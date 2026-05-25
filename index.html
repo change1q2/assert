@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>个人精细化资产管理平台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">资</span>
+          <div>
+            <strong>个人资产管理</strong>
+            <small>V1.8 十大模块</small>
+          </div>
+        </div>
+        <nav id="moduleNav" class="module-nav"></nav>
+      </aside>
+
+      <main class="shell">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">全端统一数据 · 多账户 · 多币种 · 三维归因</p>
+            <h1 id="pageTitle">资产总览</h1>
+          </div>
+          <div class="top-actions">
+            <button id="themeToggle" class="icon-button" title="切换主题">◐</button>
+            <button id="screenToggle" class="icon-button" title="大屏模式">⛶</button>
+            <button id="userEntry" class="user-entry" title="个人中心"></button>
+          </div>
+        </header>
+
+        <section class="filters" aria-label="全局四维筛选">
+          <label>
+            账户
+            <select id="accountFilter"></select>
+          </label>
+          <label>
+            时间区间
+            <select id="periodPreset">
+              <option value="today">本日</option>
+              <option value="week">本周</option>
+              <option value="month">本月</option>
+              <option value="year">本年</option>
+              <option value="lastMonth">上月</option>
+              <option value="all">全部</option>
+              <option value="custom">自定义</option>
+            </select>
+          </label>
+          <label>
+            开始日期
+            <input id="startDateFilter" type="date" />
+          </label>
+          <label>
+            结束日期
+            <input id="endDateFilter" type="date" />
+          </label>
+          <label>
+            资产大类
+            <select id="assetClassFilter"></select>
+          </label>
+          <label>
+            汇总币种
+            <select id="currencyFilter"></select>
+          </label>
+        </section>
+
+        <section id="view" class="view"></section>
+      </main>
+    </div>
+
+    <dialog id="recordDialog">
+      <form id="recordForm" method="dialog" class="modal-form">
+        <h2>新增流水</h2>
+        <label>类型
+          <select name="type">
+            <option value="income">收入</option>
+            <option value="expense">支出</option>
+            <option value="transfer">转账</option>
+          </select>
+        </label>
+        <label>金额
+          <input name="amount" type="number" step="0.01" min="0" required />
+        </label>
+        <label>一级分类
+          <select name="category"></select>
+        </label>
+        <label>账户
+          <select name="accountId"></select>
+        </label>
+        <label>日期
+          <input name="date" type="date" required />
+        </label>
+        <label>备注
+          <input name="note" placeholder="可填写标签、凭证说明或模板名" />
+        </label>
+        <menu>
+          <button value="cancel" type="button" id="cancelRecord">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
