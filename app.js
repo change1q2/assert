@@ -2212,10 +2212,18 @@ function authPage() {
   const isPhoneLogin = isLogin && authLoginMethod === "phone";
   const title = isRegister ? "注册账号" : isForgot ? "找回密码" : "登录账号";
   const subtitle = isRegister ? "创建独立数据账号" : isForgot ? "验证手机号并设置新密码" : "欢迎回来";
-  const codeField = (purpose) => `<label><span><b class="required-mark">*</b>短信验证码</span>
+  const codeField = (purpose) => `<label>短信验证码
     <div class="auth-code-row">
       <input name="smsCode" inputmode="numeric" autocomplete="one-time-code" required maxlength="6" placeholder="6 位验证码" />
       <button type="button" data-action="send-auth-code" data-purpose="${purpose}">获取验证码</button>
+    </div>
+  </label>`;
+  const passwordField = `<label>${isForgot ? "新密码" : "密码"}
+    <div class="password-field">
+      <input name="password" type="password" autocomplete="${isLogin ? "current-password" : "new-password"}" required minlength="6" placeholder="至少 6 位" />
+      <button type="button" class="password-toggle" data-action="toggle-password" aria-label="显示密码" title="显示密码">
+        <span class="password-eye" aria-hidden="true"></span>
+      </button>
     </div>
   </label>`;
   return `<section class="auth-panel">
@@ -2229,20 +2237,20 @@ function authPage() {
         <button class="${authLoginMethod === "phone" ? "active" : ""}" data-action="auth-login-method" data-method="phone">手机号登录</button>
       </div>` : ""}
       <form id="authForm" class="profile-form" autocomplete="on">
-        ${isLogin && !isPhoneLogin ? `<label><span><b class="required-mark">*</b>账号</span>
+        ${isLogin && !isPhoneLogin ? `<label>账号
           <input name="account" autocomplete="username" required placeholder="请输入用户名" />
         </label>` : ""}
-        ${isPhoneLogin || isForgot ? `<label><span><b class="required-mark">*</b>手机号</span>
+        ${isPhoneLogin || isForgot ? `<label>手机号
           <input name="phone" inputmode="tel" autocomplete="tel" required maxlength="11" placeholder="请输入手机号" />
         </label>` : ""}
         ${isPhoneLogin ? codeField("login") : ""}
-        ${isRegister ? `<label><span><b class="required-mark">*</b>账号</span>
+        ${isRegister ? `<label>账号
           <input name="account" autocomplete="username" required placeholder="至少 3 位用户名" />
         </label>
-        <label><span><b class="required-mark">*</b>昵称</span>
+        <label>昵称
           <input name="name" required placeholder="用于个人中心展示" />
         </label>` : ""}
-        ${isRegister ? `<label><span><b class="required-mark">*</b>手机</span>
+        ${isRegister ? `<label>手机
           <input name="phone" inputmode="tel" autocomplete="tel" required maxlength="11" placeholder="请输入手机号" />
         </label>` : ""}
         ${isRegister ? codeField("register") : ""}
@@ -2250,10 +2258,8 @@ function authPage() {
           <input name="email" type="email" autocomplete="email" placeholder="用于找回和通知" />
         </label>` : ""}
         ${isForgot ? codeField("reset") : ""}
-        ${!isPhoneLogin ? `<label><span><b class="required-mark">*</b>${isForgot ? "新密码" : "密码"}</span>
-          <input name="password" type="password" autocomplete="${isLogin ? "current-password" : "new-password"}" required minlength="6" placeholder="至少 6 位" />
-        </label>` : ""}
-        ${isRegister ? `<label><span><b class="required-mark">*</b>默认汇总币种</span>
+        ${!isPhoneLogin ? passwordField : ""}
+        ${isRegister ? `<label>默认汇总币种
           <select name="currency">${currencyOptions(state.user.currency)}</select>
         </label>` : ""}
         <div class="auth-links">
@@ -2634,6 +2640,15 @@ function bindViewActions() {
     render();
   }));
   document.querySelectorAll("[data-action='send-auth-code']").forEach((button) => button.addEventListener("click", handleSendAuthCode));
+  document.querySelectorAll("[data-action='toggle-password']").forEach((button) => button.addEventListener("click", () => {
+    const input = button.closest(".password-field")?.querySelector("input");
+    if (!input) return;
+    const showPassword = input.type === "password";
+    input.type = showPassword ? "text" : "password";
+    button.classList.toggle("is-visible", showPassword);
+    button.setAttribute("aria-label", showPassword ? "隐藏密码" : "显示密码");
+    button.title = showPassword ? "隐藏密码" : "显示密码";
+  }));
   document.querySelector("#authForm")?.addEventListener("submit", handleAuthSubmit);
   document.querySelector("#profileForm")?.addEventListener("submit", handleProfileSubmit);
   document.querySelector("#preferenceForm")?.addEventListener("submit", handlePreferenceSubmit);

@@ -3367,23 +3367,79 @@ input {
   padding: 2px 0;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: #1677ff;
   font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .auth-link:hover {
   border-color: transparent;
-  color: var(--primary-2);
+  color: #0958d9;
 }
 
 .auth-link-primary {
   color: #1677ff;
 }
 
-.required-mark {
-  margin-right: 4px;
-  color: var(--danger);
-  font-weight: 700;
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 44px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  width: 34px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translateY(-50%);
+}
+
+.password-toggle:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.password-eye {
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 12px;
+  margin: auto;
+  border: 2px solid var(--muted);
+  border-radius: 50% / 60%;
+}
+
+.password-eye::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--muted);
+  transform: translate(-50%, -50%);
+}
+
+.password-toggle:not(.is-visible) .password-eye::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: -3px;
+  width: 22px;
+  height: 2px;
+  background: var(--muted);
+  transform: rotate(42deg);
+  box-shadow: 0 0 0 2px var(--panel);
 }
 
 .profile-form {
