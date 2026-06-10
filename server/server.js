@@ -12,6 +12,9 @@ fs.mkdirSync(dataDir, { recursive: true });
 
 const db = new Database(path.join(dataDir, "asset-platform.sqlite"));
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+const assetClassColumns = new Set(db.prepare("PRAGMA table_info(asset_classes)").all().map((column) => column.name));
+if (!assetClassColumns.has("expected_return")) db.exec("ALTER TABLE asset_classes ADD COLUMN expected_return REAL NOT NULL DEFAULT 0");
+if (!assetClassColumns.has("sort_order")) db.exec("ALTER TABLE asset_classes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
 
 const PORT = Number(process.env.API_PORT || 3000);
 const TOKEN_TTL_DAYS = 30;
@@ -209,7 +212,7 @@ function defaultState(profile) {
     }],
     assetClasses: baseClasses.map(([id, name, children, color]) => ({
       id, name, children, color, visible: true, value: 0, openingValue: 0,
-      targetValue: 0, income: 0, expense: 0, laborIncome: 0,
+      targetValue: 0, income: 0, expense: 0, laborIncome: 0, expectedReturn: 0,
     })),
     records: [],
     budgets: [],
@@ -256,10 +259,11 @@ function loadUserState(userId) {
     id: row.id, name: row.name, owner: row.owner, currency: row.currency, type: row.type,
     balance: row.balance, liability: row.liability, enabled: Boolean(row.enabled), default: Boolean(row.is_default),
   }));
-  const assetClasses = db.prepare("SELECT * FROM asset_classes WHERE user_id = ? ORDER BY rowid").all(userId).map((row) => ({
+  const assetClasses = db.prepare("SELECT * FROM asset_classes WHERE user_id = ? ORDER BY sort_order, rowid").all(userId).map((row) => ({
     id: row.id, name: row.name, children: JSON.parse(row.children_json), visible: Boolean(row.visible),
     value: row.value, openingValue: row.opening_value, targetValue: row.target_value,
     income: row.income, expense: row.expense, laborIncome: row.labor_income, color: row.color,
+    expectedReturn: row.expected_return,
   }));
   const records = db.prepare("SELECT * FROM records WHERE user_id = ? ORDER BY record_date DESC, rowid DESC").all(userId).map((row) => ({
     id: numericIfPossible(row.id), type: row.type, category: row.category, sub: row.subcategory,
@@ -352,8 +356,18 @@ function saveUserState(userId, state) {
     const insertAccount = db.prepare("INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     (state.accounts || []).forEach((row) => insertAccount.run(userId, text(row.id), text(row.name), text(row.owner), text(row.currency), text(row.type), number(row.balance), number(row.liability), row.enabled === false ? 0 : 1, row.default ? 1 : 0));
 
-    const insertClass = db.prepare("INSERT INTO asset_classes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    (state.assetClasses || []).forEach((row) => insertClass.run(userId, text(row.id), text(row.name), JSON.stringify(row.children || []), row.visible === false ? 0 : 1, number(row.value), number(row.openingValue), number(row.targetValue), number(row.income), number(row.expense), number(row.laborIncome), text(row.color || "#539f8d")));
+    const insertClass = db.prepare(`
+      INSERT INTO asset_classes (
+        user_id, id, name, children_json, visible, value, opening_value, target_value,
+        income, expense, labor_income, color, expected_return, sort_order
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    (state.assetClasses || []).forEach((row, index) => insertClass.run(
+      userId, text(row.id), text(row.name), JSON.stringify(row.children || []),
+      row.visible === false ? 0 : 1, number(row.value), number(row.openingValue),
+      number(row.targetValue), number(row.income), number(row.expense),
+      number(row.laborIncome), text(row.color || "#539f8d"), number(row.expectedReturn), index,
+    ));
 
     const insertRecord = db.prepare("INSERT INTO records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     (state.records || []).forEach((row) => insertRecord.run(userId, text(row.id), text(row.type), text(row.category), text(row.sub), text(row.tag), number(row.amount), text(row.currency), text(row.accountId), text(row.date), text(row.recorder), text(row.note), text(row.createdAt)));

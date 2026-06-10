@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS asset_classes (
   expense REAL NOT NULL DEFAULT 0,
   labor_income REAL NOT NULL DEFAULT 0,
   color TEXT NOT NULL DEFAULT '#539f8d',
+  expected_return REAL NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (user_id, id)
 );
 

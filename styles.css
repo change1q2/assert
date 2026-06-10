@@ -699,6 +699,71 @@ input {
   margin-top: 12px;
 }
 
+.asset-class-card {
+  cursor: grab;
+  transition: border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+.asset-class-card.is-dragging {
+  opacity: 0.45;
+}
+
+.asset-class-card.is-drag-over {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 24%, transparent);
+}
+
+.asset-class-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+}
+
+.asset-class-card h3 small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.class-drag-handle {
+  color: var(--muted);
+  font-size: 18px;
+  letter-spacing: -4px;
+  cursor: grab;
+}
+
+.asset-class-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.asset-class-kpis div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.asset-class-kpis span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.asset-class-kpis strong {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+.asset-class-kpis strong.negative {
+  color: var(--danger);
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;

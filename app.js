@@ -10,6 +10,13 @@ const modules = [
   ["accounts", "账户管理", "◫"],
 ];
 
+const fixedAssetClassNames = {
+  equity: "权益类",
+  commodity: "商品类",
+  debt: "债权类",
+  cashClass: "现金类",
+};
+
 const today = new Date().toISOString().slice(0, 10);
 const API_BASE = ["127.0.0.1", "localhost"].includes(window.location.hostname)
   ? "http://127.0.0.1:3000/api"
@@ -152,12 +159,19 @@ function normalizeCustomCategories(categories = {}) {
 }
 
 function normalizeAssetClasses(classes = []) {
-  const savedById = new Map(classes.map((item) => [item.id, item]));
-  const merged = seed.assetClasses.map((item) => ({ ...item, ...(savedById.get(item.id) || {}) }));
-  classes.forEach((item) => {
-    if (!seed.assetClasses.some((base) => base.id === item.id)) merged.push(item);
+  const baseById = new Map(seed.assetClasses.map((item) => [item.id, item]));
+  const normalized = classes.map((item) => ({
+    ...(baseById.get(item.id) || {}),
+    ...item,
+    name: fixedAssetClassNames[item.id] || item.name,
+    expectedReturn: Number(item.expectedReturn) || 0,
+  }));
+  seed.assetClasses.forEach((item) => {
+    if (!normalized.some((saved) => saved.id === item.id)) {
+      normalized.push({ ...item, name: fixedAssetClassNames[item.id] || item.name, expectedReturn: 0 });
+    }
   });
-  return merged;
+  return normalized;
 }
 
 function normalizeFinanceAssets(assets = [], classes = []) {
@@ -384,6 +398,7 @@ function compute() {
   const debtContribution = -debtChange;
   const annualGrowth = laborNet + investNet + debtContribution;
   const initialAssets = 360000 / (state.rates[filters.currency] || 1);
+  const analysisStats = annualAnalysisStats();
 
   return {
     accounts,
@@ -405,7 +420,51 @@ function compute() {
     totalRate: annualGrowth / initialAssets,
     debtCost: debtExpense * 0.36,
     avgDebtRate: debtExpense ? (debtExpense * 0.36) / ((debtStart + totalLiabilities) / 2) : 0,
+    analysisStats,
   };
+}
+
+function annualAnalysisStats() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const yearRecords = state.records.filter((record) => new Date(`${record.date}T00:00:00`).getFullYear() === year);
+  const ledgerRecords = yearRecords.filter((record) => !isFinanceRecord(record));
+  const ledgerIncome = ledgerRecords
+    .filter((record) => record.type === "income")
+    .reduce((sum, record) => sum + convert(record.amount, record.currency), 0);
+  const consumption = ledgerRecords
+    .filter((record) => record.type === "expense")
+    .reduce((sum, record) => sum + convert(record.amount, record.currency), 0);
+  const laborIncome = ledgerRecords
+    .filter((record) => record.type === "income" && record.category === "劳动收入")
+    .reduce((sum, record) => sum + convert(record.amount, record.currency), 0);
+  const ledgerBalance = ledgerIncome - consumption;
+  const financeIncome = financeProfitAmountForYear(state.financeAssets || [], year, now);
+  const payableDebt = (state.debts || [])
+    .filter((debt) => debt.category === "payable")
+    .reduce((sum, debt) => sum + Math.max(Number(debt.amount) || Number(debt.principal) || 0, 0), 0);
+  const annualNetGrowth = ledgerBalance + financeIncome - payableDebt;
+  return {
+    year,
+    ledgerIncome,
+    laborIncome,
+    consumption,
+    ledgerBalance,
+    financeIncome,
+    payableDebt,
+    annualNetGrowth,
+  };
+}
+
+function financeProfitAmountForYear(assets, year, throughDate = new Date()) {
+  const lastDate = year === throughDate.getFullYear() ? throughDate : new Date(year, 11, 31);
+  const cursor = new Date(year, 0, 1);
+  let total = 0;
+  while (cursor <= lastDate) {
+    total += assets.reduce((sum, asset) => sum + financeAssetDailyProfit(asset, cursor), 0);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return total;
 }
 
 function monthlySeries() {
@@ -2028,27 +2087,53 @@ function ledgerCategoryRow(item, total) {
 }
 
 function analysis(data) {
-  const total = Math.abs(data.laborNet) + Math.abs(data.investNet) + Math.abs(data.debtContribution) || 1;
+  const stats = data.analysisStats;
+  const incomeTotal = Math.max(stats.laborIncome, 0) + Math.max(stats.financeIncome, 0) || 1;
+  const outflowTotal = stats.payableDebt + stats.consumption || 1;
+  const annualRate = data.initialAssets ? stats.annualNetGrowth / data.initialAssets : 0;
   return `
     <div class="grid cols-4">
-      ${metric("年度净资产增值", money(data.annualGrowth), "劳动 + 理财 + 负债贡献")}
-      ${metric("整体年度收益率", percent(data.totalRate), "净增值 / 期初总资产")}
-      ${metric("负债年化成本额", money(data.debtCost), "年度真实利息估算")}
-      ${metric("负债平均年化利率", percent(data.avgDebtRate), "成本额 / 日均负债余额")}
+      ${metric(`${stats.year}年度净资产增值`, money(stats.annualNetGrowth), "当年累计结余 + 当年理财收益 - 应付/借入总额")}
+      ${metric("当年累计结余", money(stats.ledgerBalance), "收支分析收入 - 消费，已排除理财收支")}
+      ${metric("当年理财收益", money(stats.financeIncome), "来源：场内穿透盈亏日历当年累计")}
+      ${metric("应付/借入总额", money(-stats.payableDebt), "负债模块应付/借入，作为净资产减项")}
     </div>
     <div class="grid cols-2">
-      ${donutCard("三维资产增长贡献", ["劳动模块", "理财模块", "负债模块"], [Math.abs(data.laborNet) / total * 100, Math.abs(data.investNet) / total * 100, Math.abs(data.debtContribution) / total * 100])}
+      ${donutCard("收入归因", ["收支分析 · 劳动收入", "理财模块 · 理财收入"], [
+        Math.max(stats.laborIncome, 0) / incomeTotal * 100,
+        Math.max(stats.financeIncome, 0) / incomeTotal * 100,
+      ])}
+      ${donutCard("负债与消费构成", ["债务模块 · 应付/借入", "收支分析 · 消费"], [
+        stats.payableDebt / outflowTotal * 100,
+        stats.consumption / outflowTotal * 100,
+      ])}
+    </div>
+    <div class="grid cols-2">
       <section class="card">
-        <div class="section-title"><h2>三维归因明细</h2><span class="badge">核心算法</span></div>
+        <div class="section-title"><h2>三大模块归因明细</h2><span class="badge">${stats.year}年</span></div>
         ${recordsRows([
-          ["劳动净增值", money(data.laborNet), percent(data.laborRate)],
-          ["理财净收益", money(data.investNet), percent(data.investRate)],
-          ["负债净资产贡献", money(data.debtContribution), percent(data.debtRate)],
-          ["简单年化收益率", percent(data.totalRate / 145 * 365), "按持有天数折算"],
+          ["劳动收入", money(stats.laborIncome), percent(stats.laborIncome / incomeTotal)],
+          ["理财收入", money(stats.financeIncome), percent(stats.financeIncome / incomeTotal)],
+          ["消费", money(-stats.consumption), percent(stats.consumption / outflowTotal)],
+          ["应付/借入", money(-stats.payableDebt), percent(stats.payableDebt / outflowTotal)],
+        ])}
+      </section>
+      <section class="card">
+        <div class="section-title"><h2>年度净增值计算</h2><span class="badge">三模块联动</span></div>
+        ${recordsRows([
+          ["收支分析累计结余", money(stats.ledgerBalance)],
+          ["加：场内穿透年度收益", money(stats.financeIncome)],
+          ["减：应付/借入总额", money(-stats.payableDebt)],
+          ["年度净资产增值", money(stats.annualNetGrowth), percent(annualRate)],
         ])}
       </section>
     </div>
-    ${barCard("历年对比折线替代表", [["2023", 42000, 90000], ["2024", 68000, 90000], ["2025", 76000, 90000], ["2026", data.annualGrowth, 90000]])}`;
+    ${barCard("当前年度模块数据", [
+      ["累计结余", stats.ledgerBalance, Math.max(Math.abs(stats.annualNetGrowth), 1)],
+      ["理财收益", stats.financeIncome, Math.max(Math.abs(stats.annualNetGrowth), 1)],
+      ["应付/借入", -stats.payableDebt, Math.max(Math.abs(stats.annualNetGrowth), 1)],
+      ["净资产增值", stats.annualNetGrowth, Math.max(Math.abs(stats.annualNetGrowth), 1)],
+    ])}`;
 }
 
 function accounts() {
@@ -2077,30 +2162,48 @@ function accounts() {
 }
 
 function assetClasses() {
+  const totalValue = state.assetClasses.reduce((sum, item) => sum + Math.max(Number(item.value) || 0, 0), 0);
   return `<section>
     <div class="section-title">
       <h2>资产大类分类管理</h2>
       <div class="section-actions">
-        <span class="badge">一级与二级均可自定义</span>
+        <span class="badge">拖拽卡片或使用前移 / 后移调整顺序</span>
         <button class="primary" data-action="new-asset-class">新增分类</button>
       </div>
     </div>
-    <div class="grid cols-4">${state.assetClasses.map((c) => `<article class="card asset-class-card">
-      <div class="section-title"><h3>${c.name}</h3><span class="badge">${c.visible ? "参与总览" : "已隐藏"}</span></div>
+    <div class="grid cols-4 asset-class-grid">${state.assetClasses.map((c, index) => {
+      const profit = (Number(c.value) || 0) - (Number(c.openingValue) || 0);
+      const profitRate = Number(c.openingValue) ? profit / Number(c.openingValue) : 0;
+      const allocation = totalValue ? (Number(c.value) || 0) / totalValue : 0;
+      const fixed = Boolean(fixedAssetClassNames[c.id]);
+      return `<article class="card asset-class-card" draggable="true" data-class-id="${c.id}">
+      <div class="section-title">
+        <h3><span class="class-drag-handle" title="拖动调整顺序">⋮⋮</span>${c.name}${fixed ? `<small>固定</small>` : ""}</h3>
+        <span class="badge">${c.visible ? "参与总览" : "已隐藏"}</span>
+      </div>
       <p class="muted">${c.children.join(" / ")}</p>
+      <div class="asset-class-kpis">
+        <div><span>总资金占比</span><strong>${percent(allocation)}</strong></div>
+        <div><span>当前收益额</span><strong class="${profit < 0 ? "negative" : ""}">${money(profit)}</strong></div>
+        <div><span>当前收益率</span><strong class="${profitRate < 0 ? "negative" : ""}">${percent(profitRate)}</strong></div>
+      </div>
       ${recordsRows([
         ["当前价值", money(c.value)],
         ["期初价值", money(c.openingValue)],
         ["目标价值", money(c.targetValue)],
+        ["期望收益率", `${Number(c.expectedReturn || 0).toFixed(2)}%`],
         ["年度收益", money(c.income)],
         ["年度支出", money(c.expense)],
       ])}
       <div class="class-actions">
+        <button data-action="move-asset-class" data-id="${c.id}" data-offset="-1" ${index === 0 ? "disabled" : ""}>前移</button>
+        <button data-action="move-asset-class" data-id="${c.id}" data-offset="1" ${index === state.assetClasses.length - 1 ? "disabled" : ""}>后移</button>
         <button data-action="edit-asset-class" data-id="${c.id}">编辑</button>
         <button data-action="toggle-class" data-id="${c.id}">${c.visible ? "隐藏" : "显示"}</button>
-        <button data-action="delete-asset-class" data-id="${c.id}">删除</button>
+        ${fixed ? "" : `<button data-action="delete-asset-class" data-id="${c.id}">删除</button>`}
       </div>
-    </article>`).join("")}</div>
+    </article>`;
+    }).join("")}</div>
   </section>`;
 }
 
@@ -2752,6 +2855,10 @@ function bindViewActions() {
     if (item) openAssetClassDialog(item);
   }));
   document.querySelectorAll("[data-action='delete-asset-class']").forEach((button) => button.addEventListener("click", () => deleteAssetClass(button.dataset.id)));
+  document.querySelectorAll("[data-action='move-asset-class']").forEach((button) => button.addEventListener("click", () => {
+    moveAssetClass(button.dataset.id, Number(button.dataset.offset));
+  }));
+  bindAssetClassSorting();
   document.querySelectorAll("[data-action='export']").forEach((button) => button.addEventListener("click", exportCsv));
   document.querySelectorAll("[data-action='upload-avatar']").forEach((button) => button.addEventListener("click", () => {
     document.querySelector("#avatarInput")?.click();
@@ -3055,10 +3162,13 @@ function openAssetClassDialog(item = null) {
   form.reset();
   fields.classId.value = item?.id || "";
   fields.name.value = item?.name || "";
+  fields.name.readOnly = Boolean(item && fixedAssetClassNames[item.id]);
+  fields.name.title = fields.name.readOnly ? "固定默认分类名称不可修改" : "";
   fields.children.value = item?.children?.join(",") || "";
   fields.value.value = item ? financeAssetClassValue(item.name).toFixed(2) : "0.00";
   fields.openingValue.value = item?.openingValue ?? 0;
   fields.targetValue.value = item?.targetValue ?? 0;
+  fields.expectedReturn.value = item?.expectedReturn ?? 0;
   fields.income.value = item?.income ?? 0;
   fields.expense.value = item?.expense ?? 0;
   fields.color.value = item?.color || "#539f8d";
@@ -3076,14 +3186,16 @@ function handleAssetClassSubmit(event) {
     .map((item) => item.trim())
     .filter(Boolean);
   const existing = state.assetClasses.find((item) => item.id === id);
+  const fixedName = fixedAssetClassNames[id];
   const payload = {
     id,
-    name: String(data.name || "").trim(),
+    name: fixedName || String(data.name || "").trim(),
     children: children.length ? children : ["其他"],
     visible: existing?.visible ?? true,
     value: existing?.value || 0,
     openingValue: Number(data.openingValue) || 0,
     targetValue: Number(data.targetValue) || 0,
+    expectedReturn: Number(data.expectedReturn) || 0,
     income: Number(data.income) || 0,
     expense: Number(data.expense) || 0,
     laborIncome: existing?.laborIncome || 0,
@@ -3112,6 +3224,10 @@ function handleAssetClassSubmit(event) {
 }
 
 function deleteAssetClass(id) {
+  if (fixedAssetClassNames[id]) {
+    window.alert("权益类、商品类、债权类和现金类为固定默认分类，不能删除。");
+    return;
+  }
   if (state.assetClasses.length <= 1) {
     window.alert("至少需要保留一个资产分类。");
     return;
@@ -3131,6 +3247,51 @@ function deleteAssetClass(id) {
   if (filters.assetClass === id) filters.assetClass = "all";
   saveState();
   render();
+}
+
+function moveAssetClass(id, offset) {
+  const index = state.assetClasses.findIndex((item) => item.id === id);
+  const target = index + offset;
+  if (index < 0 || target < 0 || target >= state.assetClasses.length) return;
+  const [item] = state.assetClasses.splice(index, 1);
+  state.assetClasses.splice(target, 0, item);
+  saveState();
+  render();
+}
+
+function bindAssetClassSorting() {
+  let draggedId = "";
+  document.querySelectorAll(".asset-class-card[draggable='true']").forEach((card) => {
+    card.addEventListener("dragstart", (event) => {
+      draggedId = card.dataset.classId;
+      card.classList.add("is-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", draggedId);
+    });
+    card.addEventListener("dragend", () => {
+      draggedId = "";
+      card.classList.remove("is-dragging");
+      document.querySelectorAll(".asset-class-card").forEach((item) => item.classList.remove("is-drag-over"));
+    });
+    card.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      if (draggedId && draggedId !== card.dataset.classId) card.classList.add("is-drag-over");
+    });
+    card.addEventListener("dragleave", () => card.classList.remove("is-drag-over"));
+    card.addEventListener("drop", (event) => {
+      event.preventDefault();
+      card.classList.remove("is-drag-over");
+      const sourceId = draggedId || event.dataTransfer.getData("text/plain");
+      const targetId = card.dataset.classId;
+      const sourceIndex = state.assetClasses.findIndex((item) => item.id === sourceId);
+      const targetIndex = state.assetClasses.findIndex((item) => item.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
+      const [item] = state.assetClasses.splice(sourceIndex, 1);
+      state.assetClasses.splice(targetIndex, 0, item);
+      saveState();
+      render();
+    });
+  });
 }
 
 function financeCategoryOptions(kind = "stock", preferred = "") {
