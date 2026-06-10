@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>个人精细化资产管理平台</title>
-    <link rel="stylesheet" href="./styles.css?v=authflow2" />
+    <link rel="stylesheet" href="./styles.css?v=financeocr1" />
   </head>
   <body>
     <div id="app">
@@ -12,8 +12,7 @@
         <div class="brand">
           <span class="brand-mark">资</span>
           <div>
-            <strong>个人资产管理</strong>
-            <small>V1.8 十大模块</small>
+            <strong>个人资产管理 V1.8</strong>
           </div>
         </div>
         <nav id="moduleNav" class="module-nav"></nav>
@@ -259,6 +258,18 @@
       <form id="financeAssetForm" method="dialog" class="modal-form finance-asset-form">
         <h2>新增理财资产</h2>
         <input name="assetId" type="hidden" />
+        <section class="finance-ocr-panel">
+          <div class="finance-ocr-copy">
+            <strong>图片识别自动填写</strong>
+            <span>支持持仓截图、基金或股票资产凭证，识别后请核对数据。</span>
+          </div>
+          <label class="finance-ocr-upload">上传图片
+            <input name="assetImage" type="file" accept="image/png,image/jpeg,image/webp" />
+          </label>
+          <button type="button" data-action="recognize-finance-image">识别并自动填写</button>
+          <img id="financeOcrPreview" alt="待识别资产图片预览" />
+          <p id="financeOcrStatus" class="finance-ocr-status" role="status">尚未选择图片</p>
+        </section>
         <label>市场
           <select name="market" required>
             <option value="domestic">国内市场</option>
@@ -362,6 +373,7 @@
       </form>
     </dialog>
 
-    <script src="./app.js?v=authflow2"></script>
+    <script src="./vendor/tesseract.min.js?v=5.1.1"></script>
+    <script src="./app.js?v=financeocr1"></script>
   </body>
 </html>

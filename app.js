@@ -640,6 +640,8 @@ function bindGlobalActions() {
   document.querySelector("#financeAssetForm [name='currency']").addEventListener("change", handleFinanceCurrencyChange);
   document.querySelector("#financeAssetForm [name='subcategory']").addEventListener("change", () => updateFinanceTertiaryCategories());
   document.querySelector("#financeAssetForm [name='positionGroup']").addEventListener("change", () => updateFinancePositionCategories());
+  document.querySelector("#financeAssetForm [name='assetImage']").addEventListener("change", handleFinanceImageSelection);
+  document.querySelector("[data-action='recognize-finance-image']").addEventListener("click", handleFinanceImageRecognition);
   document.querySelector("[data-action='manage-finance-tertiary']").addEventListener("click", openFinanceTertiaryDialog);
   document.querySelector("#financeTertiaryForm").addEventListener("submit", handleFinanceTertiarySubmit);
   document.querySelector("#recordOptionForm").addEventListener("submit", handleRecordOptionSubmit);
@@ -2103,7 +2105,7 @@ function assetClasses() {
 }
 
 function tools() {
-  return portfolioBacktestPage(backtestModel());
+  return `<section class="empty-module" aria-label="辅助工具暂无内容"></section>`;
 }
 
 function portfolioBacktestPage(model) {
@@ -3232,9 +3234,183 @@ function openFinanceAssetDialog(asset = null, preferredKind = "stock") {
   fields.costPrice.value = source.costPrice ?? "";
   fields.shares.value = source.shares ?? "";
   fields.pnl.value = source.pnl ?? 0;
+  resetFinanceOcrPanel();
   form.querySelector("h2").textContent = asset ? "编辑理财资产" : "新增理财资产";
   updateFinanceAssetPreview();
   document.querySelector("#financeAssetDialog").showModal();
+}
+
+function resetFinanceOcrPanel() {
+  const preview = document.querySelector("#financeOcrPreview");
+  const status = document.querySelector("#financeOcrStatus");
+  if (preview?.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+  if (preview) {
+    preview.removeAttribute("src");
+    preview.dataset.objectUrl = "";
+  }
+  if (status) {
+    status.textContent = "尚未选择图片";
+    status.className = "finance-ocr-status";
+  }
+}
+
+function handleFinanceImageSelection(event) {
+  const file = event.currentTarget.files?.[0];
+  const preview = document.querySelector("#financeOcrPreview");
+  const status = document.querySelector("#financeOcrStatus");
+  if (!file) {
+    resetFinanceOcrPanel();
+    return;
+  }
+  if (!file.type.startsWith("image/")) {
+    event.currentTarget.value = "";
+    status.textContent = "请选择 PNG、JPG 或 WebP 图片。";
+    status.className = "finance-ocr-status error";
+    return;
+  }
+  if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+  const objectUrl = URL.createObjectURL(file);
+  preview.src = objectUrl;
+  preview.dataset.objectUrl = objectUrl;
+  status.textContent = `已选择 ${file.name}，点击“识别并自动填写”。`;
+  status.className = "finance-ocr-status";
+}
+
+async function handleFinanceImageRecognition(event) {
+  const form = document.querySelector("#financeAssetForm");
+  const file = form.elements.assetImage.files?.[0];
+  const button = event.currentTarget;
+  const status = document.querySelector("#financeOcrStatus");
+  if (!file) {
+    status.textContent = "请先上传需要识别的资产图片。";
+    status.className = "finance-ocr-status error";
+    return;
+  }
+  if (!window.Tesseract?.recognize) {
+    status.textContent = "图文识别组件加载失败，请检查网络后刷新页面重试。";
+    status.className = "finance-ocr-status error";
+    return;
+  }
+  button.disabled = true;
+  button.textContent = "正在识别...";
+  status.className = "finance-ocr-status working";
+  try {
+    const result = await window.Tesseract.recognize(file, "chi_sim+eng", {
+      workerPath: "/vendor/tesseract-worker.min.js",
+      logger: (message) => {
+        if (message.status !== "recognizing text") return;
+        status.textContent = `正在识别图片 ${Math.round((message.progress || 0) * 100)}%`;
+      },
+    });
+    const extracted = parseFinanceOcrText(result.data.text || "");
+    const filled = applyFinanceOcrResult(extracted);
+    status.textContent = filled.length
+      ? `识别完成，已填写：${filled.join("、")}。请核对后保存。`
+      : "图片识别完成，但没有找到可自动填写的资产字段，请换一张更清晰的截图。";
+    status.className = `finance-ocr-status ${filled.length ? "success" : "error"}`;
+  } catch (error) {
+    console.error("资产图片识别失败", error);
+    status.textContent = "图片识别失败，请使用更清晰、文字方向正常的截图重试。";
+    status.className = "finance-ocr-status error";
+  } finally {
+    button.disabled = false;
+    button.textContent = "识别并自动填写";
+  }
+}
+
+function parseFinanceOcrText(rawText) {
+  const text = String(rawText || "")
+    .replace(/[，]/g, ",")
+    .replace(/[：]/g, ":")
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/[^\S\r\n]+/g, " ");
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const valueAfterLabel = (labels) => {
+    const labelPattern = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    for (const line of lines) {
+      const match = line.match(new RegExp(`(?:${labelPattern})\\s*[:：]?\\s*([^|]+)$`, "i"));
+      if (match?.[1]) return match[1].trim();
+    }
+    return "";
+  };
+  const numberAfterLabel = (labels) => {
+    const value = valueAfterLabel(labels);
+    const match = value.match(/[-+]?\d[\d,]*(?:\.\d+)?/);
+    return match ? Number(match[0].replaceAll(",", "")) : null;
+  };
+  const lower = text.toLowerCase();
+  const kind = /基金|etf|lof/.test(lower)
+    ? "fund"
+    : /期货|futures?/.test(lower)
+      ? "futures"
+      : /期权|options?/.test(lower)
+        ? "options"
+        : /黄金|白银|原油|商品/.test(lower)
+          ? "commodity"
+          : /比特币|btc|eth|加密/.test(lower)
+            ? "crypto"
+            : /股票|证券|持股|stock/.test(lower)
+              ? "stock"
+              : "";
+  const currency = /\bHKD\b|港币/.test(text)
+    ? "HKD"
+    : /\bUSD\b|美元/.test(text)
+      ? "USD"
+      : /\bEUR\b|欧元/.test(text)
+        ? "EUR"
+        : /\bJPY\b|日元/.test(text)
+          ? "JPY"
+          : /\bCNY\b|\bCNH\b|人民币|￥|¥/.test(text)
+            ? "CNH"
+            : "";
+  const labeledName = valueAfterLabel(["资产名称", "证券名称", "股票名称", "基金名称", "产品名称", "名称"]);
+  const codeValue = valueAfterLabel(["资产代码", "证券代码", "股票代码", "基金代码", "产品代码", "代码"]);
+  const fallbackCode = text.match(/\b(?:\d{5,6}|[A-Z]{1,5})\b/)?.[0] || "";
+  return {
+    kind,
+    currency,
+    market: currency && currency !== "CNH" ? "overseas" : currency ? "domestic" : "",
+    name: labeledName.replace(/\s{2,}.*/, "").trim(),
+    code: (codeValue.match(/[A-Z0-9.-]{2,12}/i)?.[0] || fallbackCode).toUpperCase(),
+    costPrice: numberAfterLabel(["持仓成本", "平均成本", "成本价", "成本单价", "买入均价"]),
+    shares: numberAfterLabel(["持仓数量", "持有数量", "持有份额", "基金份额", "股票数量", "数量", "份额"]),
+    pnl: numberAfterLabel(["浮动盈亏", "持仓盈亏", "累计盈亏", "盈亏"]),
+  };
+}
+
+function applyFinanceOcrResult(result) {
+  const form = document.querySelector("#financeAssetForm");
+  const fields = form.elements;
+  const filled = [];
+  if (result.kind) {
+    fields.kind.value = result.kind;
+    handleFinanceKindChange();
+    filled.push("资产类型");
+  }
+  if (result.market) {
+    fields.market.value = result.market;
+    updateFinanceCurrencyOptions(result.currency);
+    filled.push("市场");
+  }
+  if (result.currency) {
+    fields.currency.value = result.currency;
+    syncFinanceSubcategoryByCurrency(result.currency);
+    filled.push("货币单位");
+  }
+  [["name", "资产名称"], ["code", "资产代码"]].forEach(([field, label]) => {
+    if (!result[field]) return;
+    fields[field].value = result[field];
+    filled.push(label);
+  });
+  [["costPrice", "持仓成本"], ["shares", "份额/数量"], ["pnl", "浮动盈亏"]].forEach(([field, label]) => {
+    if (result[field] === null || !Number.isFinite(result[field])) return;
+    fields[field].value = result[field];
+    filled.push(label);
+  });
+  updateFinanceAssetPreview();
+  saveFinanceAssetDraftFromForm();
+  return filled;
 }
 
 function handleFinanceKindChange() {
