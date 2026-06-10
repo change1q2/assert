@@ -2,9 +2,11 @@
 
 项目已改为前后端分离架构：
 
-- 前端：原生 HTML / CSS / JavaScript，默认运行在 `http://127.0.0.1:4173`
-- 后端：Node.js HTTP API，运行在 `http://127.0.0.1:3000`
+- 前端：原生 HTML / CSS / JavaScript，本地开发运行在 `http://127.0.0.1:4173`
+- 后端：Node.js HTTP API，本地运行在 `http://127.0.0.1:3000`
+- 生产环境：Node.js 可在同一端口提供前端文件和 `/api`
 - 数据库：SQLite，文件位于 `server/data/asset-platform.sqlite`
+- SQLite 驱动：`better-sqlite3`
 - 鉴权：随机会话令牌
 - 密码：Node.js `scrypt` 加盐哈希，不保存明文密码
 
@@ -18,6 +20,13 @@ npm run api
 
 ```powershell
 npm run web
+```
+
+生产服务器可只运行：
+
+```powershell
+$env:PORT=80
+npm start
 ```
 
 ## API

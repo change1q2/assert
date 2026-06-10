@@ -3346,6 +3346,46 @@ input {
   color: #fff;
 }
 
+.auth-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  gap: 10px;
+}
+
+.auth-code-row button {
+  white-space: nowrap;
+}
+
+.auth-links {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 28px;
+}
+
+.auth-link {
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.auth-link:hover {
+  border-color: transparent;
+  color: var(--primary-2);
+}
+
+.auth-link-primary {
+  color: #1677ff;
+}
+
+.required-mark {
+  margin-right: 4px;
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .profile-form {
   display: grid;
   gap: 14px;

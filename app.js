@@ -11,7 +11,9 @@ const modules = [
 ];
 
 const today = new Date().toISOString().slice(0, 10);
-const API_BASE = "http://127.0.0.1:3000/api";
+const API_BASE = ["127.0.0.1", "localhost"].includes(window.location.hostname)
+  ? "http://127.0.0.1:3000/api"
+  : "/api";
 let legacyStatePending = Boolean(localStorage.getItem("asset-platform-v18")) && !localStorage.getItem("asset-platform-token");
 const seed = {
   user: {
@@ -92,6 +94,7 @@ let auth = loadAuth();
 let stateSaveTimer = null;
 let stateSaveInFlight = Promise.resolve();
 let authMode = "login";
+let authLoginMethod = "account";
 let currentModule = "overview";
 let ledgerPeriodMode = "month";
 let ledgerPeriod = `month-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
@@ -655,7 +658,13 @@ function render() {
   renderFilters();
   if (!isAuthenticated()) {
     document.querySelector(".filters").classList.add("is-hidden");
-    document.querySelector("#pageTitle").textContent = authMode === "login" ? "账号登录" : "账号注册";
+    document.querySelector("#pageTitle").textContent = authMode === "register"
+      ? "账号注册"
+      : authMode === "forgot"
+        ? "找回密码"
+        : authLoginMethod === "phone"
+          ? "手机号登录"
+          : "账号登录";
     document.querySelector("#view").innerHTML = authPage();
     bindViewActions();
     return;
@@ -2198,37 +2207,62 @@ function strategies() {
 
 function authPage() {
   const isLogin = authMode === "login";
+  const isRegister = authMode === "register";
+  const isForgot = authMode === "forgot";
+  const isPhoneLogin = isLogin && authLoginMethod === "phone";
+  const title = isRegister ? "注册账号" : isForgot ? "找回密码" : "登录账号";
+  const subtitle = isRegister ? "创建独立数据账号" : isForgot ? "验证手机号并设置新密码" : "欢迎回来";
+  const codeField = (purpose) => `<label><span><b class="required-mark">*</b>短信验证码</span>
+    <div class="auth-code-row">
+      <input name="smsCode" inputmode="numeric" autocomplete="one-time-code" required maxlength="6" placeholder="6 位验证码" />
+      <button type="button" data-action="send-auth-code" data-purpose="${purpose}">获取验证码</button>
+    </div>
+  </label>`;
   return `<section class="auth-panel">
     <div class="auth-card">
       <div class="section-title">
-        <h2>${isLogin ? "登录账号" : "注册账号"}</h2>
-        <span class="badge">${isLogin ? "欢迎回来" : "创建数据库账号"}</span>
+        <h2>${title}</h2>
+        <span class="badge">${subtitle}</span>
       </div>
-      <div class="auth-tabs">
-        <button class="${isLogin ? "active" : ""}" data-action="auth-mode" data-mode="login">登录</button>
-        <button class="${!isLogin ? "active" : ""}" data-action="auth-mode" data-mode="register">注册</button>
-      </div>
+      ${isLogin ? `<div class="auth-tabs">
+        <button class="${authLoginMethod === "account" ? "active" : ""}" data-action="auth-login-method" data-method="account">账号登录</button>
+        <button class="${authLoginMethod === "phone" ? "active" : ""}" data-action="auth-login-method" data-method="phone">手机号登录</button>
+      </div>` : ""}
       <form id="authForm" class="profile-form" autocomplete="on">
-        <label>账号
-          <input name="account" autocomplete="username" required placeholder="手机号、邮箱或用户名" />
+        ${isLogin && !isPhoneLogin ? `<label><span><b class="required-mark">*</b>账号</span>
+          <input name="account" autocomplete="username" required placeholder="请输入用户名" />
+        </label>` : ""}
+        ${isPhoneLogin || isForgot ? `<label><span><b class="required-mark">*</b>手机号</span>
+          <input name="phone" inputmode="tel" autocomplete="tel" required maxlength="11" placeholder="请输入手机号" />
+        </label>` : ""}
+        ${isPhoneLogin ? codeField("login") : ""}
+        ${isRegister ? `<label><span><b class="required-mark">*</b>账号</span>
+          <input name="account" autocomplete="username" required placeholder="至少 3 位用户名" />
         </label>
-        ${isLogin ? "" : `<label>昵称
+        <label><span><b class="required-mark">*</b>昵称</span>
           <input name="name" required placeholder="用于个人中心展示" />
-        </label>`}
-        ${isLogin ? "" : `<label>手机
-          <input name="phone" inputmode="tel" autocomplete="tel" required placeholder="请输入手机号" />
-        </label>`}
-        ${isLogin ? "" : `<label>邮箱
+        </label>` : ""}
+        ${isRegister ? `<label><span><b class="required-mark">*</b>手机</span>
+          <input name="phone" inputmode="tel" autocomplete="tel" required maxlength="11" placeholder="请输入手机号" />
+        </label>` : ""}
+        ${isRegister ? codeField("register") : ""}
+        ${isRegister ? `<label>邮箱
           <input name="email" type="email" autocomplete="email" placeholder="用于找回和通知" />
-        </label>`}
-        <label>密码
+        </label>` : ""}
+        ${isForgot ? codeField("reset") : ""}
+        ${!isPhoneLogin ? `<label><span><b class="required-mark">*</b>${isForgot ? "新密码" : "密码"}</span>
           <input name="password" type="password" autocomplete="${isLogin ? "current-password" : "new-password"}" required minlength="6" placeholder="至少 6 位" />
-        </label>
-        ${isLogin ? "" : `<label>默认汇总币种
+        </label>` : ""}
+        ${isRegister ? `<label><span><b class="required-mark">*</b>默认汇总币种</span>
           <select name="currency">${currencyOptions(state.user.currency)}</select>
-        </label>`}
+        </label>` : ""}
+        <div class="auth-links">
+          ${isLogin ? `<button type="button" class="auth-link" data-action="auth-mode" data-mode="forgot">忘记密码</button>
+          <button type="button" class="auth-link auth-link-primary" data-action="auth-mode" data-mode="register">注册</button>` : `
+          <button type="button" class="auth-link" data-action="auth-mode" data-mode="login">返回登录</button>`}
+        </div>
         <p id="authMessage" class="form-message" role="status"></p>
-        <button class="primary" type="submit">${isLogin ? "登录" : "注册并登录"}</button>
+        <button class="primary" type="submit">${isRegister ? "注册并登录" : isForgot ? "重置密码并登录" : "登录"}</button>
       </form>
     </div>
   </section>`;
@@ -2592,8 +2626,14 @@ function bindViewActions() {
   }));
   document.querySelectorAll("[data-action='auth-mode']").forEach((button) => button.addEventListener("click", () => {
     authMode = button.dataset.mode;
+    if (authMode === "login") authLoginMethod = "account";
     render();
   }));
+  document.querySelectorAll("[data-action='auth-login-method']").forEach((button) => button.addEventListener("click", () => {
+    authLoginMethod = button.dataset.method;
+    render();
+  }));
+  document.querySelectorAll("[data-action='send-auth-code']").forEach((button) => button.addEventListener("click", handleSendAuthCode));
   document.querySelector("#authForm")?.addEventListener("submit", handleAuthSubmit);
   document.querySelector("#profileForm")?.addEventListener("submit", handleProfileSubmit);
   document.querySelector("#preferenceForm")?.addEventListener("submit", handlePreferenceSubmit);
@@ -2758,43 +2798,101 @@ async function handleAuthSubmit(event) {
   const form = event.currentTarget;
   const message = document.querySelector("#authMessage");
   const data = Object.fromEntries(new FormData(form));
-  const account = data.account.trim();
-  const password = data.password.trim();
+  const account = String(data.account || "").trim();
+  const password = String(data.password || "").trim();
+  const phone = String(data.phone || "").trim();
+  const smsCode = String(data.smsCode || "").trim();
   const submit = form.querySelector("button[type='submit']");
   submit.disabled = true;
-  message.textContent = authMode === "login" ? "正在登录..." : "正在创建账号...";
+  message.textContent = authMode === "register" ? "正在创建账号..." : authMode === "forgot" ? "正在重置密码..." : "正在登录...";
   try {
-    const endpoint = authMode === "login" ? "/auth/login" : "/auth/register";
+    const endpoint = authMode === "register"
+      ? "/auth/register"
+      : authMode === "forgot"
+        ? "/auth/reset-password"
+        : authLoginMethod === "phone"
+          ? "/auth/phone-login"
+          : "/auth/login";
+    const body = authMode === "register"
+      ? {
+        account,
+        password,
+        name: String(data.name || "").trim(),
+        phone,
+        smsCode,
+        email: String(data.email || "").trim(),
+        currency: data.currency,
+        initialState: legacyStatePending ? state : undefined,
+      }
+      : authMode === "forgot"
+        ? { phone, smsCode, password }
+        : authLoginMethod === "phone"
+          ? { phone, smsCode }
+          : { account, password };
     const payload = await apiRequest(endpoint, {
       method: "POST",
-      body: authMode === "login"
-        ? { account, password }
-        : {
-          account,
-          password,
-          name: data.name.trim(),
-          phone: data.phone.trim(),
-          email: data.email.trim(),
-          currency: data.currency,
-          initialState: legacyStatePending ? state : undefined,
-        },
+      body,
     });
-    auth = {
-      token: payload.token,
-      currentUser: payload.user.account,
-      users: [{ account: payload.user.account, profile: payload.user }],
-    };
-    state = normalizeLoadedState(payload.state);
-    filters.currency = state.user.currency;
-    saveAuth();
-    localStorage.setItem("asset-platform-v18", JSON.stringify(state));
-    legacyStatePending = false;
-    currentModule = "overview";
-    render();
+    completeAuthentication(payload);
   } catch (error) {
     message.textContent = error.message;
     submit.disabled = false;
   }
+}
+
+async function handleSendAuthCode(event) {
+  const button = event.currentTarget;
+  const form = document.querySelector("#authForm");
+  const phone = String(new FormData(form).get("phone") || "").trim();
+  const message = document.querySelector("#authMessage");
+  if (!/^1\d{10}$/.test(phone)) {
+    message.textContent = "请先输入正确的 11 位手机号。";
+    return;
+  }
+  button.disabled = true;
+  button.textContent = "发送中...";
+  try {
+    const payload = await apiRequest("/auth/sms/send", {
+      method: "POST",
+      body: { phone, purpose: button.dataset.purpose },
+    });
+    message.textContent = payload.debugCode
+      ? `测试验证码：${payload.debugCode}（配置短信服务后将直接发送到手机）`
+      : payload.message;
+    let seconds = 60;
+    button.textContent = `${seconds} 秒后重发`;
+    const timer = window.setInterval(() => {
+      seconds -= 1;
+      if (seconds <= 0 || !document.body.contains(button)) {
+        window.clearInterval(timer);
+        if (document.body.contains(button)) {
+          button.disabled = false;
+          button.textContent = "获取验证码";
+        }
+        return;
+      }
+      button.textContent = `${seconds} 秒后重发`;
+    }, 1000);
+  } catch (error) {
+    message.textContent = error.message;
+    button.disabled = false;
+    button.textContent = "获取验证码";
+  }
+}
+
+function completeAuthentication(payload) {
+  auth = {
+    token: payload.token,
+    currentUser: payload.user.account,
+    users: [{ account: payload.user.account, profile: payload.user }],
+  };
+  state = normalizeLoadedState(payload.state);
+  filters.currency = state.user.currency;
+  saveAuth();
+  localStorage.setItem("asset-platform-v18", JSON.stringify(state));
+  legacyStatePending = false;
+  currentModule = "overview";
+  render();
 }
 
 function handleProfileSubmit(event) {

@@ -3,21 +3,35 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const publicRoot = path.resolve(__dirname, "..");
 const dataDir = path.join(__dirname, "data");
 fs.mkdirSync(dataDir, { recursive: true });
 
-const db = new DatabaseSync(path.join(dataDir, "asset-platform.sqlite"));
+const db = new Database(path.join(dataDir, "asset-platform.sqlite"));
 db.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
 
 const PORT = Number(process.env.API_PORT || 3000);
 const TOKEN_TTL_DAYS = 30;
+const SMS_CODE_TTL_MINUTES = 5;
+const SMS_RESEND_SECONDS = 60;
 const allowedOrigins = new Set([
   "http://127.0.0.1:4173",
   "http://localhost:4173",
 ]);
+const mimeTypes = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+};
 
 const json = (res, status, payload, origin = "") => {
   if (allowedOrigins.has(origin)) {
@@ -44,6 +58,20 @@ const readBody = (req) => new Promise((resolve, reject) => {
   req.on("error", reject);
 });
 
+function serveStatic(url, res) {
+  const requestPath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+  const resolved = path.resolve(publicRoot, `.${requestPath}`);
+  const filePath = resolved.startsWith(`${publicRoot}${path.sep}`) && fs.existsSync(resolved) && fs.statSync(resolved).isFile()
+    ? resolved
+    : path.join(publicRoot, "index.html");
+  const extension = path.extname(filePath).toLowerCase();
+  res.writeHead(200, {
+    "Content-Type": mimeTypes[extension] || "application/octet-stream",
+    "Cache-Control": extension === ".html" ? "no-cache" : "public, max-age=3600",
+  });
+  fs.createReadStream(filePath).pipe(res);
+}
+
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.scryptSync(password, salt, 64).toString("hex");
   return `${salt}:${hash}`;
@@ -62,6 +90,70 @@ function issueToken(userId) {
   const expiresAt = new Date(Date.now() + TOKEN_TTL_DAYS * 86400000).toISOString();
   db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(tokenHash, userId, expiresAt);
   return token;
+}
+
+function userByPhone(phone) {
+  return db.prepare(`
+    SELECT users.id, users.account, users.password_hash
+    FROM users JOIN user_profiles ON user_profiles.user_id = users.id
+    WHERE user_profiles.phone = ?
+    ORDER BY users.id
+    LIMIT 1
+  `).get(phone);
+}
+
+function verificationCodeHash(phone, purpose, code) {
+  return crypto.createHash("sha256").update(`${phone}:${purpose}:${code}`).digest("hex");
+}
+
+function createSmsCode(phone, purpose) {
+  const previous = db.prepare(`
+    SELECT created_at FROM sms_verification_codes
+    WHERE phone = ? AND purpose = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(phone, purpose);
+  if (previous && Date.now() - new Date(`${previous.created_at}Z`).getTime() < SMS_RESEND_SECONDS * 1000) {
+    throw new Error("验证码发送过于频繁，请稍后再试。");
+  }
+  const code = String(crypto.randomInt(100000, 1000000));
+  const expiresAt = new Date(Date.now() + SMS_CODE_TTL_MINUTES * 60000).toISOString();
+  db.prepare(`
+    INSERT INTO sms_verification_codes (phone, purpose, code_hash, expires_at)
+    VALUES (?, ?, ?, ?)
+  `).run(phone, purpose, verificationCodeHash(phone, purpose, code), expiresAt);
+  return code;
+}
+
+function verifySmsCode(phone, purpose, code) {
+  const row = db.prepare(`
+    SELECT id, code_hash, expires_at FROM sms_verification_codes
+    WHERE phone = ? AND purpose = ? AND used_at = ''
+    ORDER BY id DESC LIMIT 1
+  `).get(phone, purpose);
+  if (!row || row.expires_at <= new Date().toISOString()) return false;
+  const actual = Buffer.from(verificationCodeHash(phone, purpose, code), "hex");
+  const expected = Buffer.from(row.code_hash, "hex");
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return false;
+  db.prepare("UPDATE sms_verification_codes SET used_at = ? WHERE id = ?").run(new Date().toISOString(), row.id);
+  return true;
+}
+
+async function deliverSmsCode(phone, code, purpose) {
+  const webhook = process.env.SMS_WEBHOOK_URL;
+  if (!webhook) {
+    console.log(`[SMS development] ${phone} ${purpose}: ${code}`);
+    return false;
+  }
+  const response = await fetch(webhook, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(process.env.SMS_WEBHOOK_TOKEN ? { Authorization: `Bearer ${process.env.SMS_WEBHOOK_TOKEN}` } : {}),
+    },
+    body: JSON.stringify({ phone, code, purpose, expiresInMinutes: SMS_CODE_TTL_MINUTES }),
+  });
+  if (!response.ok) throw new Error("短信服务发送失败，请稍后重试。");
+  return true;
 }
 
 function authenticatedUser(req) {
@@ -320,6 +412,14 @@ function createUser({ account, password, name, phone, email, currency }) {
   }
 }
 
+function authPayload(userId) {
+  return {
+    token: issueToken(userId),
+    user: profileForUser(userId),
+    state: loadUserState(userId),
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin || "";
   if (req.method === "OPTIONS") {
@@ -336,6 +436,33 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { ok: true, database: "sqlite" }, origin);
       return;
     }
+    if (req.method === "POST" && url.pathname === "/api/auth/sms/send") {
+      const body = await readBody(req);
+      const phone = text(body.phone).trim();
+      const purpose = text(body.purpose).trim();
+      if (!/^1\d{10}$/.test(phone) || !["login", "register", "reset"].includes(purpose)) {
+        json(res, 400, { message: "请输入正确的手机号。" }, origin);
+        return;
+      }
+      const existingUser = userByPhone(phone);
+      if (purpose === "register" && existingUser) {
+        json(res, 409, { message: "这个手机号已经注册，请直接登录。" }, origin);
+        return;
+      }
+      if (purpose !== "register" && !existingUser) {
+        json(res, 404, { message: "这个手机号尚未注册。" }, origin);
+        return;
+      }
+      const code = createSmsCode(phone, purpose);
+      const delivered = await deliverSmsCode(phone, code, purpose);
+      json(res, 200, {
+        ok: true,
+        expiresIn: SMS_CODE_TTL_MINUTES * 60,
+        message: delivered ? "验证码已发送。" : "测试验证码已生成。",
+        ...(delivered ? {} : { debugCode: code }),
+      }, origin);
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/api/auth/register") {
       const body = await readBody(req);
       const account = text(body.account).trim();
@@ -344,12 +471,25 @@ const server = http.createServer(async (req, res) => {
       const phone = text(body.phone).trim();
       const email = text(body.email).trim();
       const currency = text(body.currency || "CNY");
+      const smsCode = text(body.smsCode).trim();
       if (account.length < 3 || password.length < 6 || !name || !phone) {
         json(res, 400, { message: "账号至少 3 位，密码至少 6 位，昵称和手机不能为空。" }, origin);
         return;
       }
+      if (!/^1\d{10}$/.test(phone)) {
+        json(res, 400, { message: "请输入正确的手机号。" }, origin);
+        return;
+      }
       if (db.prepare("SELECT id FROM users WHERE account = ?").get(account)) {
         json(res, 409, { message: "这个账号已经注册，请直接登录。" }, origin);
+        return;
+      }
+      if (userByPhone(phone)) {
+        json(res, 409, { message: "这个手机号已经注册，请直接登录。" }, origin);
+        return;
+      }
+      if (!verifySmsCode(phone, "register", smsCode)) {
+        json(res, 400, { message: "短信验证码不正确或已过期。" }, origin);
         return;
       }
       const userId = createUser({ account, password, name, phone, email, currency });
@@ -367,8 +507,7 @@ const server = http.createServer(async (req, res) => {
         }
         : defaultState({ account, name, phone, email, currency });
       saveUserState(userId, initialState);
-      const token = issueToken(userId);
-      json(res, 201, { token, user: profileForUser(userId), state: loadUserState(userId) }, origin);
+      json(res, 201, authPayload(userId), origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/auth/login") {
@@ -378,8 +517,45 @@ const server = http.createServer(async (req, res) => {
         json(res, 401, { message: "账号或密码不正确。" }, origin);
         return;
       }
-      const token = issueToken(user.id);
-      json(res, 200, { token, user: profileForUser(user.id), state: loadUserState(user.id) }, origin);
+      json(res, 200, authPayload(user.id), origin);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/auth/phone-login") {
+      const body = await readBody(req);
+      const phone = text(body.phone).trim();
+      const user = userByPhone(phone);
+      if (!user || !verifySmsCode(phone, "login", text(body.smsCode).trim())) {
+        json(res, 401, { message: "手机号或验证码不正确。" }, origin);
+        return;
+      }
+      json(res, 200, authPayload(user.id), origin);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/auth/reset-password") {
+      const body = await readBody(req);
+      const phone = text(body.phone).trim();
+      const password = text(body.password);
+      const user = userByPhone(phone);
+      if (!user) {
+        json(res, 404, { message: "这个手机号尚未注册。" }, origin);
+        return;
+      }
+      if (password.length < 6) {
+        json(res, 400, { message: "新密码至少需要 6 位。" }, origin);
+        return;
+      }
+      if (!verifySmsCode(phone, "reset", text(body.smsCode).trim())) {
+        json(res, 400, { message: "短信验证码不正确或已过期。" }, origin);
+        return;
+      }
+      db.prepare("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(hashPassword(password), user.id);
+      db.prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
+      json(res, 200, authPayload(user.id), origin);
+      return;
+    }
+    if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
+      serveStatic(url, res);
       return;
     }
 
@@ -407,7 +583,11 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { ok: true, updatedAt: new Date().toISOString() }, origin);
       return;
     }
-    json(res, 404, { message: "接口不存在。" }, origin);
+    if (url.pathname.startsWith("/api/")) {
+      json(res, 404, { message: "接口不存在。" }, origin);
+      return;
+    }
+    json(res, 404, { message: "资源不存在。" }, origin);
   } catch (error) {
     console.error(error);
     const status = String(error.message).includes("UNIQUE") ? 409 : 500;
@@ -415,6 +595,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Asset Platform API: http://127.0.0.1:${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Asset Platform API listening on 0.0.0.0:${PORT}`);
 });
