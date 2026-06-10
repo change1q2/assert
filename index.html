@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>个人精细化资产管理平台</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=backend2" />
   </head>
   <body>
     <div id="app">
@@ -74,10 +74,11 @@
     <dialog id="recordDialog">
       <form id="recordForm" method="dialog" class="modal-form">
         <h2>新增流水</h2>
+        <input name="recordId" type="hidden" />
         <label>类型
           <select name="type">
             <option value="income">收入</option>
-            <option value="expense">支出</option>
+            <option value="expense">消费</option>
             <option value="transfer">转账</option>
           </select>
         </label>
@@ -85,13 +86,26 @@
           <input name="amount" type="number" step="0.01" min="0" required />
         </label>
         <label>一级分类
-          <select name="category"></select>
+          <span class="category-field">
+            <select name="category" required aria-label="选择一级分类"></select>
+            <button type="button" data-action="add-category">增加分类</button>
+          </span>
         </label>
         <label>账户
           <select name="accountId"></select>
         </label>
         <label>日期
           <input name="date" type="date" required />
+        </label>
+        <label>记录人
+          <input name="recorder" placeholder="可填写记账人" />
+          <span id="recordRecorderOptions" class="tag-options"></span>
+        </label>
+        <label>标签
+          <span class="category-field">
+            <select name="tag" aria-label="选择标签"></select>
+            <button type="button" data-action="add-tag">添加标签</button>
+          </span>
         </label>
         <label>备注
           <input name="note" placeholder="可填写标签、凭证说明或模板名" />
@@ -103,6 +117,251 @@
       </form>
     </dialog>
 
-    <script src="./app.js"></script>
+    <dialog id="debtDialog">
+      <form id="debtForm" method="dialog" class="modal-form debt-form">
+        <h2>新增债务</h2>
+        <input name="debtId" type="hidden" />
+        <label>大类
+          <select name="category">
+            <option value="payable">应付 / 借入</option>
+            <option value="receivable">应收款 / 借出</option>
+          </select>
+        </label>
+        <label>类型
+          <select name="type">
+            <option>借入</option>
+            <option>借出</option>
+            <option>应付</option>
+            <option>应收</option>
+          </select>
+        </label>
+        <label>债权人 / 借款人
+          <input name="creditorName" required placeholder="请输入债权人或借款人" />
+        </label>
+        <label>债务人 / 付款人
+          <input name="debtorName" required placeholder="请输入债务人或付款人" />
+        </label>
+        <label>本金
+          <input name="principal" type="number" step="0.01" min="0" required />
+        </label>
+        <label>利息（年化%）
+          <input name="annualRate" type="number" step="0.01" min="0" value="0" />
+        </label>
+        <label>金额
+          <input name="amount" type="number" step="0.01" min="0" readonly />
+        </label>
+        <label>借入日期
+          <input name="startDate" type="date" required />
+        </label>
+        <label>还款日期
+          <input name="dueDate" type="date" required />
+        </label>
+        <label>还款方式
+          <select name="repaymentMethod">
+            <option value="equalPrincipalInterest">等额本息</option>
+            <option value="equalPrincipalEqualInterest">等本等息</option>
+            <option value="interestOnly">先息后本</option>
+            <option value="singlePayment">一次性还款</option>
+          </select>
+        </label>
+        <label>已还金额
+          <input name="paidAmount" type="number" step="0.01" min="0" value="0" />
+        </label>
+        <label>剩余金额
+          <input name="remainingAmount" type="number" step="0.01" min="0" readonly />
+        </label>
+        <label>附件
+          <input name="attachment" type="file" />
+        </label>
+        <label class="full-field">备注
+          <input name="note" placeholder="合同编号、用途、抵押物、沟通记录等" />
+        </label>
+        <div id="debtCalcPreview" class="debt-calc-preview"></div>
+        <menu>
+          <button value="cancel" type="button" id="cancelDebt">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="accountDialog">
+      <form id="accountForm" method="dialog" class="modal-form">
+        <h2>新增账户</h2>
+        <input name="accountId" type="hidden" />
+        <label>账户名称
+          <input name="name" required placeholder="例如 招商储蓄卡" />
+        </label>
+        <label>所有人
+          <input name="owner" required placeholder="本人 / 家庭 / 公司" />
+        </label>
+        <label>币种
+          <select name="currency"></select>
+        </label>
+        <label>账户类型
+          <select name="type">
+            <option>现金账户</option>
+            <option>投资账户</option>
+            <option>外币账户</option>
+            <option>负债账户</option>
+            <option>储蓄账户</option>
+            <option>其他账户</option>
+          </select>
+        </label>
+        <label>余额
+          <input name="balance" type="number" step="0.01" value="0" />
+        </label>
+        <label>负债
+          <input name="liability" type="number" step="0.01" value="0" />
+        </label>
+        <menu>
+          <button value="cancel" type="button" id="cancelAccount">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="assetClassDialog">
+      <form id="assetClassForm" method="dialog" class="modal-form">
+        <h2>新增资产分类</h2>
+        <input name="classId" type="hidden" />
+        <label>分类名称
+          <input name="name" required placeholder="例如 房产类" />
+        </label>
+        <label>二级分类
+          <input name="children" required placeholder="多个分类用逗号分隔，例如 住宅,商铺" />
+        </label>
+        <label>当前价值
+          <input name="value" type="number" step="0.01" min="0" required readonly />
+        </label>
+        <label>期初价值
+          <input name="openingValue" type="number" step="0.01" min="0" required />
+        </label>
+        <label>目标价值
+          <input name="targetValue" type="number" step="0.01" min="0" required />
+        </label>
+        <label>年度收益
+          <input name="income" type="number" step="0.01" value="0" required />
+        </label>
+        <label>年度支出
+          <input name="expense" type="number" step="0.01" value="0" required />
+        </label>
+        <label>颜色
+          <input name="color" type="color" value="#539f8d" required />
+        </label>
+        <menu>
+          <button value="cancel" type="button" id="cancelAssetClass">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="financeAssetDialog">
+      <form id="financeAssetForm" method="dialog" class="modal-form finance-asset-form">
+        <h2>新增理财资产</h2>
+        <input name="assetId" type="hidden" />
+        <label>市场
+          <select name="market" required>
+            <option value="domestic">国内市场</option>
+            <option value="overseas">海外市场</option>
+          </select>
+        </label>
+        <label>货币单位
+          <select name="currency" required></select>
+        </label>
+        <label>资产类型
+          <select name="kind" required>
+            <option value="stock">股票</option>
+            <option value="fund">基金</option>
+            <option value="commodity">商品</option>
+            <option value="futures">期货</option>
+            <option value="options">期权</option>
+            <option value="crypto">加密货币</option>
+            <option value="cashflow">现金流资产</option>
+            <option value="custom">自定义理财</option>
+          </select>
+        </label>
+        <label>所属账户
+          <select name="accountId" required></select>
+        </label>
+        <label>资产分类
+          <select name="category" required></select>
+        </label>
+        <label>资产分类二级
+          <select name="subcategory" required></select>
+        </label>
+        <label class="inline-label">资产三级分类
+          <span class="field-inline">
+            <select name="tertiaryCategory"></select>
+            <button type="button" data-action="manage-finance-tertiary">自由增添</button>
+          </span>
+        </label>
+        <label>仓位分组
+          <select name="positionGroup" required>
+            <option value="core">核心仓位</option>
+            <option value="satellite">卫星仓位</option>
+            <option value="cashflow">现金流仓位</option>
+            <option value="income">吃息仓位</option>
+          </select>
+        </label>
+        <label>仓位分类
+          <select name="positionCategory" required></select>
+        </label>
+        <label>资产名称
+          <input name="name" required placeholder="基金、股票或自定义资产名称" />
+        </label>
+        <label>资产代码
+          <input name="code" required placeholder="基金代码 / 股票代码 / 自定义编号" />
+        </label>
+        <label>持仓成本
+          <input name="costPrice" type="number" step="0.0001" min="0" required />
+        </label>
+        <label>份额 / 数量
+          <input name="shares" type="number" step="0.0001" min="0" required />
+        </label>
+        <label>浮动盈亏
+          <input name="pnl" type="number" step="0.01" value="0" required />
+        </label>
+        <label>当前价值
+          <input name="currentValue" type="number" step="0.01" readonly />
+        </label>
+        <menu>
+          <button value="cancel" type="button" id="cancelFinanceAsset">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="financeTertiaryDialog">
+      <form id="financeTertiaryForm" method="dialog" class="modal-form option-manager">
+        <h2>资产三级分类</h2>
+        <p id="financeTertiaryScope" class="muted"></p>
+        <div id="financeTertiaryList" class="option-list"></div>
+        <label>新增名称
+          <input name="name" required placeholder="请输入三级分类名称" />
+        </label>
+        <menu>
+          <button value="cancel" type="button" id="cancelFinanceTertiary">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="recordOptionDialog">
+      <form id="recordOptionForm" method="dialog" class="modal-form option-manager">
+        <h2>增加分类</h2>
+        <input name="kind" type="hidden" />
+        <p id="recordOptionScope" class="muted"></p>
+        <div id="recordOptionList" class="option-list"></div>
+        <label>新增名称
+          <input name="name" required placeholder="请输入名称" />
+        </label>
+        <menu>
+          <button value="cancel" type="button" id="cancelRecordOption">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="./app.js?v=backend2"></script>
   </body>
 </html>
