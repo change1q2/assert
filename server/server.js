@@ -575,7 +575,7 @@ const server = http.createServer(async (req, res) => {
     res.end();
     return;
   }
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  const url = new URL(req.url || "/", "http://localhost");
   try {
     if (req.method === "GET" && url.pathname === "/api/health") {
       json(res, 200, { ok: true, database: "sqlite" }, origin);
