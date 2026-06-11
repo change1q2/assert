@@ -1,13 +1,13 @@
 const modules = [
-  ["overview", "资产总览", "⌂"],
-  ["records", "收支分析", "＋"],
-  ["finance", "理财模块", "财"],
-  ["debts", "债务模块", "债"],
-  ["classes", "资产分类", "☷"],
-  ["analysis", "统计分析", "◇"],
-  ["tools", "辅助工具", "⚙"],
-  ["strategies", "业务设计", "◎"],
-  ["accounts", "账户管理", "◫"],
+  ["overview", "资产总览", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>'],
+  ["records", "收支分析", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>'],
+  ["finance", "理财模块", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>'],
+  ["debts", "债务模块", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>'],
+  ["classes", "资产分类", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>'],
+  ["analysis", "统计分析", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>'],
+  ["tools", "辅助工具", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'],
+  ["strategies", "业务设计", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'],
+  ["accounts", "账户管理", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'],
 ];
 
 const fixedAssetClassNames = {
@@ -47,12 +47,12 @@ const seed = {
     { id: "mortgage", name: "房贷账户", owner: "家庭", currency: "CNY", type: "负债账户", balance: 0, liability: 520000, enabled: true },
   ],
   assetClasses: [
-    { id: "cashClass", name: "现金类", children: ["活期", "货币基金"], visible: true, value: 1641827, openingValue: 1200000, targetValue: 12000000, income: 36300, expense: 28200, laborIncome: 106300, color: "#539f8d" },
-    { id: "equity", name: "权益类", children: ["股票", "基金"], visible: true, value: 1276482, openingValue: 900000, targetValue: 18000000, income: 172419, expense: 4600, laborIncome: 0, color: "#b9d765" },
-    { id: "debt", name: "债权类", children: ["债券", "定期"], visible: true, value: 202912, openingValue: 180000, targetValue: 8000000, income: 12600, expense: 18000, laborIncome: 0, color: "#f5a623" },
-    { id: "commodity", name: "商品类", children: ["黄金"], visible: true, value: 74375, openingValue: 62000, targetValue: 5000000, income: 6800, expense: 0, laborIncome: 0, color: "#ffc72c" },
-    { id: "crypto", name: "加密类", children: ["BTC", "ETH"], visible: true, value: 364227.7, openingValue: 110000, targetValue: 7000000, income: 27400, expense: 0, laborIncome: 0, color: "#ff7f50" },
-    { id: "incomeClass", name: "吃息类", children: ["红利股票", "债券基金", "股息"], visible: true, value: 0, openingValue: 0, targetValue: 3000000, income: 0, expense: 0, laborIncome: 0, color: "#4fb477" },
+    { id: "cashClass", name: "现金类", children: ["活期", "货币基金"], visible: true, value: 1641827, openingValue: 1200000, targetValue: 12000000, income: 36300, expense: 28200, laborIncome: 106300, color: "#10b981" },
+    { id: "equity", name: "权益类", children: ["股票", "基金"], visible: true, value: 1276482, openingValue: 900000, targetValue: 18000000, income: 172419, expense: 4600, laborIncome: 0, color: "#6366f1" },
+    { id: "debt", name: "债权类", children: ["债券", "定期"], visible: true, value: 202912, openingValue: 180000, targetValue: 8000000, income: 12600, expense: 18000, laborIncome: 0, color: "#f59e0b" },
+    { id: "commodity", name: "商品类", children: ["黄金"], visible: true, value: 74375, openingValue: 62000, targetValue: 5000000, income: 6800, expense: 0, laborIncome: 0, color: "#8b5cf6" },
+    { id: "crypto", name: "加密类", children: ["BTC", "ETH"], visible: true, value: 364227.7, openingValue: 110000, targetValue: 7000000, income: 27400, expense: 0, laborIncome: 0, color: "#f97316" },
+    { id: "incomeClass", name: "吃息类", children: ["红利股票", "债券基金", "股息"], visible: true, value: 0, openingValue: 0, targetValue: 3000000, income: 0, expense: 0, laborIncome: 0, color: "#06b6d4" },
   ],
   records: [
     { id: 1, type: "income", category: "劳动收入", sub: "工资", amount: 36000, currency: "CNY", accountId: "cash", date: "2026-01-15", note: "工资收入" },
@@ -115,6 +115,9 @@ let financeAnalysisPeriod = "day";
 let financeCalendarMode = "day";
 let financeCalendarValue = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
 let financeCalendarMetric = "amount";
+let analysisPeriodMode = "year";
+let analysisPeriod = String(new Date().getFullYear());
+let analysisShowTotalDebt = false;
 let premiumRows = [];
 let premiumLoading = false;
 let premiumError = "";
@@ -575,7 +578,13 @@ async function init() {
 
 function renderNav() {
   const nav = document.querySelector("#moduleNav");
-  nav.innerHTML = modules.map(([id, name, icon]) => `<button data-module="${id}" class="${id === currentModule ? "active" : ""}"><span>${icon}</span>${name}</button>`).join("");
+  nav.innerHTML = modules.map(([id, name, icon]) => `<button data-module="${id}" class="${id === currentModule ? "active" : ""}"><span class="nav-icon">${icon}</span><span class="nav-label">${name}</span></button>`).join("");
+  const bottomNav = document.querySelector("#mobileBottomNav");
+  if (bottomNav) {
+    bottomNav.querySelectorAll("button[data-module]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.module === currentModule);
+    });
+  }
 }
 
 function renderUserEntry() {
@@ -609,6 +618,10 @@ function bindGlobalActions() {
     if (!button) return;
     currentModule = button.dataset.module;
     document.querySelector(".shell").scrollTop = 0;
+    const sb = document.querySelector("#sidebar");
+    const ov = document.querySelector("#sidebarOverlay");
+    if (sb) sb.classList.remove("is-open");
+    if (ov) ov.classList.remove("is-open");
     render();
   });
   document.querySelector(".filters").addEventListener("change", () => {
@@ -639,6 +652,33 @@ function bindGlobalActions() {
     saveProfileToAuth();
   });
   document.querySelector("#screenToggle").addEventListener("click", () => document.documentElement.requestFullscreen?.());
+  const mobileMenuToggle = document.querySelector("#mobileMenuToggle");
+  const sidebar = document.querySelector("#sidebar");
+  const sidebarOverlay = document.querySelector("#sidebarOverlay");
+  if (mobileMenuToggle && sidebar && sidebarOverlay) {
+    mobileMenuToggle.addEventListener("click", () => {
+      sidebar.classList.toggle("is-open");
+      sidebarOverlay.classList.toggle("is-open");
+    });
+    sidebarOverlay.addEventListener("click", () => {
+      sidebar.classList.remove("is-open");
+      sidebarOverlay.classList.remove("is-open");
+    });
+  }
+  const bottomNav = document.querySelector("#mobileBottomNav");
+  if (bottomNav) {
+    bottomNav.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-module]");
+      if (!button) return;
+      currentModule = button.dataset.module;
+      document.querySelector(".shell").scrollTop = 0;
+      const sb = document.querySelector("#sidebar");
+      const ov = document.querySelector("#sidebarOverlay");
+      if (sb) sb.classList.remove("is-open");
+      if (ov) ov.classList.remove("is-open");
+      render();
+    });
+  }
   document.querySelector("#userEntry").addEventListener("click", () => {
     currentModule = "profile";
     document.querySelector(".shell").scrollTop = 0;
@@ -739,7 +779,7 @@ function render() {
     bindViewActions();
     return;
   }
-  document.querySelector(".filters").classList.toggle("is-hidden", ["overview", "profile", "records", "finance", "financeAnalysis", "debts", "tools", "premiumTool"].includes(currentModule));
+  document.querySelector(".filters").classList.toggle("is-hidden", ["overview", "profile", "records", "finance", "financeAnalysis", "debts", "tools", "premiumTool", "analysis"].includes(currentModule));
   const moduleName = currentModule === "profile"
     ? "个人中心"
     : currentModule === "financeAnalysis"
@@ -797,7 +837,7 @@ function pieSegments(rows) {
 }
 
 function overviewPieCard(title, rows) {
-  const safeRows = rows.length ? rows : [{ name: "暂无数据", value: 1, color: "#d9e0dc" }];
+  const safeRows = rows.length ? rows : [{ name: "暂无数据", value: 1, color: "#c7d2fe" }];
   const total = overviewTotal(safeRows);
   return `<section class="overview-card overview-chart-card">
     <h2>${title}</h2>
@@ -810,7 +850,7 @@ function overviewPieCard(title, rows) {
 }
 
 function overviewDonutCard(title, rows, centerValue, centerLabel) {
-  const safeRows = rows.length ? rows : [{ name: "暂无数据", value: 1, color: "#d9e0dc" }];
+  const safeRows = rows.length ? rows : [{ name: "暂无数据", value: 1, color: "#c7d2fe" }];
   const total = overviewTotal(safeRows);
   return `<section class="overview-card overview-chart-card">
     <h2>${title}</h2>
@@ -850,7 +890,7 @@ function assetGrowthLineCard(rows) {
   const currentPoints = rows.map((row, index) => point(row.current, index).map((num) => num.toFixed(1)).join(",")).join(" ");
   return `<section class="overview-card asset-growth-card">
     <h2>资产增长表</h2>
-    ${overviewLegend([{ name: "原有总资产", color: "#ff7f50" }, { name: "现有总资产", color: "#b9d765" }])}
+    ${overviewLegend([{ name: "原有总资产", color: "#f97316" }, { name: "现有总资产", color: "#6366f1" }])}
     <svg class="asset-growth-line" viewBox="0 0 ${width} ${height}" role="img" aria-label="资产增长表">
       ${[0, 1, 2, 3, 4].map((line) => `<line x1="${padding}" y1="${padding + line * 52}" x2="${width - padding}" y2="${padding + line * 52}" />`).join("")}
       <polyline class="original" points="${originalPoints}" />
@@ -868,12 +908,12 @@ function annualAssetChangeCard(rows) {
   const maxAbs = Math.max(...rows.flatMap((row) => [Math.abs(row.original), Math.abs(row.current), Math.abs(row.growth)]), 1);
   return `<section class="overview-card annual-change-card">
     <h2>年均资产变化</h2>
-    ${overviewLegend([{ name: "原有总资产", color: "#ff7f50" }, { name: "现有总资产", color: "#b9d765" }, { name: "增长额", color: "#ffd24a" }])}
+    ${overviewLegend([{ name: "原有总资产", color: "#f97316" }, { name: "现有总资产", color: "#6366f1" }, { name: "增长额", color: "#fbbf24" }])}
     <div class="annual-bars">
       ${rows.map((row) => `<div class="annual-group">
-        ${annualBar(row.original, maxAbs, "#ff7f50")}
-        ${annualBar(row.current, maxAbs, "#b9d765")}
-        ${annualBar(row.growth, maxAbs, "#ffd24a")}
+        ${annualBar(row.original, maxAbs, "#f97316")}
+        ${annualBar(row.current, maxAbs, "#6366f1")}
+        ${annualBar(row.growth, maxAbs, "#fbbf24")}
         <span>${row.year}</span>
       </div>`).join("")}
     </div>
@@ -929,18 +969,18 @@ function overviewDashboardData(data) {
   const monthSpend = yearSpend / 12;
   const monthBalance = yearNetIncome / 12;
   const contributionRows = [
-    { name: "劳动净增值", value: Math.abs(data.laborNet), signed: data.laborNet, color: "#b9d765" },
-    { name: "理财净收益", value: Math.abs(data.investNet), signed: data.investNet, color: "#ff7f50" },
-    { name: "负债贡献", value: Math.abs(data.debtContribution), signed: data.debtContribution, color: "#ffc72c" },
+    { name: "劳动净增值", value: Math.abs(data.laborNet), signed: data.laborNet, color: "#10b981" },
+    { name: "理财净收益", value: Math.abs(data.investNet), signed: data.investNet, color: "#6366f1" },
+    { name: "负债贡献", value: Math.abs(data.debtContribution), signed: data.debtContribution, color: "#f59e0b" },
   ].filter((item) => item.value > 0);
   const incomeShare = [
-    { name: "劳动收入", value: Math.max(data.laborNet, 0), color: "#b9d765" },
-    { name: "理财收入", value: Math.max(data.investNet, 0), color: "#ff7f50" },
-    { name: "负债改善", value: Math.max(data.debtContribution, 0), color: "#ffc72c" },
+    { name: "劳动收入", value: Math.max(data.laborNet, 0), color: "#10b981" },
+    { name: "理财收入", value: Math.max(data.investNet, 0), color: "#6366f1" },
+    { name: "负债改善", value: Math.max(data.debtContribution, 0), color: "#f59e0b" },
   ].filter((item) => item.value > 0);
   const laborShare = [
-    { name: "劳动净增值", value: Math.abs(data.laborNet), color: "#b9d765" },
-    { name: "生活/偿债消耗", value: Math.max(data.expense - Math.abs(data.investNet), 0), color: "#ff7f50" },
+    { name: "劳动净增值", value: Math.abs(data.laborNet), color: "#10b981" },
+    { name: "生活/偿债消耗", value: Math.max(data.expense - Math.abs(data.investNet), 0), color: "#f43f5e" },
   ].filter((item) => item.value > 0);
   return {
     totalAssetValue,
@@ -1885,13 +1925,13 @@ function sumRecordCategories(records, categories) {
 }
 
 function expenseBreakdown(records) {
-  return groupRecordRows(records, (record) => record.category, ["#2fb9b1", "#f07a55", "#f0c94e", "#78c6e7", "#8bd17c", "#c890e8", "#ef6f96", "#9aa7b2"]);
+  return groupRecordRows(records, (record) => record.category, ["#6366f1", "#f43f5e", "#fbbf24", "#06b6d4", "#10b981", "#8b5cf6", "#ec4899", "#64748b"]);
 }
 
 function incomeSourceBreakdown(records) {
   const rows = [
-    { name: "劳动收入", value: sumRecordCategory(records, "劳动收入"), count: records.filter((record) => record.category === "劳动收入").length, color: "#24a381" },
-    { name: "资产收入", value: records.filter((record) => record.category !== "劳动收入").reduce((sum, record) => sum + convert(record.amount, record.currency), 0), count: records.filter((record) => record.category !== "劳动收入").length, color: "#57b7e6" },
+    { name: "劳动收入", value: sumRecordCategory(records, "劳动收入"), count: records.filter((record) => record.category === "劳动收入").length, color: "#10b981" },
+    { name: "资产收入", value: records.filter((record) => record.category !== "劳动收入").reduce((sum, record) => sum + convert(record.amount, record.currency), 0), count: records.filter((record) => record.category !== "劳动收入").length, color: "#6366f1" },
   ].filter((item) => item.value > 0);
   const total = rows.reduce((sum, item) => sum + item.value, 0) || 1;
   return rows.map((item) => ({ ...item, share: item.value / total }));
@@ -1899,7 +1939,7 @@ function incomeSourceBreakdown(records) {
 
 function expenseRankBreakdown(records) {
   const rows = [
-    { name: "生活消费", value: sumRecordCategory(records, "生活消费"), count: records.filter((record) => record.category === "生活消费").length, color: "#ef6f96" },
+    { name: "生活消费", value: sumRecordCategory(records, "生活消费"), count: records.filter((record) => record.category === "生活消费").length, color: "#ec4899" },
   ].filter((item) => item.value > 0);
   const total = rows.reduce((sum, item) => sum + item.value, 0) || 1;
   return rows.sort((a, b) => b.value - a.value).map((item) => ({ ...item, share: item.value / total }));
@@ -1952,7 +1992,7 @@ function ledgerYoyRow(row) {
 }
 
 function tagBreakdown(records) {
-  return groupRecordRows(records, (record) => record.sub || record.note || "未标记", ["#24b8b1", "#f18a4d", "#88c5f1", "#f2cf58", "#9bd67d", "#e98da8"]);
+  return groupRecordRows(records, (record) => record.sub || record.note || "未标记", ["#06b6d4", "#f97316", "#3b82f6", "#fbbf24", "#10b981", "#f43f5e"]);
 }
 
 function groupRecordRows(records, getName, colors) {
@@ -2085,7 +2125,7 @@ function ledgerDonut(rows, label) {
     const end = offset + row.share * 100;
     offset = end;
     return `${row.color} ${start}% ${end}%`;
-  }).join(", ") : "#d9e0dc 0% 100%";
+  }).join(", ") : "#c7d2fe 0% 100%";
   return `<div class="ledger-donut" style="--segments:${segments}"><span>${label}</span></div>`;
 }
 
@@ -2102,53 +2142,326 @@ function ledgerCategoryRow(item, total) {
 }
 
 function analysis(data) {
-  const stats = data.analysisStats;
-  const incomeTotal = Math.max(stats.laborIncome, 0) + Math.max(stats.financeIncome, 0) || 1;
-  const outflowTotal = stats.payableDebt + stats.consumption || 1;
-  const annualRate = data.initialAssets ? stats.annualNetGrowth / data.initialAssets : 0;
-  return `
-    <div class="grid cols-4">
-      ${metric(`${stats.year}年度净资产增值`, money(stats.annualNetGrowth), "当年累计结余 + 当年理财收益 - 应付/借入总额")}
-      ${metric("当年累计结余", money(stats.ledgerBalance), "收支分析收入 - 消费，已排除理财收支")}
-      ${metric("当年理财收益", money(stats.financeIncome), "来源：场内穿透盈亏日历当年累计")}
-      ${metric("应付/借入总额", money(-stats.payableDebt), "负债模块应付/借入，作为净资产减项")}
-    </div>
-    <div class="grid cols-2">
-      ${donutCard("收入归因", ["收支分析 · 劳动收入", "理财模块 · 理财收入"], [
-        Math.max(stats.laborIncome, 0) / incomeTotal * 100,
-        Math.max(stats.financeIncome, 0) / incomeTotal * 100,
-      ])}
-      ${donutCard("负债与消费构成", ["债务模块 · 应付/借入", "收支分析 · 消费"], [
-        stats.payableDebt / outflowTotal * 100,
-        stats.consumption / outflowTotal * 100,
-      ])}
-    </div>
-    <div class="grid cols-2">
-      <section class="card">
-        <div class="section-title"><h2>三大模块归因明细</h2><span class="badge">${stats.year}年</span></div>
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+
+  /* ---- 计算期间范围 ---- */
+  let pStart, pEnd, pLabel, pMetricLabel;
+  if (analysisPeriodMode === "day") {
+    pStart = new Date(year, month, now.getDate());
+    pEnd = new Date(year, month, now.getDate(), 23, 59, 59);
+    pLabel = `${month + 1}月${now.getDate()}日`;
+    pMetricLabel = "今日";
+  } else if (analysisPeriodMode === "month") {
+    const m = analysisPeriod.match(/^(\d{4})-(\d{2})$/);
+    const sy = m ? Number(m[1]) : year;
+    const sm = m ? Number(m[2]) - 1 : month;
+    const isCur = sy === year && sm === month;
+    pStart = new Date(sy, sm, 1);
+    pEnd = isCur ? now : new Date(sy, sm + 1, 0, 23, 59, 59);
+    pLabel = isCur ? "本月" : `${sy}年${sm + 1}月`;
+    pMetricLabel = pLabel;
+  } else if (analysisPeriodMode === "year") {
+    const sy = Number(analysisPeriod) || year;
+    const isCur = sy === year;
+    pStart = new Date(sy, 0, 1);
+    pEnd = isCur ? now : new Date(sy, 11, 31, 23, 59, 59);
+    pLabel = isCur ? "今年" : `${sy}年`;
+    pMetricLabel = pLabel;
+  } else {
+    pStart = filters.startDate ? new Date(`${filters.startDate}T00:00:00`) : new Date(year, 0, 1);
+    pEnd = filters.endDate ? new Date(`${filters.endDate}T23:59:59`) : now;
+    pLabel = "自定义";
+    pMetricLabel = "自定义";
+  }
+
+  /* ---- 天数计算 ---- */
+  const daysElapsed = Math.max(Math.floor((Math.min(pEnd, now) - pStart) / 86400000) + 1, 1);
+  const daysTotal = Math.max(Math.floor((pEnd - pStart) / 86400000) + 1, 1);
+  const yearFraction = daysElapsed / (new Date(year, 11, 31) - new Date(year, 0, 1) + 1) * 365;
+
+  /* ---- 收支分析：按期间筛选 ---- */
+  const periodRecords = state.records.filter((r) => {
+    const d = new Date(`${r.date}T00:00:00`);
+    return d >= pStart && d <= pEnd;
+  });
+  const ledgerRecords = periodRecords.filter((r) => !isFinanceRecord(r));
+  const incomeRecords = ledgerRecords.filter((r) => r.type === "income");
+  const expenseRecords = ledgerRecords.filter((r) => r.type === "expense");
+  const ledgerIncome = incomeRecords.reduce((s, r) => s + convert(r.amount, r.currency), 0);
+  const ledgerExpense = expenseRecords.reduce((s, r) => s + convert(r.amount, r.currency), 0);
+  const ledgerBalance = ledgerIncome - ledgerExpense;
+  const laborIncome = incomeRecords.filter((r) => r.category === "劳动收入").reduce((s, r) => s + convert(r.amount, r.currency), 0);
+
+  /* ---- 理财模块：浮动盈亏 ---- */
+  const assets = state.financeAssets || [];
+  const totalValue = assets.reduce((s, a) => s + financeAssetValueRmb(a), 0);
+  const totalCost = assets.reduce((s, a) => s + financeAssetCostRmb(a), 0);
+  const totalPnl = assets.reduce((s, a) => s + financeAmountToRmb(a.pnl, a.currency), 0);
+  const financeIncomeForPeriod = totalPnl >= 0 ? totalPnl : 0;
+  const financeLossForPeriod = totalPnl < 0 ? Math.abs(totalPnl) : 0;
+
+  /* ---- 饼图数据 ---- */
+  const totalIncomeForPie = laborIncome + financeIncomeForPeriod;
+  const pieIncomePct = totalIncomeForPie > 0 ? laborIncome / totalIncomeForPie * 100 : 50;
+  const pieFinancePct = totalIncomeForPie > 0 ? financeIncomeForPeriod / totalIncomeForPie * 100 : 50;
+
+  /* ---- 年度净资产增值 ---- */
+  const annualNetGrowth = data.analysisStats.annualNetGrowth;
+  const annualRate = data.initialAssets ? annualNetGrowth / data.initialAssets : 0;
+
+  /* ---- 债务模块 ---- */
+  const allDebts = state.debts || [];
+  const payable = allDebts.filter((d) => d.category === "payable");
+  const receivable = allDebts.filter((d) => d.category === "receivable");
+  const payableTotalAll = payable.reduce((s, d) => s + debtPlan(d).totalAmount, 0);
+  const receivableTotalAll = receivable.reduce((s, d) => s + debtPlan(d).totalAmount, 0);
+  const payableInterestTotal = payable.reduce((s, d) => s + debtPlan(d).totalInterest, 0);
+  const receivableInterestTotal = receivable.reduce((s, d) => s + debtPlan(d).totalInterest, 0);
+  const payablePrincipalAll = payable.reduce((s, d) => s + (Number(d.principal) || 0), 0);
+  const receivablePrincipalAll = receivable.reduce((s, d) => s + (Number(d.principal) || 0), 0);
+
+  /* ---- 期间利息（按比例） ---- */
+  const periodInterest = payableInterestTotal * (yearFraction / 365);
+  const periodReceivableInterest = receivableInterestTotal * (yearFraction / 365);
+
+  /* ---- 债务展示值 ---- */
+  const debtDisplayValue = analysisShowTotalDebt ? payableTotalAll : periodInterest;
+  const debtDisplayLabel = analysisShowTotalDebt ? "总负债" : "当年利息";
+
+  /* ---- 期间选项生成 ---- */
+  let periodOptionHtml = "";
+  if (analysisPeriodMode === "day") {
+    periodOptionHtml = `<span class="badge">${year}年${month + 1}月${now.getDate()}日</span>`;
+  } else if (analysisPeriodMode === "month") {
+    const options = Array.from({ length: month + 1 }, (_, i) => {
+      const tm = month - i;
+      const v = `${year}-${String(tm + 1).padStart(2, "0")}`;
+      const l = i === 0 ? "本月" : i === 1 ? "上月" : `${tm + 1}月`;
+      return [v, l];
+    });
+    periodOptionHtml = `<div class="ledger-period-options">
+      <span class="ledger-period-year">${year}年</span>
+      ${options.map(([v, l]) => `<button data-action="analysis-period" data-period="${v}" class="${analysisPeriod === v ? 'active' : ''}">${l}</button>`).join("")}
+    </div>`;
+  } else if (analysisPeriodMode === "year") {
+    const options = [];
+    for (let y = year; y >= Math.min(year, 2020); y--) {
+      options.push([String(y), y === year ? "今年" : y === year - 1 ? "去年" : `${y}年`]);
+    }
+    periodOptionHtml = `<div class="ledger-period-options">
+      ${options.map(([v, l]) => `<button data-action="analysis-period" data-period="${v}" class="${analysisPeriod === v ? 'active' : ''}">${l}</button>`).join("")}
+    </div>`;
+  } else {
+    periodOptionHtml = `<div class="ledger-period-options"><span class="ledger-period-year">自定义日期范围</span></div>`;
+  }
+
+  /* ---- SVG 饼图 ---- */
+  const pieR = 70;
+  const pieCx = 80;
+  const pieCy = 80;
+  const pieCircum = 2 * Math.PI * pieR;
+  const incomeStroke = (pieIncomePct / 100) * pieCircum;
+  const financeStroke = (pieFinancePct / 100) * pieCircum;
+
+  /* ---- 消费占比 ---- */
+  const consumptionItems = [
+    { label: "消费支出", value: ledgerExpense, tone: "#f43f5e" },
+    { label: "理财盈亏", value: totalPnl, tone: totalPnl >= 0 ? "#10b981" : "#f43f5e" },
+    { label: debtDisplayLabel, value: debtDisplayValue, tone: "#f59e0b" },
+  ];
+  const consumptionTotal = consumptionItems.reduce((s, c) => s + Math.max(Math.abs(c.value), 0.01), 0);
+
+  /* ---- 月度趋势 ---- */
+  const months = monthlySeries();
+  const maxMonthVal = Math.max(...months.map((m) => Math.max(m.income, m.expense)), 1);
+
+  return `<div class="analysis-page">
+
+    <!-- 筛选 Tab -->
+    <section class="analysis-filter-bar">
+      <div class="ledger-periods ledger-mode-tabs">
+        ${[
+          ["day", "日常"],
+          ["month", "月统计"],
+          ["year", "年统计"],
+          ["custom", "自定义"],
+        ].map(([id, label]) => `<button data-action="analysis-mode" data-mode="${id}" class="${analysisPeriodMode === id ? "active" : ""}">${label}</button>`).join("")}
+      </div>
+      ${periodOptionHtml}
+      <div class="analysis-custom-range ${analysisPeriodMode === 'custom' ? 'active' : ''}">
+        <input id="analysisStartDate" type="date" value="${filters.startDate}" />
+        <input id="analysisEndDate" type="date" value="${filters.endDate}" />
+      </div>
+    </section>
+
+    <!-- 第一行：概览 -->
+    <section class="analysis-row analysis-overview card">
+      <div class="analysis-overview-head">
+        <div class="analysis-overview-label">
+          <h2>数据统计</h2>
+        </div>
+        <div class="analysis-overview-time">
+          <span class="analysis-time-badge">${pLabel}</span>
+          <span class="analysis-time-days">至今 ${daysElapsed} 天 / 共 ${daysTotal} 天</span>
+        </div>
+      </div>
+      <div class="analysis-overview-kpis">
+        <article class="${annualNetGrowth >= 0 ? 'income' : 'expense'}">
+          <span>净资产增值</span>
+          <strong>${money(annualNetGrowth)}</strong>
+          <small>${percent(annualRate)}</small>
+        </article>
+        <article>
+          <span>总收入</span>
+          <strong class="income">${money(ledgerIncome + financeIncomeForPeriod)}</strong>
+          <small>劳动 + 理财</small>
+        </article>
+        <article>
+          <span>总支出</span>
+          <strong class="expense">${money(ledgerExpense + financeLossForPeriod)}</strong>
+          <small>消费 + 亏损</small>
+        </article>
+      </div>
+    </section>
+
+    <!-- 第二行：收入占比饼图 -->
+    <section class="analysis-row analysis-income-row card">
+      <div class="analysis-pie-section">
+        <h3>收入占比</h3>
+        <div class="analysis-pie-wrap">
+          <svg viewBox="0 0 160 160" class="analysis-pie-svg">
+            <circle cx="${pieCx}" cy="${pieCy}" r="${pieR}" fill="none" stroke="var(--panel-3)" stroke-width="24"/>
+            <circle cx="${pieCx}" cy="${pieCy}" r="${pieR}" fill="none"
+              stroke="#10b981" stroke-width="24"
+              stroke-dasharray="${incomeStroke} ${pieCircum - incomeStroke}"
+              stroke-dashoffset="0"
+              transform="rotate(-90 ${pieCx} ${pieCy})"
+              style="transition: stroke-dasharray .4s ease"/>
+            <circle cx="${pieCx}" cy="${pieCy}" r="${pieR}" fill="none"
+              stroke="#6366f1" stroke-width="24"
+              stroke-dasharray="${financeStroke} ${pieCircum - financeStroke}"
+              stroke-dashoffset="${-incomeStroke}"
+              transform="rotate(-90 ${pieCx} ${pieCy})"
+              style="transition: stroke-dasharray .4s ease"/>
+            <text x="${pieCx}" y="${pieCy - 6}" text-anchor="middle" class="pie-center-label">${money(totalIncomeForPie)}</text>
+            <text x="${pieCx}" y="${pieCy + 12}" text-anchor="middle" class="pie-center-sub">合计收入</text>
+          </svg>
+          <div class="analysis-pie-legend">
+            <div class="pie-legend-item">
+              <span class="pie-dot" style="background:#10b981"></span>
+              <span>劳动收入</span>
+              <strong>${pieIncomePct.toFixed(1)}%</strong>
+            </div>
+            <div class="pie-legend-item">
+              <span class="pie-dot" style="background:#6366f1"></span>
+              <span>理财收入</span>
+              <strong>${pieFinancePct.toFixed(1)}%</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="analysis-income-amounts">
+        <article>
+          <span class="analysis-amount-icon" style="--tone:#10b981"></span>
+          <div>
+            <span>劳动收入</span>
+            <strong>${money(laborIncome)}</strong>
+            <small>${incomeRecords.filter((r) => r.category === "劳动收入").length} 笔</small>
+          </div>
+        </article>
+        <article>
+          <span class="analysis-amount-icon" style="--tone:#6366f1"></span>
+          <div>
+            <span>理财收入</span>
+            <strong>${money(financeIncomeForPeriod)}</strong>
+            <small>浮动盈亏 ${totalPnl >= 0 ? "+" : ""}${money(totalPnl)}</small>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 第三行：消费占比 -->
+    <section class="analysis-row analysis-consumption-row card">
+      <h3>消费占比</h3>
+      <div class="analysis-consumption-grid">
+        <div class="analysis-consumption-col">
+          <div class="consumption-header" style="--tone:#f43f5e">
+            <span>消费支出</span>
+            <strong>${money(ledgerExpense)}</strong>
+          </div>
+          <div class="consumption-bar-track">
+            <i style="--width:${Math.max(ledgerExpense / consumptionTotal * 100, 3)}%;--tone:#f43f5e"></i>
+          </div>
+          <span class="consumption-pct">${(ledgerExpense / consumptionTotal * 100).toFixed(1)}%</span>
+          <small>${expenseRecords.length} 笔记录</small>
+        </div>
+        <div class="analysis-consumption-col">
+          <div class="consumption-header" style="--tone:${totalPnl >= 0 ? '#10b981' : '#f43f5e'}">
+            <span>理财盈亏</span>
+            <strong class="${totalPnl >= 0 ? 'income' : 'expense'}">${money(totalPnl)}</strong>
+          </div>
+          <div class="consumption-bar-track">
+            <i style="--width:${Math.max(Math.abs(totalPnl) / consumptionTotal * 100, 3)}%;--tone:${totalPnl >= 0 ? '#10b981' : '#f43f5e'}"></i>
+          </div>
+          <span class="consumption-pct">${(Math.abs(totalPnl) / consumptionTotal * 100).toFixed(1)}%</span>
+          <small>${totalPnl >= 0 ? "收益计入收入" : "亏损计入消费"}</small>
+        </div>
+        <div class="analysis-consumption-col">
+          <div class="consumption-header" style="--tone:#f59e0b">
+            <span>债务 · ${debtDisplayLabel}</span>
+            <strong>${money(debtDisplayValue)}</strong>
+          </div>
+          <label class="analysis-debt-toggle">
+            <input type="checkbox" data-action="analysis-debt-toggle" ${analysisShowTotalDebt ? "checked" : ""} />
+            <span class="toggle-switch"></span>
+            <span>显示整体负债</span>
+          </label>
+          ${analysisShowTotalDebt ? `
+          <div class="debt-detail-mini">
+            <div><span>应付本金</span><b>${money(payablePrincipalAll)}</b></div>
+            <div><span>总利息</span><b>${money(payableInterestTotal)}</b></div>
+            <div><span>应收本金</span><b>${money(receivablePrincipalAll)}</b></div>
+            <div><span>应收利息</span><b>${money(receivableInterestTotal)}</b></div>
+          </div>
+          ` : `
+          <div class="debt-detail-mini">
+            <div><span>应付利息</span><b>${money(periodInterest)}</b></div>
+            <div><span>应收利息</span><b>${money(periodReceivableInterest)}</b></div>
+            <div><span>应付笔数</span><b>${payable.length}</b></div>
+            <div><span>应收笔数</span><b>${receivable.length}</b></div>
+          </div>
+          `}
+        </div>
+      </div>
+    </section>
+
+    <!-- 第四行：月度收支趋势 -->
+    <section class="analysis-row analysis-trend-row card">
+      <div class="analysis-trend-head">
+        <h3>月度收支趋势</h3>
+        <div class="analysis-monthly-legend">
+          <span><i style="--tone:#10b981"></i>收入</span>
+          <span><i style="--tone:#f43f5e"></i>支出</span>
+        </div>
+      </div>
+      <div class="analysis-monthly-bars">
+        ${months.slice(0, now.getMonth() + 1).map((m) => `<div class="monthly-bar-group">
+          <i class="bar-income" style="--height:${Math.max(m.income / maxMonthVal * 100, 2)}%" title="收入 ${money(m.income)}"></i>
+          <i class="bar-expense" style="--height:${Math.max(m.expense / maxMonthVal * 100, 2)}%" title="支出 ${money(m.expense)}"></i>
+          <span>${m.shortLabel}</span>
+        </div>`).join("")}
+      </div>
+      <div class="analysis-monthly-table">
         ${recordsRows([
-          ["劳动收入", money(stats.laborIncome), percent(stats.laborIncome / incomeTotal)],
-          ["理财收入", money(stats.financeIncome), percent(stats.financeIncome / incomeTotal)],
-          ["消费", money(-stats.consumption), percent(stats.consumption / outflowTotal)],
-          ["应付/借入", money(-stats.payableDebt), percent(stats.payableDebt / outflowTotal)],
+          ...months.slice(0, now.getMonth() + 1).map((m) => [m.label, money(m.income), money(-m.expense), money(m.income - m.expense)]),
+          ["合计", money(ledgerIncome), money(-ledgerExpense), money(ledgerBalance)],
         ])}
-      </section>
-      <section class="card">
-        <div class="section-title"><h2>年度净增值计算</h2><span class="badge">三模块联动</span></div>
-        ${recordsRows([
-          ["收支分析累计结余", money(stats.ledgerBalance)],
-          ["加：场内穿透年度收益", money(stats.financeIncome)],
-          ["减：应付/借入总额", money(-stats.payableDebt)],
-          ["年度净资产增值", money(stats.annualNetGrowth), percent(annualRate)],
-        ])}
-      </section>
-    </div>
-    ${barCard("当前年度模块数据", [
-      ["累计结余", stats.ledgerBalance, Math.max(Math.abs(stats.annualNetGrowth), 1)],
-      ["理财收益", stats.financeIncome, Math.max(Math.abs(stats.annualNetGrowth), 1)],
-      ["应付/借入", -stats.payableDebt, Math.max(Math.abs(stats.annualNetGrowth), 1)],
-      ["净资产增值", stats.annualNetGrowth, Math.max(Math.abs(stats.annualNetGrowth), 1)],
-    ])}`;
+      </div>
+    </section>
+
+  </div>`;
 }
 
 function accounts() {
@@ -2454,8 +2767,8 @@ function portfolioLineChart(model) {
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="组合回测收益曲线">
       <defs>
         <linearGradient id="portfolioFill" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0" stop-color="#fb6b45" stop-opacity="0.34" />
-          <stop offset="1" stop-color="#fb6b45" stop-opacity="0" />
+          <stop offset="0" stop-color="#6366f1" stop-opacity="0.34" />
+          <stop offset="1" stop-color="#6366f1" stop-opacity="0" />
         </linearGradient>
       </defs>
       <line x1="${padding}" y1="40" x2="${width - padding}" y2="40" />
@@ -2932,6 +3245,32 @@ function bindViewActions() {
     filters.endDate = document.querySelector("#ledgerEndDate")?.value || filters.endDate;
     render();
   }));
+  document.querySelectorAll("[data-action='analysis-mode']").forEach((button) => button.addEventListener("click", () => {
+    analysisPeriodMode = button.dataset.mode;
+    const now = new Date();
+    if (analysisPeriodMode === "day") analysisPeriod = "day";
+    if (analysisPeriodMode === "month") analysisPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    if (analysisPeriodMode === "year") analysisPeriod = String(now.getFullYear());
+    if (analysisPeriodMode === "custom") {
+      analysisPeriod = "custom";
+    }
+    render();
+  }));
+  document.querySelectorAll("[data-action='analysis-period']").forEach((button) => button.addEventListener("click", () => {
+    analysisPeriod = button.dataset.period;
+    render();
+  }));
+  document.querySelectorAll("[data-action='analysis-debt-toggle']").forEach((input) => input.addEventListener("change", () => {
+    analysisShowTotalDebt = input.checked;
+    render();
+  }));
+  document.querySelectorAll("#analysisStartDate, #analysisEndDate").forEach((input) => input.addEventListener("change", () => {
+    analysisPeriodMode = "custom";
+    analysisPeriod = "custom";
+    filters.startDate = document.querySelector("#analysisStartDate")?.value || filters.startDate;
+    filters.endDate = document.querySelector("#analysisEndDate")?.value || filters.endDate;
+    render();
+  }));
   document.querySelectorAll("[data-action='auth-mode']").forEach((button) => button.addEventListener("click", () => {
     authMode = button.dataset.mode;
     if (authMode === "login") authLoginMethod = "account";
@@ -3368,7 +3707,7 @@ function openAssetClassDialog(item = null) {
   fields.expectedReturn.value = item?.expectedReturn ?? 0;
   fields.income.value = item?.income ?? 0;
   fields.expense.value = item?.expense ?? 0;
-  fields.color.value = item?.color || "#539f8d";
+  fields.color.value = item?.color || "#6366f1";
   form.querySelector("h2").textContent = item ? "编辑资产分类" : "新增资产分类";
   document.querySelector("#assetClassDialog").showModal();
 }
@@ -3396,7 +3735,7 @@ function handleAssetClassSubmit(event) {
     income: Number(data.income) || 0,
     expense: Number(data.expense) || 0,
     laborIncome: existing?.laborIncome || 0,
-    color: data.color || "#539f8d",
+    color: data.color || "#6366f1",
   };
   if (!payload.name) return;
   const duplicate = state.assetClasses.some((item) => item.id !== id && item.name === payload.name);

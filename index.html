@@ -2,42 +2,65 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>个人精细化资产管理平台</title>
-    <link rel="stylesheet" href="./styles.css?v=premium1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#6366f1" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="个人精细化资产管理平台 — 统一多账户、多币种、三维归因分析" />
+    <title>Wealth OS · 个人资产管理</title>
+    <link rel="stylesheet" href="./styles.css?v=wealth2" />
   </head>
   <body>
     <div id="app">
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
         <div class="brand">
-          <span class="brand-mark">资</span>
-          <div>
-            <strong>个人资产管理 V1.8</strong>
+          <span class="brand-mark">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
+            </svg>
+          </span>
+          <div class="brand-text">
+            <strong>Wealth OS</strong>
+            <small>v2.0</small>
           </div>
         </div>
         <nav id="moduleNav" class="module-nav"></nav>
+        <div class="sidebar-footer">
+          <div id="syncStatus" class="sync-status"></div>
+        </div>
       </aside>
+
+      <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
       <main class="shell">
         <header class="topbar">
-          <div>
-            <p class="eyebrow">全端统一数据 · 多账户 · 多币种 · 三维归因</p>
+          <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="打开菜单">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <div class="topbar-title">
+            <p class="eyebrow">Wealth OS · 多账户 · 多币种 · 三维归因</p>
             <h1 id="pageTitle">资产总览</h1>
           </div>
           <div class="top-actions">
-            <button id="themeToggle" class="icon-button" title="切换主题">◐</button>
-            <button id="screenToggle" class="icon-button" title="大屏模式">⛶</button>
+            <button id="themeToggle" class="icon-button" title="切换主题">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
+            <button id="screenToggle" class="icon-button" title="大屏模式">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            </button>
             <button id="userEntry" class="user-entry" title="个人中心"></button>
           </div>
         </header>
 
         <section class="filters" aria-label="全局四维筛选">
           <label>
-            账户
+            <span class="filter-label">账户</span>
             <select id="accountFilter"></select>
           </label>
           <label>
-            时间区间
+            <span class="filter-label">时间区间</span>
             <select id="periodPreset">
               <option value="today">本日</option>
               <option value="week">本周</option>
@@ -49,19 +72,19 @@
             </select>
           </label>
           <label>
-            开始日期
+            <span class="filter-label">开始日期</span>
             <input id="startDateFilter" type="date" />
           </label>
           <label>
-            结束日期
+            <span class="filter-label">结束日期</span>
             <input id="endDateFilter" type="date" />
           </label>
           <label>
-            资产大类
+            <span class="filter-label">资产大类</span>
             <select id="assetClassFilter"></select>
           </label>
           <label>
-            汇总币种
+            <span class="filter-label">汇总币种</span>
             <select id="currencyFilter"></select>
           </label>
         </section>
@@ -69,6 +92,29 @@
         <section id="view" class="view"></section>
       </main>
     </div>
+
+    <nav class="mobile-bottom-nav" id="mobileBottomNav">
+      <button data-module="overview" class="active">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>总览</span>
+      </button>
+      <button data-module="records">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span>收支</span>
+      </button>
+      <button data-module="finance">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>理财</span>
+      </button>
+      <button data-module="debts">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        <span>债务</span>
+      </button>
+      <button data-module="analysis">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>统计</span>
+      </button>
+    </nav>
 
     <dialog id="recordDialog">
       <form id="recordForm" method="dialog" class="modal-form">
@@ -248,7 +294,7 @@
           <input name="expense" type="number" step="0.01" value="0" />
         </label>
         <label>颜色
-          <input name="color" type="color" value="#539f8d" />
+          <input name="color" type="color" value="#6366f1" />
         </label>
         <menu>
           <button value="cancel" type="button" id="cancelAssetClass">取消</button>
@@ -377,6 +423,6 @@
     </dialog>
 
     <script src="./vendor/tesseract.min.js?v=5.1.1"></script>
-    <script src="./app.js?v=premium1"></script>
+    <script src="./app.js?v=wealth2"></script>
   </body>
 </html>
