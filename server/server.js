@@ -747,4 +747,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Asset Platform API listening on 0.0.0.0:${PORT}`);
+  void fetchPremiumMarket().catch((error) => {
+    console.warn("Premium market warmup failed:", error.message);
+  });
 });
