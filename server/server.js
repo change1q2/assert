@@ -59,6 +59,7 @@ let premiumMarketCache = {
   expiresAt: 0,
   payload: null,
 };
+let premiumMarketRefreshPromise = null;
 
 const json = (res, status, payload, origin = "") => {
   if (allowedOrigins.has(origin)) {
@@ -190,6 +191,19 @@ async function fetchPremiumMarket(force = false) {
     payload,
   };
   return payload;
+}
+
+function refreshPremiumMarketInBackground() {
+  if (premiumMarketRefreshPromise) return premiumMarketRefreshPromise;
+  premiumMarketRefreshPromise = fetchPremiumMarket(true)
+    .catch((error) => {
+      console.warn("Premium market refresh failed:", error.message);
+      return premiumMarketCache.payload;
+    })
+    .finally(() => {
+      premiumMarketRefreshPromise = null;
+    });
+  return premiumMarketRefreshPromise;
 }
 
 function serveStatic(url, res) {
@@ -583,7 +597,17 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/tools/premium") {
       const force = url.searchParams.get("refresh") === "1";
-      json(res, 200, await fetchPremiumMarket(force), origin);
+      if (premiumMarketCache.payload) {
+        const shouldRefresh = force || premiumMarketCache.expiresAt <= Date.now();
+        if (shouldRefresh) void refreshPremiumMarketInBackground();
+        json(res, 200, {
+          ...premiumMarketCache.payload,
+          cached: true,
+          refreshing: shouldRefresh,
+        }, origin);
+        return;
+      }
+      json(res, 200, await fetchPremiumMarket(), origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/auth/sms/send") {
@@ -747,7 +771,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Asset Platform API listening on 0.0.0.0:${PORT}`);
-  void fetchPremiumMarket().catch((error) => {
-    console.warn("Premium market warmup failed:", error.message);
-  });
+  void refreshPremiumMarketInBackground();
 });
