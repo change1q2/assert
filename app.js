@@ -115,6 +115,15 @@ let financeAnalysisPeriod = "day";
 let financeCalendarMode = "day";
 let financeCalendarValue = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
 let financeCalendarMetric = "amount";
+let premiumRows = [];
+let premiumLoading = false;
+let premiumError = "";
+let premiumLoadedAt = 0;
+let premiumFetchedAt = "";
+let premiumSource = "";
+let premiumFilter = "all";
+let premiumQuery = "";
+let premiumRefreshTimer = null;
 let filters = {
   account: "all",
   periodPreset: "year",
@@ -730,19 +739,25 @@ function render() {
     bindViewActions();
     return;
   }
-  document.querySelector(".filters").classList.toggle("is-hidden", ["overview", "profile", "records", "finance", "financeAnalysis", "debts", "tools"].includes(currentModule));
+  document.querySelector(".filters").classList.toggle("is-hidden", ["overview", "profile", "records", "finance", "financeAnalysis", "debts", "tools", "premiumTool"].includes(currentModule));
   const moduleName = currentModule === "profile"
     ? "个人中心"
     : currentModule === "financeAnalysis"
       ? "汇总盈亏分析"
+      : currentModule === "premiumTool"
+        ? "溢价查询"
       : modules.find(([id]) => id === currentModule)?.[1] || "资产总览";
   document.querySelector("#pageTitle").textContent = moduleName;
   const view = document.querySelector("#view");
   syncAssetClassValuesFromFinance();
   const data = compute();
-  const renderers = { overview, records, finance, financeAnalysis, debts, analysis, accounts, classes: assetClasses, tools, strategies, profile };
+  const renderers = { overview, records, finance, financeAnalysis, debts, analysis, accounts, classes: assetClasses, tools, premiumTool, strategies, profile };
   view.innerHTML = renderers[currentModule](data);
   bindViewActions();
+  syncPremiumAutoRefresh();
+  if (currentModule === "premiumTool" && !premiumLoading && !premiumLoadedAt) {
+    void loadPremiumMarket();
+  }
 }
 
 function metric(label, value, hint = "") {
@@ -2208,7 +2223,167 @@ function assetClasses() {
 }
 
 function tools() {
-  return `<section class="empty-module" aria-label="辅助工具暂无内容"></section>`;
+  return `<section class="tool-hub">
+    <div class="tool-hub-intro">
+      <div>
+        <p class="eyebrow">行情与分析工具</p>
+        <h2>辅助工具</h2>
+        <p class="muted">把常用的投资研究能力集中在这里，减少在多个网站之间切换。</p>
+      </div>
+    </div>
+    <div class="tool-grid">
+      <button class="tool-entry" data-action="open-premium-tool">
+        <span class="tool-entry-icon" aria-hidden="true">％</span>
+        <span class="tool-entry-copy">
+          <strong>溢价查询</strong>
+          <small>实时筛选 ETF、LOF、QDII 溢价标的</small>
+        </span>
+        <span class="tool-entry-arrow" aria-hidden="true">›</span>
+      </button>
+    </div>
+  </section>`;
+}
+
+function premiumTool() {
+  const query = premiumQuery.trim().toLowerCase();
+  const rows = premiumRows.filter((row) => {
+    const matchesFilter = premiumFilter === "all" || row.status === premiumFilter;
+    const matchesQuery = !query || `${row.code} ${row.name} ${row.category}`.toLowerCase().includes(query);
+    return matchesFilter && matchesQuery;
+  });
+  const premiumTargets = premiumRows.filter((row) => row.status === "premium");
+  const highest = premiumTargets[0] || premiumRows[0];
+  const fetchedTime = premiumFetchedAt
+    ? new Date(premiumFetchedAt).toLocaleString("zh-CN", { hour12: false })
+    : "尚未获取";
+  return `<section class="premium-page">
+    <div class="premium-toolbar">
+      <div class="premium-title">
+        <button class="icon-button premium-back" data-action="back-tools" title="返回辅助工具" aria-label="返回辅助工具">‹</button>
+        <div>
+          <p class="eyebrow">辅助工具 / 行情</p>
+          <h2>溢价查询</h2>
+        </div>
+      </div>
+      <div class="premium-refresh-group">
+        <span class="premium-live"><i></i>每 30 秒自动刷新</span>
+        <button class="primary premium-refresh" data-action="refresh-premium" ${premiumLoading ? "disabled" : ""}>
+          ${premiumLoading ? "正在刷新..." : "刷新行情"}
+        </button>
+      </div>
+    </div>
+
+    <div class="premium-summary">
+      <article><span>覆盖标的</span><strong>${premiumRows.length}</strong><small>ETF / LOF / QDII</small></article>
+      <article><span>溢价标的</span><strong>${premiumTargets.length}</strong><small>溢价率高于 0.50%</small></article>
+      <article><span>最高参考溢价</span><strong class="${highest?.premiumRate >= 0 ? "positive" : "negative"}">${highest ? formatPremiumRate(highest.premiumRate) : "--"}</strong><small>${highest ? `${escapeHtml(highest.code)} ${escapeHtml(highest.name)}` : "等待行情"}</small></article>
+      <article><span>行情时间</span><strong class="premium-time">${fetchedTime}</strong><small>${escapeHtml(premiumSource || "公开基金行情聚合")}</small></article>
+    </div>
+
+    <div class="premium-controls">
+      <div class="premium-segments" aria-label="溢价状态筛选">
+        ${[
+          ["all", "全部"],
+          ["premium", "溢价"],
+          ["flat", "平价"],
+          ["discount", "折价"],
+        ].map(([value, label]) => `<button data-action="premium-filter" data-value="${value}" class="${premiumFilter === value ? "active" : ""}">${label}</button>`).join("")}
+      </div>
+      <form id="premiumSearchForm" class="premium-search">
+        <input name="query" value="${escapeAttr(premiumQuery)}" placeholder="搜索代码、名称或类型" aria-label="搜索溢价标的" />
+        <button type="submit">查询</button>
+      </form>
+    </div>
+
+    ${premiumError ? `<div class="premium-alert" role="alert">${escapeHtml(premiumError)}</div>` : ""}
+    <div class="premium-table-wrap">
+      <table class="premium-table">
+        <thead>
+          <tr>
+            <th>标的</th>
+            <th>类型</th>
+            <th>市场价格</th>
+            <th>涨跌幅</th>
+            <th>参考净值</th>
+            <th>参考溢价率</th>
+            <th>估值依据</th>
+            <th>申赎状态</th>
+            <th>更新时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${premiumLoading && !premiumRows.length
+            ? `<tr><td colspan="9" class="premium-empty">正在获取实时行情...</td></tr>`
+            : rows.map(premiumRow).join("") || `<tr><td colspan="9" class="premium-empty">当前条件下暂无标的</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    <p class="premium-disclaimer">参考溢价率根据公开行情中的实时价格、IOPV、估算净值或最新净值计算，仅用于数据观察，不构成投资建议。跨境品种可能受时差、汇率及净值披露延迟影响。</p>
+  </section>`;
+}
+
+function premiumRow(row) {
+  const tone = row.status === "premium" ? "positive" : row.status === "discount" ? "negative" : "";
+  return `<tr>
+    <td><div class="premium-symbol"><strong>${escapeHtml(row.name)}</strong><span>${escapeHtml(row.code)} · ${escapeHtml(row.market)}</span></div></td>
+    <td><span class="premium-type">${escapeHtml(row.category)}</span></td>
+    <td>${Number(row.price).toFixed(3)}</td>
+    <td class="${Number(row.changeRate) >= 0 ? "positive" : "negative"}">${formatPremiumRate(row.changeRate)}</td>
+    <td>${row.referenceNav === null ? "--" : Number(row.referenceNav).toFixed(4)}</td>
+    <td><strong class="premium-rate ${tone}">${formatPremiumRate(row.premiumRate)}</strong></td>
+    <td>${escapeHtml(row.premiumBasis)}</td>
+    <td><div class="premium-status"><span>${escapeHtml(row.applyStatus)}</span><small>${escapeHtml(row.redeemStatus)}</small></div></td>
+    <td><div class="premium-status"><span>${escapeHtml(row.quoteTime)}</span><small>净值 ${escapeHtml(row.navDate)}</small></div></td>
+  </tr>`;
+}
+
+function formatPremiumRate(value) {
+  const number = Number(value) || 0;
+  return `${number > 0 ? "+" : ""}${number.toFixed(2)}%`;
+}
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+async function loadPremiumMarket(force = false) {
+  if (premiumLoading) return;
+  premiumLoading = true;
+  premiumError = "";
+  if (currentModule === "premiumTool") render();
+  try {
+    const payload = await apiRequest(`/tools/premium${force ? "?refresh=1" : ""}`);
+    premiumRows = Array.isArray(payload.rows) ? payload.rows : [];
+    premiumFetchedAt = payload.fetchedAt || new Date().toISOString();
+    premiumSource = payload.source || "公开基金行情聚合";
+    premiumLoadedAt = Date.now();
+    if (payload.stale) premiumError = "行情源暂时不可用，当前显示最近一次缓存数据。";
+    if (payload.failedSources) premiumError = `部分行情源暂时不可用，已展示其余 ${payload.sourceCount || 0} 个来源的数据。`;
+  } catch (error) {
+    premiumError = error.message || "行情获取失败，请稍后重试。";
+  } finally {
+    premiumLoading = false;
+    if (currentModule === "premiumTool") render();
+  }
+}
+
+function syncPremiumAutoRefresh() {
+  if (currentModule !== "premiumTool") {
+    if (premiumRefreshTimer) window.clearInterval(premiumRefreshTimer);
+    premiumRefreshTimer = null;
+    return;
+  }
+  if (premiumRefreshTimer) return;
+  premiumRefreshTimer = window.setInterval(() => {
+    if (currentModule === "premiumTool" && document.visibilityState === "visible" && !premiumLoading) {
+      void loadPremiumMarket(true);
+    }
+  }, 30_000);
 }
 
 function portfolioBacktestPage(model) {
@@ -2644,6 +2819,28 @@ function typeLabel(type) {
 function bindViewActions() {
   document.querySelectorAll(".trend-chart-scroll").forEach(bindHorizontalDrag);
   document.querySelectorAll(".trend-yoy-row").forEach(bindTrendYoyResize);
+  document.querySelectorAll("[data-action='open-premium-tool']").forEach((button) => button.addEventListener("click", () => {
+    currentModule = "premiumTool";
+    document.querySelector(".shell").scrollTop = 0;
+    render();
+  }));
+  document.querySelectorAll("[data-action='back-tools']").forEach((button) => button.addEventListener("click", () => {
+    currentModule = "tools";
+    document.querySelector(".shell").scrollTop = 0;
+    render();
+  }));
+  document.querySelectorAll("[data-action='refresh-premium']").forEach((button) => button.addEventListener("click", () => {
+    void loadPremiumMarket(true);
+  }));
+  document.querySelectorAll("[data-action='premium-filter']").forEach((button) => button.addEventListener("click", () => {
+    premiumFilter = button.dataset.value;
+    render();
+  }));
+  document.querySelector("#premiumSearchForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    premiumQuery = String(new FormData(event.currentTarget).get("query") || "").trim();
+    render();
+  });
   document.querySelectorAll("[data-action='open-finance-analysis']").forEach((button) => button.addEventListener("click", () => {
     currentModule = "financeAnalysis";
     financeAnalysisScope = "all";

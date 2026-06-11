@@ -35,6 +35,30 @@ const mimeTypes = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
 };
+const premiumMarketSources = [
+  {
+    key: "qdii",
+    label: "QDII",
+    url: "https://www.jisilu.cn/data/qdii/qdii_list/?___jsl=LST___t=1",
+    referer: "https://www.jisilu.cn/data/qdii/",
+  },
+  {
+    key: "etf",
+    label: "ETF",
+    url: "https://www.jisilu.cn/data/etf/etf_list/?___jsl=LST___t=1",
+    referer: "https://www.jisilu.cn/data/etf/",
+  },
+  {
+    key: "lof",
+    label: "LOF",
+    url: "https://www.jisilu.cn/data/lof/stock_lof_list/?___jsl=LST___t=1",
+    referer: "https://www.jisilu.cn/data/lof/",
+  },
+];
+let premiumMarketCache = {
+  expiresAt: 0,
+  payload: null,
+};
 
 const json = (res, status, payload, origin = "") => {
   if (allowedOrigins.has(origin)) {
@@ -60,6 +84,113 @@ const readBody = (req) => new Promise((resolve, reject) => {
   });
   req.on("error", reject);
 });
+
+function marketNumber(value) {
+  const normalized = String(value ?? "").replace("%", "").replace(",", "").trim();
+  if (!normalized || normalized === "-") return null;
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : null;
+}
+
+function premiumReference(cell) {
+  const directPremium = marketNumber(cell.iopv_discount_rt ?? cell.discount_rt);
+  const price = marketNumber(cell.price);
+  const iopv = marketNumber(cell.iopv);
+  const estimate = marketNumber(cell.estimate_value);
+  const nav = marketNumber(cell.fund_nav);
+  if (directPremium !== null) {
+    const reference = price && directPremium > -99 ? price / (1 + directPremium / 100) : iopv || estimate || nav;
+    return { reference, premiumRate: directPremium, basis: iopv ? "IOPV" : "实时估值" };
+  }
+  if (price === null) return { reference: null, premiumRate: null, basis: "暂无参考" };
+  if (iopv !== null) {
+    return { reference: iopv, premiumRate: (price / iopv - 1) * 100, basis: "IOPV" };
+  }
+  if (estimate !== null) {
+    return { reference: estimate, premiumRate: (price / estimate - 1) * 100, basis: "实时估值" };
+  }
+  if (nav !== null) {
+    const referenceChange = marketNumber(
+      cell.est_val_increase_rt
+      ?? cell.ref_increase_rt
+      ?? cell.index_increase_rt
+      ?? cell.stock_increase_rt,
+    );
+    const adjustedNav = referenceChange === null ? nav : nav * (1 + referenceChange / 100);
+    return {
+      reference: adjustedNav,
+      premiumRate: (price / adjustedNav - 1) * 100,
+      basis: referenceChange === null ? "最新净值" : "指数估算",
+    };
+  }
+  return { reference: null, premiumRate: null, basis: "暂无参考" };
+}
+
+function normalizePremiumRow(cell, source) {
+  const price = marketNumber(cell.price);
+  const reference = premiumReference(cell);
+  if (!cell.fund_id || !cell.fund_nm || price === null || reference.premiumRate === null) return null;
+  const premiumRate = Number(reference.premiumRate.toFixed(4));
+  return {
+    code: String(cell.fund_id),
+    name: String(cell.fund_nm),
+    category: source.label,
+    market: String(cell.fund_id).startsWith("5") ? "上交所" : "深交所",
+    price,
+    changeRate: marketNumber(cell.increase_rt) ?? 0,
+    referenceNav: reference.reference === null ? null : Number(reference.reference.toFixed(4)),
+    premiumRate,
+    premiumBasis: reference.basis,
+    navDate: String(cell.nav_dt || cell.iopv_dt || cell.est_val_dt || "-"),
+    quoteTime: String(cell.last_time || cell.last_est_time || "-"),
+    applyStatus: String(cell.apply_status || "-"),
+    redeemStatus: String(cell.redeem_status || "-"),
+    status: premiumRate > 0.5 ? "premium" : premiumRate < -0.5 ? "discount" : "flat",
+  };
+}
+
+async function fetchPremiumMarket(force = false) {
+  const now = Date.now();
+  if (!force && premiumMarketCache.payload && premiumMarketCache.expiresAt > now) {
+    return { ...premiumMarketCache.payload, cached: true };
+  }
+  const results = await Promise.allSettled(premiumMarketSources.map(async (source) => {
+    const response = await fetch(source.url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; PersonalAssetPlatform/1.8)",
+        "X-Requested-With": "XMLHttpRequest",
+        Referer: source.referer,
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!response.ok) throw new Error(`${source.label} 行情源返回 ${response.status}`);
+    const payload = await response.json();
+    return (payload.rows || [])
+      .map((row) => normalizePremiumRow(row.cell || {}, source))
+      .filter(Boolean);
+  }));
+  const successfulRows = results
+    .filter((result) => result.status === "fulfilled")
+    .flatMap((result) => result.value);
+  if (!successfulRows.length) {
+    if (premiumMarketCache.payload) return { ...premiumMarketCache.payload, cached: true, stale: true };
+    throw new Error("暂时无法连接行情源");
+  }
+  const uniqueRows = [...new Map(successfulRows.map((row) => [row.code, row])).values()]
+    .sort((a, b) => b.premiumRate - a.premiumRate);
+  const payload = {
+    rows: uniqueRows,
+    fetchedAt: new Date().toISOString(),
+    source: "公开基金行情聚合",
+    sourceCount: results.filter((result) => result.status === "fulfilled").length,
+    failedSources: results.filter((result) => result.status === "rejected").length,
+  };
+  premiumMarketCache = {
+    expiresAt: now + 15_000,
+    payload,
+  };
+  return payload;
+}
 
 function serveStatic(url, res) {
   const requestPath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
@@ -448,6 +579,11 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && url.pathname === "/api/health") {
       json(res, 200, { ok: true, database: "sqlite" }, origin);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/tools/premium") {
+      const force = url.searchParams.get("refresh") === "1";
+      json(res, 200, await fetchPremiumMarket(force), origin);
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/auth/sms/send") {
