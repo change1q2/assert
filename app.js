@@ -787,7 +787,7 @@ function render() {
     bindViewActions();
     return;
   }
-  document.querySelector(".filters").classList.toggle("is-hidden", ["overview", "profile", "records", "finance", "financeAnalysis", "debts", "tools", "premiumTool", "analysis"].includes(currentModule));
+  document.querySelector(".filters").classList.toggle("is-hidden", ["overview", "profile", "records", "finance", "financeAnalysis", "debts", "tools", "premiumTool", "analysis", "classes"].includes(currentModule));
   const moduleName = currentModule === "profile"
     ? "个人中心"
     : currentModule === "financeAnalysis"
@@ -2417,10 +2417,23 @@ function analysis(data) {
       </div>
     </section>
 
-    <!-- 第一行：概览 -->
-    <!-- 第二行：收支分析 -->
+    <!-- 收支分析 -->
     <section class="analysis-row analysis-dual-pie-row card">
       <h3 class="analysis-dual-pie-title">收支分析</h3>
+      <div class="analysis-kpi-bar">
+        <div class="analysis-kpi-item" style="--accent:#10b981">
+          <span>总收入</span>
+          <strong class="income">${money(ledgerIncome)}</strong>
+        </div>
+        <div class="analysis-kpi-item" style="--accent:#f43f5e">
+          <span>总消费</span>
+          <strong class="expense">${money(ledgerExpense)}</strong>
+        </div>
+        <div class="analysis-kpi-item" style="--accent:${ledgerBalance >= 0 ? '#10b981' : '#f43f5e'}">
+          <span>结余</span>
+          <strong class="${ledgerBalance >= 0 ? 'income' : 'expense'}">${money(ledgerBalance)}</strong>
+        </div>
+      </div>
       <div class="analysis-dual-pie-grid">
         <div class="analysis-pie-card">
           <h4>收入构成</h4>
@@ -2475,25 +2488,32 @@ function analysis(data) {
       </div>
     </section>
 
-    <!-- 第三行：理财分析 -->
+    <!-- 理财分析 -->
     <section class="analysis-row analysis-finance-row card">
       <h3>理财分析</h3>
       <div class="analysis-finance-grid">
         <div class="analysis-finance-col">
           <div class="consumption-header" style="--tone:#6366f1">
-            <span>理财收入</span>
+            <span>总盈亏</span>
             <strong class="${totalPnl >= 0 ? 'income' : 'expense'}">${money(totalPnl)}</strong>
           </div>
           <div class="consumption-bar-track">
-            <i style="--width:${Math.min(Math.abs(totalPnl) / Math.max(totalValue, 1) * 100, 100)}%;--tone:${totalPnl >= 0 ? '#10b981' : '#f43f5e'}"></i>
+            <i style="--width:${Math.min(Math.abs(totalPnl) / Math.max(totalCost, 1) * 100, 100)}%;--tone:${totalPnl >= 0 ? '#10b981' : '#f43f5e'}"></i>
           </div>
           <div class="debt-detail-mini">
-            <div><span>浮动盈亏</span><b class="${totalPnl >= 0 ? 'income' : 'expense'}">${totalPnl >= 0 ? '+' : ''}${money(totalPnl)}</b></div>
             <div><span>持仓市值</span><b>${money(totalValue)}</b></div>
             <div><span>持仓成本</span><b>${money(totalCost)}</b></div>
-            <div><span>资产数量</span><b>${assets.length}</b></div>
+            <div><span>资产总数</span><b>${assets.length}</b></div>
+            <div><span>收益率</span><b class="${totalPnl >= 0 ? 'income' : 'expense'}">${totalCost > 0 ? (totalPnl / totalCost * 100).toFixed(2) + '%' : '--'}</b></div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- 债务分析 -->
+    <section class="analysis-row analysis-debt-row card">
+      <h3>债务分析</h3>
+      <div class="analysis-finance-grid">
         <div class="analysis-finance-col">
           <div class="consumption-header" style="--tone:#f59e0b">
             <span>债务总额</span>
@@ -2505,8 +2525,8 @@ function analysis(data) {
           <div class="debt-detail-mini">
             <div><span>应付总额</span><b>${money(payableTotalAll)}</b></div>
             <div><span>应收总额</span><b>${money(receivableTotalAll)}</b></div>
-            <div><span>应付笔数</span><b>${payable.length}</b></div>
-            <div><span>应收笔数</span><b>${receivable.length}</b></div>
+            <div><span>净债务</span><b class="${payableTotalAll - receivableTotalAll > 0 ? 'expense' : 'income'}">${money(payableTotalAll - receivableTotalAll)}</b></div>
+            <div><span>总笔数</span><b>${payable.length + receivable.length}</b></div>
           </div>
         </div>
         <div class="analysis-finance-col">
@@ -2596,16 +2616,327 @@ function accounts() {
 }
 
 function assetClasses() {
-  const totalValue = state.assetClasses.reduce((sum, item) => sum + Math.max(Number(item.value) || 0, 0), 0);
-  return `<section>
-    <div class="section-title">
-      <h2>资产大类分类管理</h2>
-      <div class="section-actions">
-        <span class="badge">拖拽卡片或使用前移 / 后移调整顺序</span>
-        <button class="primary" data-action="new-asset-class">新增分类</button>
+  const now = new Date();
+  const year = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const visibleClasses = state.assetClasses.filter((c) => c.visible !== false);
+  const totalValue = visibleClasses.reduce((sum, item) => sum + Math.max(Number(item.value) || 0, 0), 0);
+
+  /* ---- 期间筛选 ---- */
+  let pStart, pEnd, pLabel;
+  if (analysisPeriodMode === "day") {
+    pStart = new Date(year, currentMonth, now.getDate());
+    pEnd = new Date(year, currentMonth, now.getDate(), 23, 59, 59);
+    pLabel = `${currentMonth + 1}月${now.getDate()}日`;
+  } else if (analysisPeriodMode === "month") {
+    const pm = parseInt((analysisPeriod || "").split("-")[1], 10) - 1;
+    pStart = new Date(year, isNaN(pm) ? currentMonth : pm, 1);
+    pEnd = new Date(year, (isNaN(pm) ? currentMonth : pm) + 1, 0, 23, 59, 59);
+    pLabel = `${(isNaN(pm) ? currentMonth : pm) + 1}月`;
+  } else if (analysisPeriodMode === "year") {
+    pStart = new Date(year, 0, 1);
+    pEnd = new Date(year, 11, 31, 23, 59, 59);
+    pLabel = `${year}年`;
+  } else {
+    pStart = new Date(year, 0, 1);
+    pEnd = now;
+    pLabel = "自定义";
+  }
+
+  /* ---- 饼图：各类别占比 ---- */
+  const pR = 68, pCx = 80, pCy = 80;
+  const pCirc = 2 * Math.PI * pR;
+  const pieSegs = totalValue > 0
+    ? visibleClasses.filter((c) => (Number(c.value) || 0) > 0).map((c) => ({
+        pct: (Number(c.value) || 0) / totalValue * 100,
+        color: c.color || "#6366f1",
+        label: c.name,
+        val: Number(c.value) || 0,
+      }))
+    : [];
+  let pieOffset = 0;
+  const pieCircles = pieSegs.map((seg) => {
+    const s = (seg.pct / 100) * pCirc;
+    const c = `<circle cx="${pCx}" cy="${pCy}" r="${pR}" fill="none"
+      stroke="${seg.color}" stroke-width="24"
+      stroke-dasharray="${s.toFixed(2)} ${(pCirc - s).toFixed(2)}"
+      stroke-dashoffset="${(-pieOffset).toFixed(2)}"
+      transform="rotate(-90 ${pCx} ${pCy})"/>`;
+    pieOffset += s;
+    return c;
+  }).join("\n");
+
+  /* ---- 趋势图：根据筛选模式计算时间序列 ---- */
+  const svgH = 240, padT = 24, padB = 30, padL = 50, padR = 16;
+  let trendLabels = [], trendSeries = [];
+
+  if (analysisPeriodMode === "day") {
+    // 日模式：当月每天
+    const daysInMonth = new Date(year, currentMonth + 1, 0).getDate();
+    trendLabels = Array.from({ length: daysInMonth }, (_, i) => `${i + 1}`);
+    const xStepBase = 22;
+    var svgW = padL + padR + Math.max(daysInMonth - 1, 1) * xStepBase;
+    trendSeries = visibleClasses.map((c) => {
+      const openV = Number(c.openingValue) || 0;
+      const curV = Number(c.value) || 0;
+      const vals = Array.from({ length: daysInMonth }, (_, i) => {
+        const progress = (i + 1) / daysInMonth;
+        return openV + (curV - openV) * progress;
+      });
+      return { name: c.name, color: c.color || "#6366f1", vals };
+    });
+  } else if (analysisPeriodMode === "month") {
+    // 月模式：当年每月
+    trendLabels = Array.from({ length: 12 }, (_, i) => `${i + 1}月`);
+    const xStepBase = 52;
+    var svgW = padL + padR + 11 * xStepBase;
+    trendSeries = visibleClasses.map((c) => {
+      const openV = Number(c.openingValue) || 0;
+      const curV = Number(c.value) || 0;
+      const vals = Array.from({ length: 12 }, (_, i) => {
+        const progress = (i + 1) / 12;
+        return openV + (curV - openV) * progress;
+      });
+      return { name: c.name, color: c.color || "#6366f1", vals };
+    });
+  } else {
+    // 年模式：多年数据
+    const startYear = 2020;
+    const years = Array.from({ length: year - startYear + 1 }, (_, i) => startYear + i);
+    trendLabels = years.map((y) => `${y}`);
+    const xStepBase = 80;
+    var svgW = padL + padR + Math.max(years.length - 1, 1) * xStepBase;
+    trendSeries = visibleClasses.map((c) => {
+      const openV = Number(c.openingValue) || 0;
+      const curV = Number(c.value) || 0;
+      const growthPerYear = (curV - openV) / Math.max(years.length, 1);
+      const vals = years.map((_, i) => openV + growthPerYear * (i + 1));
+      return { name: c.name, color: c.color || "#6366f1", vals };
+    });
+  }
+
+  const nPts = trendLabels.length;
+  const plotW = svgW - padL - padR;
+  const plotH = svgH - padT - padB;
+  const xStep = nPts > 1 ? plotW / (nPts - 1) : 0;
+
+  // Y 轴范围（支持负数）
+  const allVals = trendSeries.flatMap((s) => s.vals);
+  const minV = allVals.length ? Math.min(...allVals, 0) : 0;
+  const maxV = allVals.length ? Math.max(...allVals, 1) : 1;
+  const range = maxV - minV || 1;
+  const zeroY = padT + plotH * (maxV / range);
+  const yOf = (v) => padT + plotH - ((v - minV) / range) * plotH;
+  const toPoly = (vals) => vals.map((v, i) => `${(padL + i * xStep).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
+
+  // Y 轴刻度
+  const yTicks = 4;
+  const yTickHtml = Array.from({ length: yTicks + 1 }, (_, i) => {
+    const v = minV + (range / yTicks) * i;
+    const y = yOf(v);
+    const label = Math.abs(v) >= 10000 ? (v / 10000).toFixed(1) + "万" : v.toFixed(0);
+    return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${svgW - padR}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="0.5" stroke-dasharray="4,4"/>
+      <text x="${padL - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end" fill="var(--muted)" font-size="9">${label}</text>`;
+  }).join("\n");
+
+  // 零线（当有负数时显示）
+  const zeroLineHtml = minV < 0
+    ? `<line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${svgW - padR}" y2="${zeroY.toFixed(1)}" stroke="var(--ink)" stroke-width="1" stroke-opacity="0.3"/>`
+    : "";
+
+  // 每条线
+  const linesHtml = trendSeries.map((s) => {
+    const pts = toPoly(s.vals);
+    const dots = s.vals.map((v, i) =>
+      `<circle cx="${(padL + i * xStep).toFixed(1)}" cy="${yOf(v).toFixed(1)}" r="3" fill="${s.color}" stroke="var(--panel)" stroke-width="1.5"><title>${s.name} ${trendLabels[i]}: ${money(v)}</title></circle>`
+    ).join("");
+    return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+  }).join("\n");
+
+  /* ---- 柱状图数据 ---- */
+  const barH = 220, barPadT = 20, barPadB = 30, barPadL = 50, barPadR = 16;
+  const barPlotH = barH - barPadT - barPadB;
+  const barPlotW = svgW - barPadL - barPadR;
+  const barGroupW = visibleClasses.length > 0 ? barPlotW / visibleClasses.length : barPlotW;
+  const barMaxV = Math.max(...visibleClasses.map((c) => Math.max(Number(c.value) || 0, Number(c.openingValue) || 0)), 1);
+  const barTicks = 4;
+  const barYTickHtml = Array.from({ length: barTicks + 1 }, (_, i) => {
+    const v = (barMaxV / barTicks) * i;
+    const y = barPadT + barPlotH - (v / barMaxV) * barPlotH;
+    return `<line x1="${barPadL}" y1="${y.toFixed(1)}" x2="${svgW - barPadR}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="0.5" stroke-dasharray="4,4"/>
+      <text x="${barPadL - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end" fill="var(--muted)" font-size="9">${v >= 10000 ? (v / 10000).toFixed(1) + "万" : v.toFixed(0)}</text>`;
+  }).join("\n");
+
+  /* ---- 筛选栏 HTML ---- */
+  let periodOptionHtml = "";
+  if (analysisPeriodMode === "day") {
+    periodOptionHtml = `<span class="badge">${year}年${currentMonth + 1}月${now.getDate()}日</span>`;
+  } else if (analysisPeriodMode === "month") {
+    const options = Array.from({ length: currentMonth + 1 }, (_, i) => {
+      const tm = currentMonth - i;
+      const v = `${year}-${String(tm + 1).padStart(2, "0")}`;
+      const l = i === 0 ? "本月" : i === 1 ? "上月" : `${tm + 1}月`;
+      return [v, l];
+    });
+    periodOptionHtml = `<div class="ledger-period-options">
+      <span class="ledger-period-year">${year}年</span>
+      ${options.map(([v, l]) => `<button data-action="analysis-period" data-period="${v}" class="${analysisPeriod === v ? 'active' : ''}">${l}</button>`).join("")}
+    </div>`;
+  } else if (analysisPeriodMode === "year") {
+    const options = [];
+    for (let y = year; y >= Math.min(year, 2020); y--) {
+      options.push([String(y), y === year ? "今年" : y === year - 1 ? "去年" : `${y}年`]);
+    }
+    periodOptionHtml = `<div class="ledger-period-options">
+      ${options.map(([v, l]) => `<button data-action="analysis-period" data-period="${v}" class="${analysisPeriod === v ? 'active' : ''}">${l}</button>`).join("")}
+    </div>`;
+  } else {
+    periodOptionHtml = `<div class="ledger-period-options"><span class="ledger-period-year">自定义日期范围</span></div>`;
+  }
+
+  return `<div class="analysis-page">
+    <!-- 筛选栏 -->
+    <section class="analysis-filter-bar">
+      <div class="ledger-periods ledger-mode-tabs">
+        ${[
+          ["day", "日常"],
+          ["month", "月统计"],
+          ["year", "年统计"],
+          ["custom", "自定义"],
+        ].map(([id, label]) => `<button data-action="analysis-mode" data-mode="${id}" class="${analysisPeriodMode === id ? "active" : ""}">${label}</button>`).join("")}
       </div>
+      ${periodOptionHtml}
+      <div class="analysis-custom-range ${analysisPeriodMode === 'custom' ? 'active' : ''}">
+        <input id="analysisStartDate" type="date" value="${filters.startDate}" />
+        <input id="analysisEndDate" type="date" value="${filters.endDate}" />
+      </div>
+    </section>
+
+    <!-- 资产分类饼图 + 右侧统计卡片 -->
+    <section class="analysis-row card">
+      <div class="section-title" style="margin-bottom:16px">
+        <h3 style="margin:0">资产分类占比</h3>
+        <span class="badge">总价值 ${money(totalValue)}</span>
+      </div>
+      <div class="analysis-dual-pie-grid" style="grid-template-columns:220px 1fr;gap:24px">
+        <div class="analysis-pie-wrap" style="justify-content:center">
+          <svg viewBox="0 0 160 160" class="analysis-pie-svg">
+            <circle cx="${pCx}" cy="${pCy}" r="${pR}" fill="none" stroke="var(--panel-3)" stroke-width="24"/>
+            ${pieCircles}
+            <text x="${pCx}" y="${pCy - 4}" text-anchor="middle" class="pie-center-label" font-size="11">${pieSegs.length > 0 ? '资产' : '暂无'}</text>
+            <text x="${pCx}" y="${pCy + 10}" text-anchor="middle" class="pie-center-sub">占比</text>
+          </svg>
+        </div>
+        <div class="class-pie-stats">
+          ${pieSegs.map((seg) => {
+            const cls = visibleClasses.find((c) => c.name === seg.label);
+            const profit = cls ? (Number(cls.value) || 0) - (Number(cls.openingValue) || 0) : 0;
+            const profitRate = cls && Number(cls.openingValue) ? profit / Number(cls.openingValue) : 0;
+            return `<div class="class-pie-stat-item">
+              <div class="class-pie-stat-head">
+                <span class="pie-dot" style="background:${seg.color}"></span>
+                <span class="class-pie-stat-name">${seg.label}</span>
+                <span class="class-pie-stat-pct">${seg.pct.toFixed(1)}%</span>
+              </div>
+              <div class="class-pie-stat-body">
+                <div><span>市值</span><b>${money(seg.val)}</b></div>
+                <div><span>盈亏</span><b class="${profit >= 0 ? 'income' : 'expense'}">${profit >= 0 ? '+' : ''}${money(profit)}</b></div>
+                <div><span>收益率</span><b class="${profitRate >= 0 ? 'income' : 'expense'}">${(profitRate * 100).toFixed(1)}%</b></div>
+              </div>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>
+    </section>
+
+    <!-- 趋势折线图 + 分类对比 (左右布局) -->
+    <div class="analysis-charts-row">
+      <section class="card">
+        <div class="section-title" style="margin-bottom:12px">
+          <h3 style="margin:0">资产增长趋势</h3>
+          <div class="analysis-monthly-legend" style="display:flex;gap:10px;flex-wrap:wrap">
+            ${trendSeries.map((s) => `<span style="display:flex;align-items:center;gap:4px;font-size:11px"><i style="--tone:${s.color};display:inline-block;width:8px;height:8px;border-radius:50%;background:${s.color}"></i>${s.name}</span>`).join("")}
+          </div>
+        </div>
+        <div class="analysis-trend-chart trend-scrollable">
+          <svg viewBox="0 0 ${svgW} ${svgH}" class="trend-line-svg" preserveAspectRatio="none" style="min-width:${svgW}px">
+            ${yTickHtml}
+            ${zeroLineHtml}
+            ${linesHtml}
+          </svg>
+          <div class="trend-x-labels" style="min-width:${svgW}px">
+            ${trendLabels.map((l) => `<span>${l}</span>`).join("")}
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title" style="margin-bottom:12px">
+          <h3 style="margin:0">分类对比</h3>
+          <span class="badge">${year}年 vs 期初</span>
+        </div>
+        <div class="class-bar-chart-wrap">
+          <svg viewBox="0 0 ${svgW} ${barH}" class="trend-line-svg" preserveAspectRatio="none">
+            ${barYTickHtml}
+            ${visibleClasses.map((c, i) => {
+              const cx = barPadL + (i + 0.5) * barGroupW;
+              const openV = Number(c.openingValue) || 0;
+              const curV = Number(c.value) || 0;
+              const barW2 = barGroupW * 0.35;
+              const hOpen = openV / barMaxV * barPlotH;
+              const hCur = curV / barMaxV * barPlotH;
+              return `
+                <rect x="${cx - barW2 - 2}" y="${barPadT + barPlotH - hOpen}" width="${barW2}" height="${hOpen}" rx="3" fill="var(--panel-3)" stroke="var(--line)" stroke-width="0.5"><title>${c.name} 期初: ${money(openV)}</title></rect>
+                <rect x="${cx + 2}" y="${barPadT + barPlotH - hCur}" width="${barW2}" height="${hCur}" rx="3" fill="${c.color || '#6366f1'}" opacity="0.85"><title>${c.name} 当前: ${money(curV)}</title></rect>
+                <text x="${cx}" y="${barPadT + barPlotH + 14}" text-anchor="middle" fill="var(--muted)" font-size="10">${c.name}</text>`;
+            }).join("")}
+          </svg>
+          <div style="display:flex;gap:12px;justify-content:center;margin-top:8px;font-size:11px;color:var(--muted)">
+            <span style="display:flex;align-items:center;gap:4px"><i style="display:inline-block;width:12px;height:12px;border-radius:2px;background:var(--panel-3);border:1px solid var(--line)"></i>期初价值</span>
+            <span style="display:flex;align-items:center;gap:4px"><i style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#6366f1;opacity:0.85"></i>当前价值</span>
+          </div>
+        </div>
+        <div class="class-yoy-grid">
+          ${(() => {
+            const avgValue = totalValue / (visibleClasses.length || 1);
+            return visibleClasses.map((c) => {
+              const openV = Number(c.openingValue) || 0;
+              const curV = Number(c.value) || 0;
+              const yoyRate = openV ? (curV - openV) / openV : 0;
+              const incomeTotal = Number(c.income) || 0;
+              const returnRate = openV ? incomeTotal / openV : 0;
+              const target = Number(c.targetValue) || avgValue;
+              const targetProgress = target ? curV / target : 0;
+              return `<div class="class-yoy-item">
+                <div class="class-yoy-head">
+                  <span class="pie-dot" style="background:${c.color || '#6366f1'}"></span>
+                  <span style="flex:1">${c.name}</span>
+                  <button data-action="edit-class-target" data-id="${c.id}" class="class-target-btn" title="设置目标">⚙</button>
+                </div>
+                <div class="class-yoy-vals-4">
+                  <div><span>当前值</span><b>${money(curV)}</b></div>
+                  <div><span>同比</span><b class="${yoyRate >= 0 ? 'income' : 'expense'}">${yoyRate >= 0 ? '+' : ''}${(yoyRate * 100).toFixed(1)}%</b></div>
+                  <div><span>收益率</span><b class="${returnRate >= 0 ? 'income' : 'expense'}">${(returnRate * 100).toFixed(1)}%</b></div>
+                  <div><span>目标</span><b>${targetProgress >= 1 ? '100' : (targetProgress * 100).toFixed(0)}%</b></div>
+                </div>
+                <div class="class-yoy-bar"><i style="width:${Math.min(targetProgress * 100, 100)}%;background:${c.color || '#6366f1'}"></i></div>
+              </div>`;
+            }).join("");
+          })()}
+        </div>
+      </section>
     </div>
-    <div class="grid cols-4 asset-class-grid">${state.assetClasses.map((c, index) => {
+
+    <!-- 资产分类卡片 -->
+    <section class="analysis-row card">
+      <div class="section-title" style="margin-bottom:12px">
+        <h3 style="margin:0">分类管理</h3>
+        <div class="section-actions">
+          <span class="badge">拖拽或前后移调整顺序</span>
+          <button class="primary" data-action="new-asset-class">新增分类</button>
+        </div>
+      </div>
+      <div class="grid cols-4 asset-class-grid">${state.assetClasses.map((c, index) => {
       const profit = (Number(c.value) || 0) - (Number(c.openingValue) || 0);
       const profitRate = Number(c.openingValue) ? profit / Number(c.openingValue) : 0;
       const allocation = totalValue ? (Number(c.value) || 0) / totalValue : 0;
@@ -2638,7 +2969,8 @@ function assetClasses() {
       </div>
     </article>`;
     }).join("")}</div>
-  </section>`;
+    </section>
+  </div>`;
 }
 
 function tools() {
@@ -3493,6 +3825,19 @@ function bindViewActions() {
     if (item) openAssetClassDialog(item);
   }));
   document.querySelectorAll("[data-action='delete-asset-class']").forEach((button) => button.addEventListener("click", () => deleteAssetClass(button.dataset.id)));
+  document.querySelectorAll("[data-action='edit-class-target']").forEach((button) => button.addEventListener("click", () => {
+    const id = button.dataset.id;
+    const item = state.assetClasses.find((c) => c.id === id);
+    if (!item) return;
+    const current = Number(item.targetValue) || 0;
+    const input = window.prompt(`设置「${item.name}」的目标价值（当前: ${money(current)}）`, String(current));
+    if (input === null) return;
+    const val = Number(input.replace(/,/g, ""));
+    if (isNaN(val) || val < 0) { window.alert("请输入有效的数值"); return; }
+    item.targetValue = val;
+    saveState();
+    render();
+  }));
   document.querySelectorAll("[data-action='move-asset-class']").forEach((button) => button.addEventListener("click", () => {
     moveAssetClass(button.dataset.id, Number(button.dataset.offset));
   }));
