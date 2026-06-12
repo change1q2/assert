@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "api": "node server/server.js",
+    "api": "node --env-file=.env server/server.js",
     "web": "npx http-server . -p 4173 -c-1",
     "start": "node server/server.js"
   },
@@ -12,6 +12,7 @@
     "node": ">=22.5.0"
   },
   "dependencies": {
-    "better-sqlite3": "^12.4.1"
+    "better-sqlite3": "^12.4.1",
+    "mysql2": "^3.22.5"
   }
 }

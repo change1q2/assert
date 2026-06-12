@@ -73,6 +73,13 @@ const seed = {
     { id: 3, kind: "custom", accountId: "cash", category: "商品类", market: "domestic", name: "黄金定投", code: "AU", costPrice: 520, shares: 80, pnl: 2200 },
   ],
   customCategories: { records: { income: [], expense: [], transfer: [] }, finance: [] },
+  overviewGoals: {
+    overall: 53000000,
+    thisYear: 4000000,
+    fiveYear: 8000000,
+    tenYear: 15000000,
+    annualizedRate: 15,
+  },
   recordTags: { tagsByCategory: {}, lastByCategory: {} },
   recorders: [],
   reminders: [
@@ -694,6 +701,7 @@ function bindGlobalActions() {
   document.querySelector("#cancelDebt").addEventListener("click", () => document.querySelector("#debtDialog").close());
   document.querySelector("#cancelAccount").addEventListener("click", () => document.querySelector("#accountDialog").close());
   document.querySelector("#cancelAssetClass").addEventListener("click", () => document.querySelector("#assetClassDialog").close());
+  document.querySelector("#cancelGoals").addEventListener("click", () => document.querySelector("#goalsDialog").close());
   document.querySelector("#cancelFinanceAsset").addEventListener("click", () => document.querySelector("#financeAssetDialog").close());
   document.querySelector("#cancelFinanceTertiary").addEventListener("click", () => document.querySelector("#financeTertiaryDialog").close());
   document.querySelector("#cancelRecordOption").addEventListener("click", () => document.querySelector("#recordOptionDialog").close());
@@ -931,28 +939,60 @@ function overview(data) {
       <section class="overview-card asset-value">
         <span>总资产价值</span>
         <strong>${formatPlainNumber(dashboard.totalAssetValue)}</strong>
+        <small>资产分类当前价值合计</small>
       </section>
       <section class="overview-card progress-goal">
-        <h2>进度目标</h2>
-        <div class="progress-ring" style="--progress:${Math.min(dashboard.progressPercent, 100)}%"><strong>${dashboard.progressPercent.toFixed(2)}%</strong></div>
-        <p><b>${formatCurrencyNumber(dashboard.totalAssetValue)}</b><span>|</span>${formatCurrencyNumber(dashboard.goalValue)}</p>
+        <div class="progress-goal-head">
+          <h2>进度目标</h2>
+          <button class="goal-edit-btn" data-action="edit-goals" title="编辑目标">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            编辑
+          </button>
+        </div>
+        <div class="overview-rate-line">
+          <span>今年收益额</span>
+          <strong class="${dashboard.annualNetGrowth >= 0 ? 'income' : 'expense'}">${money(dashboard.annualNetGrowth)}</strong>
+          <span class="overview-rate-divider">|</span>
+          <span>今年收益率</span>
+          <strong class="${dashboard.annualRate >= 0 ? 'income' : 'expense'}">${percent(dashboard.annualRate)}</strong>
+        </div>
+        <div class="goal-grid">
+          ${dashboard.goals.map(g => `
+            <div class="goal-item${g.pct >= 100 ? ' goal-done' : ''}">
+              <div class="goal-item-head">
+                <span class="goal-item-label">${g.label}</span>
+                ${g.pct >= 100
+                  ? '<span class="goal-done-badge">已完成</span>'
+                  : `<span class="goal-item-pct">${g.pct.toFixed(1)}%</span>`}
+              </div>
+              <div class="goal-bar-track">
+                <i style="--width:${Math.min(g.pct, 100)}%;--tone:${g.pct >= 100 ? '#10b981' : g.pct >= 50 ? '#6366f1' : '#f59e0b'}"></i>
+              </div>
+              <div class="goal-item-sub">${money(g.current)} / ${money(g.target)}</div>
+            </div>
+          `).join('')}
+        </div>
       </section>
-      <div class="stat-stack">
-        <section class="overview-card mini-stat"><span>今年总收入</span><strong>${formatPlainNumber(dashboard.yearIncome)}</strong></section>
-        <section class="overview-card mini-stat"><span>今年净收入</span><strong>${formatPlainNumber(dashboard.yearNetIncome)}</strong></section>
-      </div>
-      <section class="overview-card year-spend"><span>今年总消费</span><strong>${formatPlainNumber(dashboard.yearSpend)}</strong></section>
+      <section class="overview-card overview-stat-row">
+        <div class="overview-stat-item">
+          <span>今年总收入</span>
+          <strong class="income">${formatPlainNumber(dashboard.statsYearIncome)}</strong>
+        </div>
+        <div class="overview-stat-divider"></div>
+        <div class="overview-stat-item">
+          <span>今年净收入</span>
+          <strong class="${dashboard.statsYearNetIncome >= 0 ? 'income' : 'expense'}">${formatPlainNumber(dashboard.statsYearNetIncome)}</strong>
+        </div>
+        <div class="overview-stat-divider"></div>
+        <div class="overview-stat-item">
+          <span>今年总消费</span>
+          <strong class="expense">${formatPlainNumber(dashboard.statsYearSpend)}</strong>
+        </div>
+      </section>
 
       ${overviewPieCard("三维增长贡献", dashboard.assetShare)}
       ${overviewPieCard("正向收入贡献", dashboard.incomeShare)}
       ${overviewDonutCard("劳动资产数据比", dashboard.laborShare, formatPlainNumber(dashboard.laborTotal), "总数")}
-
-      ${overviewBarCard("月均收益", "实际收益金额", [{ label: "2025/12/31", value: dashboard.monthIncome }], "money")}
-      ${overviewBarCard("月消费", "金额", [{ label: "2025/12/31", value: dashboard.monthSpend }], "signed")}
-      ${overviewBarCard("月结余", "剩余金额", [{ label: "2025/12/03", value: dashboard.monthBalance }], "signed")}
-      ${overviewBarCard("年收益", "实际收益金额", [{ label: "2025", value: dashboard.yearIncome }], "money")}
-      ${overviewBarCard("年消费", "金额", [{ label: "2025", value: dashboard.yearSpend }], "signed")}
-      ${overviewBarCard("年结余", "剩余金额", [{ label: "2025/12/03", value: dashboard.yearBalance }], "signed")}
 
       ${assetGrowthLineCard(dashboard.assetGrowth)}
       ${annualAssetChangeCard(dashboard.annualChange)}
@@ -960,14 +1000,20 @@ function overview(data) {
 }
 
 function overviewDashboardData(data) {
-  const totalAssetValue = data.totalAssets;
-  const goalValue = Math.max(data.initialAssets * 2, totalAssetValue, 1);
+  // Total asset value from asset classes (not accounts)
+  const visibleClasses = (state.assetClasses || []).filter(c => c.visible !== false);
+  const totalAssetValue = visibleClasses.reduce((sum, c) => sum + (Number(c.value) || 0), 0);
+  const totalOpeningValue = visibleClasses.reduce((sum, c) => sum + (Number(c.openingValue) || 0), 0);
+  const totalTargetValue = visibleClasses.reduce((sum, c) => sum + (Number(c.targetValue) || 0), 0);
+
+  const goalValue = Math.max(totalTargetValue, totalAssetValue, 1);
   const yearIncome = data.income;
   const yearSpend = -data.expense;
   const yearNetIncome = data.balance;
   const monthIncome = yearIncome / 12;
   const monthSpend = yearSpend / 12;
   const monthBalance = yearNetIncome / 12;
+
   const contributionRows = [
     { name: "劳动净增值", value: Math.abs(data.laborNet), signed: data.laborNet, color: "#10b981" },
     { name: "理财净收益", value: Math.abs(data.investNet), signed: data.investNet, color: "#6366f1" },
@@ -982,10 +1028,38 @@ function overviewDashboardData(data) {
     { name: "劳动净增值", value: Math.abs(data.laborNet), color: "#10b981" },
     { name: "生活/偿债消耗", value: Math.max(data.expense - Math.abs(data.investNet), 0), color: "#f43f5e" },
   ].filter((item) => item.value > 0);
+
+  // Goals
+  const g = state.overviewGoals || {};
+  const overallTarget = g.overall || totalTargetValue || 1;
+  const thisYearTarget = g.thisYear || totalOpeningValue * 1.1;
+  const fiveYearTarget = g.fiveYear || totalOpeningValue * 3;
+  const tenYearTarget = g.tenYear || totalOpeningValue * 5;
+  const annualizedRateTarget = g.annualizedRate || 15;
+  const yearFraction = (new Date() - new Date(new Date().getFullYear(), 0, 1)) / (new Date(new Date().getFullYear(), 11, 31) - new Date(new Date().getFullYear(), 0, 1) + 1);
+  const annualizedActual = totalOpeningValue > 0 ? ((totalAssetValue - totalOpeningValue) / totalOpeningValue) / Math.max(yearFraction, 0.01) * 100 : 0;
+
+  const goals = [
+    { label: "整体目标", target: overallTarget, current: totalAssetValue, pct: totalAssetValue / overallTarget * 100 },
+    { label: "今年目标", target: thisYearTarget, current: totalAssetValue, pct: totalAssetValue / thisYearTarget * 100 },
+    { label: "5年目标", target: fiveYearTarget, current: totalAssetValue, pct: totalAssetValue / fiveYearTarget * 100 },
+    { label: "10年目标", target: tenYearTarget, current: totalAssetValue, pct: totalAssetValue / tenYearTarget * 100 },
+    { label: "年化目标", target: annualizedRateTarget, current: annualizedActual, pct: annualizedActual / annualizedRateTarget * 100, isRate: true },
+  ];
+
+  // Stats from analysis module
+  const stats = data.analysisStats || {};
+  const statsYearIncome = (stats.ledgerIncome || 0) + (stats.financeIncome || 0);
+  const statsYearNetIncome = stats.annualNetGrowth || 0;
+  const statsYearSpend = stats.consumption || 0;
+
   return {
     totalAssetValue,
+    totalOpeningValue,
     goalValue,
     progressPercent: totalAssetValue / goalValue * 100,
+    annualNetGrowth: data.annualGrowth,
+    annualRate: totalOpeningValue > 0 ? data.annualGrowth / totalOpeningValue : 0,
     yearIncome,
     yearSpend,
     yearNetIncome,
@@ -998,14 +1072,18 @@ function overviewDashboardData(data) {
     laborShare,
     laborTotal: laborShare.reduce((sum, item) => sum + item.value, 0),
     assetGrowth: [
-      { date: "期初", original: data.initialAssets, current: data.initialAssets },
-      { date: "当前", original: data.initialAssets, current: data.initialAssets + data.annualGrowth },
+      { date: "期初", original: totalOpeningValue, current: totalOpeningValue },
+      { date: "当前", original: totalOpeningValue, current: totalAssetValue },
     ],
     annualChange: [
-      { year: "期初", original: data.initialAssets, current: data.initialAssets, growth: 0 },
-      { year: "当前", original: data.initialAssets, current: data.initialAssets + data.annualGrowth, growth: data.annualGrowth },
+      { year: "期初", original: totalOpeningValue, current: totalOpeningValue, growth: 0 },
+      { year: "当前", original: totalOpeningValue, current: totalAssetValue, growth: totalAssetValue - totalOpeningValue },
     ],
     liveNetAssets: data.netAssets,
+    goals,
+    statsYearIncome,
+    statsYearNetIncome,
+    statsYearSpend,
   };
 }
 
@@ -2202,11 +2280,6 @@ function analysis(data) {
   const financeIncomeForPeriod = totalPnl >= 0 ? totalPnl : 0;
   const financeLossForPeriod = totalPnl < 0 ? Math.abs(totalPnl) : 0;
 
-  /* ---- 饼图数据 ---- */
-  const totalIncomeForPie = laborIncome + financeIncomeForPeriod;
-  const pieIncomePct = totalIncomeForPie > 0 ? laborIncome / totalIncomeForPie * 100 : 50;
-  const pieFinancePct = totalIncomeForPie > 0 ? financeIncomeForPeriod / totalIncomeForPie * 100 : 50;
-
   /* ---- 年度净资产增值 ---- */
   const annualNetGrowth = data.analysisStats.annualNetGrowth;
   const annualRate = data.initialAssets ? annualNetGrowth / data.initialAssets : 0;
@@ -2226,9 +2299,54 @@ function analysis(data) {
   const periodInterest = payableInterestTotal * (yearFraction / 365);
   const periodReceivableInterest = receivableInterestTotal * (yearFraction / 365);
 
-  /* ---- 债务展示值 ---- */
-  const debtDisplayValue = analysisShowTotalDebt ? payableTotalAll : periodInterest;
-  const debtDisplayLabel = analysisShowTotalDebt ? "总负债" : "当年利息";
+  /* ---- 收入构成饼图 ---- */
+  const incTotal = laborIncome + financeIncomeForPeriod;
+  const incPcts = incTotal > 0
+    ? [laborIncome / incTotal * 100, financeIncomeForPeriod / incTotal * 100]
+    : [50, 50];
+  const pR = 68, pCx = 80, pCy = 80;
+  const pC = 2 * Math.PI * pR;
+  const incSegs = incTotal > 0
+    ? [
+        { pct: incPcts[0], color: "#10b981", label: "劳动收入", val: laborIncome },
+        { pct: incPcts[1], color: "#6366f1", label: "理财收入", val: financeIncomeForPeriod },
+      ]
+    : [];
+  let incOffset = 0;
+  const incCircles = incSegs.map((seg) => {
+    const s = (seg.pct / 100) * pC;
+    const c = `<circle cx="${pCx}" cy="${pCy}" r="${pR}" fill="none"
+      stroke="${seg.color}" stroke-width="24"
+      stroke-dasharray="${s.toFixed(2)} ${(pC - s).toFixed(2)}"
+      stroke-dashoffset="${(-incOffset).toFixed(2)}"
+      transform="rotate(-90 ${pCx} ${pCy})"/>`;
+    incOffset += s;
+    return c;
+  }).join("\n");
+
+  /* ---- 支出构成饼图 ---- */
+  const expTotal = ledgerExpense + financeLossForPeriod + periodInterest;
+  const expPcts = expTotal > 0
+    ? [ledgerExpense / expTotal * 100, financeLossForPeriod / expTotal * 100, periodInterest / expTotal * 100]
+    : [33.3, 33.3, 33.4];
+  const expSegs = expTotal > 0
+    ? [
+        { pct: expPcts[0], color: "#f43f5e", label: "消费支出", val: ledgerExpense },
+        { pct: expPcts[1], color: "#f59e0b", label: "理财亏损", val: financeLossForPeriod },
+        { pct: expPcts[2], color: "#ef4444", label: "债务利息", val: periodInterest },
+      ]
+    : [];
+  let expOffset = 0;
+  const expCircles = expSegs.map((seg) => {
+    const s = (seg.pct / 100) * pC;
+    const c = `<circle cx="${pCx}" cy="${pCy}" r="${pR}" fill="none"
+      stroke="${seg.color}" stroke-width="24"
+      stroke-dasharray="${s.toFixed(2)} ${(pC - s).toFixed(2)}"
+      stroke-dashoffset="${(-expOffset).toFixed(2)}"
+      transform="rotate(-90 ${pCx} ${pCy})"/>`;
+    expOffset += s;
+    return c;
+  }).join("\n");
 
   /* ---- 期间选项生成 ---- */
   let periodOptionHtml = "";
@@ -2257,27 +2375,30 @@ function analysis(data) {
     periodOptionHtml = `<div class="ledger-period-options"><span class="ledger-period-year">自定义日期范围</span></div>`;
   }
 
-  /* ---- SVG 饼图 ---- */
-  const pieR = 70;
-  const pieCx = 80;
-  const pieCy = 80;
-  const pieCircum = 2 * Math.PI * pieR;
-  const incomeStroke = (pieIncomePct / 100) * pieCircum;
-  const financeStroke = (pieFinancePct / 100) * pieCircum;
-
-  /* ---- 消费占比 ---- */
-  const consumptionItems = [
-    { label: "消费支出", value: ledgerExpense, tone: "#f43f5e" },
-    { label: "理财盈亏", value: totalPnl, tone: totalPnl >= 0 ? "#10b981" : "#f43f5e" },
-    { label: debtDisplayLabel, value: debtDisplayValue, tone: "#f59e0b" },
-  ];
-  const consumptionTotal = consumptionItems.reduce((s, c) => s + Math.max(Math.abs(c.value), 0.01), 0);
-
-  /* ---- 月度趋势 ---- */
+  /* ---- 增长趋势 ---- */
   const months = monthlySeries();
-  const maxMonthVal = Math.max(...months.map((m) => Math.max(m.income, m.expense)), 1);
+  const currentMonth = now.getMonth();
+  const trendMonths = months.slice(0, currentMonth + 1);
+  const growthSeries = trendMonths.map((m) => m.income - m.expense);
+  const maxAbsVal = Math.max(...growthSeries.map((v) => Math.abs(v)), 1);
+  const svgW = 720, svgH = 200, padT = 20, padB = 30, padL = 30, padR = 10;
+  const plotW = svgW - padL - padR;
+  const plotH = svgH - padT - padB;
+  const zeroY = padT + plotH / 2;
+  const nPts = trendMonths.length || 1;
+  const xStep = nPts > 1 ? plotW / (nPts - 1) : 0;
+  const yOf = (v) => zeroY - (v / maxAbsVal) * (plotH / 2);
+  const growthPts = growthSeries.map((v, i) => [padL + i * xStep, yOf(v)]);
+  const toPolyline = (pts) => pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const toArea = (pts) => {
+    if (!pts.length) return "";
+    const base = `${padL},${zeroY.toFixed(1)} `;
+    const line = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+    const end = ` ${pts[pts.length - 1][0].toFixed(1)},${zeroY.toFixed(1)}`;
+    return base + line + end;
+  };
 
-  return `<div class="analysis-page">
+    return `<div class="analysis-page">
 
     <!-- 筛选 Tab -->
     <section class="analysis-filter-bar">
@@ -2297,167 +2418,152 @@ function analysis(data) {
     </section>
 
     <!-- 第一行：概览 -->
-    <section class="analysis-row analysis-overview card">
-      <div class="analysis-overview-head">
-        <div class="analysis-overview-label">
-          <h2>数据统计</h2>
+    <!-- 第二行：收支分析 -->
+    <section class="analysis-row analysis-dual-pie-row card">
+      <h3 class="analysis-dual-pie-title">收支分析</h3>
+      <div class="analysis-dual-pie-grid">
+        <div class="analysis-pie-card">
+          <h4>收入构成</h4>
+          <div class="analysis-pie-wrap">
+            <svg viewBox="0 0 160 160" class="analysis-pie-svg">
+              <circle cx="${pCx}" cy="${pCy}" r="${pR}" fill="none" stroke="var(--panel-3)" stroke-width="24"/>
+              ${incCircles}
+              <text x="${pCx}" y="${pCy - 6}" text-anchor="middle" class="pie-center-label">${incTotal > 0 ? "收入" : "暂无"}</text>
+              <text x="${pCx}" y="${pCy + 12}" text-anchor="middle" class="pie-center-sub">构成</text>
+            </svg>
+            <div class="analysis-pie-legend">
+              ${incSegs.map((seg) => `<div class="pie-legend-item">
+                <span class="pie-dot" style="background:${seg.color}"></span>
+                <span>${seg.label}</span>
+                <strong>${seg.pct.toFixed(1)}%</strong>
+              </div>`).join("")}
+            </div>
+          </div>
+          <div class="analysis-pie-amounts">
+            ${incSegs.map((seg) => `<div class="pie-amount-item">
+              <span class="pie-dot" style="background:${seg.color}"></span>
+              <span>${seg.label}</span>
+              <strong>${money(seg.val)}</strong>
+            </div>`).join("")}
+          </div>
         </div>
-        <div class="analysis-overview-time">
-          <span class="analysis-time-badge">${pLabel}</span>
-          <span class="analysis-time-days">至今 ${daysElapsed} 天 / 共 ${daysTotal} 天</span>
+        <div class="analysis-pie-card">
+          <h4>支出构成</h4>
+          <div class="analysis-pie-wrap">
+            <svg viewBox="0 0 160 160" class="analysis-pie-svg">
+              <circle cx="${pCx}" cy="${pCy}" r="${pR}" fill="none" stroke="var(--panel-3)" stroke-width="24"/>
+              ${expCircles}
+              <text x="${pCx}" y="${pCy - 6}" text-anchor="middle" class="pie-center-label">${expTotal > 0 ? "支出" : "暂无"}</text>
+              <text x="${pCx}" y="${pCy + 12}" text-anchor="middle" class="pie-center-sub">构成</text>
+            </svg>
+            <div class="analysis-pie-legend">
+              ${expSegs.map((seg) => `<div class="pie-legend-item">
+                <span class="pie-dot" style="background:${seg.color}"></span>
+                <span>${seg.label}</span>
+                <strong>${seg.pct.toFixed(1)}%</strong>
+              </div>`).join("")}
+            </div>
+          </div>
+          <div class="analysis-pie-amounts">
+            ${expSegs.map((seg) => `<div class="pie-amount-item">
+              <span class="pie-dot" style="background:${seg.color}"></span>
+              <span>${seg.label}</span>
+              <strong>${money(seg.val)}</strong>
+            </div>`).join("")}
+          </div>
         </div>
-      </div>
-      <div class="analysis-overview-kpis">
-        <article class="${annualNetGrowth >= 0 ? 'income' : 'expense'}">
-          <span>净资产增值</span>
-          <strong>${money(annualNetGrowth)}</strong>
-          <small>${percent(annualRate)}</small>
-        </article>
-        <article>
-          <span>总收入</span>
-          <strong class="income">${money(ledgerIncome + financeIncomeForPeriod)}</strong>
-          <small>劳动 + 理财</small>
-        </article>
-        <article>
-          <span>总支出</span>
-          <strong class="expense">${money(ledgerExpense + financeLossForPeriod)}</strong>
-          <small>消费 + 亏损</small>
-        </article>
       </div>
     </section>
 
-    <!-- 第二行：收入占比饼图 -->
-    <section class="analysis-row analysis-income-row card">
-      <div class="analysis-pie-section">
-        <h3>收入占比</h3>
-        <div class="analysis-pie-wrap">
-          <svg viewBox="0 0 160 160" class="analysis-pie-svg">
-            <circle cx="${pieCx}" cy="${pieCy}" r="${pieR}" fill="none" stroke="var(--panel-3)" stroke-width="24"/>
-            <circle cx="${pieCx}" cy="${pieCy}" r="${pieR}" fill="none"
-              stroke="#10b981" stroke-width="24"
-              stroke-dasharray="${incomeStroke} ${pieCircum - incomeStroke}"
-              stroke-dashoffset="0"
-              transform="rotate(-90 ${pieCx} ${pieCy})"
-              style="transition: stroke-dasharray .4s ease"/>
-            <circle cx="${pieCx}" cy="${pieCy}" r="${pieR}" fill="none"
-              stroke="#6366f1" stroke-width="24"
-              stroke-dasharray="${financeStroke} ${pieCircum - financeStroke}"
-              stroke-dashoffset="${-incomeStroke}"
-              transform="rotate(-90 ${pieCx} ${pieCy})"
-              style="transition: stroke-dasharray .4s ease"/>
-            <text x="${pieCx}" y="${pieCy - 6}" text-anchor="middle" class="pie-center-label">${money(totalIncomeForPie)}</text>
-            <text x="${pieCx}" y="${pieCy + 12}" text-anchor="middle" class="pie-center-sub">合计收入</text>
-          </svg>
-          <div class="analysis-pie-legend">
-            <div class="pie-legend-item">
-              <span class="pie-dot" style="background:#10b981"></span>
-              <span>劳动收入</span>
-              <strong>${pieIncomePct.toFixed(1)}%</strong>
-            </div>
-            <div class="pie-legend-item">
-              <span class="pie-dot" style="background:#6366f1"></span>
-              <span>理财收入</span>
-              <strong>${pieFinancePct.toFixed(1)}%</strong>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="analysis-income-amounts">
-        <article>
-          <span class="analysis-amount-icon" style="--tone:#10b981"></span>
-          <div>
-            <span>劳动收入</span>
-            <strong>${money(laborIncome)}</strong>
-            <small>${incomeRecords.filter((r) => r.category === "劳动收入").length} 笔</small>
-          </div>
-        </article>
-        <article>
-          <span class="analysis-amount-icon" style="--tone:#6366f1"></span>
-          <div>
+    <!-- 第三行：理财分析 -->
+    <section class="analysis-row analysis-finance-row card">
+      <h3>理财分析</h3>
+      <div class="analysis-finance-grid">
+        <div class="analysis-finance-col">
+          <div class="consumption-header" style="--tone:#6366f1">
             <span>理财收入</span>
-            <strong>${money(financeIncomeForPeriod)}</strong>
-            <small>浮动盈亏 ${totalPnl >= 0 ? "+" : ""}${money(totalPnl)}</small>
-          </div>
-        </article>
-      </div>
-    </section>
-
-    <!-- 第三行：消费占比 -->
-    <section class="analysis-row analysis-consumption-row card">
-      <h3>消费占比</h3>
-      <div class="analysis-consumption-grid">
-        <div class="analysis-consumption-col">
-          <div class="consumption-header" style="--tone:#f43f5e">
-            <span>消费支出</span>
-            <strong>${money(ledgerExpense)}</strong>
-          </div>
-          <div class="consumption-bar-track">
-            <i style="--width:${Math.max(ledgerExpense / consumptionTotal * 100, 3)}%;--tone:#f43f5e"></i>
-          </div>
-          <span class="consumption-pct">${(ledgerExpense / consumptionTotal * 100).toFixed(1)}%</span>
-          <small>${expenseRecords.length} 笔记录</small>
-        </div>
-        <div class="analysis-consumption-col">
-          <div class="consumption-header" style="--tone:${totalPnl >= 0 ? '#10b981' : '#f43f5e'}">
-            <span>理财盈亏</span>
             <strong class="${totalPnl >= 0 ? 'income' : 'expense'}">${money(totalPnl)}</strong>
           </div>
           <div class="consumption-bar-track">
-            <i style="--width:${Math.max(Math.abs(totalPnl) / consumptionTotal * 100, 3)}%;--tone:${totalPnl >= 0 ? '#10b981' : '#f43f5e'}"></i>
+            <i style="--width:${Math.min(Math.abs(totalPnl) / Math.max(totalValue, 1) * 100, 100)}%;--tone:${totalPnl >= 0 ? '#10b981' : '#f43f5e'}"></i>
           </div>
-          <span class="consumption-pct">${(Math.abs(totalPnl) / consumptionTotal * 100).toFixed(1)}%</span>
-          <small>${totalPnl >= 0 ? "收益计入收入" : "亏损计入消费"}</small>
+          <div class="debt-detail-mini">
+            <div><span>浮动盈亏</span><b class="${totalPnl >= 0 ? 'income' : 'expense'}">${totalPnl >= 0 ? '+' : ''}${money(totalPnl)}</b></div>
+            <div><span>持仓市值</span><b>${money(totalValue)}</b></div>
+            <div><span>持仓成本</span><b>${money(totalCost)}</b></div>
+            <div><span>资产数量</span><b>${assets.length}</b></div>
+          </div>
         </div>
-        <div class="analysis-consumption-col">
+        <div class="analysis-finance-col">
           <div class="consumption-header" style="--tone:#f59e0b">
-            <span>债务 · ${debtDisplayLabel}</span>
-            <strong>${money(debtDisplayValue)}</strong>
+            <span>债务总额</span>
+            <strong>${money(payableTotalAll)}</strong>
           </div>
-          <label class="analysis-debt-toggle">
-            <input type="checkbox" data-action="analysis-debt-toggle" ${analysisShowTotalDebt ? "checked" : ""} />
-            <span class="toggle-switch"></span>
-            <span>显示整体负债</span>
-          </label>
-          ${analysisShowTotalDebt ? `
-          <div class="debt-detail-mini">
-            <div><span>应付本金</span><b>${money(payablePrincipalAll)}</b></div>
-            <div><span>总利息</span><b>${money(payableInterestTotal)}</b></div>
-            <div><span>应收本金</span><b>${money(receivablePrincipalAll)}</b></div>
-            <div><span>应收利息</span><b>${money(receivableInterestTotal)}</b></div>
+          <div class="consumption-bar-track">
+            <i style="--width:${Math.min(payableTotalAll / Math.max(payableTotalAll + receivableTotalAll, 1) * 100, 100)}%;--tone:#f59e0b"></i>
           </div>
-          ` : `
           <div class="debt-detail-mini">
-            <div><span>应付利息</span><b>${money(periodInterest)}</b></div>
-            <div><span>应收利息</span><b>${money(periodReceivableInterest)}</b></div>
+            <div><span>应付总额</span><b>${money(payableTotalAll)}</b></div>
+            <div><span>应收总额</span><b>${money(receivableTotalAll)}</b></div>
             <div><span>应付笔数</span><b>${payable.length}</b></div>
             <div><span>应收笔数</span><b>${receivable.length}</b></div>
           </div>
-          `}
+        </div>
+        <div class="analysis-finance-col">
+          <div class="consumption-header" style="--tone:#ef4444">
+            <span>债务利息</span>
+            <strong>${money(payableInterestTotal)}</strong>
+          </div>
+          <div class="consumption-bar-track">
+            <i style="--width:${Math.min(payableInterestTotal / Math.max(payableTotalAll, 1) * 100, 100)}%;--tone:#ef4444"></i>
+          </div>
+          <div class="debt-detail-mini">
+            <div><span>应付利息</span><b>${money(payableInterestTotal)}</b></div>
+            <div><span>应收利息</span><b>${money(receivableInterestTotal)}</b></div>
+            <div><span>当年利息</span><b>${money(periodInterest)}</b></div>
+            <div><span>当年应收</span><b>${money(periodReceivableInterest)}</b></div>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- 第四行：月度收支趋势 -->
+    <!-- 第四行：增长趋势 -->
     <section class="analysis-row analysis-trend-row card">
       <div class="analysis-trend-head">
-        <h3>月度收支趋势</h3>
+        <h3>收支趋势</h3>
         <div class="analysis-monthly-legend">
-          <span><i style="--tone:#10b981"></i>收入</span>
-          <span><i style="--tone:#f43f5e"></i>支出</span>
+          <span><i style="--tone:#6366f1"></i>增长</span>
         </div>
       </div>
-      <div class="analysis-monthly-bars">
-        ${months.slice(0, now.getMonth() + 1).map((m) => `<div class="monthly-bar-group">
-          <i class="bar-income" style="--height:${Math.max(m.income / maxMonthVal * 100, 2)}%" title="收入 ${money(m.income)}"></i>
-          <i class="bar-expense" style="--height:${Math.max(m.expense / maxMonthVal * 100, 2)}%" title="支出 ${money(m.expense)}"></i>
-          <span>${m.shortLabel}</span>
-        </div>`).join("")}
-      </div>
-      <div class="analysis-monthly-table">
-        ${recordsRows([
-          ...months.slice(0, now.getMonth() + 1).map((m) => [m.label, money(m.income), money(-m.expense), money(m.income - m.expense)]),
-          ["合计", money(ledgerIncome), money(-ledgerExpense), money(ledgerBalance)],
-        ])}
+      <div class="analysis-trend-chart">
+        <svg viewBox="0 0 ${svgW} ${svgH}" class="trend-line-svg" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="growthGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#10b981"/>
+              <stop offset="50%" stop-color="#10b981" stop-opacity="0.02"/>
+              <stop offset="50%" stop-color="#f43f5e" stop-opacity="0.02"/>
+              <stop offset="100%" stop-color="#f43f5e"/>
+            </linearGradient>
+          </defs>
+          <!-- Zero line -->
+          <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${svgW - padR}" y2="${zeroY.toFixed(1)}" stroke="var(--line)" stroke-width="1"/>
+          <!-- Positive/negative boundary lines -->
+          <line x1="${padL}" y1="${padT}" x2="${svgW - padR}" y2="${padT}" stroke="var(--line)" stroke-width="0.5" stroke-dasharray="4,4"/>
+          <line x1="${padL}" y1="${(padT + plotH).toFixed(1)}" x2="${svgW - padR}" y2="${(padT + plotH).toFixed(1)}" stroke="var(--line)" stroke-width="0.5" stroke-dasharray="4,4"/>
+          <!-- Area fill -->
+          <polygon points="${toArea(growthPts)}" fill="url(#growthGrad)" opacity="0.2"/>
+          <!-- Growth line -->
+          <polyline points="${toPolyline(growthPts)}" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+          <!-- Data points -->
+          ${growthPts.map(([x, y], i) => {
+            const v = growthSeries[i];
+            const clr = v >= 0 ? "#10b981" : "#f43f5e";
+            return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="${clr}" stroke="var(--panel)" stroke-width="1.5"><title>${trendMonths[i].shortLabel}: ${v >= 0 ? "+" : ""}${money(v)}</title></circle>`;
+          }).join("")}
+        </svg>
+        <div class="trend-x-labels">
+          ${trendMonths.map((m) => `<span>${m.shortLabel}</span>`).join("")}
+        </div>
       </div>
     </section>
 
@@ -3260,10 +3366,6 @@ function bindViewActions() {
     analysisPeriod = button.dataset.period;
     render();
   }));
-  document.querySelectorAll("[data-action='analysis-debt-toggle']").forEach((input) => input.addEventListener("change", () => {
-    analysisShowTotalDebt = input.checked;
-    render();
-  }));
   document.querySelectorAll("#analysisStartDate, #analysisEndDate").forEach((input) => input.addEventListener("change", () => {
     analysisPeriodMode = "custom";
     analysisPeriod = "custom";
@@ -3400,6 +3502,33 @@ function bindViewActions() {
     document.querySelector("#avatarInput")?.click();
   }));
   document.querySelector("#avatarInput")?.addEventListener("change", handleAvatarUpload);
+
+  // Goals dialog
+  document.querySelectorAll("[data-action='edit-goals']").forEach((button) => button.addEventListener("click", () => {
+    const dialog = document.querySelector("#goalsDialog");
+    const form = document.querySelector("#goalsForm");
+    const g = state.overviewGoals || {};
+    form.overall.value = g.overall || 0;
+    form.thisYear.value = g.thisYear || 0;
+    form.fiveYear.value = g.fiveYear || 0;
+    form.tenYear.value = g.tenYear || 0;
+    form.annualizedRate.value = g.annualizedRate || 0;
+    dialog.showModal();
+  }));
+  document.querySelector("#goalsForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    state.overviewGoals = {
+      overall: Number(data.overall) || 0,
+      thisYear: Number(data.thisYear) || 0,
+      fiveYear: Number(data.fiveYear) || 0,
+      tenYear: Number(data.tenYear) || 0,
+      annualizedRate: Number(data.annualizedRate) || 0,
+    };
+    saveState();
+    document.querySelector("#goalsDialog").close();
+    render();
+  });
 }
 
 function bindHorizontalDrag(element) {

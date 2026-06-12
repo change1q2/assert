@@ -422,6 +422,31 @@
       </form>
     </dialog>
 
+    <dialog id="goalsDialog">
+      <form id="goalsForm" method="dialog" class="modal-form">
+        <h2>编辑进度目标</h2>
+        <label>整体目标（元）
+          <input name="overall" type="number" step="1" min="0" required />
+        </label>
+        <label>今年目标（元）
+          <input name="thisYear" type="number" step="1" min="0" required />
+        </label>
+        <label>5年目标（元）
+          <input name="fiveYear" type="number" step="1" min="0" required />
+        </label>
+        <label>10年目标（元）
+          <input name="tenYear" type="number" step="1" min="0" required />
+        </label>
+        <label>年化目标收益率（%）
+          <input name="annualizedRate" type="number" step="0.1" min="0" required />
+        </label>
+        <menu>
+          <button value="cancel" type="button" id="cancelGoals">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
     <script src="./vendor/tesseract.min.js?v=5.1.1"></script>
     <script src="./app.js?v=wealth2"></script>
   </body>
