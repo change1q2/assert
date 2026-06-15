@@ -1251,8 +1251,8 @@ const server = http.createServer(async (req, res) => {
         return "us" + code.replace(/^us/i, "").toUpperCase();
       }
       // Auto-detect A-share
-      if (code.startsWith("6") || code.startsWith("9")) return "sh" + code;
-      if (/^[03]/.test(code)) return "sz" + code;
+      if (/^[569]/.test(code)) return "sh" + code;
+      if (/^[013]/.test(code)) return "sz" + code;
       return null;
     }
 
@@ -1299,15 +1299,19 @@ const server = http.createServer(async (req, res) => {
             const fullCode = match[1];
             const parts = match[2].split("~");
             if (parts.length > 32) {
+              const numeric = (value) => {
+                const number = Number.parseFloat(value);
+                return Number.isFinite(number) ? number : null;
+              };
               priceMap.set(fullCode, {
                 name: parts[1] || null,
-                price: parseFloat(parts[3]) || null,
-                prevClose: parseFloat(parts[4]) || null,
-                changePct: parseFloat(parts[32]) || null,
-                changeAmt: parseFloat(parts[31]) || null,
-                high: parseFloat(parts[33]) || null,
-                low: parseFloat(parts[34]) || null,
-                volume: parseFloat(parts[36]) || null,
+                price: numeric(parts[3]),
+                prevClose: numeric(parts[4]),
+                changePct: numeric(parts[32]),
+                changeAmt: numeric(parts[31]),
+                high: numeric(parts[33]),
+                low: numeric(parts[34]),
+                volume: numeric(parts[36]),
               });
             }
           }
@@ -1319,6 +1323,33 @@ const server = http.createServer(async (req, res) => {
           }
         } catch (_) { /* best-effort */ }
       }
+      // A股及场内基金缺失时，使用东方财富行情作为回退。
+      const fallbackItems = queryItems.filter(({ index }) => results[index].price == null);
+      await Promise.all(fallbackItems.map(async ({ tencentCode, index }) => {
+        const prefix = tencentCode.slice(0, 2);
+        if (!["sh", "sz"].includes(prefix)) return;
+        const secid = `${prefix === "sh" ? "1" : "0"}.${tencentCode.slice(2)}`;
+        try {
+          const quoteRes = await fetch(`https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f47,f57,f58,f60,f169,f170`, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            signal: AbortSignal.timeout(6000),
+          });
+          const data = (await quoteRes.json())?.data;
+          if (!data || !Number.isFinite(Number(data.f43))) return;
+          const scaled = (value) => Number.isFinite(Number(value)) ? Number(value) / 100 : null;
+          results[index] = {
+            ...results[index],
+            name: data.f58 || null,
+            price: scaled(data.f43),
+            prevClose: scaled(data.f60),
+            changeAmt: scaled(data.f169),
+            changePct: scaled(data.f170),
+            high: scaled(data.f44),
+            low: scaled(data.f45),
+            volume: Number.isFinite(Number(data.f47)) ? Number(data.f47) : null,
+          };
+        } catch (_) { /* fallback is best-effort */ }
+      }));
       json(res, 200, { quotes: results }, origin);
       return;
     }

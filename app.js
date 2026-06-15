@@ -660,13 +660,13 @@ async function init() {
   startQuoteAutoRefresh();
 }
 
-// ── 每小时自动刷新行情定时器 ──
+// ── 理财行情自动刷新定时器 ──
 let quoteAutoTimer = null;
 function startQuoteAutoRefresh() {
   stopQuoteAutoRefresh();
   quoteAutoTimer = setInterval(() => {
     if (currentModule === "finance") fetchRealtimeQuotes();
-  }, 3600000); // 1 小时
+  }, 300000); // 5 分钟
 }
 function stopQuoteAutoRefresh() {
   if (quoteAutoTimer) { clearInterval(quoteAutoTimer); quoteAutoTimer = null; }
@@ -1438,12 +1438,16 @@ function records(data) {
 function finance() {
   calculatePositionWeights();
   const assets = state.financeAssets || [];
+  const displayAssets = assets.filter(financeAssetHasMarketValue);
   const assetKinds = ["stock", "fund", "commodity", "futures", "options", "crypto", "cashflow", "custom"];
-  const visibleKinds = financeStockFilters.kind === "all" ? assetKinds : [financeStockFilters.kind];
-  const filteredAssets = filterFinanceAssets(assets);
-  const totalValue = assets.reduce((sum, item) => sum + financeAssetValueRmb(item), 0);
-  const totalCost = assets.reduce((sum, item) => sum + financeAssetCostRmb(item), 0);
-  const totalPnl = assets.reduce((sum, item) => sum + financeAmountToRmb(item.pnl, item.currency), 0);
+  const availableKinds = assetKinds.filter((kind) => displayAssets.some((item) => item.kind === kind));
+  const visibleKinds = financeStockFilters.kind === "all"
+    ? availableKinds
+    : availableKinds.includes(financeStockFilters.kind) ? [financeStockFilters.kind] : [];
+  const filteredAssets = filterFinanceAssets(displayAssets);
+  const totalValue = displayAssets.reduce((sum, item) => sum + financeAssetValueRmb(item), 0);
+  const totalCost = displayAssets.reduce((sum, item) => sum + financeAssetCostRmb(item), 0);
+  const totalPnl = displayAssets.reduce((sum, item) => sum + financeAmountToRmb(item.pnl, item.currency), 0);
   return `<div class="finance-mvp">
     <section class="finance-hero">
       <div>
@@ -1451,6 +1455,7 @@ function finance() {
         <h2>个人理财资产管理</h2>
         <p class="muted">统一管理股票、基金、商品、期货、期权、加密货币、现金流资产与自定义理财，资产归属账户后自动汇总总资产。</p>
       </div>
+      <button class="primary" data-action="new-finance-asset" data-kind="stock">+ 新增资产</button>
     </section>
 
     <section class="ledger-kpi-grid simple-kpis">
@@ -1460,7 +1465,7 @@ function finance() {
           <button type="button" data-action="open-finance-analysis">场内穿透</button>
         </div>
         <strong>${money(totalValue, "CNY")}</strong>
-        <p>${assets.length} 个资产 · 已统一折算</p>
+        <p>${displayAssets.length} 个资产 · 已统一折算</p>
       </article>
       ${ledgerKpi("持仓成本（RMB）", totalCost, "按货币汇率统一折算", "neutral", "CNY")}
       ${ledgerKpi("浮动盈亏（RMB）", totalPnl, "外币盈亏同步折算", totalPnl >= 0 ? "income" : "expense", "CNY")}
@@ -1468,12 +1473,12 @@ function finance() {
 
     <section class="finance-card">
       <div class="ledger-web-title"><h3>账户汇总</h3><span>按所属账户自动汇总</span></div>
-      ${financeAccountSummary(assets)}
+      ${financeAccountSummary(displayAssets)}
     </section>
 
     <section class="finance-card finance-global-filter-card">
       <div class="ledger-web-title"><h3>资产筛选</h3><span>筛选条件应用于下方全部资产列表</span></div>
-      ${financeAssetFilterBar(assets, filteredAssets.length)}
+      ${financeAssetFilterBar(displayAssets, filteredAssets.length)}
     </section>
 
     ${visibleKinds.map((kind) => {
@@ -1485,6 +1490,7 @@ function finance() {
       ${financeAssetTable(visibleAssets, kind)}
     </section>`;
     }).join("")}
+    ${visibleKinds.length ? "" : `<section class="finance-card"><p class="muted">暂无有市值的理财资产，新增资产后将在这里显示。</p></section>`}
   </div>`;
 }
 
@@ -1790,6 +1796,17 @@ function financeAssetValue(item) {
   return financeAssetCost(item) + (Number(item.pnl) || 0);
 }
 
+function financeAssetMarketValue(item) {
+  const shares = Number(item?.shares) || 0;
+  const price = resolveAssetPrice(item);
+  const liveValue = price > 0 && shares > 0 ? price * shares : 0;
+  return liveValue || financeAssetValue(item);
+}
+
+function financeAssetHasMarketValue(item) {
+  return financeAssetMarketValue(item) > 0.000001;
+}
+
 function financeAmountToRmb(amount, currency = "CNH") {
   const code = currency === "CNH" ? "CNH" : currency;
   return (Number(amount) || 0) * (state.rates[code] || 1);
@@ -1947,20 +1964,18 @@ function financeAssetFilterBar(assets, resultCount) {
 
 // ── 实时行情获取 ──
 async function fetchRealtimeQuotes() {
-  const stockAssets = (state.financeAssets || []).filter((a) => a.kind === "stock" && a.code);
-  if (!stockAssets.length) return;
-  const codes = stockAssets.map((a) => ({
+  const quotedAssets = (state.financeAssets || []).filter((asset) =>
+    ["stock", "fund"].includes(asset.kind) && asset.code);
+  if (!quotedAssets.length) return;
+  const codes = quotedAssets.map((a) => ({
     code: a.code,
     market: a.market || "domestic",
   }));
   try {
-    const res = await fetch("/api/finance/quotes", {
+    const data = await apiRequest("/finance/quotes", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ codes }),
+      body: { codes },
     });
-    if (!res.ok) return;
-    const data = await res.json();
     const quotes = data.quotes || [];
     // Build map: code -> quote data
     for (let i = 0; i < codes.length; i++) {
@@ -1976,9 +1991,11 @@ async function fetchRealtimeQuotes() {
       }
     }
     applyRealtimeQuotes();
-    saveState();
+    await saveState();
     render();
-  } catch (_) { /* best-effort */ }
+  } catch (error) {
+    console.warn("实时行情刷新失败", error);
+  }
 }
 
 // ── 统一取价：实时价 → 昨收价 → 保存的currentPrice → 成本+盈亏反算 ──
@@ -2014,7 +2031,7 @@ function calculatePositionWeights() {
 }
 
 function applyRealtimeQuotes() {
-  const stockAssets = (state.financeAssets || []).filter((a) => a.kind === "stock");
+  const stockAssets = (state.financeAssets || []).filter((a) => ["stock", "fund"].includes(a.kind));
   // First pass: update current prices and calculate per-asset values
   for (const asset of stockAssets) {
     const q = realtimeQuoteMap[asset.code];
@@ -2028,11 +2045,11 @@ function applyRealtimeQuotes() {
         asset.pnl = parseFloat(((q.price - costPrice) * shares).toFixed(2));
         asset.pnlPercent = parseFloat(((q.price - costPrice) / costPrice * 100).toFixed(2));
       }
-      // 当日盈亏 = 涨跌额 × 份额 (or 涨跌幅 × 昨收 × 份额)
+      // 当日盈亏 = 实时涨跌额 × 持仓；缺少涨跌额时按现价、涨跌率反推。
       if (shares > 0 && q.changeAmt != null) {
         asset.todayPnl = parseFloat((q.changeAmt * shares).toFixed(2));
-      } else if (shares > 0 && q.changePct != null && q.prevClose > 0) {
-        asset.todayPnl = parseFloat((q.prevClose * q.changePct / 100 * shares).toFixed(2));
+      } else if (shares > 0 && q.changePct != null) {
+        asset.todayPnl = parseFloat((q.price * shares * q.changePct / 100).toFixed(2));
       }
       if (q.changePct != null) {
         asset.todayPnlPercent = parseFloat((q.changePct || 0).toFixed(2));
@@ -2273,6 +2290,18 @@ function switchKlineRange(range) {
     .catch(() => { container.innerHTML = '<div class="kline-loading">K线数据加载失败</div>'; });
 }
 
+function calculateFinanceTodayPnl(asset, quote = {}, percentOverride = null) {
+  const shares = Number(asset?.shares) || 0;
+  const currentPrice = Number(quote?.price) || Number(asset?.currentPrice) || resolveAssetPrice(asset);
+  const percent = percentOverride === null
+    ? (quote?.changePct != null ? Number(quote.changePct) : Number(asset?.todayPnlPercent) || 0)
+    : Number(percentOverride) || 0;
+  if (!(shares > 0) || !(currentPrice > 0)) return Number(asset?.todayPnl) || 0;
+  if (quote?.changeAmt != null) return Number(quote.changeAmt) * shares;
+  if (!percent && Number(asset?.todayPnl)) return Number(asset.todayPnl);
+  return currentPrice * shares * percent / 100;
+}
+
 // ── 股票汇总栏 ──
 function renderStockSummaryBar(assets, kind = "stock") {
   // Use resolveAssetPrice for consistent fallback chain
@@ -2290,8 +2319,7 @@ function renderStockSummaryBar(assets, kind = "stock") {
   }, 0);
   const totalTodayPnl = assets.reduce((s, a) => {
     const q = realtimeQuoteMap[a.code];
-    const shares = Number(a.shares) || 0;
-    const todayPnl = (q?.changeAmt != null && shares > 0) ? q.changeAmt * shares : (Number(a.todayPnl) || 0);
+    const todayPnl = calculateFinanceTodayPnl(a, q);
     return s + financeAmountToRmb(todayPnl, a.currency);
   }, 0);
   const allFinanceValue = (state.financeAssets || []).reduce((s, a) => {
@@ -2334,7 +2362,7 @@ function sortStockAssets(assets) {
       case "shares": va = Number(a.shares) || 0; vb = Number(b.shares) || 0; break;
       case "price": va = Number(a.currentPrice) || 0; vb = Number(b.currentPrice) || 0; break;
       case "pnl": va = Number(a.pnl) || 0; vb = Number(b.pnl) || 0; break;
-      case "todayPnl": va = Number(a.todayPnl) || 0; vb = Number(b.todayPnl) || 0; break;
+      case "todayPnl": va = calculateFinanceTodayPnl(a, realtimeQuoteMap[a.code]); vb = calculateFinanceTodayPnl(b, realtimeQuoteMap[b.code]); break;
       case "positionWeight": va = Number(a.positionWeight) || 0; vb = Number(b.positionWeight) || 0; break;
       case "code": va = a.code || ""; vb = b.code || ""; return va.localeCompare(vb) * dir;
       case "category": va = a.category || ""; vb = b.category || ""; return va.localeCompare(vb, "zh-CN") * dir;
@@ -2368,12 +2396,10 @@ function stockCellContent(item, colKey) {
   // 使用实时计算的盈亏
   const pnl = (cp > 0 && cost > 0 && shares > 0) ? (cp - cost) * shares : (Number(item.pnl) || 0);
   const pnlPct = (cp > 0 && cost > 0) ? ((cp - cost) / cost * 100) : (Number(item.pnlPercent) || 0);
-  const todayPnl = (quoteData.changeAmt != null && shares > 0)
-    ? quoteData.changeAmt * shares
-    : (Number(item.todayPnl) || 0);
   const todayPnlPct = quoteData.changePct != null
     ? quoteData.changePct
     : (Number(item.todayPnlPercent) || 0);
+  const todayPnl = calculateFinanceTodayPnl(item, quoteData, todayPnlPct);
   const pnlCls = pnl >= 0 ? "income" : "expense";
   const todayCls = todayPnl >= 0 ? "income" : "expense";
   switch (colKey) {
@@ -2399,9 +2425,7 @@ function stockCellContent(item, colKey) {
     case "marketValue": return `<div class="stock-cell-main">${financeLocalMoney(financeAssetValue(item), item.currency)}</div>`;
     case "rmbValue": return `<div class="stock-cell-main">${money(financeAssetValueRmb(item), "CNY")}</div>`;
     case "actions": {
-      const klineBtn = (item.kind === "stock" && item.code)
-        ? `<button data-action="show-kline-chart" data-id="${item.id}">K线</button>` : "";
-      return `<div class="stock-cell-actions">${klineBtn}<button data-action="show-holding-detail" data-id="${item.id}">明细</button><button data-action="edit-finance-asset" data-id="${item.id}">编辑</button><button data-action="delete-finance-asset" data-id="${item.id}">删除</button></div>`;
+      return `<div class="stock-cell-actions"><button data-action="show-holding-detail" data-id="${item.id}">明细</button><button data-action="edit-finance-asset" data-id="${item.id}">编辑</button><button data-action="delete-finance-asset" data-id="${item.id}">删除</button></div>`;
     }
     default: return "";
   }
@@ -5458,6 +5482,7 @@ function renderHoldingTab(asset) {
   const currentShares = Number(asset.shares) || 0;
   // 现价：实时价 → 昨收价 → 保存的currentPrice → 成本+盈亏反算
   const quoteData = realtimeQuoteMap[asset.code] || {};
+  const realTimePrice = Number(quoteData.price) > 0;
   const marketPrice = resolveAssetPrice(asset) || calcMarketPrice;
   // 持仓市值：现价 × 份额
   const totalValue = marketPrice * currentShares;
@@ -5470,12 +5495,10 @@ function renderHoldingTab(asset) {
   const pnlPct = displayCostPrice > 0 ? ((marketPrice - displayCostPrice) / displayCostPrice * 100) : (Number(asset.pnlPercent) || 0);
   const isProfit = totalPnl >= 0;
   // 当日盈亏：优先实时行情涨跌幅
-  const todayPnl = (quoteData.changeAmt != null && currentShares > 0)
-    ? quoteData.changeAmt * currentShares
-    : (Number(asset.todayPnl) || 0);
   const todayPnlPct = quoteData.changePct != null
     ? quoteData.changePct
     : (Number(asset.todayPnlPercent) || 0);
+  const todayPnl = calculateFinanceTodayPnl(asset, quoteData, todayPnlPct);
   // 个股仓位：占全部股票资产的比例
   const stockAssets = (state.financeAssets || []).filter((a) => a.kind === "stock");
   const totalStockValue = stockAssets.reduce((s, a) => {
@@ -6109,16 +6132,14 @@ function updateFinancePnlPercents(form) {
       }
     }
   }
-  // 当日参考盈亏：根据盈亏额反算盈亏率
-  const todayPnl = Number(f.todayPnl.value) || 0;
-  const totalCost = costPrice * shares;
-  if (active !== f.todayPnl && active !== f.todayPnlPercent) {
-    if (totalCost > 0) f.todayPnlPercent.value = ((todayPnl / totalCost) * 100).toFixed(2);
-  } else if (active === f.todayPnl && totalCost > 0) {
-    f.todayPnlPercent.value = ((todayPnl / totalCost) * 100).toFixed(2);
-  } else if (active === f.todayPnlPercent && totalCost > 0) {
+  // 当日盈亏：按现价 × 持仓数量 × 当日涨跌率计算。
+  const currentMarketValue = currentPrice * shares;
+  if (active === f.todayPnl && currentMarketValue > 0) {
+    const todayPnl = Number(f.todayPnl.value) || 0;
+    f.todayPnlPercent.value = ((todayPnl / currentMarketValue) * 100).toFixed(2);
+  } else if (currentMarketValue > 0) {
     const pct = Number(f.todayPnlPercent.value) || 0;
-    f.todayPnl.value = ((pct / 100) * totalCost).toFixed(2);
+    f.todayPnl.value = ((pct / 100) * currentMarketValue).toFixed(2);
   }
 }
 
@@ -6144,7 +6165,7 @@ function openFinanceAssetDialog(asset = null, preferredKind = "stock") {
   fields.costPrice.value = source.costPrice ?? "";
   fields.shares.value = source.shares ?? "";
   fields.pnl.value = source.pnl ?? 0;
-  fields.currentPrice.value = source.currentPrice ?? "";
+  fields.currentPrice.value = Number(source.currentPrice) || (asset ? resolveAssetPrice(source) : "");
   fields.avgBuyPrice.value = source.avgBuyPrice ?? "";
   fields.holdingDays.value = source.holdingDays ?? "";
   fields.positionWeight.value = source.positionWeight ?? "";
@@ -7164,7 +7185,7 @@ function parseBrokerHoldingRows(lines) {
 }
 
 function parseBrokerDetailTransactions(lines, asset = {}) {
-  const hasTransactionArea = lines.some((line) => /交易记录/.test(line));
+  const hasTransactionArea = lines.some((line) => /交\s*易\s*记\s*录/.test(line));
   if (!hasTransactionArea) return [];
   const transactions = [];
   lines.forEach((line, index) => {
@@ -7176,15 +7197,20 @@ function parseBrokerDetailTransactions(lines, asset = {}) {
         : "";
     const dateMatch = line.match(/20\d{2}[年./-]\d{1,2}[月./-]\d{1,2}/);
     if (!direction || !dateMatch) return;
-    const context = lines.slice(index, Math.min(index + 4, lines.length)).join(" ");
+    const context = lines.slice(index + 1, Math.min(index + 3, lines.length)).join(" ");
     const compactContext = context.replace(/\s+/g, "");
-    const cleanedContext = compactContext
-      .replace(/20\d{2}[年./-]\d{1,2}[月./-]\d{1,2}/g, " ")
-      .replace(/\d{1,2}[:：.]\d{2}(?::\d{2})?/g, " ");
+    const cleanedContext = compactContext;
     const inferred = inferTransactionNumbers(cleanedContext);
-    const shares = numberFromOcrContext(compactContext, ["数量", "成交数量", "股数"]) || inferred.shares;
-    const amount = numberFromOcrContext(compactContext, ["金额", "成交金额"]) || inferred.amount;
-    const rawPrice = numberFromOcrContext(compactContext, ["价格", "成交价"]) || inferred.price;
+    const inferredIsConsistent = inferred.shares > 0 && inferred.price > 0 && inferred.amount > 0
+      && Math.abs(inferred.shares * inferred.price - inferred.amount) / inferred.amount <= 0.03;
+    const shares = numberFromOcrContext(compactContext, ["数量", "成交数量", "股数"])
+      || (inferredIsConsistent ? inferred.shares : null);
+    const rawPrice = numberFromOcrContext(compactContext, ["价格", "成交价"])
+      || (inferredIsConsistent ? inferred.price : null);
+    const labeledAmount = numberFromOcrContext(compactContext, ["金额", "成交金额"]);
+    const amount = labeledAmount
+      || (inferredIsConsistent ? inferred.amount : null)
+      || (shares && rawPrice ? shares * rawPrice : null);
     const price = shares && amount ? financeOcrNumberNear(rawPrice, amount / shares) : rawPrice;
     if (!(shares > 0) || !(price > 0)) return;
     const numericValues = financeOcrNumericTokens(cleanedContext).map((item) => Math.abs(item.value));
@@ -7204,7 +7230,7 @@ function parseBrokerDetailTransactions(lines, asset = {}) {
       transferFee: numberFromOcrContext(compactContext, ["过户费"]) || 0,
       assetCode: asset.code || "",
       assetName: asset.name || "",
-      sourceLine: context,
+      sourceLine: `${line} ${context}`,
     });
   });
   return dedupeFinanceTransactions(transactions);
@@ -7218,7 +7244,7 @@ function parseBrokerDetailOcrText(rawText) {
     .replace(/[）]/g, ")")
     .replace(/[^\S\r\n]+/g, " ");
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const transactionHeadingIndex = lines.findIndex((line) => /交易记录/.test(line));
+  const transactionHeadingIndex = lines.findIndex((line) => /交\s*易\s*记\s*录/.test(line));
   const summaryLines = transactionHeadingIndex >= 0 ? lines.slice(0, transactionHeadingIndex) : lines.slice(0, 24);
   const summaryText = summaryLines.join(" ");
   const compactSummaryText = summaryText.replace(/\s+/g, "");
