@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>资产管理平台 — 管理后台</title>
+  <style>
+    :root {
+      --bg: #f0f2f8; --panel: #fff; --panel-2: #f5f6fc; --panel-3: #eef0fa;
+      --ink: #1e1b4b; --ink-2: #312e81; --muted: #6b7194; --muted-2: #9ca3c2;
+      --line: #e2e5f1; --line-2: #d1d5eb;
+      --primary: #6366f1; --primary-light: #818cf8; --primary-dark: #4f46e5;
+      --primary-gradient: linear-gradient(135deg, #6366f1, #8b5cf6);
+      --accent: #06b6d4; --warn: #f59e0b; --danger: #ef4444; --good: #10b981;
+      --radius-sm: 8px; --radius: 12px; --radius-lg: 16px; --radius-full: 999px;
+      --shadow: 0 4px 24px rgba(99,102,241,.07); --shadow-sm: 0 2px 8px rgba(99,102,241,.06);
+      --transition: 200ms cubic-bezier(.4,0,.2,1);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select, textarea { font: inherit; }
+    button {
+      border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+      border-radius: var(--radius-sm); min-height: 38px; padding: 0 16px; cursor: pointer;
+      transition: all var(--transition); font-weight: 500;
+    }
+    button:hover { border-color: var(--primary); color: var(--primary); }
+    button.primary {
+      background: var(--primary-gradient); border: none; color: #fff; font-weight: 600;
+      box-shadow: 0 4px 14px rgba(99,102,241,.25);
+    }
+    button.primary:hover { opacity: .9; color: #fff; }
+    input, select {
+      width: 100%; min-height: 40px; border: 1.5px solid var(--line); border-radius: var(--radius-sm);
+      padding: 0 12px; background: var(--panel); color: var(--ink);
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,.12);
+    }
+    textarea {
+      width: 100%; min-height: 80px; padding: 10px 12px; border: 1.5px solid var(--line);
+      border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); resize: vertical;
+      font: inherit; transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,.12); }
+
+    /* Layout */
+    .admin-login-wrap {
+      display: grid; place-items: center; min-height: 100vh; padding: 20px;
+    }
+    .admin-login-card {
+      width: min(400px, 100%); padding: 36px; background: var(--panel); border: 1px solid var(--line);
+      border-radius: var(--radius-lg); box-shadow: var(--shadow);
+    }
+    .admin-login-card h1 {
+      margin: 0 0 8px; font-size: 24px; font-weight: 700;
+      background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text; text-align: center;
+    }
+    .admin-login-card p { text-align: center; color: var(--muted); font-size: 13px; margin: 0 0 24px; }
+    .admin-login-card form { display: grid; gap: 14px; }
+    .admin-login-card label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 500; }
+
+    .admin-shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+    .admin-sidebar {
+      padding: 24px 16px; background: var(--panel); border-right: 1px solid var(--line);
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .admin-sidebar h2 {
+      margin: 0 0 20px; font-size: 17px; font-weight: 700;
+      background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .admin-sidebar button {
+      width: 100%; text-align: left; border: 0; background: transparent; padding: 10px 14px;
+      border-radius: var(--radius-sm); color: var(--muted); font-size: 14px;
+    }
+    .admin-sidebar button:hover { color: var(--primary); background: var(--panel-2); }
+    .admin-sidebar button.active { color: #fff; background: var(--primary-gradient); font-weight: 600; }
+    .admin-sidebar .admin-sidebar-footer { margin-top: auto; }
+    .admin-main { padding: 28px 32px; overflow-y: auto; max-height: 100vh; }
+
+    /* Stats */
+    .admin-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
+    .admin-stat-card {
+      padding: 22px; background: var(--panel); border: 1px solid var(--line);
+      border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+    }
+    .admin-stat-card span { font-size: 12px; color: var(--muted); font-weight: 500; }
+    .admin-stat-card strong {
+      display: block; margin-top: 6px; font-size: 32px; font-weight: 800; letter-spacing: -.02em;
+    }
+    .admin-stat-card:nth-child(1) strong { color: var(--primary); }
+    .admin-stat-card:nth-child(2) strong { color: var(--accent); }
+    .admin-stat-card:nth-child(3) strong { color: var(--warn); }
+
+    /* Table */
+    .admin-card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-sm); overflow: hidden;
+    }
+    .admin-card-head {
+      display: flex; justify-content: space-between; align-items: center; padding: 18px 22px;
+      border-bottom: 1px solid var(--line);
+    }
+    .admin-card-head h3 { margin: 0; font-size: 16px; font-weight: 700; }
+    .admin-table { width: 100%; border-collapse: collapse; }
+    .admin-table th, .admin-table td {
+      padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--line); font-size: 13px;
+    }
+    .admin-table th {
+      color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase;
+      letter-spacing: .03em; background: var(--panel-2);
+    }
+    .admin-table tbody tr:hover { background: var(--panel-2); }
+    .admin-table tbody tr:last-child td { border-bottom: 0; }
+
+    .badge {
+      display: inline-flex; align-items: center; padding: 2px 10px; border-radius: var(--radius-full);
+      font-size: 11px; font-weight: 600;
+    }
+    .badge-pending { color: var(--warn); background: rgba(245,158,11,.08); }
+    .badge-replied { color: var(--primary); background: rgba(99,102,241,.08); }
+    .badge-resolved { color: var(--good); background: rgba(16,185,129,.08); }
+    .badge-type { color: var(--primary); background: rgba(99,102,241,.06); margin-right: 6px; }
+
+    .reply-btn {
+      min-height: 28px; padding: 0 10px; font-size: 12px; border-radius: 6px;
+      border: 1px solid var(--primary); color: var(--primary); background: rgba(99,102,241,.04);
+    }
+    .reply-btn:hover { background: var(--primary); color: #fff; }
+
+    .reply-area { margin-top: 8px; display: grid; gap: 8px; }
+    .reply-area textarea { min-height: 60px; }
+    .reply-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .reply-actions button { min-height: 32px; font-size: 12px; }
+
+    .admin-empty { text-align: center; padding: 40px; color: var(--muted); }
+
+    @media (max-width: 768px) {
+      .admin-shell { grid-template-columns: 1fr; }
+      .admin-sidebar { flex-direction: row; flex-wrap: wrap; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .admin-sidebar h2 { width: 100%; margin-bottom: 8px; }
+      .admin-sidebar button { flex: 1; min-width: 80px; text-align: center; }
+      .admin-sidebar .admin-sidebar-footer { margin-top: 0; }
+      .admin-main { padding: 16px; max-height: none; }
+      .admin-stats { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="adminApp"></div>
+
+<script type="module">
+const API_BASE = ["127.0.0.1", "localhost"].includes(window.location.hostname)
+  ? "http://127.0.0.1:3000/api"
+  : "/api";
+
+let adminToken = localStorage.getItem("admin_token") || "";
+let currentTab = "dashboard";
+let dashData = { stats: { totalUsers: 0, todayUsers: 0, pendingFeedback: 0 } };
+let usersData = [];
+let feedbackData = [];
+
+if (!adminToken) {
+  window.location.href = "/";
+}
+
+async function api(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  if (adminToken) headers.Authorization = `Bearer ${adminToken}`;
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: options.method || "GET", headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem("admin_token");
+      window.location.href = "/";
+      return;
+    }
+    throw new Error(data.message || "请求失败");
+  }
+  return data;
+}
+
+function esc(s) {
+  const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML;
+}
+
+function render() {
+  if (!adminToken) return;
+  const app = document.getElementById("adminApp");
+  app.innerHTML = renderShell();
+  bindShell();
+  loadTab();
+}
+
+function renderShell() {
+  const tabs = [
+    ["dashboard", "数据概览"],
+    ["users", "用户管理"],
+    ["feedback", "问题反馈"],
+  ];
+  return `<div class="admin-shell">
+    <nav class="admin-sidebar">
+      <h2>管理后台</h2>
+      ${tabs.map(([id, label]) => `<button data-tab="${id}" class="${currentTab === id ? 'active' : ''}">${label}</button>`).join("")}
+      <div class="admin-sidebar-footer">
+        <button data-action="logout">退出登录</button>
+      </div>
+    </nav>
+    <main class="admin-main" id="adminMain"></main>
+  </div>`;
+}
+
+function bindShell() {
+  document.querySelectorAll("[data-tab]").forEach(btn => {
+    btn.addEventListener("click", () => { currentTab = btn.dataset.tab; render(); });
+  });
+  document.querySelector("[data-action='logout']")?.addEventListener("click", async () => {
+    try { await api("/admin/logout", { method: "POST" }); } catch {}
+    localStorage.removeItem("admin_token");
+    window.location.href = "/";
+  });
+}
+
+async function loadTab() {
+  const main = document.getElementById("adminMain");
+  if (currentTab === "dashboard") {
+    main.innerHTML = `<div class="admin-empty">加载中…</div>`;
+    try {
+      dashData = await api("/admin/dashboard");
+      await Promise.all([
+        api("/admin/users").then(d => { usersData = d.users || []; }),
+        api("/admin/feedback").then(d => { feedbackData = d.feedback || []; }),
+      ]);
+    } catch (err) {
+      if (err.message.includes("失效")) { localStorage.removeItem("admin_token"); window.location.href = "/"; return; }
+    }
+    main.innerHTML = renderDashboard();
+  } else if (currentTab === "users") {
+    main.innerHTML = `<div class="admin-empty">加载中…</div>`;
+    try {
+      const d = await api("/admin/users");
+      usersData = d.users || [];
+    } catch (err) {
+      if (err.message.includes("失效")) { localStorage.removeItem("admin_token"); window.location.href = "/"; return; }
+    }
+    main.innerHTML = renderUsers();
+  } else if (currentTab === "feedback") {
+    main.innerHTML = `<div class="admin-empty">加载中…</div>`;
+    try {
+      const d = await api("/admin/feedback");
+      feedbackData = d.feedback || [];
+    } catch (err) {
+      if (err.message.includes("失效")) { localStorage.removeItem("admin_token"); window.location.href = "/"; return; }
+    }
+    main.innerHTML = renderFeedback();
+    bindFeedbackReply();
+  }
+}
+
+function renderDashboard() {
+  const s = dashData.stats || {};
+  const recentFeedback = feedbackData.slice(0, 5);
+  return `
+    <div class="admin-stats">
+      <div class="admin-stat-card"><span>注册用户总数</span><strong>${s.totalUsers || 0}</strong></div>
+      <div class="admin-stat-card"><span>今日新增用户</span><strong>${s.todayUsers || 0}</strong></div>
+      <div class="admin-stat-card"><span>待处理反馈</span><strong>${s.pendingFeedback || 0}</strong></div>
+    </div>
+    <div class="admin-card">
+      <div class="admin-card-head"><h3>最新反馈</h3></div>
+      ${recentFeedback.length ? `<table class="admin-table">
+        <thead><tr><th>用户</th><th>类型</th><th>内容</th><th>状态</th><th>时间</th></tr></thead>
+        <tbody>${recentFeedback.map(fb => `<tr>
+          <td>${esc(fb.user_name || fb.user_account)}</td>
+          <td><span class="badge badge-type">${esc(fb.type)}</span></td>
+          <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(fb.content)}</td>
+          <td><span class="badge badge-${fb.status}">${{pending:'待处理',replied:'已回复',resolved:'已解决'}[fb.status]||fb.status}</span></td>
+          <td style="white-space:nowrap">${fb.created_at||''}</td>
+        </tr>`).join("")}</tbody>
+      </table>` : `<div class="admin-empty">暂无反馈</div>`}
+    </div>`;
+}
+
+function renderUsers() {
+  return `<div class="admin-card">
+    <div class="admin-card-head"><h3>用户列表</h3><span class="badge badge-replied">共 ${usersData.length} 人</span></div>
+    ${usersData.length ? `<table class="admin-table">
+      <thead><tr><th>ID</th><th>账号</th><th>昵称</th><th>手机</th><th>邮箱</th><th>注册时间</th></tr></thead>
+      <tbody>${usersData.map(u => `<tr>
+        <td>${u.id}</td>
+        <td>${esc(u.account)}</td>
+        <td>${esc(u.name) || '-'}</td>
+        <td>${esc(u.phone) || '-'}</td>
+        <td>${esc(u.email) || '-'}</td>
+        <td style="white-space:nowrap">${u.created_at||''}</td>
+      </tr>`).join("")}</tbody>
+    </table>` : `<div class="admin-empty">暂无注册用户</div>`}
+  </div>`;
+}
+
+function renderFeedback() {
+  const statusMap = { pending: "待处理", replied: "已回复", resolved: "已解决" };
+  return `<div class="admin-card">
+    <div class="admin-card-head"><h3>问题与反馈</h3><span class="badge badge-pending">共 ${feedbackData.length} 条</span></div>
+    ${feedbackData.length ? `<table class="admin-table">
+      <thead><tr><th>用户</th><th>类型</th><th>标题</th><th>内容</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+      <tbody>${feedbackData.map(fb => `<tr id="fb-row-${fb.id}">
+        <td>${esc(fb.user_name || fb.user_account)}</td>
+        <td><span class="badge badge-type">${esc(fb.type)}</span></td>
+        <td>${esc(fb.title) || '-'}</td>
+        <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(fb.content)}">${esc(fb.content)}</td>
+        <td><span class="badge badge-${fb.status}">${statusMap[fb.status]||fb.status}</span></td>
+        <td style="white-space:nowrap">${fb.created_at||''}</td>
+        <td><button class="reply-btn" data-reply-id="${fb.id}">回复</button></td>
+      </tr>
+      <tr id="fb-reply-area-${fb.id}" style="display:none"><td colspan="7">
+        <div class="reply-area">
+          ${fb.admin_reply ? `<div style="color:var(--muted);font-size:12px">当前回复：${esc(fb.admin_reply)}</div>` : ''}
+          <textarea id="fb-reply-text-${fb.id}" placeholder="输入回复内容…">${esc(fb.admin_reply || '')}</textarea>
+          <div class="reply-actions">
+            <select id="fb-reply-status-${fb.id}">
+              <option value="replied" ${fb.status==='replied'?'selected':''}>已回复</option>
+              <option value="resolved" ${fb.status==='resolved'?'selected':''}>已解决</option>
+              <option value="pending" ${fb.status==='pending'?'selected':''}>待处理</option>
+            </select>
+            <button class="primary" data-save-id="${fb.id}">保存</button>
+            <button data-cancel-id="${fb.id}">取消</button>
+          </div>
+        </div>
+      </td></tr>`).join("")}</tbody>
+    </table>` : `<div class="admin-empty">暂无反馈</div>`}
+  </div>`;
+}
+
+function bindFeedbackReply() {
+  document.querySelectorAll("[data-reply-id]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.replyId;
+      const area = document.getElementById(`fb-reply-area-${id}`);
+      area.style.display = area.style.display === "none" ? "table-row" : "none";
+    });
+  });
+  document.querySelectorAll("[data-save-id]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.saveId;
+      const replyText = document.getElementById(`fb-reply-text-${id}`).value.trim();
+      const status = document.getElementById(`fb-reply-status-${id}`).value;
+      btn.disabled = true; btn.textContent = "保存中…";
+      try {
+        await api(`/admin/feedback/${id}`, { method: "PUT", body: { status, adminReply: replyText } });
+        const d = await api("/admin/feedback");
+        feedbackData = d.feedback || [];
+        document.getElementById("adminMain").innerHTML = renderFeedback();
+        bindFeedbackReply();
+      } catch (err) {
+        alert(err.message || "保存失败");
+      } finally {
+        btn.disabled = false; btn.textContent = "保存";
+      }
+    });
+  });
+  document.querySelectorAll("[data-cancel-id]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.cancelId;
+      document.getElementById(`fb-reply-area-${id}`).style.display = "none";
+    });
+  });
+}
+
+render();
+</script>
+</body>
+</html>

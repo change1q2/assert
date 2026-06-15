@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="个人精细化资产管理平台 — 统一多账户、多币种、三维归因分析" />
     <title>Wealth OS · 个人资产管理</title>
-    <link rel="stylesheet" href="./styles.css?v=wealth2" />
+    <link rel="stylesheet" href="./styles.css?v=wealth36" />
   </head>
   <body>
     <div id="app">
@@ -307,17 +307,40 @@
       <form id="financeAssetForm" method="dialog" class="modal-form finance-asset-form">
         <h2>新增理财资产</h2>
         <input name="assetId" type="hidden" />
-        <section class="finance-ocr-panel">
+        <section class="finance-ocr-panel" tabindex="0">
           <div class="finance-ocr-copy">
-            <strong>图片识别自动填写</strong>
-            <span>支持持仓截图、基金或股票资产凭证，识别后请核对数据。</span>
+            <strong>持仓图片识别</strong>
+            <span>列表图用于选择资产行，详情图仅识别持仓摘要和交易记录；支持分别上传或 Ctrl+V 粘贴。</span>
           </div>
-          <label class="finance-ocr-upload">上传图片
-            <input name="assetImage" type="file" accept="image/png,image/jpeg,image/webp" />
-          </label>
-          <button type="button" data-action="recognize-finance-image">识别并自动填写</button>
-          <img id="financeOcrPreview" alt="待识别资产图片预览" />
+          <div class="finance-ocr-kind-switch" role="tablist" aria-label="选择粘贴图片类型">
+            <button type="button" class="active" data-action="set-finance-ocr-kind" data-kind="list">列表识别</button>
+            <button type="button" data-action="set-finance-ocr-kind" data-kind="detail">详情识别</button>
+          </div>
+          <div class="finance-ocr-upload-grid">
+            <label class="finance-ocr-upload" data-ocr-kind="list">
+              <b>列表识别</b>
+              <span>上传持仓列表，可识别多行并选择一行</span>
+              <input name="assetImage" type="file" accept="image/png,image/jpeg,image/webp" />
+            </label>
+            <label class="finance-ocr-upload" data-ocr-kind="detail">
+              <b>详情识别</b>
+              <span>上传持仓明细，只读取顶部摘要和交易记录</span>
+              <input name="assetDetailImage" type="file" accept="image/png,image/jpeg,image/webp" />
+            </label>
+          </div>
+          <div class="finance-ocr-preview-grid">
+            <figure>
+              <figcaption>列表图片</figcaption>
+              <img id="financeOcrPreview" alt="待识别持仓列表图片预览" />
+            </figure>
+            <figure>
+              <figcaption>详情图片</figcaption>
+              <img id="financeOcrDetailPreview" alt="待识别持仓详情图片预览" />
+            </figure>
+          </div>
+          <button type="button" data-action="recognize-finance-image">识别图片并预览</button>
           <p id="financeOcrStatus" class="finance-ocr-status" role="status">尚未选择图片</p>
+          <div id="financeOcrTransactions" class="ocr-transaction-preview" hidden></div>
         </section>
         <label>市场
           <select name="market" required>
@@ -327,6 +350,7 @@
         </label>
         <label>货币单位
           <select name="currency" required></select>
+          <p id="financeCurrencyRate" class="finance-currency-rate"></p>
         </label>
         <label>资产类型
           <select name="kind" required>
@@ -369,8 +393,12 @@
         <label>资产名称
           <input name="name" required placeholder="基金、股票或自定义资产名称" />
         </label>
-        <label>资产代码
-          <input name="code" required placeholder="基金代码 / 股票代码 / 自定义编号" />
+        <label class="code-lookup-label" data-stock-only>资产代码
+          <span class="code-lookup-wrapper">
+            <input name="code" required placeholder="输入代码自动查询，如 600519 / 000001" autocomplete="off" />
+            <div id="codeLookupDropdown" class="code-lookup-dropdown" hidden></div>
+            <span id="codeLookupStatus" class="code-lookup-status"></span>
+          </span>
         </label>
         <label>持仓成本
           <input name="costPrice" type="number" step="0.0001" min="0" required />
@@ -378,9 +406,37 @@
         <label>份额 / 数量
           <input name="shares" type="number" step="0.0001" min="0" required />
         </label>
-        <label>浮动盈亏
-          <input name="pnl" type="number" step="0.01" value="0" required />
+        <label>现价
+          <input name="currentPrice" type="number" step="0.0001" min="0" />
         </label>
+        <label data-stock-only>买入均价
+          <input name="avgBuyPrice" type="number" step="0.0001" min="0" />
+        </label>
+        <label data-stock-only>持仓天数
+          <input name="holdingDays" type="number" step="1" min="0" />
+        </label>
+        <label data-stock-only class="stock-auto-field">个股仓位 (%)
+          <input name="positionWeight" type="number" step="0.01" min="0" max="100" />
+        </label>
+        <label data-stock-only class="stock-auto-field">税费合计
+          <input name="totalFees" type="number" step="0.01" min="0" value="0" />
+        </label>
+        <div class="form-group-row">
+          <label class="group-label">持仓盈亏
+            <div class="group-fields">
+              <input name="pnl" type="number" step="0.01" value="0" required placeholder="盈亏额" />
+              <input name="pnlPercent" type="number" step="0.01" placeholder="盈亏率%" />
+            </div>
+          </label>
+        </div>
+        <div class="form-group-row">
+          <label class="group-label">当日参考盈亏
+            <div class="group-fields">
+              <input name="todayPnl" type="number" step="0.01" value="0" placeholder="盈亏额" />
+              <input name="todayPnlPercent" type="number" step="0.01" placeholder="盈亏率%" />
+            </div>
+          </label>
+        </div>
         <label>当前价值
           <input name="currentValue" type="number" step="0.01" readonly />
         </label>
@@ -425,19 +481,13 @@
     <dialog id="goalsDialog">
       <form id="goalsForm" method="dialog" class="modal-form">
         <h2>编辑进度目标</h2>
-        <label>整体目标（元）
+        <label>终极目标（元）
           <input name="overall" type="number" step="1" min="0" required />
         </label>
-        <label>今年目标（元）
+        <label>本年目标（元）
           <input name="thisYear" type="number" step="1" min="0" required />
         </label>
-        <label>5年目标（元）
-          <input name="fiveYear" type="number" step="1" min="0" required />
-        </label>
-        <label>10年目标（元）
-          <input name="tenYear" type="number" step="1" min="0" required />
-        </label>
-        <label>年化目标收益率（%）
+        <label>目标年化收益率（%）
           <input name="annualizedRate" type="number" step="0.1" min="0" required />
         </label>
         <menu>
@@ -447,7 +497,137 @@
       </form>
     </dialog>
 
+    <dialog id="feeDetailDialog">
+      <div class="fee-detail-modal">
+        <h2>费用详情</h2>
+        <p id="feeDetailSubtitle" class="fee-detail-subtitle"></p>
+        <div id="feeDetailList" class="fee-detail-list"></div>
+        <menu>
+          <button value="cancel" type="button" id="cancelFeeDetail">关闭</button>
+        </menu>
+      </div>
+    </dialog>
+
+    <dialog id="feeConfigDialog">
+      <form id="feeConfigForm" method="dialog" class="modal-form fee-config-form">
+        <h2>编辑税费规则</h2>
+        <p class="fee-config-hint">修改后将按新费率重新计算所有 A 股股票的税费。</p>
+        <label>印花税率 (%)
+          <input name="stampDutyRate" type="number" step="0.001" min="0" required />
+        </label>
+        <p class="fee-config-note">国税局收取，卖出时按成交金额的百分比收取</p>
+        <label>佣金费率 (%)
+          <input name="commissionRate" type="number" step="0.001" min="0" required />
+        </label>
+        <p class="fee-config-note">包含净佣金、手续费、证管费等</p>
+        <label>佣金最低收费 (元)
+          <input name="commissionMin" type="number" step="0.1" min="0" required />
+        </label>
+        <label>沪市过户费率 (%)
+          <input name="transferFeeRateSH" type="number" step="0.001" min="0" required />
+        </label>
+        <p class="fee-config-note">沪市单独收取</p>
+        <label>深市过户费率 (%)
+          <input name="transferFeeRateSZ" type="number" step="0.001" min="0" required />
+        </label>
+        <p class="fee-config-note">深市京市通常包含在佣金内收取</p>
+        <label>股息红利税率 (%)
+          <input name="dividendTaxRate" type="number" step="0.001" min="0" required />
+        </label>
+        <p class="fee-config-note">国税局收取，卖出已分红的股份后收取</p>
+        <menu>
+          <button value="cancel" type="button" id="cancelFeeConfig">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="holdingDetailDialog">
+      <div class="holding-detail-modal">
+        <div class="holding-detail-header">
+          <h2 id="holdingDetailTitle"></h2>
+          <div class="holding-detail-actions">
+            <button type="button" class="holding-detail-edit" id="editHoldingAsset" title="编辑资产">编辑</button>
+            <button type="button" class="holding-detail-close" id="closeHoldingDetail">&times;</button>
+          </div>
+        </div>
+        <div class="holding-tabs">
+          <button class="holding-tab active" data-tab="holding">持仓</button>
+          <button class="holding-tab" data-tab="trade">交易记录</button>
+          <button class="holding-tab" data-tab="fee">税费</button>
+        </div>
+        <div id="holdingTabContent" class="holding-tab-content"></div>
+      </div>
+    </dialog>
+
+    <dialog id="klineChartDialog">
+      <div class="kline-chart-modal">
+        <div class="kline-chart-header">
+          <div class="kline-chart-title">
+            <h2 id="klineChartTitle"></h2>
+            <span id="klineChartSubtitle" class="kline-chart-subtitle"></span>
+          </div>
+          <div class="kline-chart-price" id="klineChartPrice"></div>
+        </div>
+        <div class="kline-time-tabs" id="klineTimeTabs">
+          <button type="button" data-range="3m">3月</button>
+          <button type="button" data-range="6m" class="active">6月</button>
+          <button type="button" data-range="1y">1年</button>
+          <button type="button" data-range="all">全部</button>
+        </div>
+        <div class="kline-chart-container" id="klineChartContainer">
+          <div class="kline-loading" id="klineLoading">加载K线数据...</div>
+        </div>
+        <div class="kline-chart-legend" id="klineChartLegend">
+          <span class="kline-legend-item kline-ma5">MA5</span>
+          <span class="kline-legend-item kline-ma10">MA10</span>
+          <span class="kline-legend-item kline-ma20">MA20</span>
+          <span class="kline-legend-item kline-buy">▲ 买入</span>
+          <span class="kline-legend-item kline-sell">▼ 卖出</span>
+          <span class="kline-legend-item kline-t">T 做T</span>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="tradeRecordDialog">
+      <form id="tradeRecordForm" method="dialog" class="modal-form">
+        <h2 id="tradeRecordTitle">添加交易记录</h2>
+        <input name="assetId" type="hidden" />
+        <label>交易方向
+          <select name="direction" required>
+            <option value="buy">买入</option>
+            <option value="sell">卖出</option>
+          </select>
+        </label>
+        <label>交易日期
+          <input name="date" type="date" required />
+        </label>
+        <label>数量（股/份）
+          <input name="shares" type="number" step="0.0001" min="0.0001" required />
+        </label>
+        <label>价格
+          <input name="price" type="number" step="0.001" min="0" required />
+        </label>
+        <label>金额
+          <input name="amount" type="number" step="0.01" readonly />
+        </label>
+        <label>佣金
+          <input name="commission" type="number" step="0.01" min="0" value="0" />
+        </label>
+        <label>印花税
+          <input name="stampDuty" type="number" step="0.01" min="0" value="0" />
+        </label>
+        <label>过户费
+          <input name="transferFee" type="number" step="0.01" min="0" value="0" />
+        </label>
+        <menu>
+          <button value="cancel" type="button" id="cancelTradeRecord">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
     <script src="./vendor/tesseract.min.js?v=5.1.1"></script>
-    <script src="./app.js?v=wealth2"></script>
+    <script src="./app.js?v=wealth36"></script>
   </body>
 </html>

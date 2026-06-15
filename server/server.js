@@ -22,7 +22,33 @@ const pool = mysql.createPool({
 
 // Initialize database schema
 const schemaSql = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
-const initDb = pool.query(schemaSql).then(() => {
+const initDb = pool.query(schemaSql).then(async () => {
+  // Ensure fee_config_json column exists on user_settings (safe migration)
+  try {
+    await pool.query("ALTER TABLE user_settings ADD COLUMN fee_config_json JSON AFTER finance_asset_draft_json");
+    console.log("Added fee_config_json column to user_settings");
+  } catch (_) { /* column already exists */ }
+  try {
+    await pool.query("ALTER TABLE user_settings ADD COLUMN overview_goals_json JSON AFTER fee_config_json");
+    console.log("Added overview_goals_json column to user_settings");
+  } catch (_) { /* column already exists */ }
+  const financeAssetColumns = [
+    ["available_shares", "DOUBLE NOT NULL DEFAULT 0 AFTER shares"],
+    ["current_price", "DOUBLE NOT NULL DEFAULT 0 AFTER available_shares"],
+    ["pnl_percent", "DOUBLE NOT NULL DEFAULT 0 AFTER pnl"],
+    ["avg_buy_price", "DOUBLE NOT NULL DEFAULT 0 AFTER pnl_percent"],
+    ["holding_days", "DOUBLE NOT NULL DEFAULT 0 AFTER avg_buy_price"],
+    ["position_weight", "DOUBLE NOT NULL DEFAULT 0 AFTER holding_days"],
+    ["total_fees", "DOUBLE NOT NULL DEFAULT 0 AFTER position_weight"],
+    ["today_pnl", "DOUBLE NOT NULL DEFAULT 0 AFTER total_fees"],
+    ["today_pnl_percent", "DOUBLE NOT NULL DEFAULT 0 AFTER today_pnl"],
+  ];
+  for (const [column, definition] of financeAssetColumns) {
+    try {
+      await pool.query(`ALTER TABLE finance_assets ADD COLUMN ${column} ${definition}`);
+      console.log(`Added ${column} column to finance_assets`);
+    } catch (_) { /* column already exists */ }
+  }
   console.log("MySQL schema initialized");
 }).catch((err) => {
   console.error("Failed to initialize MySQL schema:", err.message);
@@ -356,6 +382,52 @@ async function authenticatedUser(req) {
   return row ? { ...row, tokenHash } : null;
 }
 
+async function authenticatedAdmin(req) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (!token) return null;
+  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  // Check admin session first
+  const adminRow = await sqlGet(pool, `
+    SELECT admin_users.id, admin_users.username
+    FROM admin_sessions JOIN admin_users ON admin_users.id = admin_sessions.admin_id
+    WHERE admin_sessions.token_hash = ? AND admin_sessions.expires_at > ?
+  `, [tokenHash, fmtDt(new Date())]);
+  if (adminRow) return { ...adminRow, tokenHash };
+  // Fallback: check if this is a user token belonging to an admin user
+  const userRow = await sqlGet(pool, `
+    SELECT users.id, users.account
+    FROM sessions JOIN users ON users.id = sessions.user_id
+    WHERE sessions.token_hash = ? AND sessions.expires_at > ?
+  `, [tokenHash, fmtDt(new Date())]);
+  if (userRow) {
+    const isAdmin = await sqlGet(pool, "SELECT id FROM admin_users WHERE username = ?", [userRow.account]);
+    if (isAdmin) return { id: isAdmin.id, username: userRow.account, tokenHash };
+  }
+  return null;
+}
+
+async function ensureDefaultAdmin() {
+  const existing = await sqlGet(pool, "SELECT id FROM admin_users WHERE username = ?", ["admin"]);
+  if (!existing) {
+    const password = process.env.ADMIN_PASSWORD || "admin123";
+    const hash = hashPassword(password);
+    // Create user account for unified login
+    const userExists = await sqlGet(pool, "SELECT id FROM users WHERE account = ?", ["admin"]);
+    let userId;
+    if (!userExists) {
+      const result = await sqlRun(pool, "INSERT INTO users (account, password_hash) VALUES (?, ?)", ["admin", hash]);
+      userId = result.insertId;
+      await sqlRun(pool, "INSERT INTO user_profiles (user_id, name, phone) VALUES (?, ?, ?)", [userId, "管理员", ""]);
+      console.log("Default admin user account created (account: admin)");
+    } else {
+      userId = userExists.id;
+    }
+    await sqlRun(pool, "INSERT INTO admin_users (username, password_hash) VALUES (?, ?)", ["admin", hash]);
+    console.log("Default admin entry created (username: admin)");
+  }
+}
+
 function defaultState(profile) {
   const baseClasses = [
     ["cashClass", "现金类", ["活期", "货币基金"], "#539f8d"],
@@ -460,11 +532,33 @@ async function loadUserState(userId) {
   const budgets = (await sqlAll(pool, "SELECT * FROM budgets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: numericIfPossible(row.id), name: row.name, category: row.category, amount: row.amount, used: row.used,
   }));
+  const transactionRows = await sqlAll(pool, "SELECT * FROM finance_asset_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
+  const transactionsByAsset = new Map();
+  transactionRows.forEach((row) => {
+    const rows = transactionsByAsset.get(String(row.asset_id)) || [];
+    rows.push({
+      id: numericIfPossible(row.id),
+      direction: row.direction,
+      date: row.transaction_date,
+      shares: row.shares,
+      price: row.price,
+      amount: row.amount,
+      commission: row.commission,
+      stampDuty: row.stamp_duty,
+      transferFee: row.transfer_fee,
+    });
+    transactionsByAsset.set(String(row.asset_id), rows);
+  });
   const financeAssets = (await sqlAll(pool, "SELECT * FROM finance_assets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: numericIfPossible(row.id), kind: row.kind, accountId: row.account_id, category: row.category,
     subcategory: row.subcategory, tertiaryCategory: row.tertiary_category, market: row.market,
     currency: row.currency, name: row.name, code: row.code, positionGroup: row.position_group,
-    positionCategory: row.position_category, costPrice: row.cost_price, shares: row.shares, pnl: row.pnl,
+    positionCategory: row.position_category, costPrice: row.cost_price, shares: row.shares,
+    availableShares: row.available_shares, currentPrice: row.current_price, pnl: row.pnl,
+    pnlPercent: row.pnl_percent, avgBuyPrice: row.avg_buy_price, holdingDays: row.holding_days,
+    positionWeight: row.position_weight, totalFees: row.total_fees, todayPnl: row.today_pnl,
+    todayPnlPercent: row.today_pnl_percent,
+    transactions: transactionsByAsset.get(String(row.id)) || [],
   }));
   const customRecords = { income: [], expense: [], transfer: [] };
   (await sqlAll(pool, "SELECT record_type, name FROM custom_record_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
@@ -500,7 +594,7 @@ async function loadUserState(userId) {
     allocation: maybeParseJson(row.allocation_json), debtLimit: row.debt_limit,
     annualReturn: row.annual_return, risk: row.risk,
   }));
-  const settings = await sqlGet(pool, "SELECT finance_asset_draft_json FROM user_settings WHERE user_id = ?", [userId]);
+  const settings = await sqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json FROM user_settings WHERE user_id = ?", [userId]);
   return {
     user: profile,
     rates,
@@ -516,6 +610,8 @@ async function loadUserState(userId) {
     debts: resolvedDebts,
     strategies,
     financeAssetDraft: settings ? maybeParseJson(settings.finance_asset_draft_json) : {},
+    feeConfig: settings ? maybeParseJson(settings.fee_config_json) : undefined,
+    overviewGoals: settings ? maybeParseJson(settings.overview_goals_json) : undefined,
   };
 }
 
@@ -533,7 +629,7 @@ async function saveUserState(conn, userId, state) {
     text(user.privacyLock || "已开启"), text(user.dataMask || "已开启"), text(user.deviceName), userId]);
 
   const tables = [
-    "exchange_rates", "accounts", "asset_classes", "records", "budgets", "finance_assets",
+    "exchange_rates", "accounts", "asset_classes", "records", "budgets", "finance_asset_transactions", "finance_assets",
     "custom_record_categories", "finance_tertiary_categories", "record_tags", "recorders",
     "reminders", "debt_payments", "debts", "strategies", "user_settings",
   ];
@@ -580,12 +676,22 @@ async function saveUserState(conn, userId, state) {
 
   for (const [index, row] of (state.financeAssets || []).entries()) {
     await sqlRun(conn, `INSERT INTO finance_assets
-      (user_id, id, kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, pnl, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, id, kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, text(row.id), text(row.kind), text(row.accountId), text(row.category),
        text(row.subcategory), text(row.tertiaryCategory), text(row.market), text(row.currency),
        text(row.name), text(row.code), text(row.positionGroup), text(row.positionCategory),
-       number(row.costPrice), number(row.shares), number(row.pnl), index]);
+       number(row.costPrice), number(row.shares), number(row.availableShares), number(row.currentPrice),
+       number(row.pnl), number(row.pnlPercent), number(row.avgBuyPrice), number(row.holdingDays),
+       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), index]);
+    for (const [transactionIndex, transaction] of (row.transactions || []).entries()) {
+      await sqlRun(conn, `INSERT INTO finance_asset_transactions
+        (user_id, asset_id, id, direction, transaction_date, shares, price, amount, commission, stamp_duty, transfer_fee, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [userId, text(row.id), text(transaction.id || `${row.id}-${transactionIndex}`), text(transaction.direction),
+         text(transaction.date), number(transaction.shares), number(transaction.price), number(transaction.amount),
+         number(transaction.commission), number(transaction.stampDuty), number(transaction.transferFee), transactionIndex]);
+    }
   }
 
   let catOrder = 0;
@@ -640,8 +746,9 @@ async function saveUserState(conn, userId, state) {
       [userId, Number(row.id), text(row.name), row.active ? 1 : 0, text(row.target),
        JSON.stringify(row.allocation || []), number(row.debtLimit), number(row.annualReturn), text(row.risk)]);
   }
-  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json) VALUES (?, ?)",
-    [userId, JSON.stringify(state.financeAssetDraft || {})]);
+  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json) VALUES (?, ?, ?, ?)",
+    [userId, JSON.stringify(state.financeAssetDraft || {}), JSON.stringify(state.feeConfig || {}),
+     JSON.stringify(state.overviewGoals || {})]);
 }
 
 async function createUser({ account, password, name, phone, email, currency }) {
@@ -665,10 +772,13 @@ async function createUser({ account, password, name, phone, email, currency }) {
 }
 
 async function authPayload(userId) {
+  const user = await profileForUser(userId);
+  const adminRow = await sqlGet(pool, "SELECT id FROM admin_users WHERE username = ?", [user.account]);
   return {
     token: await issueToken(userId),
-    user: await profileForUser(userId),
+    user,
     state: await loadUserState(userId),
+    isAdmin: !!adminRow,
   };
 }
 
@@ -831,8 +941,99 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, await authPayload(user.id), origin);
       return;
     }
+
+    // ─── Admin Login (public) ───
+    if (req.method === "POST" && url.pathname === "/api/admin/login") {
+      const body = await readBody(req);
+      const username = text(body.username).trim();
+      const password = text(body.password);
+      if (!username || !password) {
+        json(res, 400, { message: "请输入用户名和密码。" }, origin);
+        return;
+      }
+      const admin = await sqlGet(pool, "SELECT * FROM admin_users WHERE username = ?", [username]);
+      if (!admin || !verifyPassword(password, admin.password_hash)) {
+        json(res, 401, { message: "管理员账号或密码错误。" }, origin);
+        return;
+      }
+      const token = crypto.randomBytes(32).toString("base64url");
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+      const expiresAt = fmtDt(new Date(Date.now() + TOKEN_TTL_DAYS * 86400000));
+      await sqlRun(pool, "INSERT INTO admin_sessions (token_hash, admin_id, expires_at) VALUES (?, ?, ?)", [tokenHash, admin.id, expiresAt]);
+      json(res, 200, { token, admin: { id: admin.id, username: admin.username } }, origin);
+      return;
+    }
+
     if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
       serveStatic(url, res);
+      return;
+    }
+
+    // ─── Admin Dashboard (admin auth) ───
+    if (url.pathname.startsWith("/api/admin/")) {
+      const admin = await authenticatedAdmin(req);
+      if (!admin) {
+        json(res, 401, { message: "管理员登录已失效。" }, origin);
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/admin/logout") {
+        await sqlRun(pool, "DELETE FROM admin_sessions WHERE token_hash = ?", [admin.tokenHash]);
+        json(res, 200, { ok: true }, origin);
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/admin/dashboard") {
+        const [totalUsers] = await pool.execute("SELECT COUNT(*) AS cnt FROM users");
+        const [todayUsers] = await pool.execute("SELECT COUNT(*) AS cnt FROM users WHERE DATE(created_at) = CURDATE()");
+        const [pendingFeedback] = await pool.execute("SELECT COUNT(*) AS cnt FROM feedback WHERE status = 'pending'");
+        json(res, 200, {
+          stats: {
+            totalUsers: totalUsers[0].cnt,
+            todayUsers: todayUsers[0].cnt,
+            pendingFeedback: pendingFeedback[0].cnt,
+          },
+        }, origin);
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/admin/users") {
+        const rows = await sqlAll(pool, `
+          SELECT u.id, u.account, u.created_at,
+            COALESCE(up.name, '') AS name,
+            COALESCE(up.phone, '') AS phone,
+            COALESCE(up.email, '') AS email
+          FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id
+          ORDER BY u.created_at DESC
+        `);
+        json(res, 200, { users: rows }, origin);
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/admin/feedback") {
+        const rows = await sqlAll(pool, `
+          SELECT f.*, COALESCE(up.name, '') AS user_name, COALESCE(u.account, '') AS user_account
+          FROM feedback f
+          LEFT JOIN user_profiles up ON up.user_id = f.user_id
+          LEFT JOIN users u ON u.id = f.user_id
+          ORDER BY f.created_at DESC
+        `);
+        json(res, 200, { feedback: rows }, origin);
+        return;
+      }
+      if (req.method === "PUT" && url.pathname.startsWith("/api/admin/feedback/")) {
+        const id = parseInt(url.pathname.split("/").pop(), 10);
+        const body = await readBody(req);
+        const status = text(body.status).trim();
+        const adminReply = text(body.adminReply).trim();
+        if (!["pending", "replied", "resolved"].includes(status)) {
+          json(res, 400, { message: "无效状态。" }, origin);
+          return;
+        }
+        await sqlRun(pool,
+          "UPDATE feedback SET status = ?, admin_reply = ?, replied_at = ? WHERE id = ?",
+          [status, adminReply, status !== "pending" ? fmtDt(new Date()) : null, id]
+        );
+        json(res, 200, { ok: true }, origin);
+        return;
+      }
+      json(res, 404, { message: "管理接口不存在。" }, origin);
       return;
     }
 
@@ -870,6 +1071,312 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { ok: true, updatedAt: new Date().toISOString() }, origin);
       return;
     }
+
+    // ─── Finance asset code lookup (authenticated user) ───
+    if (req.method === "GET" && url.pathname === "/api/finance/lookup") {
+      const q = (url.searchParams.get("q") || "").trim();
+      if (!q) {
+        json(res, 200, { items: [] }, origin);
+        return;
+      }
+      const normalizedQuery = q.trim().toUpperCase();
+      const localInstruments = [
+        { code: "XAU", name: "现货黄金", classify: "Commodity", typeName: "贵金属", marketType: "overseas", mktNum: "" },
+        { code: "XAG", name: "现货白银", classify: "Commodity", typeName: "贵金属", marketType: "overseas", mktNum: "" },
+        { code: "WTI", name: "WTI原油", classify: "Commodity", typeName: "原油", marketType: "overseas", mktNum: "" },
+        { code: "BRENT", name: "布伦特原油", classify: "Commodity", typeName: "原油", marketType: "overseas", mktNum: "" },
+        { code: "AU", name: "沪金", classify: "Futures", typeName: "国内期货", marketType: "domestic", mktNum: "" },
+        { code: "AG", name: "沪银", classify: "Futures", typeName: "国内期货", marketType: "domestic", mktNum: "" },
+        { code: "BTC", name: "比特币", classify: "Crypto", typeName: "加密货币", marketType: "overseas", mktNum: "" },
+        { code: "ETH", name: "以太坊", classify: "Crypto", typeName: "加密货币", marketType: "overseas", mktNum: "" },
+        { code: "USDT", name: "泰达币", classify: "Crypto", typeName: "稳定币", marketType: "overseas", mktNum: "" },
+        { code: "USDC", name: "USD Coin", classify: "Crypto", typeName: "稳定币", marketType: "overseas", mktNum: "" },
+      ];
+      const localItems = localInstruments.filter((item) =>
+        item.code.includes(normalizedQuery)
+        || item.name.toUpperCase().includes(normalizedQuery));
+      try {
+        const searchUrl = `https://searchapi.eastmoney.com/api/suggest/get?input=${encodeURIComponent(q)}&type=14&token=D43BF722C8E33BDC906FB84D85E326E8&count=10`;
+        const searchRes = await fetch(searchUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          signal: AbortSignal.timeout(8000),
+        });
+        const searchData = await searchRes.json();
+        const rows = searchData?.QuotationCodeTable?.Data || [];
+        const items = rows
+          .filter((r) => ["AStock", "OTCFUND", "ETF", "Index", "HK", "UsStock", "UsADR"].includes(r.Classify))
+          .slice(0, 8)
+          .map((r) => ({
+            code: r.Code,
+            name: r.Name,
+            classify: r.Classify,
+            typeName: r.SecurityTypeName,
+            marketType: r.MarketType,
+            mktNum: r.MktNum,
+            jys: r.JYS || "",
+          }));
+        for (const item of localItems) {
+          if (!items.some((entry) => entry.code === item.code && entry.classify === item.classify)) items.push(item);
+        }
+
+        // ── Build Tencent Finance price queries ──
+        const tencentQueries = []; // { tencentCode, itemIndex }
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          let tencentCode = null;
+          if (it.marketType === "1") {
+            // Shanghai A-share
+            tencentCode = "sh" + it.code;
+          } else if (it.marketType === "2") {
+            // Shenzhen A-share
+            tencentCode = "sz" + it.code;
+          } else if (it.classify === "HK" || it.mktNum === "116") {
+            // Hong Kong - 5-digit zero-padded
+            const hkCode = it.code.padStart(5, "0");
+            tencentCode = "hk" + hkCode;
+          } else if (it.classify === "UsStock" || it.classify === "UsADR" || ["105", "106", "107"].includes(it.mktNum)) {
+            // US stocks - uppercase ticker
+            tencentCode = "us" + it.code.toUpperCase();
+          }
+          if (tencentCode) {
+            tencentQueries.push({ tencentCode, index: i });
+          }
+        }
+
+        // ── Fetch prices via Tencent Finance (GBK encoded, ~ separated) ──
+        if (tencentQueries.length) {
+          try {
+            const queryStr = tencentQueries.map((q) => q.tencentCode).join(",");
+            const priceUrl = `http://qt.gtimg.cn/q=${queryStr}`;
+            const priceRes = await fetch(priceUrl, {
+              headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+              signal: AbortSignal.timeout(6000),
+            });
+            const priceBuf = Buffer.from(await priceRes.arrayBuffer());
+            const priceText = new TextDecoder("gbk").decode(priceBuf);
+            const priceMap = new Map();
+            // Tencent responses may be separated by ; or newlines
+            const segments = priceText.split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
+            for (const segment of segments) {
+              const match = segment.match(/v_(\w+)="(.*)"/);
+              if (!match || !match[2]) continue;
+              const fullCode = match[1];
+              const parts = match[2].split("~");
+              if (parts.length > 32) {
+                const price = parseFloat(parts[3]) || null;
+                const changePct = parseFloat(parts[32]) || null;
+                const changeAmt = parseFloat(parts[31]) || null;
+                priceMap.set(fullCode, { price, changePct, changeAmt });
+              }
+            }
+            for (const { tencentCode, index } of tencentQueries) {
+              const pm = priceMap.get(tencentCode);
+              if (pm) {
+                items[index].price = pm.price;
+                items[index].changePct = pm.changePct;
+                items[index].changeAmt = pm.changeAmt;
+              }
+            }
+          } catch (_) { /* price fetch is best-effort */ }
+        }
+
+        // ── For items still without price, try Sina Finance as fallback ──
+        const sinaQueries = [];
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].price != null) continue;
+          const it = items[i];
+          let sinaCode = null;
+          if (it.classify === "HK" || it.mktNum === "116") {
+            sinaCode = "hk" + it.code.padStart(5, "0");
+          } else if (it.classify === "UsStock" || it.classify === "UsADR" || ["105", "106", "107"].includes(it.mktNum)) {
+            sinaCode = "gb_" + it.code.toLowerCase();
+          }
+          if (sinaCode) sinaQueries.push({ sinaCode, index: i });
+        }
+        if (sinaQueries.length) {
+          try {
+            const queryStr = sinaQueries.map((q) => q.sinaCode).join(",");
+            const sinaUrl = `https://hq.sinajs.cn/list=${queryStr}`;
+            const sinaRes = await fetch(sinaUrl, {
+              headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn" },
+              signal: AbortSignal.timeout(5000),
+            });
+            const sinaBuf = Buffer.from(await sinaRes.arrayBuffer());
+            const sinaText = new TextDecoder("gbk").decode(sinaBuf);
+            for (const line of sinaText.split("\n")) {
+              const match = line.match(/var hq_str_(\w+)="(.*)"/);
+              if (!match || !match[2]) continue;
+              const code = match[1];
+              const fields = match[2].split(",");
+              let price = null, changePct = null, changeAmt = null;
+              if (code.startsWith("hk") && fields.length > 8) {
+                price = parseFloat(fields[6]) || null;
+                changePct = parseFloat(fields[8]) || null;
+                changeAmt = parseFloat(fields[7]) || null;
+              } else if (code.startsWith("gb_") && fields.length > 4) {
+                price = parseFloat(fields[1]) || null;
+                changePct = parseFloat(fields[2]) || null;
+                changeAmt = parseFloat(fields[4]) || null;
+              }
+              const sq = sinaQueries.find((q) => q.sinaCode === code);
+              if (sq && price != null) {
+                items[sq.index].price = price;
+                items[sq.index].changePct = changePct;
+                items[sq.index].changeAmt = changeAmt;
+              }
+            }
+          } catch (_) { /* Sina fallback is best-effort */ }
+        }
+
+        json(res, 200, { items: items.slice(0, 10) }, origin);
+      } catch (err) {
+        json(res, 200, { items: localItems, error: err.message }, origin);
+      }
+      return;
+    }
+
+    // ─── Tencent code helper ───
+    function tencentCodeFor(code, market) {
+      code = String(code || "").trim();
+      if (!code) return null;
+      market = String(market || "").toLowerCase();
+      if (market === "domestic" || /^sh/i.test(code)) {
+        const raw = code.replace(/^(sh|sz)/i, "");
+        return (raw.startsWith("6") || raw.startsWith("9")) ? "sh" + raw : "sz" + raw;
+      }
+      if (market === "hk" || /^hk/i.test(code) || /^0[0-9]{4}$/.test(code)) {
+        return "hk" + code.replace(/^hk/i, "").padStart(5, "0");
+      }
+      if (market === "us" || /^us/i.test(code)) {
+        return "us" + code.replace(/^us/i, "").toUpperCase();
+      }
+      // Auto-detect A-share
+      if (code.startsWith("6") || code.startsWith("9")) return "sh" + code;
+      if (/^[03]/.test(code)) return "sz" + code;
+      return null;
+    }
+
+    // ─── Real-time stock quotes (authenticated user) ───
+    if (req.method === "POST" && url.pathname === "/api/finance/quotes") {
+      const body = await readBody(req);
+      const codes = Array.isArray(body.codes) ? body.codes : [];
+      if (!codes.length) {
+        json(res, 200, { quotes: [] }, origin);
+        return;
+      }
+      // Build Tencent Finance query codes
+      const queryItems = []; // { tencentCode, index, code }
+      for (let i = 0; i < codes.length; i++) {
+        const tc = tencentCodeFor(codes[i].code, codes[i].market);
+        if (tc) queryItems.push({ tencentCode: tc, index: i, code: codes[i].code });
+      }
+      const results = codes.map((item) => ({
+        code: item.code,
+        price: null,
+        changePct: null,
+        changeAmt: null,
+        prevClose: null,
+        high: null,
+        low: null,
+        volume: null,
+        name: null,
+      }));
+      if (queryItems.length) {
+        try {
+          const queryStr = queryItems.map((q) => q.tencentCode).join(",");
+          const priceUrl = `http://qt.gtimg.cn/q=${queryStr}`;
+          const priceRes = await fetch(priceUrl, {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+            signal: AbortSignal.timeout(8000),
+          });
+          const priceBuf = Buffer.from(await priceRes.arrayBuffer());
+          const priceText = new TextDecoder("gbk").decode(priceBuf);
+          const priceMap = new Map();
+          const segments = priceText.split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
+          for (const segment of segments) {
+            const match = segment.match(/v_(\w+)="(.*)"/);
+            if (!match || !match[2]) continue;
+            const fullCode = match[1];
+            const parts = match[2].split("~");
+            if (parts.length > 32) {
+              priceMap.set(fullCode, {
+                name: parts[1] || null,
+                price: parseFloat(parts[3]) || null,
+                prevClose: parseFloat(parts[4]) || null,
+                changePct: parseFloat(parts[32]) || null,
+                changeAmt: parseFloat(parts[31]) || null,
+                high: parseFloat(parts[33]) || null,
+                low: parseFloat(parts[34]) || null,
+                volume: parseFloat(parts[36]) || null,
+              });
+            }
+          }
+          for (const { tencentCode, index } of queryItems) {
+            const pm = priceMap.get(tencentCode);
+            if (pm) {
+              results[index] = { ...results[index], ...pm };
+            }
+          }
+        } catch (_) { /* best-effort */ }
+      }
+      json(res, 200, { quotes: results }, origin);
+      return;
+    }
+
+    // ─── K-line historical data (authenticated user) ───
+    if (req.method === "GET" && url.pathname === "/api/finance/kline") {
+      const code = url.searchParams.get("code") || "";
+      const market = url.searchParams.get("market") || "domestic";
+      const start = url.searchParams.get("start") || "";
+      const end = url.searchParams.get("end") || "";
+      const count = url.searchParams.get("count") || "320";
+      const tc = tencentCodeFor(code, market);
+      if (!tc) {
+        json(res, 400, { error: "unsupported code" }, origin);
+        return;
+      }
+      try {
+        const upstream = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tc},day,${start},${end},${count},qfq`;
+        const resp = await fetch(upstream, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          signal: AbortSignal.timeout(10000),
+        });
+        const data = await resp.json();
+        const stockData = data?.data?.[tc];
+        const kline = stockData?.qfqday || stockData?.day || [];
+        json(res, 200, { kline, code: tc }, origin);
+      } catch (err) {
+        json(res, 502, { error: "K-line data unavailable", detail: err.message }, origin);
+      }
+      return;
+    }
+
+    // ─── Feedback (authenticated user) ───
+    if (req.method === "POST" && url.pathname === "/api/feedback") {
+      const body = await readBody(req);
+      const type = text(body.type).trim() || "问题";
+      const title = text(body.title).trim();
+      const content = text(body.content).trim();
+      if (!content) {
+        json(res, 400, { message: "请输入反馈内容。" }, origin);
+        return;
+      }
+      const result = await sqlRun(pool,
+        "INSERT INTO feedback (user_id, type, title, content) VALUES (?, ?, ?, ?)",
+        [currentUser.id, type, title, content]
+      );
+      json(res, 201, { id: result.insertId, ok: true }, origin);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/feedback") {
+      const rows = await sqlAll(pool,
+        "SELECT f.*, up.name AS user_name FROM feedback f LEFT JOIN user_profiles up ON up.user_id = f.user_id WHERE f.user_id = ? ORDER BY f.created_at DESC",
+        [currentUser.id]
+      );
+      json(res, 200, { feedback: rows }, origin);
+      return;
+    }
+
     if (url.pathname.startsWith("/api/")) {
       json(res, 404, { message: "接口不存在。" }, origin);
       return;
@@ -882,7 +1389,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, "0.0.0.0", async () => {
   console.log(`Asset Platform API listening on 0.0.0.0:${PORT} (MySQL)`);
   void refreshPremiumMarketInBackground();
+  try { await initDb; await ensureDefaultAdmin(); } catch (e) { console.error("Admin init error:", e.message); }
 });

@@ -135,12 +135,39 @@ CREATE TABLE IF NOT EXISTS finance_assets (
   position_category VARCHAR(255) NOT NULL DEFAULT '',
   cost_price DOUBLE NOT NULL DEFAULT 0,
   shares DOUBLE NOT NULL DEFAULT 0,
+  available_shares DOUBLE NOT NULL DEFAULT 0,
+  current_price DOUBLE NOT NULL DEFAULT 0,
   pnl DOUBLE NOT NULL DEFAULT 0,
+  pnl_percent DOUBLE NOT NULL DEFAULT 0,
+  avg_buy_price DOUBLE NOT NULL DEFAULT 0,
+  holding_days DOUBLE NOT NULL DEFAULT 0,
+  position_weight DOUBLE NOT NULL DEFAULT 0,
+  total_fees DOUBLE NOT NULL DEFAULT 0,
+  today_pnl DOUBLE NOT NULL DEFAULT 0,
+  today_pnl_percent DOUBLE NOT NULL DEFAULT 0,
   sort_order INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (user_id, id),
   INDEX idx_finance_assets_user_account (user_id, account_id),
   INDEX idx_finance_assets_user_kind (user_id, kind),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS finance_asset_transactions (
+  user_id INTEGER NOT NULL,
+  asset_id VARCHAR(255) NOT NULL,
+  id VARCHAR(255) NOT NULL,
+  direction VARCHAR(20) NOT NULL,
+  transaction_date VARCHAR(20) NOT NULL,
+  shares DOUBLE NOT NULL DEFAULT 0,
+  price DOUBLE NOT NULL DEFAULT 0,
+  amount DOUBLE NOT NULL DEFAULT 0,
+  commission DOUBLE NOT NULL DEFAULT 0,
+  stamp_duty DOUBLE NOT NULL DEFAULT 0,
+  transfer_fee DOUBLE NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, asset_id, id),
+  INDEX idx_finance_transactions_user_asset (user_id, asset_id),
+  FOREIGN KEY (user_id, asset_id) REFERENCES finance_assets(user_id, id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS custom_record_categories (
@@ -237,5 +264,37 @@ CREATE TABLE IF NOT EXISTS strategies (
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id INTEGER PRIMARY KEY,
   finance_asset_draft_json JSON NOT NULL,
+  fee_config_json JSON,
+  overview_goals_json JSON,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS feedback (
+  id INTEGER PRIMARY KEY AUTO_INCREMENT,
+  user_id INTEGER NOT NULL,
+  type VARCHAR(50) NOT NULL DEFAULT '问题',
+  title VARCHAR(255) NOT NULL DEFAULT '',
+  content TEXT NOT NULL,
+  status VARCHAR(50) NOT NULL DEFAULT 'pending',
+  admin_reply TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  replied_at DATETIME,
+  INDEX idx_feedback_user (user_id),
+  INDEX idx_feedback_status (status),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS admin_users (
+  id INTEGER PRIMARY KEY AUTO_INCREMENT,
+  username VARCHAR(255) NOT NULL UNIQUE,
+  password_hash VARCHAR(512) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  token_hash VARCHAR(255) PRIMARY KEY,
+  admin_id INTEGER NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (admin_id) REFERENCES admin_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

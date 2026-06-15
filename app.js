@@ -73,11 +73,17 @@ const seed = {
     { id: 3, kind: "custom", accountId: "cash", category: "商品类", market: "domestic", name: "黄金定投", code: "AU", costPrice: 520, shares: 80, pnl: 2200 },
   ],
   customCategories: { records: { income: [], expense: [], transfer: [] }, finance: [] },
+  feeConfig: {
+    stampDutyRate: 0.05,       // 印花税率 (%)，卖出时收取
+    commissionRate: 0.025,     // 佣金费率 (%)，含净佣金+手续费+证管费
+    commissionMin: 5,          // 佣金最低收费 (元)
+    transferFeeRateSH: 0.001,  // 沪市过户费率 (%)
+    transferFeeRateSZ: 0,      // 深市过户费率 (%)，已含在佣金内
+    dividendTaxRate: 0,        // 股息红利税率 (%)
+  },
   overviewGoals: {
     overall: 53000000,
     thisYear: 4000000,
-    fiveYear: 8000000,
-    tenYear: 15000000,
     annualizedRate: 15,
   },
   recordTags: { tagsByCategory: {}, lastByCategory: {} },
@@ -122,9 +128,64 @@ let financeAnalysisPeriod = "day";
 let financeCalendarMode = "day";
 let financeCalendarValue = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
 let financeCalendarMetric = "amount";
+let financeStockFilters = {
+  query: "",
+  kind: "all",
+  category: "all",
+  subcategory: "all",
+  tertiaryCategory: "all",
+  positionGroup: "all",
+  positionCategory: "all",
+  market: "all",
+  currency: "all",
+  accountId: "all",
+};
+
+// ── 股票列表列配置 ──
+const STOCK_COLUMN_DEFS = [
+  { key: "name", label: "名称/市值", sortable: true, defaultVisible: true },
+  { key: "shares", label: "持仓/可用", sortable: true, defaultVisible: true },
+  { key: "price", label: "现价/成本", sortable: true, defaultVisible: true },
+  { key: "pnl", label: "持仓盈亏", sortable: true, defaultVisible: true },
+  { key: "todayPnl", label: "当日盈亏", sortable: true, defaultVisible: true },
+  { key: "positionWeight", label: "仓位", sortable: true, defaultVisible: true },
+  { key: "code", label: "代码", sortable: true, defaultVisible: false },
+  { key: "category", label: "资产分类", sortable: true, defaultVisible: false },
+  { key: "subcategory", label: "二级分类", sortable: true, defaultVisible: false },
+  { key: "tertiaryCategory", label: "三级分类", sortable: true, defaultVisible: false },
+  { key: "market", label: "市场", sortable: true, defaultVisible: false },
+  { key: "currency", label: "货币", sortable: true, defaultVisible: false },
+  { key: "account", label: "所属账户", sortable: true, defaultVisible: false },
+  { key: "costPrice", label: "买入均价", sortable: true, defaultVisible: false },
+  { key: "marketValue", label: "当前价值", sortable: true, defaultVisible: false },
+  { key: "rmbValue", label: "折合RMB", sortable: true, defaultVisible: false },
+  { key: "actions", label: "操作", sortable: false, defaultVisible: true },
+];
+
+let stockTableConfig = {
+  columns: STOCK_COLUMN_DEFS.map((c) => c.key),
+  visible: Object.fromEntries(STOCK_COLUMN_DEFS.map((c) => [c.key, c.defaultVisible])),
+  sortKey: "",
+  sortDir: "asc",
+};
+let pendingFinanceOcrTransactions = [];
+let pendingFinanceOcrResult = null;
+let pendingFinanceOcrAssets = [];
+let pendingFinanceOcrRawText = "";
+let pendingFinanceOcrUnassignedTransactions = [];
+let pendingFinanceOcrFile = null;
+let pendingFinanceOcrDetailFile = null;
+let pendingFinanceOcrPasteKind = "list";
+let pendingFinanceOcrConfirmed = false;
+let pendingTradeOcrTransactions = [];
+let pendingTradeOcrAssetId = null;
+let pendingTradeOcrFile = null;
+let pendingTradeOcrPreviewUrl = "";
 let analysisPeriodMode = "year";
 let analysisPeriod = String(new Date().getFullYear());
 let analysisShowTotalDebt = false;
+// ── 实时行情 ──
+let realtimeQuoteMap = {}; // code -> { price, changePct, changeAmt, prevClose, name }
 let premiumRows = [];
 let premiumLoading = false;
 let premiumError = "";
@@ -154,7 +215,15 @@ function normalizeLoadedState(source) {
   loaded.assetClasses = normalizeAssetClasses(loaded.assetClasses);
   loaded.debts = loaded.debts || structuredClone(seed.debts);
   loaded.financeAssets = normalizeFinanceAssets(Array.isArray(loaded.financeAssets) ? loaded.financeAssets : structuredClone(seed.financeAssets), loaded.assetClasses);
-  loaded.financeAssetDraft = loaded.financeAssetDraft || {};
+  loaded.financeAssetDrafts = loaded.financeAssetDrafts || {};
+  // 兼容旧版单草稿迁移
+  if (loaded.financeAssetDraft && Object.keys(loaded.financeAssetDraft).length) {
+    const oldKind = loaded.financeAssetDraft.kind || "stock";
+    loaded.financeAssetDrafts[oldKind] = loaded.financeAssetDraft;
+    delete loaded.financeAssetDraft;
+  }
+  loaded.feeConfig = { ...seed.feeConfig, ...(loaded.feeConfig || {}) };
+  loaded.overviewGoals = { ...seed.overviewGoals, ...(loaded.overviewGoals || {}) };
   loaded.customCategories = normalizeCustomCategories(loaded.customCategories);
   loaded.recordTags = {
     tagsByCategory: { ...seed.recordTags.tagsByCategory, ...(loaded.recordTags?.tagsByCategory || {}) },
@@ -206,7 +275,7 @@ function normalizeFinanceAssets(assets = [], classes = []) {
     const positionOptions = financePositionCategoryOptions(kind, positionGroup);
     const savedPositionCategory = item.positionCategory === "持续股票" ? "吃息股票" : item.positionCategory;
     const positionCategory = positionOptions.includes(savedPositionCategory) ? savedPositionCategory : positionOptions[0];
-    return { ...item, kind, market, currency, category, subcategory, tertiaryCategory: item.tertiaryCategory || "未分类", positionGroup, positionCategory };
+    return { ...item, kind, market, currency, category, subcategory, tertiaryCategory: item.tertiaryCategory || "未分类", positionGroup, positionCategory, transactions: Array.isArray(item.transactions) ? item.transactions : [] };
   });
 }
 
@@ -478,9 +547,14 @@ function annualAnalysisStats() {
 function financeProfitAmountForYear(assets, year, throughDate = new Date()) {
   const lastDate = year === throughDate.getFullYear() ? throughDate : new Date(year, 11, 31);
   const cursor = new Date(year, 0, 1);
+  const currentYear = throughDate.getFullYear();
+  const activeFrom = new Map(assets.map((asset) => {
+    const dates = (asset.transactions || []).map((transaction) => transaction.date).filter(Boolean).sort();
+    return [asset.id, dates[0] ? new Date(`${dates[0]}T00:00:00`) : new Date(currentYear, 0, 1)];
+  }));
   let total = 0;
   while (cursor <= lastDate) {
-    total += assets.reduce((sum, asset) => sum + financeAssetDailyProfit(asset, cursor), 0);
+    total += assets.reduce((sum, asset) => cursor >= activeFrom.get(asset.id) ? sum + financeAssetDailyProfit(asset, cursor) : sum, 0);
     cursor.setDate(cursor.getDate() + 1);
   }
   return total;
@@ -580,7 +654,37 @@ async function init() {
   renderNav();
   renderFilters();
   bindGlobalActions();
+  initDialogCloseButtons();
   render();
+  if (currentModule === "finance") fetchRealtimeQuotes();
+  startQuoteAutoRefresh();
+}
+
+// ── 每小时自动刷新行情定时器 ──
+let quoteAutoTimer = null;
+function startQuoteAutoRefresh() {
+  stopQuoteAutoRefresh();
+  quoteAutoTimer = setInterval(() => {
+    if (currentModule === "finance") fetchRealtimeQuotes();
+  }, 3600000); // 1 小时
+}
+function stopQuoteAutoRefresh() {
+  if (quoteAutoTimer) { clearInterval(quoteAutoTimer); quoteAutoTimer = null; }
+}
+
+// ── 所有弹窗右上角添加关闭按钮 ──
+function initDialogCloseButtons() {
+  document.querySelectorAll("dialog").forEach((dialog) => {
+    if (dialog.querySelector(".dialog-close-btn")) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dialog-close-btn";
+    btn.innerHTML = "×";
+    btn.title = "关闭";
+    btn.addEventListener("click", () => dialog.close());
+    dialog.style.position || (dialog.style.position = "relative");
+    dialog.prepend(btn);
+  });
 }
 
 function renderNav() {
@@ -630,6 +734,7 @@ function bindGlobalActions() {
     if (sb) sb.classList.remove("is-open");
     if (ov) ov.classList.remove("is-open");
     render();
+    if (currentModule === "finance") fetchRealtimeQuotes();
   });
   document.querySelector(".filters").addEventListener("change", () => {
     filters = {
@@ -684,6 +789,7 @@ function bindGlobalActions() {
       if (sb) sb.classList.remove("is-open");
       if (ov) ov.classList.remove("is-open");
       render();
+      if (currentModule === "finance") fetchRealtimeQuotes();
     });
   }
   document.querySelector("#userEntry").addEventListener("click", () => {
@@ -700,6 +806,38 @@ function bindGlobalActions() {
   document.querySelector("#cancelRecord").addEventListener("click", () => document.querySelector("#recordDialog").close());
   document.querySelector("#cancelDebt").addEventListener("click", () => document.querySelector("#debtDialog").close());
   document.querySelector("#cancelAccount").addEventListener("click", () => document.querySelector("#accountDialog").close());
+  document.querySelector("#cancelFeeDetail")?.addEventListener("click", () => document.querySelector("#feeDetailDialog").close());
+  document.querySelector("#cancelFeeConfig")?.addEventListener("click", () => document.querySelector("#feeConfigDialog").close());
+  document.querySelector("#feeConfigForm")?.addEventListener("submit", handleFeeConfigSubmit);
+  // ─── Holding detail dialog bindings ───
+  document.querySelector("#closeHoldingDetail")?.addEventListener("click", () => document.querySelector("#holdingDetailDialog").close());
+  document.querySelector("#editHoldingAsset")?.addEventListener("click", () => {
+    const dialog = document.querySelector("#holdingDetailDialog");
+    const assetId = Number(dialog.dataset.assetId);
+    const asset = (state.financeAssets || []).find((a) => a.id === assetId);
+    if (asset) openFinanceAssetDialog(asset);
+  });
+  document.querySelectorAll(".holding-tab").forEach((tab) => tab.addEventListener("click", () => {
+    document.querySelectorAll(".holding-tab").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    const assetId = Number(document.querySelector("#holdingDetailDialog").dataset.assetId);
+    renderHoldingTabContent(tab.dataset.tab, assetId);
+  }));
+  // ─── K-line chart dialog bindings ───
+  document.querySelectorAll("#klineTimeTabs button").forEach((btn) => btn.addEventListener("click", () => switchKlineRange(btn.dataset.range)));
+  document.querySelector("#klineChartDialog")?.addEventListener("close", () => {
+    if (klineChartInstance) { klineChartInstance.dispose(); klineChartInstance = null; }
+    if (klineResizeObserver) { klineResizeObserver.disconnect(); klineResizeObserver = null; }
+  });
+  document.querySelector("#cancelTradeRecord")?.addEventListener("click", () => document.querySelector("#tradeRecordDialog").close());
+  document.querySelector("#tradeRecordForm")?.addEventListener("submit", handleTradeRecordSubmit);
+  // Auto-calc amount when shares or price changes in trade form
+  document.querySelector("#tradeRecordForm")?.addEventListener("input", (e) => {
+    if (e.target.name === "shares" || e.target.name === "price") {
+      const form = e.currentTarget;
+      form.amount.value = ((Number(form.shares.value) || 0) * (Number(form.price.value) || 0)).toFixed(2);
+    }
+  });
   document.querySelector("#cancelAssetClass").addEventListener("click", () => document.querySelector("#assetClassDialog").close());
   document.querySelector("#cancelGoals").addEventListener("click", () => document.querySelector("#goalsDialog").close());
   document.querySelector("#cancelFinanceAsset").addEventListener("click", () => document.querySelector("#financeAssetDialog").close());
@@ -757,6 +895,67 @@ function bindGlobalActions() {
   document.querySelector("#financeAssetForm [name='subcategory']").addEventListener("change", () => updateFinanceTertiaryCategories());
   document.querySelector("#financeAssetForm [name='positionGroup']").addEventListener("change", () => updateFinancePositionCategories());
   document.querySelector("#financeAssetForm [name='assetImage']").addEventListener("change", handleFinanceImageSelection);
+  document.querySelector("#financeAssetForm [name='assetDetailImage']").addEventListener("change", handleFinanceDetailImageSelection);
+  document.querySelector(".finance-ocr-panel")?.addEventListener("paste", handleFinanceOcrPaste);
+  document.querySelector(".finance-ocr-kind-switch")?.addEventListener("click", handleFinanceOcrKindSwitch);
+  document.querySelector("#financeOcrTransactions")?.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-action]");
+    const action = target?.dataset.action;
+    if (action === "confirm-finance-ocr") confirmFinanceOcrResult();
+    if (action === "discard-finance-ocr") discardFinanceOcrResult();
+    if (action === "remove-finance-ocr-asset") {
+      const index = Number(target.dataset.index);
+      pendingFinanceOcrAssets.splice(index, 1);
+      renderFinanceOcrResultPreview();
+    }
+  });
+  document.querySelector("#financeOcrTransactions")?.addEventListener("input", handleFinanceOcrPreviewInput);
+  document.querySelector("#financeOcrTransactions")?.addEventListener("change", handleFinanceOcrPreviewChange);
+  // Finance code lookup autocomplete
+  {
+    const codeInput = document.querySelector("#financeAssetForm [name='code']");
+    let lookupTimer = null;
+    let lookupActiveIdx = -1;
+    codeInput.addEventListener("input", () => {
+      clearTimeout(lookupTimer);
+      const val = codeInput.value.trim();
+      if (val.length < 2) { hideCodeLookupDropdown(); return; }
+      lookupActiveIdx = -1;
+      lookupTimer = setTimeout(() => fetchCodeLookup(val), 400);
+    });
+    codeInput.addEventListener("keydown", (e) => {
+      const dropdown = document.querySelector("#codeLookupDropdown");
+      if (!dropdown || dropdown.hidden) return;
+      const items = dropdown.querySelectorAll(".code-lookup-item");
+      if (!items.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        lookupActiveIdx = Math.min(lookupActiveIdx + 1, items.length - 1);
+        items.forEach((el, i) => el.classList.toggle("active", i === lookupActiveIdx));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        lookupActiveIdx = Math.max(lookupActiveIdx - 1, 0);
+        items.forEach((el, i) => el.classList.toggle("active", i === lookupActiveIdx));
+      } else if (e.key === "Enter" && lookupActiveIdx >= 0) {
+        e.preventDefault();
+        items[lookupActiveIdx].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      } else if (e.key === "Escape") {
+        hideCodeLookupDropdown();
+      }
+    });
+    codeInput.addEventListener("blur", () => {
+      setTimeout(() => hideCodeLookupDropdown(), 200);
+      // Auto-infer board (三级分类) from code prefix on blur
+      const val = codeInput.value.trim();
+      const form = document.querySelector("#financeAssetForm");
+      if (!form) return;
+      const fields = form.elements;
+      if (fields.kind.value === "stock" && fields.subcategory.value === "A股" && val) {
+        const board = inferBoardFromCode(val);
+        if (board) updateFinanceTertiaryCategories(board);
+      }
+    });
+  }
   document.querySelector("[data-action='recognize-finance-image']").addEventListener("click", handleFinanceImageRecognition);
   document.querySelector("[data-action='manage-finance-tertiary']").addEventListener("click", openFinanceTertiaryDialog);
   document.querySelector("#financeTertiaryForm").addEventListener("submit", handleFinanceTertiarySubmit);
@@ -968,9 +1167,29 @@ function overview(data) {
               <div class="goal-bar-track">
                 <i style="--width:${Math.min(g.pct, 100)}%;--tone:${g.pct >= 100 ? '#10b981' : g.pct >= 50 ? '#6366f1' : '#f59e0b'}"></i>
               </div>
-              <div class="goal-item-sub">${money(g.current)} / ${money(g.target)}</div>
+              <div class="goal-item-sub">${g.isRate ? `${g.current.toFixed(2)}% / ${g.target.toFixed(2)}%` : `${money(g.current)} / ${money(g.target)}`}</div>
             </div>
           `).join('')}
+        </div>
+        <div class="annual-goal-progress">
+          <div class="annual-goal-progress-head">
+            <h3>每年完成情况</h3>
+            <span>年度收益目标 = 期初资产 × 目标年化收益率</span>
+          </div>
+          <div class="annual-goal-table-wrap">
+            <table class="annual-goal-table">
+              <thead><tr><th>年份</th><th>期初资产</th><th>目标收益额</th><th>实际收益额</th><th>实际收益率</th><th>完成率</th><th>状态</th></tr></thead>
+              <tbody>${dashboard.annualGoalRows.map((row) => `<tr>
+                <td>${row.year}</td>
+                <td>${money(row.opening)}</td>
+                <td>${money(row.targetProfit)}</td>
+                <td class="${row.actualProfit >= 0 ? "income" : "expense"}">${money(row.actualProfit)}</td>
+                <td class="${row.actualRate >= 0 ? "income" : "expense"}">${percent(row.actualRate)}</td>
+                <td><div class="annual-completion-cell"><span>${row.completion.toFixed(1)}%</span><i><b style="--width:${Math.min(Math.max(row.completion, 0), 100)}%"></b></i></div></td>
+                <td><span class="annual-goal-status ${row.statusClass}">${row.status}</span></td>
+              </tr>`).join("")}</tbody>
+            </table>
+          </div>
         </div>
       </section>
       <section class="overview-card overview-stat-row">
@@ -1033,18 +1252,16 @@ function overviewDashboardData(data) {
   const g = state.overviewGoals || {};
   const overallTarget = g.overall || totalTargetValue || 1;
   const thisYearTarget = g.thisYear || totalOpeningValue * 1.1;
-  const fiveYearTarget = g.fiveYear || totalOpeningValue * 3;
-  const tenYearTarget = g.tenYear || totalOpeningValue * 5;
   const annualizedRateTarget = g.annualizedRate || 15;
   const yearFraction = (new Date() - new Date(new Date().getFullYear(), 0, 1)) / (new Date(new Date().getFullYear(), 11, 31) - new Date(new Date().getFullYear(), 0, 1) + 1);
-  const annualizedActual = totalOpeningValue > 0 ? ((totalAssetValue - totalOpeningValue) / totalOpeningValue) / Math.max(yearFraction, 0.01) * 100 : 0;
+  const annualGoalRows = annualGoalCompletionRows(totalOpeningValue, annualizedRateTarget);
+  const currentAnnualRow = annualGoalRows.at(-1) || { actualProfit: 0, actualRate: 0 };
+  const annualizedActual = currentAnnualRow.actualRate / Math.max(yearFraction, 0.01) * 100;
 
   const goals = [
-    { label: "整体目标", target: overallTarget, current: totalAssetValue, pct: totalAssetValue / overallTarget * 100 },
-    { label: "今年目标", target: thisYearTarget, current: totalAssetValue, pct: totalAssetValue / thisYearTarget * 100 },
-    { label: "5年目标", target: fiveYearTarget, current: totalAssetValue, pct: totalAssetValue / fiveYearTarget * 100 },
-    { label: "10年目标", target: tenYearTarget, current: totalAssetValue, pct: totalAssetValue / tenYearTarget * 100 },
-    { label: "年化目标", target: annualizedRateTarget, current: annualizedActual, pct: annualizedActual / annualizedRateTarget * 100, isRate: true },
+    { label: "终极目标", target: overallTarget, current: totalAssetValue, pct: overallTarget > 0 ? totalAssetValue / overallTarget * 100 : 0 },
+    { label: "本年目标", target: thisYearTarget, current: totalAssetValue, pct: thisYearTarget > 0 ? totalAssetValue / thisYearTarget * 100 : 0 },
+    { label: "目标年化收益率", target: annualizedRateTarget, current: annualizedActual, pct: annualizedRateTarget > 0 ? annualizedActual / annualizedRateTarget * 100 : 0, isRate: true },
   ];
 
   // Stats from analysis module
@@ -1058,8 +1275,8 @@ function overviewDashboardData(data) {
     totalOpeningValue,
     goalValue,
     progressPercent: totalAssetValue / goalValue * 100,
-    annualNetGrowth: data.annualGrowth,
-    annualRate: totalOpeningValue > 0 ? data.annualGrowth / totalOpeningValue : 0,
+    annualNetGrowth: currentAnnualRow.actualProfit,
+    annualRate: currentAnnualRow.actualRate,
     yearIncome,
     yearSpend,
     yearNetIncome,
@@ -1081,10 +1298,64 @@ function overviewDashboardData(data) {
     ],
     liveNetAssets: data.netAssets,
     goals,
+    annualGoalRows,
     statsYearIncome,
     statsYearNetIncome,
     statsYearSpend,
   };
+}
+
+function annualGoalCompletionRows(currentYearOpening, targetRatePercent) {
+  const currentYear = new Date().getFullYear();
+  const years = [
+    ...(state.records || []).map((record) => Number(String(record.date || "").slice(0, 4))),
+    ...(state.financeAssets || []).flatMap((asset) => (asset.transactions || []).map((transaction) => Number(String(transaction.date || "").slice(0, 4)))),
+    ...(state.debts || []).map((debt) => Number(String(debt.startDate || "").slice(0, 4))),
+  ].filter((year) => Number.isInteger(year) && year >= 2000 && year <= currentYear);
+  const firstYear = years.length ? Math.min(...years) : currentYear;
+  const annualResults = new Map();
+  for (let year = firstYear; year <= currentYear; year += 1) {
+    annualResults.set(year, annualActualProfit(year));
+  }
+  const openings = new Map([[currentYear, Math.max(Number(currentYearOpening) || 0, 0)]]);
+  for (let year = currentYear - 1; year >= firstYear; year -= 1) {
+    openings.set(year, Math.max((openings.get(year + 1) || 0) - (annualResults.get(year) || 0), 0));
+  }
+  return Array.from({ length: currentYear - firstYear + 1 }, (_, index) => {
+    const year = firstYear + index;
+    const opening = openings.get(year) || 0;
+    const actualProfit = annualResults.get(year) || 0;
+    const targetProfit = opening * (Number(targetRatePercent) || 0) / 100;
+    const actualRate = opening > 0 ? actualProfit / opening : 0;
+    const completion = targetProfit > 0 ? actualProfit / targetProfit * 100 : 0;
+    const current = year === currentYear;
+    const completed = completion >= 100;
+    return {
+      year,
+      opening,
+      targetProfit,
+      actualProfit,
+      actualRate,
+      completion,
+      status: current ? "进行中" : completed ? "已完成" : "未完成",
+      statusClass: current ? "is-progress" : completed ? "is-done" : "is-missed",
+    };
+  });
+}
+
+function annualActualProfit(year) {
+  const yearRecords = (state.records || []).filter((record) => Number(String(record.date || "").slice(0, 4)) === year && !isFinanceRecord(record));
+  const ledgerIncome = yearRecords
+    .filter((record) => record.type === "income")
+    .reduce((sum, record) => sum + convert(record.amount, record.currency), 0);
+  const consumption = yearRecords
+    .filter((record) => record.type === "expense")
+    .reduce((sum, record) => sum + convert(record.amount, record.currency), 0);
+  const financeIncome = financeProfitAmountForYear(state.financeAssets || [], year, new Date());
+  const payableDebt = (state.debts || [])
+    .filter((debt) => debt.category === "payable" && Number(String(debt.startDate || "").slice(0, 4)) === year)
+    .reduce((sum, debt) => sum + Math.max(Number(debt.amount) || Number(debt.principal) || 0, 0), 0);
+  return ledgerIncome - consumption + financeIncome - payableDebt;
 }
 
 function records(data) {
@@ -1165,8 +1436,11 @@ function records(data) {
 }
 
 function finance() {
+  calculatePositionWeights();
   const assets = state.financeAssets || [];
   const assetKinds = ["stock", "fund", "commodity", "futures", "options", "crypto", "cashflow", "custom"];
+  const visibleKinds = financeStockFilters.kind === "all" ? assetKinds : [financeStockFilters.kind];
+  const filteredAssets = filterFinanceAssets(assets);
   const totalValue = assets.reduce((sum, item) => sum + financeAssetValueRmb(item), 0);
   const totalCost = assets.reduce((sum, item) => sum + financeAssetCostRmb(item), 0);
   const totalPnl = assets.reduce((sum, item) => sum + financeAmountToRmb(item.pnl, item.currency), 0);
@@ -1176,9 +1450,6 @@ function finance() {
         <p class="eyebrow">统一资产管理 · MVP</p>
         <h2>个人理财资产管理</h2>
         <p class="muted">统一管理股票、基金、商品、期货、期权、加密货币、现金流资产与自定义理财，资产归属账户后自动汇总总资产。</p>
-      </div>
-      <div class="finance-actions">
-        <button class="primary" data-action="new-finance-asset">新增资产</button>
       </div>
     </section>
 
@@ -1200,10 +1471,20 @@ function finance() {
       ${financeAccountSummary(assets)}
     </section>
 
-    ${assetKinds.map((kind) => `<section class="finance-card">
-      <div class="ledger-web-title"><h3>${financeKindSectionTitle(kind)}</h3><span>${financeKindDescription(kind)}</span></div>
-      ${financeAssetTable(assets.filter((item) => item.kind === kind), kind)}
-    </section>`).join("")}
+    <section class="finance-card finance-global-filter-card">
+      <div class="ledger-web-title"><h3>资产筛选</h3><span>筛选条件应用于下方全部资产列表</span></div>
+      ${financeAssetFilterBar(assets, filteredAssets.length)}
+    </section>
+
+    ${visibleKinds.map((kind) => {
+      const visibleAssets = filteredAssets.filter((item) => item.kind === kind);
+      const summaryBar = renderStockSummaryBar(visibleAssets, kind);
+      return `<section class="finance-card">
+      <div class="ledger-web-title"><div style="display:flex;align-items:baseline;gap:10px"><h3>${financeKindSectionTitle(kind)}</h3><span>${financeKindDescription(kind)}</span></div><button class="primary" data-action="new-finance-asset" data-kind="${kind}" style="padding:5px 14px;font-size:12px;white-space:nowrap">+ 新增</button></div>
+      ${summaryBar}
+      ${financeAssetTable(visibleAssets, kind)}
+    </section>`;
+    }).join("")}
   </div>`;
 }
 
@@ -1526,6 +1807,38 @@ function financeLocalMoney(value, currency = "CNH") {
   return `${currency} ${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(Number(value) || 0)}`;
 }
 
+// ─── 税费计算（A股股票交易） ───
+// 规则：印花税 0.05%（卖出）、佣金（含净佣金+手续费+证管费）、过户费（沪市单独收）、股息红利税
+function calculateStockFees(item) {
+  const isStock = item.kind === "stock";
+  const isDomestic = item.market === "domestic";
+  const isShanghai = isStock && isDomestic && item.code && item.code.startsWith("6");
+  const isShenzhen = isStock && isDomestic && item.code && (item.code.startsWith("0") || item.code.startsWith("3"));
+  if (!isStock || !isDomestic) {
+    return { stampDuty: 0, commission: 0, transferFee: 0, dividendTax: 0, total: 0, applicable: false };
+  }
+  const cfg = state.feeConfig || seed.feeConfig;
+  const transactionAmount = financeAssetValue(item); // 当前市值作为交易金额估算
+  // 印花税：卖出时按配置费率收取
+  const stampDuty = transactionAmount * (cfg.stampDutyRate / 100);
+  // 佣金：按配置费率，最低配置金额
+  let commission = transactionAmount * (cfg.commissionRate / 100);
+  if (commission < cfg.commissionMin) commission = cfg.commissionMin;
+  // 过户费：沪市/深市按各自费率
+  const transferFee = isShanghai
+    ? transactionAmount * (cfg.transferFeeRateSH / 100)
+    : transactionAmount * (cfg.transferFeeRateSZ / 100);
+  // 股息红利税
+  const dividendTax = transactionAmount * (cfg.dividendTaxRate / 100);
+  const total = stampDuty + commission + transferFee + dividendTax;
+  return { stampDuty, commission, transferFee, dividendTax, total, applicable: true };
+}
+
+function formatFeeDetail(fees, currency = "CNH") {
+  if (!fees.applicable) return "非 A 股股票，不适用";
+  return `税费合计: ${financeLocalMoney(fees.total, currency)}`;
+}
+
 function financeKindLabel(kind) {
   return ({ stock: "股票", fund: "基金", commodity: "商品", futures: "期货", options: "期权", crypto: "加密货币", cashflow: "现金流资产", custom: "自定义理财" })[kind] || kind;
 }
@@ -1581,34 +1894,562 @@ function financeAccountSummary(assets) {
   </article>`).join("") || `<p class="muted">暂无理财资产归属账户。</p>`}</div>`;
 }
 
+function filterFinanceAssets(assets) {
+  return assets.filter((item) => {
+    const account = state.accounts.find((entry) => entry.id === item.accountId);
+    const searchable = [item.name, item.code, financeKindLabel(item.kind), item.category, item.subcategory, item.tertiaryCategory, account?.name]
+      .join(" ")
+      .toLowerCase();
+    if (financeStockFilters.query && !searchable.includes(financeStockFilters.query.toLowerCase())) return false;
+    return ["kind", "category", "subcategory", "tertiaryCategory", "positionGroup", "positionCategory", "market", "currency", "accountId"]
+      .every((field) => financeStockFilters[field] === "all" || String(item[field] || "") === financeStockFilters[field]);
+  });
+}
+
+function financeAssetFilterOptions(assets, field, labeler = (value) => value) {
+  const values = field === "kind"
+    ? ["stock", "fund", "commodity", "futures", "options", "crypto", "cashflow", "custom"]
+    : [...new Set(assets.map((item) => item[field]).filter(Boolean))];
+  return `<option value="all">全部</option>${values.map((value) => `
+    <option value="${escapeAttr(value)}" ${financeStockFilters[field] === String(value) ? "selected" : ""}>${labeler(value)}</option>
+  `).join("")}`;
+}
+
+function financeAssetFilterBar(assets, resultCount) {
+  const accountOptions = [...new Set(assets.map((item) => item.accountId).filter(Boolean))];
+  return `<form id="financeStockFilterForm" class="finance-stock-filter">
+    <label class="finance-stock-search">名称 / 代码
+      <input name="query" value="${escapeAttr(financeStockFilters.query)}" placeholder="搜索名称、代码或分类" />
+    </label>
+    <label>资产类型<select name="kind">${financeAssetFilterOptions(assets, "kind", financeKindLabel)}</select></label>
+    <label>资产分类<select name="category">${financeAssetFilterOptions(assets, "category")}</select></label>
+    <label>二级分类<select name="subcategory">${financeAssetFilterOptions(assets, "subcategory")}</select></label>
+    <label>三级分类<select name="tertiaryCategory">${financeAssetFilterOptions(assets, "tertiaryCategory")}</select></label>
+    <label>仓位分组<select name="positionGroup">${financeAssetFilterOptions(assets, "positionGroup", financePositionGroupLabel)}</select></label>
+    <label>仓位分类<select name="positionCategory">${financeAssetFilterOptions(assets, "positionCategory")}</select></label>
+    <label>市场<select name="market">${financeAssetFilterOptions(assets, "market", financeMarketLabel)}</select></label>
+    <label>币种<select name="currency">${financeAssetFilterOptions(assets, "currency")}</select></label>
+    <label>账户<select name="accountId">
+      <option value="all">全部</option>
+      ${accountOptions.map((accountId) => {
+        const account = state.accounts.find((item) => item.id === accountId);
+        return `<option value="${escapeAttr(accountId)}" ${financeStockFilters.accountId === accountId ? "selected" : ""}>${account?.name || accountId}</option>`;
+      }).join("")}
+    </select></label>
+    <div class="finance-stock-filter-actions">
+      <span>显示 ${resultCount} / ${assets.length} 项</span>
+      <button type="button" class="primary" data-action="refresh-quotes">刷新行情</button>
+      <button type="button" data-action="reset-finance-filter">重置</button>
+      <button type="submit" class="primary">筛选</button>
+    </div>
+  </form>`;
+}
+
+// ── 实时行情获取 ──
+async function fetchRealtimeQuotes() {
+  const stockAssets = (state.financeAssets || []).filter((a) => a.kind === "stock" && a.code);
+  if (!stockAssets.length) return;
+  const codes = stockAssets.map((a) => ({
+    code: a.code,
+    market: a.market || "domestic",
+  }));
+  try {
+    const res = await fetch("/api/finance/quotes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ codes }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const quotes = data.quotes || [];
+    // Build map: code -> quote data
+    for (let i = 0; i < codes.length; i++) {
+      const q = quotes[i];
+      if (q && q.price != null && q.price > 0) {
+        realtimeQuoteMap[codes[i].code] = {
+          price: q.price,
+          changePct: q.changePct,
+          changeAmt: q.changeAmt,
+          prevClose: q.prevClose,
+          name: q.name,
+        };
+      }
+    }
+    applyRealtimeQuotes();
+    saveState();
+    render();
+  } catch (_) { /* best-effort */ }
+}
+
+// ── 统一取价：实时价 → 昨收价 → 保存的currentPrice → 成本+盈亏反算 ──
+function resolveAssetPrice(asset) {
+  const q = realtimeQuoteMap[asset.code] || {};
+  const cost = Number(asset.costPrice) || 0;
+  const shares = Number(asset.shares) || 0;
+  const calcPrice = (shares > 0 && cost > 0) ? (cost + (Number(asset.pnl) || 0) / shares) : 0;
+  return q.price || q.prevClose || Number(asset.currentPrice) || (calcPrice > 0 ? calcPrice : 0);
+}
+
+// ── 个股仓位计算（独立于行情接口，每次渲染都可调用）──
+function calculatePositionWeights() {
+  const stockAssets = (state.financeAssets || []).filter((a) => a.kind === "stock");
+  if (!stockAssets.length) return;
+  let totalStockValue = 0;
+  for (const asset of stockAssets) {
+    const price = resolveAssetPrice(asset);
+    const cost = Number(asset.costPrice) || 0;
+    const shares = Number(asset.shares) || 0;
+    const marketVal = price > 0 ? price * shares : (cost * shares + (Number(asset.pnl) || 0));
+    totalStockValue += financeAmountToRmb(marketVal, asset.currency);
+  }
+  for (const asset of stockAssets) {
+    const price = resolveAssetPrice(asset);
+    const cost = Number(asset.costPrice) || 0;
+    const shares = Number(asset.shares) || 0;
+    const assetValue = price > 0 ? price * shares : (cost * shares + (Number(asset.pnl) || 0));
+    asset.positionWeight = totalStockValue > 0
+      ? parseFloat((financeAmountToRmb(assetValue, asset.currency) / totalStockValue * 100).toFixed(2))
+      : 0;
+  }
+}
+
+function applyRealtimeQuotes() {
+  const stockAssets = (state.financeAssets || []).filter((a) => a.kind === "stock");
+  // First pass: update current prices and calculate per-asset values
+  for (const asset of stockAssets) {
+    const q = realtimeQuoteMap[asset.code];
+    if (q && q.price > 0) {
+      asset.currentPrice = q.price;
+      // Recalculate market value
+      const shares = Number(asset.shares) || 0;
+      const costPrice = Number(asset.costPrice) || 0;
+      // 持仓盈亏 = (现价 - 成本) × 份额
+      if (shares > 0 && costPrice > 0) {
+        asset.pnl = parseFloat(((q.price - costPrice) * shares).toFixed(2));
+        asset.pnlPercent = parseFloat(((q.price - costPrice) / costPrice * 100).toFixed(2));
+      }
+      // 当日盈亏 = 涨跌额 × 份额 (or 涨跌幅 × 昨收 × 份额)
+      if (shares > 0 && q.changeAmt != null) {
+        asset.todayPnl = parseFloat((q.changeAmt * shares).toFixed(2));
+      } else if (shares > 0 && q.changePct != null && q.prevClose > 0) {
+        asset.todayPnl = parseFloat((q.prevClose * q.changePct / 100 * shares).toFixed(2));
+      }
+      if (q.changePct != null) {
+        asset.todayPnlPercent = parseFloat((q.changePct || 0).toFixed(2));
+      }
+    }
+  }
+  // Second pass: auto-calculate 个股仓位
+  calculatePositionWeights();
+}
+
+// ── K-line 走势图 ──
+let echartsLoaded = false;
+let echartsLoading = null;
+let klineChartInstance = null;
+let klineCurrentAsset = null;
+let klineCurrentRange = "6m";
+let klineDataCache = {};
+let klineResizeObserver = null;
+
+function loadECharts() {
+  if (echartsLoaded) return Promise.resolve();
+  if (echartsLoading) return echartsLoading;
+  echartsLoading = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js";
+    s.onload = () => { echartsLoaded = true; resolve(); };
+    s.onerror = () => { echartsLoading = null; reject(new Error("ECharts CDN failed")); };
+    document.head.appendChild(s);
+  });
+  return echartsLoading;
+}
+
+async function fetchKlineData(code, market, range) {
+  const cacheKey = `${code}_${range}`;
+  const cached = klineDataCache[cacheKey];
+  if (cached && Date.now() - cached.ts < 300000) return cached.data;
+  const end = new Date().toISOString().slice(0, 10);
+  let start = "", count = 320;
+  if (range === "3m") { start = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10); count = 90; }
+  else if (range === "6m") { start = new Date(Date.now() - 180 * 864e5).toISOString().slice(0, 10); count = 180; }
+  else if (range === "1y") { start = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10); count = 320; }
+  else { count = 800; }
+  const url = `${API_BASE}/finance/kline?code=${encodeURIComponent(code)}&market=${encodeURIComponent(market)}&start=${start}&end=${end}&count=${count}`;
+  const headers = {};
+  if (auth.token) headers.Authorization = `Bearer ${auth.token}`;
+  const resp = await fetch(url, { headers });
+  if (!resp.ok) throw new Error("K-line fetch failed");
+  const data = await resp.json();
+  klineDataCache[cacheKey] = { data, ts: Date.now() };
+  return data;
+}
+
+function calculateMA(klineData, period) {
+  const result = [];
+  for (let i = 0; i < klineData.length; i++) {
+    if (i < period - 1) { result.push(null); continue; }
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += parseFloat(klineData[j][2]);
+    result.push(+(sum / period).toFixed(2));
+  }
+  return result;
+}
+
+function prepareTransactionMarkers(asset, klineDates, klineData) {
+  const txns = (asset.transactions || []).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const effectiveTxns = txns.length > 0 ? txns : [{
+    direction: "buy",
+    date: klineDates[0] || new Date().toISOString().slice(0, 10),
+    price: Number(asset.costPrice) || 0,
+    shares: Number(asset.shares) || 0,
+  }];
+  const byDate = new Map();
+  for (const txn of effectiveTxns) {
+    if (!byDate.has(txn.date)) byDate.set(txn.date, []);
+    byDate.get(txn.date).push(txn);
+  }
+  const dateIdx = new Map(klineDates.map((d, i) => [d, i]));
+  const markers = [];
+  byDate.forEach((txns, dt) => {
+    const idx = dateIdx.get(dt);
+    if (idx == null) return;
+    const hasBuy = txns.some(t => t.direction === "buy");
+    const hasSell = txns.some(t => t.direction === "sell");
+    const closePrice = parseFloat(klineData[idx]?.[2]) || 0;
+    if (hasBuy && hasSell) {
+      markers.push({ type: "T", index: idx, date: dt, price: closePrice });
+    } else {
+      const dir = hasBuy ? "buy" : "sell";
+      const rel = txns.filter(t => t.direction === dir);
+      const totalAmt = rel.reduce((s, t) => s + (Number(t.price) * Number(t.shares)), 0);
+      const totalSh = rel.reduce((s, t) => s + Number(t.shares), 0);
+      const avgPrice = totalSh > 0 ? totalAmt / totalSh : Number(rel[0].price) || closePrice;
+      markers.push({ type: dir, index: idx, date: dt, price: avgPrice });
+    }
+  });
+  return markers;
+}
+
+function renderKlineChart(klineData, markers) {
+  const container = document.getElementById("klineChartContainer");
+  const loading = document.getElementById("klineLoading");
+  if (loading) loading.style.display = "none";
+  if (klineChartInstance) { klineChartInstance.dispose(); }
+  klineChartInstance = echarts.init(container);
+  if (klineResizeObserver) klineResizeObserver.disconnect();
+  klineResizeObserver = new ResizeObserver(() => klineChartInstance?.resize());
+  klineResizeObserver.observe(container);
+
+  const dates = klineData.map(d => d[0]);
+  const ohlc = klineData.map(d => [+d[1], +d[2], +d[4], +d[3]]);
+  const volumes = klineData.map(d => +(d[5] || 0));
+  const ma5 = calculateMA(klineData, 5);
+  const ma10 = calculateMA(klineData, 10);
+  const ma20 = calculateMA(klineData, 20);
+  const volColors = klineData.map(d => +d[2] >= +d[1] ? "#ef4444" : "#10b981");
+
+  const buyScatter = markers.filter(m => m.type === "buy").map(m => ({
+    coord: [m.date, m.price], value: m.price,
+    symbol: "triangle", symbolSize: 14, symbolRotate: 0,
+    itemStyle: { color: "#ef4444" },
+  }));
+  const sellScatter = markers.filter(m => m.type === "sell").map(m => ({
+    coord: [m.date, m.price], value: m.price,
+    symbol: "triangle", symbolSize: 14, symbolRotate: 180,
+    itemStyle: { color: "#10b981" },
+  }));
+  const tScatter = markers.filter(m => m.type === "T").map(m => ({
+    coord: [m.date, m.price], value: "T",
+    symbol: "none", symbolSize: 0,
+    label: { show: true, formatter: "T", color: "#f59e0b", fontWeight: "bold", fontSize: 14, position: "top" },
+  }));
+
+  const option = {
+    animation: false,
+    backgroundColor: "transparent",
+    tooltip: {
+      trigger: "axis", axisPointer: { type: "cross" },
+      formatter: function (params) {
+        const k = params.find(p => p.seriesName === "K线");
+        if (!k) return "";
+        const d = k.data;
+        const dt = k.axisValue;
+        let s = `<b>${dt}</b><br/>开: ${d[1]}<br/>收: ${d[2]}<br/>低: ${d[3]}<br/>高: ${d[4]}`;
+        const v = params.find(p => p.seriesName === "成交量");
+        if (v) s += `<br/>量: ${Number(v.value).toLocaleString()}`;
+        return s;
+      },
+    },
+    axisPointer: { link: [{ xAxisIndex: "all" }] },
+    grid: [
+      { left: "9%", right: "3%", top: "6%", height: "55%" },
+      { left: "9%", right: "3%", top: "70%", height: "20%" },
+    ],
+    xAxis: [
+      { type: "category", data: dates, gridIndex: 0, axisLabel: { show: false }, axisTick: { show: false } },
+      { type: "category", data: dates, gridIndex: 1, axisLabel: { fontSize: 10 } },
+    ],
+    yAxis: [
+      { scale: true, gridIndex: 0, splitLine: { lineStyle: { color: "#e8e8e8" } }, axisLabel: { fontSize: 10 } },
+      { scale: true, gridIndex: 1, splitLine: { show: false }, axisLabel: { show: false } },
+    ],
+    dataZoom: [
+      { type: "inside", xAxisIndex: [0, 1], start: klineData.length > 120 ? 50 : 0, end: 100 },
+    ],
+    series: [
+      {
+        name: "K线", type: "candlestick", data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
+        itemStyle: { color: "#ef4444", color0: "#10b981", borderColor: "#ef4444", borderColor0: "#10b981" },
+      },
+      { name: "MA5", type: "line", data: ma5, smooth: true, lineStyle: { width: 1, color: "#f5a623" }, symbol: "none", xAxisIndex: 0, yAxisIndex: 0 },
+      { name: "MA10", type: "line", data: ma10, smooth: true, lineStyle: { width: 1, color: "#6366f1" }, symbol: "none", xAxisIndex: 0, yAxisIndex: 0 },
+      { name: "MA20", type: "line", data: ma20, smooth: true, lineStyle: { width: 1, color: "#06b6d4" }, symbol: "none", xAxisIndex: 0, yAxisIndex: 0 },
+      {
+        name: "成交量", type: "bar", data: volumes.map((v, i) => ({ value: v, itemStyle: { color: volColors[i] } })),
+        xAxisIndex: 1, yAxisIndex: 1,
+      },
+      {
+        name: "买入", type: "scatter", data: buyScatter, xAxisIndex: 0, yAxisIndex: 0, z: 10,
+      },
+      {
+        name: "卖出", type: "scatter", data: sellScatter, xAxisIndex: 0, yAxisIndex: 0, z: 10,
+      },
+      {
+        name: "做T", type: "scatter", data: tScatter, xAxisIndex: 0, yAxisIndex: 0, z: 10,
+      },
+    ],
+  };
+  klineChartInstance.setOption(option);
+}
+
+async function openKlineChart(assetId) {
+  const asset = (state.financeAssets || []).find(a => a.id === assetId);
+  if (!asset || !asset.code) return;
+  klineCurrentAsset = asset;
+  klineCurrentRange = "6m";
+  const dialog = document.querySelector("#klineChartDialog");
+  const quote = realtimeQuoteMap[asset.code] || {};
+  document.getElementById("klineChartTitle").textContent = `${asset.name} (${asset.code})`;
+  document.getElementById("klineChartSubtitle").textContent = `${financeMarketLabel(asset.market)} · ${asset.kind === "stock" ? "股票" : asset.kind}`;
+  const cp = resolveAssetPrice(asset);
+  const priceEl = document.getElementById("klineChartPrice");
+  if (cp > 0) {
+    const chg = quote.changePct || 0;
+    const cls = chg >= 0 ? "income" : "expense";
+    priceEl.innerHTML = `<span class="${cls}">${cp.toFixed(3)} ${chg ? (chg >= 0 ? "+" : "") + chg.toFixed(2) + "%" : ""}</span>`;
+  } else {
+    priceEl.textContent = "--";
+  }
+  document.querySelectorAll("#klineTimeTabs button").forEach(btn => btn.classList.toggle("active", btn.dataset.range === "6m"));
+  dialog.showModal();
+  const container = document.getElementById("klineChartContainer");
+  container.innerHTML = '<div class="kline-loading" id="klineLoading">加载图表库...</div>';
+  try { await loadECharts(); } catch (_) { container.innerHTML = '<div class="kline-loading">图表库加载失败，请检查网络</div>'; return; }
+  container.innerHTML = '<div class="kline-loading" id="klineLoading">加载K线数据...</div>';
+  try {
+    const data = await fetchKlineData(asset.code, asset.market || "domestic", "6m");
+    if (!data.kline || !data.kline.length) { container.innerHTML = '<div class="kline-loading">暂无K线数据</div>'; return; }
+    const dates = data.kline.map(d => d[0]);
+    const markers = prepareTransactionMarkers(asset, dates, data.kline);
+    renderKlineChart(data.kline, markers);
+  } catch (_) { container.innerHTML = '<div class="kline-loading">K线数据加载失败</div>'; }
+}
+
+function switchKlineRange(range) {
+  if (range === klineCurrentRange || !klineCurrentAsset) return;
+  klineCurrentRange = range;
+  document.querySelectorAll("#klineTimeTabs button").forEach(btn => btn.classList.toggle("active", btn.dataset.range === range));
+  const container = document.getElementById("klineChartContainer");
+  if (klineChartInstance) { klineChartInstance.dispose(); klineChartInstance = null; }
+  container.innerHTML = '<div class="kline-loading">加载K线数据...</div>';
+  fetchKlineData(klineCurrentAsset.code, klineCurrentAsset.market || "domestic", range)
+    .then(data => {
+      if (!data.kline || !data.kline.length) { container.innerHTML = '<div class="kline-loading">暂无K线数据</div>'; return; }
+      const dates = data.kline.map(d => d[0]);
+      const markers = prepareTransactionMarkers(klineCurrentAsset, dates, data.kline);
+      renderKlineChart(data.kline, markers);
+    })
+    .catch(() => { container.innerHTML = '<div class="kline-loading">K线数据加载失败</div>'; });
+}
+
+// ── 股票汇总栏 ──
+function renderStockSummaryBar(assets, kind = "stock") {
+  // Use resolveAssetPrice for consistent fallback chain
+  const totalMV = assets.reduce((s, a) => {
+    const price = resolveAssetPrice(a);
+    const shares = Number(a.shares) || 0;
+    return s + financeAmountToRmb(price * shares || financeAssetValue(a), a.currency);
+  }, 0);
+  const totalPnl = assets.reduce((s, a) => {
+    const price = resolveAssetPrice(a);
+    const cost = Number(a.costPrice) || 0;
+    const shares = Number(a.shares) || 0;
+    const pnl = (price > 0 && cost > 0 && shares > 0) ? (price - cost) * shares : (Number(a.pnl) || 0);
+    return s + financeAmountToRmb(pnl, a.currency);
+  }, 0);
+  const totalTodayPnl = assets.reduce((s, a) => {
+    const q = realtimeQuoteMap[a.code];
+    const shares = Number(a.shares) || 0;
+    const todayPnl = (q?.changeAmt != null && shares > 0) ? q.changeAmt * shares : (Number(a.todayPnl) || 0);
+    return s + financeAmountToRmb(todayPnl, a.currency);
+  }, 0);
+  const allFinanceValue = (state.financeAssets || []).reduce((s, a) => {
+    const q = realtimeQuoteMap[a.code];
+    const price = q?.price || Number(a.currentPrice) || 0;
+    const shares = Number(a.shares) || 0;
+    return s + financeAmountToRmb(price * shares || financeAssetValue(a), a.currency);
+  }, 0);
+  const posWeight = allFinanceValue > 0 ? (totalMV / allFinanceValue * 100) : 0;
+  const pnlCls = totalPnl >= 0 ? "income" : "expense";
+  const todayCls = totalTodayPnl >= 0 ? "income" : "expense";
+  // 根据资产类型使用不同标签
+  const labels = ({
+    stock:     ["市值", "持仓盈亏", "当日盈亏", "仓位"],
+    fund:      ["净值总额", "持有收益", "当日收益", "占比"],
+    commodity: ["持有价值", "持仓盈亏", "当日盈亏", "占比"],
+    futures:   ["合约价值", "持仓盈亏", "当日盈亏", "占比"],
+    options:   ["权利金价值", "持仓盈亏", "当日盈亏", "占比"],
+    crypto:    ["持有价值", "持仓盈亏", "当日盈亏", "占比"],
+    cashflow:  ["本金总额", "累计收益", "当期收益", "占比"],
+    custom:    ["持有价值", "累计收益", "当期收益", "占比"],
+  })[kind] || ["总市值", "总盈亏", "当日盈亏", "占比"];
+  return `<div class="stock-summary-bar">
+    <div class="stock-summary-item"><span>${labels[0]}</span><strong>${money(totalMV, "CNY")}</strong></div>
+    <div class="stock-summary-item"><span>${labels[1]}</span><strong class="${pnlCls}">${money(totalPnl, "CNY")}</strong></div>
+    <div class="stock-summary-item"><span>${labels[2]}</span><strong class="${todayCls}">${money(totalTodayPnl, "CNY")}</strong></div>
+    <div class="stock-summary-item"><span>${labels[3]}</span><strong>${posWeight.toFixed(2)}%</strong></div>
+  </div>`;
+}
+
+// ── 股票列排序 ──
+function sortStockAssets(assets) {
+  const key = stockTableConfig.sortKey;
+  if (!key) return assets;
+  const dir = stockTableConfig.sortDir === "desc" ? -1 : 1;
+  return [...assets].sort((a, b) => {
+    let va, vb;
+    switch (key) {
+      case "name": va = a.name || ""; vb = b.name || ""; return va.localeCompare(vb, "zh-CN") * dir;
+      case "shares": va = Number(a.shares) || 0; vb = Number(b.shares) || 0; break;
+      case "price": va = Number(a.currentPrice) || 0; vb = Number(b.currentPrice) || 0; break;
+      case "pnl": va = Number(a.pnl) || 0; vb = Number(b.pnl) || 0; break;
+      case "todayPnl": va = Number(a.todayPnl) || 0; vb = Number(b.todayPnl) || 0; break;
+      case "positionWeight": va = Number(a.positionWeight) || 0; vb = Number(b.positionWeight) || 0; break;
+      case "code": va = a.code || ""; vb = b.code || ""; return va.localeCompare(vb) * dir;
+      case "category": va = a.category || ""; vb = b.category || ""; return va.localeCompare(vb, "zh-CN") * dir;
+      case "subcategory": va = a.subcategory || ""; vb = b.subcategory || ""; return va.localeCompare(vb, "zh-CN") * dir;
+      case "tertiaryCategory": va = a.tertiaryCategory || ""; vb = b.tertiaryCategory || ""; return va.localeCompare(vb, "zh-CN") * dir;
+      case "market": va = a.market || ""; vb = b.market || ""; return va.localeCompare(vb) * dir;
+      case "currency": va = a.currency || ""; vb = b.currency || ""; return va.localeCompare(vb) * dir;
+      case "account": {
+        const acA = state.accounts.find((e) => e.id === a.accountId);
+        const acB = state.accounts.find((e) => e.id === b.accountId);
+        va = acA ? acA.name : ""; vb = acB ? acB.name : "";
+        return va.localeCompare(vb, "zh-CN") * dir;
+      }
+      case "costPrice": va = Number(a.costPrice) || 0; vb = Number(b.costPrice) || 0; break;
+      case "marketValue": va = financeAssetValue(a); vb = financeAssetValue(b); break;
+      case "rmbValue": va = financeAssetValueRmb(a); vb = financeAssetValueRmb(b); break;
+      default: return 0;
+    }
+    return (va - vb) * dir;
+  });
+}
+
+// ── 股票卡片式单元格渲染 ──
+function stockCellContent(item, colKey) {
+  const account = state.accounts.find((e) => e.id === item.accountId);
+  // 现价：实时价 → 昨收价 → 保存的currentPrice → 成本+盈亏反算
+  const quoteData = realtimeQuoteMap[item.code] || {};
+  const cp = resolveAssetPrice(item);
+  const cost = Number(item.costPrice) || 0;
+  const shares = Number(item.shares) || 0;
+  // 使用实时计算的盈亏
+  const pnl = (cp > 0 && cost > 0 && shares > 0) ? (cp - cost) * shares : (Number(item.pnl) || 0);
+  const pnlPct = (cp > 0 && cost > 0) ? ((cp - cost) / cost * 100) : (Number(item.pnlPercent) || 0);
+  const todayPnl = (quoteData.changeAmt != null && shares > 0)
+    ? quoteData.changeAmt * shares
+    : (Number(item.todayPnl) || 0);
+  const todayPnlPct = quoteData.changePct != null
+    ? quoteData.changePct
+    : (Number(item.todayPnlPercent) || 0);
+  const pnlCls = pnl >= 0 ? "income" : "expense";
+  const todayCls = todayPnl >= 0 ? "income" : "expense";
+  switch (colKey) {
+    case "name": {
+      const nameLink = (item.kind === "stock" && item.code)
+        ? `<a href="javascript:void(0)" data-action="show-kline-chart" data-id="${item.id}" class="kline-name-link">${item.name}</a>`
+        : item.name;
+      return `<div class="stock-cell-main">${nameLink}</div><div class="stock-cell-sub">${financeLocalMoney(cp * shares || financeAssetValue(item), item.currency)}</div>`;
+    }
+    case "shares": return `<div class="stock-cell-main">${shares}</div><div class="stock-cell-sub">${shares}</div>`;
+    case "price": return `<div class="stock-cell-main">${cp > 0 ? cp.toFixed(3) : "--"}${quoteData.price ? ' <span class="holding-live-dot"></span>' : ''}</div><div class="stock-cell-sub">${cost > 0 ? cost.toFixed(3) : "--"}</div>`;
+    case "pnl": return `<div class="stock-cell-main ${pnlCls}">${pnl >= 0 ? "+" : ""}${financeLocalMoney(pnl, item.currency)}</div><div class="stock-cell-sub ${pnlCls}">${pnl >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%</div>`;
+    case "todayPnl": return `<div class="stock-cell-main ${todayCls}">${todayPnl !== 0 ? (todayPnl >= 0 ? "+" : "") + financeLocalMoney(todayPnl, item.currency) : "--"}</div><div class="stock-cell-sub ${todayCls}">${todayPnlPct ? (todayPnlPct >= 0 ? "+" : "") + todayPnlPct.toFixed(2) + "%" : "--"}</div>`;
+    case "positionWeight": return `<div class="stock-cell-main">${(Number(item.positionWeight) || 0).toFixed(2)}%</div>`;
+    case "code": return `<div class="stock-cell-main">${item.code || "-"}</div>`;
+    case "category": return `<div class="stock-cell-main">${item.category || "-"}</div>`;
+    case "subcategory": return `<div class="stock-cell-main">${item.subcategory || "-"}</div>`;
+    case "tertiaryCategory": return `<div class="stock-cell-main">${item.tertiaryCategory || "-"}</div>`;
+    case "market": return `<div class="stock-cell-main">${financeMarketLabel(item.market)}</div>`;
+    case "currency": return `<div class="stock-cell-main">${item.currency || "CNH"}</div>`;
+    case "account": return `<div class="stock-cell-main">${account?.name || "-"}</div>`;
+    case "costPrice": return `<div class="stock-cell-main">${financeLocalMoney(financeAssetCost(item), item.currency)}</div>`;
+    case "marketValue": return `<div class="stock-cell-main">${financeLocalMoney(financeAssetValue(item), item.currency)}</div>`;
+    case "rmbValue": return `<div class="stock-cell-main">${money(financeAssetValueRmb(item), "CNY")}</div>`;
+    case "actions": {
+      const klineBtn = (item.kind === "stock" && item.code)
+        ? `<button data-action="show-kline-chart" data-id="${item.id}">K线</button>` : "";
+      return `<div class="stock-cell-actions">${klineBtn}<button data-action="show-holding-detail" data-id="${item.id}">明细</button><button data-action="edit-finance-asset" data-id="${item.id}">编辑</button><button data-action="delete-finance-asset" data-id="${item.id}">删除</button></div>`;
+    }
+    default: return "";
+  }
+}
+
+// ── 股票列可见性面板 ──
+function renderStockColumnPanel() {
+  return `<div class="stock-col-panel" id="stockColPanel" hidden>
+    <strong>显示字段</strong>
+    <div class="stock-col-panel-list">${STOCK_COLUMN_DEFS.map((col) => {
+      const checked = stockTableConfig.visible[col.key] ? "checked" : "";
+      const disabled = col.key === "actions" ? "disabled" : "";
+      return `<label class="stock-col-check"><input type="checkbox" data-col="${col.key}" ${checked} ${disabled} />${col.label}</label>`;
+    }).join("")}</div>
+  </div>`;
+}
+
 function financeAssetTable(assets, kind) {
-  return `<div class="finance-table-wrap"><table class="table finance-asset-table">
-    <thead><tr><th>名称</th><th>代码</th><th>资产分类</th><th>二级分类</th><th>三级分类</th><th>仓位分组</th><th>仓位分类</th><th>市场</th><th>货币单位</th><th>所属账户</th><th>持仓成本</th><th>份额/数量</th><th>浮动盈亏</th><th>当前价值</th><th>折合RMB资产</th><th>操作</th></tr></thead>
-    <tbody>${assets.map((item) => {
-      const account = state.accounts.find((entry) => entry.id === item.accountId);
-      return `<tr>
-        <td>${item.name}</td>
-        <td>${item.code || "-"}</td>
-        <td>${item.category || financeKindLabel(kind)}</td>
-        <td>${item.subcategory || "-"}</td>
-        <td>${item.tertiaryCategory || "未分类"}</td>
-        <td>${financePositionGroupLabel(item.positionGroup)}</td>
-        <td>${item.positionCategory || financePositionCategoryOptions(kind, item.positionGroup || "core")[0]}</td>
-        <td>${financeMarketLabel(item.market)}</td>
-        <td>${item.currency || "CNH"}</td>
-        <td>${account?.name || "-"}</td>
-        <td>${financeLocalMoney(financeAssetCost(item), item.currency)}</td>
-        <td>${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 4 }).format(Number(item.shares) || 0)}</td>
-        <td class="${Number(item.pnl) >= 0 ? "income" : "expense"}">${financeLocalMoney(item.pnl, item.currency)}</td>
-        <td>${financeLocalMoney(financeAssetValue(item), item.currency)}</td>
-        <td>${money(financeAssetValueRmb(item), "CNY")}</td>
-        <td class="table-actions">
-          <button data-action="edit-finance-asset" data-id="${item.id}">编辑</button>
-          <button data-action="delete-finance-asset" data-id="${item.id}">删除</button>
-        </td>
-      </tr>`;
-    }).join("") || `<tr><td colspan="16" class="muted">暂无${financeKindLabel(kind)}资产</td></tr>`}</tbody>
-  </table></div>`;
+  // 所有资产类型统一使用卡片式布局
+  const visibleCols = stockTableConfig.columns.filter((key) => stockTableConfig.visible[key]);
+  const sorted = sortStockAssets(assets);
+  const sortIcon = (key) => stockTableConfig.sortKey === key ? (stockTableConfig.sortDir === "asc" ? " ↑" : " ↓") : "";
+  const kindLabel = financeKindLabel(kind);
+  const panelId = "colPanel_" + kind;
+  return `<div class="stock-table-wrap" data-kind="${kind}">
+      <div class="stock-table-toolbar">
+        <button type="button" class="stock-col-toggle-btn" data-panel="${panelId}">显示字段 ▾</button>
+        <div class="stock-col-panel" id="${panelId}" hidden>
+          <strong>显示字段</strong>
+          <div class="stock-col-panel-list">${STOCK_COLUMN_DEFS.map((col) => {
+            const checked = stockTableConfig.visible[col.key] ? "checked" : "";
+            const disabled = col.key === "actions" ? "disabled" : "";
+            return `<label class="stock-col-check"><input type="checkbox" data-col="${col.key}" ${checked} ${disabled} />${col.label}</label>`;
+          }).join("")}</div>
+        </div>
+      </div>
+      <table class="stock-card-table">
+        <thead><tr>${visibleCols.map((key) => {
+          const def = STOCK_COLUMN_DEFS.find((d) => d.key === key);
+          const sortable = def?.sortable ? ' data-sort-key="' + key + '"' : "";
+          const dragAttr = key !== "actions" ? ' draggable="true"' : "";
+          return `<th${sortable}${dragAttr} data-col="${key}">${def?.label || key}${sortIcon(key)}</th>`;
+        }).join("")}</tr></thead>
+        <tbody>${sorted.map((item) =>
+          `<tr data-asset-id="${item.id}">${visibleCols.map((key) => `<td data-col="${key}">${stockCellContent(item, key)}</td>`).join("")}</tr>`
+        ).join("") || `<tr><td colspan="${visibleCols.length}" class="muted">暂无${kindLabel}资产</td></tr>`}</tbody>
+      </table>
+    </div>`;
 }
 
 function debts() {
@@ -2375,17 +3216,51 @@ function analysis(data) {
     periodOptionHtml = `<div class="ledger-period-options"><span class="ledger-period-year">自定义日期范围</span></div>`;
   }
 
-  /* ---- 增长趋势 ---- */
-  const months = monthlySeries();
+  /* ---- 增长趋势（根据筛选模式切换） ---- */
   const currentMonth = now.getMonth();
-  const trendMonths = months.slice(0, currentMonth + 1);
-  const growthSeries = trendMonths.map((m) => m.income - m.expense);
+  let trendLabels = [], growthSeries = [];
+
+  if (analysisPeriodMode === "day") {
+    // 日模式：当月每天
+    const daysInMonth = new Date(year, currentMonth + 1, 0).getDate();
+    trendLabels = Array.from({ length: daysInMonth }, (_, i) => `${i + 1}`);
+    growthSeries = Array.from({ length: daysInMonth }, (_, i) => {
+      const dayStr = `${year}-${String(currentMonth + 1).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`;
+      const dayRecords = state.records.filter((r) => r.date === dayStr && r.type !== "transfer");
+      const inc = dayRecords.filter((r) => r.type === "income").reduce((s, r) => s + convert(r.amount, r.currency), 0);
+      const exp = dayRecords.filter((r) => r.type === "expense").reduce((s, r) => s + convert(r.amount, r.currency), 0);
+      return inc - exp;
+    });
+    var trendSvgW = 30 + 10 + Math.max(daysInMonth - 1, 1) * 22;
+  } else if (analysisPeriodMode === "month") {
+    // 月模式：当年每月
+    trendLabels = Array.from({ length: 12 }, (_, i) => `${i + 1}月`);
+    const months = monthlySeries();
+    growthSeries = months.map((m) => m.income - m.expense);
+    var trendSvgW = 30 + 10 + 11 * 52;
+  } else {
+    // 年模式
+    const startYear = 2020;
+    const years = Array.from({ length: year - startYear + 1 }, (_, i) => startYear + i);
+    trendLabels = years.map((y) => `${y}`);
+    growthSeries = years.map((y) => {
+      const yRecords = state.records.filter((r) => {
+        const d = new Date(r.date);
+        return d.getFullYear() === y && r.type !== "transfer";
+      });
+      const inc = yRecords.filter((r) => r.type === "income").reduce((s, r) => s + convert(r.amount, r.currency), 0);
+      const exp = yRecords.filter((r) => r.type === "expense").reduce((s, r) => s + convert(r.amount, r.currency), 0);
+      return inc - exp;
+    });
+    var trendSvgW = 30 + 10 + Math.max(years.length - 1, 1) * 80;
+  }
+
   const maxAbsVal = Math.max(...growthSeries.map((v) => Math.abs(v)), 1);
-  const svgW = 720, svgH = 200, padT = 20, padB = 30, padL = 30, padR = 10;
-  const plotW = svgW - padL - padR;
+  const svgH = 200, padT = 20, padB = 30, padL = 30, padR = 10;
+  const plotW = trendSvgW - padL - padR;
   const plotH = svgH - padT - padB;
   const zeroY = padT + plotH / 2;
-  const nPts = trendMonths.length || 1;
+  const nPts = trendLabels.length || 1;
   const xStep = nPts > 1 ? plotW / (nPts - 1) : 0;
   const yOf = (v) => zeroY - (v / maxAbsVal) * (plotH / 2);
   const growthPts = growthSeries.map((v, i) => [padL + i * xStep, yOf(v)]);
@@ -2555,8 +3430,8 @@ function analysis(data) {
           <span><i style="--tone:#6366f1"></i>增长</span>
         </div>
       </div>
-      <div class="analysis-trend-chart">
-        <svg viewBox="0 0 ${svgW} ${svgH}" class="trend-line-svg" preserveAspectRatio="none">
+      <div class="analysis-trend-chart trend-scrollable">
+        <svg viewBox="0 0 ${trendSvgW} ${svgH}" class="trend-line-svg" preserveAspectRatio="none" style="min-width:${trendSvgW}px">
           <defs>
             <linearGradient id="growthGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="#10b981"/>
@@ -2566,10 +3441,10 @@ function analysis(data) {
             </linearGradient>
           </defs>
           <!-- Zero line -->
-          <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${svgW - padR}" y2="${zeroY.toFixed(1)}" stroke="var(--line)" stroke-width="1"/>
+          <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${trendSvgW - padR}" y2="${zeroY.toFixed(1)}" stroke="var(--line)" stroke-width="1"/>
           <!-- Positive/negative boundary lines -->
-          <line x1="${padL}" y1="${padT}" x2="${svgW - padR}" y2="${padT}" stroke="var(--line)" stroke-width="0.5" stroke-dasharray="4,4"/>
-          <line x1="${padL}" y1="${(padT + plotH).toFixed(1)}" x2="${svgW - padR}" y2="${(padT + plotH).toFixed(1)}" stroke="var(--line)" stroke-width="0.5" stroke-dasharray="4,4"/>
+          <line x1="${padL}" y1="${padT}" x2="${trendSvgW - padR}" y2="${padT}" stroke="var(--line)" stroke-width="0.5" stroke-dasharray="4,4"/>
+          <line x1="${padL}" y1="${(padT + plotH).toFixed(1)}" x2="${trendSvgW - padR}" y2="${(padT + plotH).toFixed(1)}" stroke="var(--line)" stroke-width="0.5" stroke-dasharray="4,4"/>
           <!-- Area fill -->
           <polygon points="${toArea(growthPts)}" fill="url(#growthGrad)" opacity="0.2"/>
           <!-- Growth line -->
@@ -2578,11 +3453,11 @@ function analysis(data) {
           ${growthPts.map(([x, y], i) => {
             const v = growthSeries[i];
             const clr = v >= 0 ? "#10b981" : "#f43f5e";
-            return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="${clr}" stroke="var(--panel)" stroke-width="1.5"><title>${trendMonths[i].shortLabel}: ${v >= 0 ? "+" : ""}${money(v)}</title></circle>`;
+            return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="${clr}" stroke="var(--panel)" stroke-width="1.5"><title>${trendLabels[i]}: ${v >= 0 ? "+" : ""}${money(v)}</title></circle>`;
           }).join("")}
         </svg>
-        <div class="trend-x-labels">
-          ${trendMonths.map((m) => `<span>${m.shortLabel}</span>`).join("")}
+        <div class="trend-x-labels" style="min-width:${trendSvgW}px">
+          ${trendLabels.map((l) => `<span>${l}</span>`).join("")}
         </div>
       </div>
     </section>
@@ -2591,6 +3466,17 @@ function analysis(data) {
 }
 
 function accounts() {
+  // 计算每个账户的税费汇总
+  const accountFees = state.accounts.map((a) => {
+    const accountAssets = (state.financeAssets || []).filter((item) => item.accountId === a.id);
+    const stockAssets = accountAssets.filter((item) => item.kind === "stock" && item.market === "domestic");
+    const totalFees = stockAssets.reduce((sum, item) => {
+      const fees = calculateStockFees(item);
+      return sum + fees.total;
+    }, 0);
+    return { account: a, stockCount: stockAssets.length, totalFees, assets: accountAssets };
+  });
+
   return `<section class="card">
     <div class="section-title">
       <h2>多账户 + 多币种</h2>
@@ -2599,14 +3485,17 @@ function accounts() {
         <button class="primary" data-action="new-account">新增</button>
       </div>
     </div>
-    <table class="table"><thead><tr><th>账户</th><th>所有人</th><th>币种</th><th>类型</th><th>余额</th><th>负债</th><th>操作</th></tr></thead>
-    <tbody>${state.accounts.map((a) => `<tr>
+    <table class="table"><thead><tr><th>账户</th><th>所有人</th><th>币种</th><th>类型</th><th>余额</th><th>负债</th><th>股票税费</th><th>操作</th></tr></thead>
+    <tbody>${accountFees.map(({ account: a, stockCount, totalFees }) => `<tr>
       <td>${a.name}</td>
       <td>${a.owner}</td>
       <td>${a.currency}</td>
       <td>${a.type}</td>
       <td>${money(convert(a.balance, a.currency))}</td>
       <td>${money(convert(a.liability, a.currency))}</td>
+      <td class="${stockCount > 0 ? 'fee-cell' : ''}">
+        ${stockCount > 0 ? `${money(totalFees, a.currency)}<button class="fee-detail-btn" data-action="show-account-fees" data-account-id="${a.id}">详情</button>` : '-'}
+      </td>
       <td class="table-actions">
         <button data-action="edit-account" data-id="${a.id}">编辑</button>
         <button data-action="delete-account" data-id="${a.id}">删除</button>
@@ -2644,7 +3533,7 @@ function assetClasses() {
   }
 
   /* ---- 饼图：各类别占比 ---- */
-  const pR = 68, pCx = 80, pCy = 80;
+  const pR = 80, pCx = 100, pCy = 100;
   const pCirc = 2 * Math.PI * pR;
   const pieSegs = totalValue > 0
     ? visibleClasses.filter((c) => (Number(c.value) || 0) > 0).map((c) => ({
@@ -2812,37 +3701,31 @@ function assetClasses() {
       </div>
     </section>
 
-    <!-- 资产分类饼图 + 右侧统计卡片 -->
+    <!-- 资产分类饼图 + 统计卡片 -->
     <section class="analysis-row card">
-      <div class="section-title" style="margin-bottom:16px">
+      <div class="section-title" style="margin-bottom:20px">
         <h3 style="margin:0">资产分类占比</h3>
         <span class="badge">总价值 ${money(totalValue)}</span>
       </div>
-      <div class="analysis-dual-pie-grid" style="grid-template-columns:220px 1fr;gap:24px">
-        <div class="analysis-pie-wrap" style="justify-content:center">
-          <svg viewBox="0 0 160 160" class="analysis-pie-svg">
-            <circle cx="${pCx}" cy="${pCy}" r="${pR}" fill="none" stroke="var(--panel-3)" stroke-width="24"/>
+      <div class="class-pie-layout">
+        <div class="class-pie-center">
+          <svg viewBox="0 0 200 200" class="class-pie-svg-lg">
+            <circle cx="${pCx}" cy="${pCy}" r="${pR}" fill="none" stroke="var(--panel-3)" stroke-width="28"/>
             ${pieCircles}
-            <text x="${pCx}" y="${pCy - 4}" text-anchor="middle" class="pie-center-label" font-size="11">${pieSegs.length > 0 ? '资产' : '暂无'}</text>
-            <text x="${pCx}" y="${pCy + 10}" text-anchor="middle" class="pie-center-sub">占比</text>
+            <text x="${pCx}" y="${pCy - 6}" text-anchor="middle" class="pie-center-label" font-size="13">${pieSegs.length > 0 ? '资产' : '暂无'}</text>
+            <text x="${pCx}" y="${pCy + 12}" text-anchor="middle" class="pie-center-sub">占比</text>
           </svg>
         </div>
-        <div class="class-pie-stats">
+        <div class="class-pie-list">
           ${pieSegs.map((seg) => {
             const cls = visibleClasses.find((c) => c.name === seg.label);
             const profit = cls ? (Number(cls.value) || 0) - (Number(cls.openingValue) || 0) : 0;
-            const profitRate = cls && Number(cls.openingValue) ? profit / Number(cls.openingValue) : 0;
-            return `<div class="class-pie-stat-item">
-              <div class="class-pie-stat-head">
-                <span class="pie-dot" style="background:${seg.color}"></span>
-                <span class="class-pie-stat-name">${seg.label}</span>
-                <span class="class-pie-stat-pct">${seg.pct.toFixed(1)}%</span>
-              </div>
-              <div class="class-pie-stat-body">
-                <div><span>市值</span><b>${money(seg.val)}</b></div>
-                <div><span>盈亏</span><b class="${profit >= 0 ? 'income' : 'expense'}">${profit >= 0 ? '+' : ''}${money(profit)}</b></div>
-                <div><span>收益率</span><b class="${profitRate >= 0 ? 'income' : 'expense'}">${(profitRate * 100).toFixed(1)}%</b></div>
-              </div>
+            return `<div class="class-pie-list-item">
+              <span class="pie-dot" style="background:${seg.color};width:12px;height:12px"></span>
+              <span class="class-pie-list-name">${seg.label}</span>
+              <span class="class-pie-list-pct">${seg.pct.toFixed(1)}%</span>
+              <span class="class-pie-list-val">${money(seg.val)}</span>
+              <span class="class-pie-list-profit ${profit >= 0 ? 'income' : 'expense'}">${profit >= 0 ? '+' : ''}${money(profit)}</span>
             </div>`;
           }).join("")}
         </div>
@@ -3401,7 +4284,33 @@ function profile() {
         </div>
       </form>
     </section>
-  </div>`;
+  </div>
+
+  <!-- 问题与反馈 -->
+  <section class="card feedback-section">
+    <div class="section-title"><h2>问题与反馈</h2><span class="badge">帮助我们改进</span></div>
+    <form id="feedbackForm" class="feedback-form">
+      <div class="feedback-form-row">
+        <label>类型
+          <select name="type">
+            <option value="问题">问题反馈</option>
+            <option value="建议">功能建议</option>
+            <option value="其他">其他</option>
+          </select>
+        </label>
+        <label>标题
+          <input name="title" placeholder="简要描述（可选）" />
+        </label>
+      </div>
+      <label>详细内容
+        <textarea name="content" rows="4" placeholder="请详细描述您遇到的问题或建议…" required></textarea>
+      </label>
+      <div class="feedback-form-actions">
+        <button class="primary" type="submit">提交反馈</button>
+      </div>
+    </form>
+    <div id="feedbackList" class="feedback-list"></div>
+  </section>`;
 }
 
 function donutCard(title, labels, values) {
@@ -3570,6 +4479,38 @@ function typeLabel(type) {
 function bindViewActions() {
   document.querySelectorAll(".trend-chart-scroll").forEach(bindHorizontalDrag);
   document.querySelectorAll(".trend-yoy-row").forEach(bindTrendYoyResize);
+  document.querySelector("#financeStockFilterForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    financeStockFilters = {
+      query: String(data.query || "").trim(),
+      kind: data.kind || "all",
+      category: data.category || "all",
+      subcategory: data.subcategory || "all",
+      tertiaryCategory: data.tertiaryCategory || "all",
+      positionGroup: data.positionGroup || "all",
+      positionCategory: data.positionCategory || "all",
+      market: data.market || "all",
+      currency: data.currency || "all",
+      accountId: data.accountId || "all",
+    };
+    render();
+  });
+  document.querySelectorAll("[data-action='reset-finance-filter']").forEach((button) => button.addEventListener("click", () => {
+    financeStockFilters = {
+      query: "",
+      kind: "all",
+      category: "all",
+      subcategory: "all",
+      tertiaryCategory: "all",
+      positionGroup: "all",
+      positionCategory: "all",
+      market: "all",
+      currency: "all",
+      accountId: "all",
+    };
+    render();
+  }));
   document.querySelectorAll("[data-action='open-premium-tool']").forEach((button) => button.addEventListener("click", () => {
     currentModule = "premiumTool";
     document.querySelector(".shell").scrollTop = 0;
@@ -3727,6 +4668,8 @@ function bindViewActions() {
   document.querySelector("#authForm")?.addEventListener("submit", handleAuthSubmit);
   document.querySelector("#profileForm")?.addEventListener("submit", handleProfileSubmit);
   document.querySelector("#preferenceForm")?.addEventListener("submit", handlePreferenceSubmit);
+  document.querySelector("#feedbackForm")?.addEventListener("submit", handleFeedbackSubmit);
+  if (currentModule === "profile" && auth.token) loadFeedbackList();
   document.querySelectorAll("[data-action='logout']").forEach((button) => button.addEventListener("click", () => {
     apiRequest("/auth/logout", { method: "POST" }).catch(() => {});
     auth.token = "";
@@ -3795,7 +4738,89 @@ function bindViewActions() {
     saveState();
     render();
   }));
+  document.querySelectorAll("[data-action='show-account-fees']").forEach((button) => button.addEventListener("click", () => {
+    const accountId = button.dataset.accountId;
+    showAccountFeeDetail(accountId);
+  }));
+  document.querySelectorAll("[data-action='show-asset-fees']").forEach((button) => button.addEventListener("click", () => {
+    const assetId = Number(button.dataset.assetId);
+    showSingleAssetFeeDetail(assetId);
+  }));
+  document.querySelectorAll("[data-action='show-holding-detail']").forEach((button) => button.addEventListener("click", () => {
+    const assetId = Number(button.dataset.id);
+    openHoldingDetail(assetId);
+  }));
+  document.querySelectorAll("[data-action='show-kline-chart']").forEach((el) => el.addEventListener("click", (e) => {
+    e.preventDefault();
+    const assetId = Number(el.dataset.id);
+    openKlineChart(assetId);
+  }));
   document.querySelectorAll("[data-action='new-finance-asset']").forEach((button) => button.addEventListener("click", () => openFinanceAssetDialog(null, button.dataset.kind)));
+  // ── 刷新行情数据 ──
+  document.querySelectorAll("[data-action='refresh-quotes']").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true;
+    button.classList.add("is-loading");
+    button.innerHTML = '<svg class="btn-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>刷新中';
+    await fetchRealtimeQuotes();
+    button.classList.remove("is-loading");
+    button.innerHTML = "刷新行情";
+    button.disabled = false;
+    render();
+  }));
+  // ── 股票表格交互：排序、拖拽列、显示字段 ──
+  document.querySelectorAll(".stock-card-table thead th[data-sort-key]").forEach((th) => {
+    th.addEventListener("click", (e) => {
+      if (e.target.closest("[draggable]") && e.type === "click" && th.dragStartFired) { th.dragStartFired = false; return; }
+      const key = th.dataset.sortKey;
+      if (stockTableConfig.sortKey === key) {
+        stockTableConfig.sortDir = stockTableConfig.sortDir === "asc" ? "desc" : "asc";
+      } else {
+        stockTableConfig.sortKey = key;
+        stockTableConfig.sortDir = "asc";
+      }
+      render();
+    });
+    th.style.cursor = "pointer";
+  });
+  // 列拖拽排序
+  let dragColKey = null;
+  document.querySelectorAll(".stock-card-table thead th[draggable]").forEach((th) => {
+    th.addEventListener("dragstart", (e) => {
+      dragColKey = th.dataset.col;
+      th.dragStartFired = true;
+      e.dataTransfer.effectAllowed = "move";
+      th.style.opacity = "0.4";
+    });
+    th.addEventListener("dragend", () => { th.style.opacity = ""; });
+    th.addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; th.classList.add("drag-over"); });
+    th.addEventListener("dragleave", () => th.classList.remove("drag-over"));
+    th.addEventListener("drop", (e) => {
+      e.preventDefault();
+      th.classList.remove("drag-over");
+      const targetKey = th.dataset.col;
+      if (!dragColKey || dragColKey === targetKey) return;
+      const cols = stockTableConfig.columns;
+      const fromIdx = cols.indexOf(dragColKey);
+      const toIdx = cols.indexOf(targetKey);
+      if (fromIdx < 0 || toIdx < 0) return;
+      cols.splice(fromIdx, 1);
+      cols.splice(toIdx, 0, dragColKey);
+      render();
+    });
+  });
+  // 显示字段面板
+  document.querySelectorAll(".stock-col-toggle-btn[data-panel]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const panel = document.getElementById(btn.dataset.panel);
+      if (panel) panel.hidden = !panel.hidden;
+    });
+  });
+  document.querySelectorAll(".stock-col-panel input[type='checkbox']").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      stockTableConfig.visible[cb.dataset.col] = cb.checked;
+      render();
+    });
+  });
   document.querySelectorAll("[data-action='edit-finance-asset']").forEach((button) => button.addEventListener("click", () => {
     const asset = state.financeAssets.find((item) => item.id === Number(button.dataset.id));
     if (asset) openFinanceAssetDialog(asset);
@@ -3855,8 +4880,6 @@ function bindViewActions() {
     const g = state.overviewGoals || {};
     form.overall.value = g.overall || 0;
     form.thisYear.value = g.thisYear || 0;
-    form.fiveYear.value = g.fiveYear || 0;
-    form.tenYear.value = g.tenYear || 0;
     form.annualizedRate.value = g.annualizedRate || 0;
     dialog.showModal();
   }));
@@ -3866,8 +4889,6 @@ function bindViewActions() {
     state.overviewGoals = {
       overall: Number(data.overall) || 0,
       thisYear: Number(data.thisYear) || 0,
-      fiveYear: Number(data.fiveYear) || 0,
-      tenYear: Number(data.tenYear) || 0,
       annualizedRate: Number(data.annualizedRate) || 0,
     };
     saveState();
@@ -4020,9 +5041,14 @@ function completeAuthentication(payload) {
     currentUser: payload.user.account,
     users: [{ account: payload.user.account, profile: payload.user }],
   };
+  saveAuth();
+  if (payload.isAdmin) {
+    localStorage.setItem("admin_token", payload.token);
+    window.location.href = "/admin.html";
+    return;
+  }
   state = normalizeLoadedState(payload.state);
   filters.currency = state.user.currency;
-  saveAuth();
   localStorage.setItem("asset-platform-v18", JSON.stringify(state));
   legacyStatePending = false;
   currentModule = "overview";
@@ -4063,6 +5089,59 @@ function handlePreferenceSubmit(event) {
   saveState();
   saveProfileToAuth();
   render();
+}
+
+async function handleFeedbackSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  const content = data.content.trim();
+  if (!content) { window.alert("请输入反馈内容"); return; }
+  const btn = form.querySelector("[type='submit']");
+  btn.disabled = true;
+  btn.textContent = "提交中…";
+  try {
+    await apiRequest("/feedback", {
+      method: "POST",
+      body: { type: data.type, title: data.title.trim(), content },
+    });
+    form.reset();
+    window.alert("感谢您的反馈，我们会尽快处理！");
+    loadFeedbackList();
+  } catch (err) {
+    window.alert(err.message || "提交失败");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "提交反馈";
+  }
+}
+
+async function loadFeedbackList() {
+  const container = document.querySelector("#feedbackList");
+  if (!container) return;
+  try {
+    const { feedback } = await apiRequest("/feedback");
+    if (!feedback.length) {
+      container.innerHTML = `<p class="muted" style="text-align:center;padding:20px">暂无反馈记录</p>`;
+      return;
+    }
+    const statusMap = { pending: "待处理", replied: "已回复", resolved: "已解决" };
+    const statusClass = { pending: "warn", replied: "info", resolved: "good" };
+    container.innerHTML = feedback.map((fb) => `
+      <div class="feedback-item">
+        <div class="feedback-item-head">
+          <span class="badge">${fb.type || "问题"}</span>
+          <span class="feedback-item-title">${escapeAttr(fb.title) || "无标题"}</span>
+          <span class="feedback-status feedback-status-${statusClass[fb.status] || 'warn'}">${statusMap[fb.status] || fb.status}</span>
+          <span class="muted" style="margin-left:auto;font-size:11px">${fb.created_at || ""}</span>
+        </div>
+        <p class="feedback-item-content">${escapeAttr(fb.content)}</p>
+        ${fb.admin_reply ? `<div class="feedback-item-reply"><strong>管理员回复：</strong>${escapeAttr(fb.admin_reply)}</div>` : ""}
+      </div>
+    `).join("");
+  } catch {
+    container.innerHTML = `<p class="muted" style="text-align:center;padding:20px">加载失败</p>`;
+  }
 }
 
 function openDebtDialog(debt = null) {
@@ -4164,6 +5243,605 @@ function handleAccountSubmit(event) {
   saveState();
   document.querySelector("#accountDialog").close();
   render();
+}
+
+function showAccountFeeDetail(accountId) {
+  const account = state.accounts.find((a) => a.id === accountId);
+  if (!account) return;
+  const stockAssets = (state.financeAssets || []).filter((item) => item.accountId === accountId && item.kind === "stock" && item.market === "domestic");
+  if (!stockAssets.length) {
+    window.alert("该账户暂无 A 股股票资产");
+    return;
+  }
+  const dialog = document.querySelector("#feeDetailDialog");
+  const subtitle = document.querySelector("#feeDetailSubtitle");
+  const list = document.querySelector("#feeDetailList");
+  const cfg = state.feeConfig || seed.feeConfig;
+  const totalFees = stockAssets.reduce((sum, item) => sum + calculateStockFees(item).total, 0);
+  subtitle.textContent = `税费合计: ${financeLocalMoney(totalFees, account.currency)}`;
+  list.innerHTML = stockAssets.map((item) => {
+    const fees = calculateStockFees(item);
+    return renderFeeDetailArticle(item, fees, cfg);
+  }).join("");
+  // Add edit button to menu
+  const menu = dialog.querySelector("menu");
+  menu.innerHTML = `<button type="button" id="editFeeConfigBtn">编辑税费规则</button><button value="cancel" type="button" id="cancelFeeDetail">关闭</button>`;
+  document.querySelector("#editFeeConfigBtn").addEventListener("click", openFeeConfigDialog);
+  document.querySelector("#cancelFeeDetail").addEventListener("click", () => dialog.close());
+  dialog.showModal();
+}
+
+function showSingleAssetFeeDetail(assetId) {
+  const asset = (state.financeAssets || []).find((item) => item.id === assetId);
+  if (!asset) return;
+  const fees = calculateStockFees(asset);
+  if (!fees.applicable) {
+    window.alert("该资产类型不适用税费计算");
+    return;
+  }
+  const dialog = document.querySelector("#feeDetailDialog");
+  const subtitle = document.querySelector("#feeDetailSubtitle");
+  const list = document.querySelector("#feeDetailList");
+  const cfg = state.feeConfig || seed.feeConfig;
+  subtitle.textContent = `${asset.name} (${asset.code}) - 税费合计: ${financeLocalMoney(fees.total, asset.currency)}`;
+  list.innerHTML = renderFeeDetailArticle(asset, fees, cfg);
+  const menu = dialog.querySelector("menu");
+  menu.innerHTML = `<button value="cancel" type="button" id="cancelFeeDetail">关闭</button>`;
+  document.querySelector("#cancelFeeDetail").addEventListener("click", () => dialog.close());
+  dialog.showModal();
+}
+
+function renderFeeDetailArticle(item, fees, cfg) {
+  const hasHead = item.name && item.code;
+  return `<article class="fee-asset-detail">
+    ${hasHead ? `<div class="fee-asset-head"><strong>${item.name} (${item.code})</strong><span>${financeLocalMoney(fees.total, item.currency)}</span></div>` : ""}
+    <div class="fee-breakdown">
+      <div class="fee-row"><span>印花税</span><em>${financeLocalMoney(fees.stampDuty, item.currency)}</em></div>
+      <p class="fee-note">国税局收取，卖出时按成交金额的 ${cfg.stampDutyRate}% 收取</p>
+      <div class="fee-row"><span>佣金</span><em>${financeLocalMoney(fees.commission, item.currency)}</em></div>
+      <p class="fee-note">费率 ${cfg.commissionRate}%，最低 ${cfg.commissionMin} 元，含净佣金、手续费、证管费等</p>
+      <div class="fee-row"><span>过户费</span><em>${financeLocalMoney(fees.transferFee, item.currency)}</em></div>
+      <p class="fee-note">沪市 ${cfg.transferFeeRateSH}% 单独收取，深市 ${cfg.transferFeeRateSZ}%</p>
+      <div class="fee-row"><span>股息红利税</span><em>${financeLocalMoney(fees.dividendTax, item.currency)}</em></div>
+      <p class="fee-note">税率 ${cfg.dividendTaxRate}%，卖出已分红的股份后收取</p>
+    </div>
+  </article>`;
+}
+
+function openFeeConfigDialog() {
+  const form = document.querySelector("#feeConfigForm");
+  const cfg = state.feeConfig || seed.feeConfig;
+  form.stampDutyRate.value = cfg.stampDutyRate;
+  form.commissionRate.value = cfg.commissionRate;
+  form.commissionMin.value = cfg.commissionMin;
+  form.transferFeeRateSH.value = cfg.transferFeeRateSH;
+  form.transferFeeRateSZ.value = cfg.transferFeeRateSZ;
+  form.dividendTaxRate.value = cfg.dividendTaxRate;
+  document.querySelector("#feeConfigDialog").showModal();
+}
+
+function handleFeeConfigSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  state.feeConfig = {
+    stampDutyRate: Number(data.stampDutyRate) || 0,
+    commissionRate: Number(data.commissionRate) || 0,
+    commissionMin: Number(data.commissionMin) || 0,
+    transferFeeRateSH: Number(data.transferFeeRateSH) || 0,
+    transferFeeRateSZ: Number(data.transferFeeRateSZ) || 0,
+    dividendTaxRate: Number(data.dividendTaxRate) || 0,
+  };
+  saveState();
+  document.querySelector("#feeConfigDialog").close();
+  render();
+}
+
+// ─── 持仓明细（Holding Detail）──────────────────────────────────────
+function openHoldingDetail(assetId) {
+  const asset = (state.financeAssets || []).find((item) => item.id === assetId);
+  if (!asset) return;
+  const dialog = document.querySelector("#holdingDetailDialog");
+  pendingTradeOcrTransactions = [];
+  pendingTradeOcrAssetId = null;
+  pendingTradeOcrFile = null;
+  if (pendingTradeOcrPreviewUrl) URL.revokeObjectURL(pendingTradeOcrPreviewUrl);
+  pendingTradeOcrPreviewUrl = "";
+  dialog.dataset.assetId = assetId;
+  document.querySelector("#holdingDetailTitle").textContent = `${asset.name} (${asset.code})`;
+  // reset to holding tab
+  document.querySelectorAll(".holding-tab").forEach((t) => t.classList.remove("active"));
+  document.querySelector('.holding-tab[data-tab="holding"]').classList.add("active");
+  renderHoldingTabContent("holding", assetId);
+  dialog.showModal();
+}
+
+function renderHoldingTabContent(tab, assetId) {
+  const asset = (state.financeAssets || []).find((item) => item.id === assetId);
+  if (!asset) return;
+  const content = document.querySelector("#holdingTabContent");
+  if (tab === "holding") content.innerHTML = renderHoldingTab(asset);
+  else if (tab === "trade") content.innerHTML = renderTradeTab(asset);
+  else if (tab === "fee") content.innerHTML = renderFeeDetailTab(asset);
+  // bind buttons inside content
+  content.querySelectorAll("[data-action='add-trade-record']").forEach((btn) => btn.addEventListener("click", () => {
+    openTradeRecordDialog(Number(btn.dataset.assetId));
+  }));
+  content.querySelectorAll("[data-action='delete-trade']").forEach((btn) => btn.addEventListener("click", () => {
+    const aId = Number(btn.dataset.assetId);
+    const idx = Number(btn.dataset.index);
+    deleteTradeRecord(aId, idx);
+  }));
+  content.querySelector("[data-action='recognize-trade-image']")?.addEventListener("click", handleTradeImageRecognition);
+  content.querySelector("[data-action='confirm-trade-ocr']")?.addEventListener("click", confirmTradeOcrImport);
+  content.querySelector("[data-action='cancel-trade-ocr']")?.addEventListener("click", () => {
+    pendingTradeOcrTransactions = [];
+    pendingTradeOcrAssetId = null;
+    pendingTradeOcrFile = null;
+    if (pendingTradeOcrPreviewUrl) URL.revokeObjectURL(pendingTradeOcrPreviewUrl);
+    pendingTradeOcrPreviewUrl = "";
+    renderHoldingTabContent("trade", assetId);
+  });
+  content.querySelector("[data-trade-ocr-file]")?.addEventListener("change", (event) => {
+    const file = event.currentTarget.files?.[0];
+    setTradeOcrFile(file, content);
+  });
+  content.querySelector(".trade-ocr-panel")?.addEventListener("paste", (event) => {
+    const file = imageFromClipboard(event);
+    if (!file) return;
+    event.preventDefault();
+    setTradeOcrFile(new File([file], `clipboard-${Date.now()}.png`, { type: file.type || "image/png" }), content);
+  });
+  content.querySelectorAll(".holding-help-icon").forEach((icon) => icon.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const tip = icon.nextElementSibling;
+    if (tip) tip.hidden = !tip.hidden;
+  }));
+}
+
+// ── 持仓 Tab：汇总 + 每笔持仓卡片 ──
+function computeHoldingLots(asset) {
+  const txns = (asset.transactions || []).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const lots = []; // each: { date, direction, shares, costPrice, remainingShares, marketValue, pnl }
+  let totalShares = 0;
+  // 摊薄成本：累计 = +买入金额 +所有交易费用 -卖出金额
+  let dilutedCost = 0;
+  // 买入均价成本：买入时累加买入金额+买入费用，卖出时按比例减少
+  let buyAvgCost = 0;
+
+  for (const txn of txns) {
+    const shares = Number(txn.shares) || 0;
+    const price = Number(txn.price) || 0;
+    const tradeAmount = shares * price;
+    const fee = (Number(txn.commission) || 0) + (Number(txn.stampDuty) || 0) + (Number(txn.transferFee) || 0);
+    if (txn.direction === "buy") {
+      lots.push({ date: txn.date, shares, costPrice: price, remainingShares: shares, direction: "buy" });
+      totalShares += shares;
+      // 摊薄成本：+买入金额 +交易费用
+      dilutedCost += tradeAmount + fee;
+      // 买入均价：+买入金额 +买入费用
+      buyAvgCost += tradeAmount + fee;
+    } else {
+      // sell: reduce from earliest lots (FIFO)
+      let toSell = shares;
+      for (const lot of lots) {
+        if (toSell <= 0) break;
+        const reduce = Math.min(lot.remainingShares, toSell);
+        lot.remainingShares -= reduce;
+        toSell -= reduce;
+      }
+      // 摊薄成本：-卖出金额 +卖出费用
+      dilutedCost -= tradeAmount;
+      dilutedCost += fee;
+      // 买入均价：按比例减少 → 买入成本 × (1 - 卖出数量 / 卖出前持仓数量)
+      const prevShares = totalShares;
+      totalShares -= shares;
+      if (prevShares > 0) {
+        buyAvgCost *= (1 - shares / prevShares);
+      } else {
+        buyAvgCost = 0;
+      }
+    }
+  }
+  const activeLots = lots.filter((l) => l.remainingShares > 0);
+  // 摊薄成本价 = 摊薄成本 / 持仓数量
+  const dilutedCostPrice = totalShares > 0 ? dilutedCost / totalShares : 0;
+  // 买入均价 = 买入成本 / 持仓数量
+  const buyAvgPrice = totalShares > 0 ? buyAvgCost / totalShares : 0;
+  const avgCost = buyAvgPrice; // 默认使用买入均价
+  const marketPrice = Number(asset.shares) > 0 ? financeAssetValue(asset) / Number(asset.shares) : avgCost;
+  return { lots: activeLots, totalShares, totalCost: buyAvgCost, avgCost, marketPrice, dilutedCost, dilutedCostPrice, buyAvgCost, buyAvgPrice };
+}
+
+function renderHoldingTab(asset) {
+  const { lots, totalShares, totalCost, avgCost, marketPrice: calcMarketPrice, dilutedCostPrice, buyAvgPrice } = computeHoldingLots(asset);
+  const currentShares = Number(asset.shares) || 0;
+  // 现价：实时价 → 昨收价 → 保存的currentPrice → 成本+盈亏反算
+  const quoteData = realtimeQuoteMap[asset.code] || {};
+  const marketPrice = resolveAssetPrice(asset) || calcMarketPrice;
+  // 持仓市值：现价 × 份额
+  const totalValue = marketPrice * currentShares;
+  // 买入均价：优先表单输入值，其次交易记录计算
+  const costPrice = Number(asset.avgBuyPrice) || buyAvgPrice || Number(asset.costPrice) || avgCost;
+  // 成本价（摊薄成本价）
+  const displayCostPrice = Number(asset.costPrice) || costPrice;
+  // 持仓盈亏 = (现价 - 成本价) × 份额
+  const totalPnl = currentShares > 0 && displayCostPrice > 0 ? (marketPrice - displayCostPrice) * currentShares : (Number(asset.pnl) || 0);
+  const pnlPct = displayCostPrice > 0 ? ((marketPrice - displayCostPrice) / displayCostPrice * 100) : (Number(asset.pnlPercent) || 0);
+  const isProfit = totalPnl >= 0;
+  // 当日盈亏：优先实时行情涨跌幅
+  const todayPnl = (quoteData.changeAmt != null && currentShares > 0)
+    ? quoteData.changeAmt * currentShares
+    : (Number(asset.todayPnl) || 0);
+  const todayPnlPct = quoteData.changePct != null
+    ? quoteData.changePct
+    : (Number(asset.todayPnlPercent) || 0);
+  // 个股仓位：占全部股票资产的比例
+  const stockAssets = (state.financeAssets || []).filter((a) => a.kind === "stock");
+  const totalStockValue = stockAssets.reduce((s, a) => {
+    const q = realtimeQuoteMap[a.code];
+    const aPrice = q?.price || Number(a.currentPrice) || 0;
+    const aShares = Number(a.shares) || 0;
+    // 优先用现价×份额，没有现价则用 成本+盈亏 作为市值兜底
+    const aMarketVal = aPrice > 0 ? aPrice * aShares : (financeAssetCost(a) + (Number(a.pnl) || 0));
+    return s + financeAmountToRmb(aMarketVal, a.currency);
+  }, 0);
+  const myValue = marketPrice * currentShares || (financeAssetCost(asset) + (Number(asset.pnl) || 0));
+  const posWeight = totalStockValue > 0 ? (financeAmountToRmb(myValue, asset.currency) / totalStockValue * 100) : 0;
+  // 持仓天数：优先表单输入值，其次交易记录计算
+  const formHoldingDays = Number(asset.holdingDays) || 0;
+  let avgHoldingDays = formHoldingDays;
+  if (!formHoldingDays && lots.length > 0 && totalShares > 0) {
+    const now = Date.now();
+    for (const lot of lots) {
+      const days = Math.max(1, Math.floor((now - new Date(lot.date).getTime()) / 86400000));
+      avgHoldingDays += days * lot.remainingShares;
+    }
+    avgHoldingDays = Math.round(avgHoldingDays / totalShares);
+  }
+  // 税费合计：与税费标签页保持同步（费率估算 + 交易记录实际费用）
+  const stockFees = calculateStockFees(asset);
+  const txnFeeSum = (asset.transactions || []).reduce((s, t) => s + (Number(t.commission) || 0) + (Number(t.stampDuty) || 0) + (Number(t.transferFee) || 0), 0);
+  const totalFees = stockFees.total + txnFeeSum;
+
+  return `
+    <div class="holding-summary">
+      <div class="holding-summary-row">
+        <div class="holding-summary-item ${isProfit ? 'profit' : 'loss'}">
+          <span class="holding-summary-label">总盈亏 <span class="holding-help-icon">?</span><span class="holding-help-tip" hidden>持仓总盈亏 = (现价 - 成本价) × 持仓数量</span></span>
+          <strong>${isProfit ? '+' : ''}${financeLocalMoney(totalPnl, asset.currency)}</strong>
+        </div>
+        <div class="holding-summary-item ${isProfit ? 'profit' : 'loss'}">
+          <span class="holding-summary-label">盈亏比例 <span class="holding-help-icon">?</span><span class="holding-help-tip" hidden>盈亏比例 = (现价 - 成本价) / 成本价 × 100%</span></span>
+          <strong>${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%</strong>
+        </div>
+      </div>
+      <div class="holding-summary-grid">
+        <div class="holding-summary-item">
+          <span class="holding-summary-label">现价 ${realTimePrice ? '<span class="holding-live-dot"></span>' : ''}</span>
+          <strong>${financeLocalMoney(marketPrice, asset.currency)}</strong>
+        </div>
+        <div class="holding-summary-item">
+          <span class="holding-summary-label">买入均价 <span class="holding-help-icon">?</span><span class="holding-help-tip" hidden>买入时：买入成本 = 原累计买入成本 + 买入金额 + 买入费用；卖出时：买入成本按比例减少。买入均价 = 买入成本 / 持仓数量</span></span>
+          <strong>${financeLocalMoney(costPrice, asset.currency)}</strong>
+        </div>
+        <div class="holding-summary-item">
+          <span class="holding-summary-label">摊薄成本价 <span class="holding-help-icon">?</span><span class="holding-help-tip" hidden>摊薄成本 = 累计买入金额 - 累计卖出金额 + 所有交易费用。摊薄成本价 = 摊薄成本 / 持仓数量</span></span>
+          <strong>${financeLocalMoney(dilutedCostPrice, asset.currency)}</strong>
+        </div>
+        <div class="holding-summary-item">
+          <span class="holding-summary-label">持仓数量</span>
+          <strong>${currentShares}</strong>
+        </div>
+        <div class="holding-summary-item">
+          <span class="holding-summary-label">持仓市值</span>
+          <strong>${financeLocalMoney(totalValue, asset.currency)}</strong>
+        </div>
+        <div class="holding-summary-item">
+          <span class="holding-summary-label">当日盈亏 ${todayPnl !== 0 ? (todayPnl >= 0 ? '+' : '') + financeLocalMoney(todayPnl, asset.currency) : ''}</span>
+          <strong class="${todayPnl >= 0 ? 'profit' : 'loss'}">${todayPnlPct >= 0 ? '+' : ''}${todayPnlPct.toFixed(2)}%</strong>
+        </div>
+        <div class="holding-summary-item">
+          <span class="holding-summary-label">个股仓位 <span class="holding-help-icon">?</span><span class="holding-help-tip" hidden>该股票市值占全部股票资产总市值的比例</span></span>
+          <strong>${posWeight.toFixed(2)}%</strong>
+        </div>
+        <div class="holding-summary-item">
+          <span class="holding-summary-label">税费合计</span>
+          <strong>${financeLocalMoney(totalFees, asset.currency)}</strong>
+        </div>
+        <div class="holding-summary-item">
+          <span class="holding-summary-label">持股天数 <span class="holding-help-icon">?</span><span class="holding-help-tip" hidden>${formHoldingDays ? '用户手动输入' : '按各批次持仓股数加权平均计算，从买入日期至今的天数'}</span></span>
+          <strong>${avgHoldingDays}天</strong>
+        </div>
+      </div>
+    </div>
+    <div class="holding-lots">
+      <h4>持仓明细（按买入批次）</h4>
+      ${lots.length > 0 ? lots.map((lot, i) => {
+        const lotValue = lot.remainingShares * marketPrice;
+        const lotCost = lot.remainingShares * lot.costPrice;
+        const lotPnl = lotValue - lotCost;
+        const lotPnlPct = lotCost > 0 ? (lotPnl / lotCost * 100) : 0;
+        const daysSince = Math.max(1, Math.floor((Date.now() - new Date(lot.date).getTime()) / 86400000));
+        const profit = lotPnl >= 0;
+        return `<div class="holding-lot-card ${profit ? 'profit' : 'loss'}">
+          <div class="holding-lot-header">
+            <span>第${i + 1}笔 · ${lot.date}</span>
+            <span class="holding-lot-days">持仓${daysSince}天</span>
+          </div>
+          <div class="holding-lot-body">
+            <div class="holding-lot-row"><span>持仓数量</span><em>${lot.remainingShares}</em></div>
+            <div class="holding-lot-row"><span>市值</span><em>${financeLocalMoney(lotValue, asset.currency)}</em></div>
+            <div class="holding-lot-row"><span>买入价</span><em>${financeLocalMoney(lot.costPrice, asset.currency)}</em></div>
+            <div class="holding-lot-row"><span>盈亏</span><em class="${profit ? 'profit' : 'loss'}">${profit ? '+' : ''}${financeLocalMoney(lotPnl, asset.currency)} (${profit ? '+' : ''}${lotPnlPct.toFixed(2)}%)</em></div>
+          </div>
+        </div>`;
+      }).join("") : `<p class="muted">暂无持仓批次数据，请先添加交易记录。</p>`}
+    </div>`;
+}
+
+// ── 交易记录 Tab ──
+function renderTradeTab(asset) {
+  const txns = (asset.transactions || []).slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const totalBuy = txns.filter((t) => t.direction === "buy").reduce((s, t) => s + (Number(t.amount) || (Number(t.shares) * Number(t.price))), 0);
+  const totalSell = txns.filter((t) => t.direction === "sell").reduce((s, t) => s + (Number(t.amount) || (Number(t.shares) * Number(t.price))), 0);
+  const totalFees = txns.reduce((s, t) => s + (Number(t.commission) || 0) + (Number(t.stampDuty) || 0) + (Number(t.transferFee) || 0), 0);
+  return `
+    <section class="trade-ocr-panel" tabindex="0">
+      <div>
+        <strong>交易截图识别</strong>
+        <span>上传交割单或交易记录截图，自动提取买卖日期、数量、价格及费用。</span>
+      </div>
+      <label class="trade-ocr-upload">选择图片
+        <input type="file" accept="image/png,image/jpeg,image/webp" data-trade-ocr-file data-asset-id="${asset.id}" />
+      </label>
+      <button type="button" data-action="recognize-trade-image" data-asset-id="${asset.id}">开始识别</button>
+      <img class="trade-ocr-image-preview" data-trade-ocr-preview alt="交易截图预览" ${pendingTradeOcrPreviewUrl ? `src="${escapeAttr(pendingTradeOcrPreviewUrl)}"` : "hidden"} />
+      <p data-trade-ocr-status>${pendingTradeOcrFile ? `已选择 ${pendingTradeOcrFile.name}，点击“开始识别”。` : "请选择交易截图，也可以点击本区域后按 Ctrl+V 粘贴图片"}</p>
+      ${pendingTradeOcrAssetId === asset.id && pendingTradeOcrTransactions.length ? `
+        <div class="trade-ocr-results">
+          <strong>识别到 ${pendingTradeOcrTransactions.length} 笔交易，请确认</strong>
+          ${pendingTradeOcrTransactions.map((transaction) => `<span>${transaction.date} · ${transaction.direction === "buy" ? "买入" : "卖出"} · ${transaction.shares} × ${transaction.price} · ${transaction.amount.toFixed(2)}</span>`).join("")}
+          <div>
+            <button type="button" data-action="cancel-trade-ocr" data-asset-id="${asset.id}">取消</button>
+            <button type="button" class="primary" data-action="confirm-trade-ocr" data-asset-id="${asset.id}">确认导入</button>
+          </div>
+        </div>` : ""}
+    </section>
+    <div class="trade-summary-bar">
+      <span>买入总额: <strong>${financeLocalMoney(totalBuy, asset.currency)}</strong></span>
+      <span>卖出总额: <strong>${financeLocalMoney(totalSell, asset.currency)}</strong></span>
+      <span>交易费用合计: <strong>${financeLocalMoney(totalFees, asset.currency)}</strong></span>
+      <button data-action="add-trade-record" data-asset-id="${asset.id}" class="primary">+ 添加交易</button>
+    </div>
+    <div class="trade-list">
+      ${txns.length > 0 ? txns.map((t, idx) => {
+        const amount = Number(t.amount) || (Number(t.shares) * Number(t.price));
+        const isBuy = t.direction === "buy";
+        const fees = (Number(t.commission) || 0) + (Number(t.stampDuty) || 0) + (Number(t.transferFee) || 0);
+        const origIdx = (asset.transactions || []).indexOf(t);
+        return `<div class="trade-record-card ${isBuy ? 'buy' : 'sell'}">
+          <div class="trade-record-header">
+            <span class="trade-direction ${isBuy ? 'buy' : 'sell'}">${isBuy ? '买入' : '卖出'}</span>
+            <span class="trade-date">${t.date}</span>
+            <button data-action="delete-trade" data-asset-id="${asset.id}" data-index="${origIdx}" class="trade-delete-btn" title="删除">×</button>
+          </div>
+          <div class="trade-record-body">
+            <div class="trade-record-row"><span>数量</span><em>${Number(t.shares)}</em></div>
+            <div class="trade-record-row"><span>价格</span><em>${financeLocalMoney(Number(t.price), asset.currency)}</em></div>
+            <div class="trade-record-row"><span>金额</span><em>${financeLocalMoney(amount, asset.currency)}</em></div>
+            ${fees > 0 ? `<div class="trade-record-row"><span>费用</span><em>${financeLocalMoney(fees, asset.currency)}</em></div>` : ""}
+          </div>
+        </div>`;
+      }).join("") : `<p class="muted">暂无交易记录，点击上方按钮添加。</p>`}
+    </div>`;
+}
+
+function setTradeOcrFile(file, content = document.querySelector("#holdingTabContent")) {
+  const status = content?.querySelector("[data-trade-ocr-status]");
+  const preview = content?.querySelector("[data-trade-ocr-preview]");
+  if (!file?.type?.startsWith("image/")) {
+    if (status) status.textContent = file ? "剪贴板或文件中不是有效图片。" : "请选择交易截图";
+    return;
+  }
+  pendingTradeOcrFile = file;
+  pendingTradeOcrTransactions = [];
+  pendingTradeOcrAssetId = null;
+  if (pendingTradeOcrPreviewUrl) URL.revokeObjectURL(pendingTradeOcrPreviewUrl);
+  pendingTradeOcrPreviewUrl = URL.createObjectURL(file);
+  if (preview) {
+    preview.src = pendingTradeOcrPreviewUrl;
+    preview.hidden = false;
+  }
+  if (status) status.textContent = `已选择 ${file.name}，点击“开始识别”。`;
+}
+
+async function handleTradeImageRecognition(event) {
+  const assetId = Number(event.currentTarget.dataset.assetId);
+  const content = document.querySelector("#holdingTabContent");
+  const input = content?.querySelector("[data-trade-ocr-file]");
+  const status = content?.querySelector("[data-trade-ocr-status]");
+  const file = pendingTradeOcrFile || input?.files?.[0];
+  if (!file) {
+    if (status) status.textContent = "请先选择需要识别的交易截图。";
+    return;
+  }
+  event.currentTarget.disabled = true;
+  if (status) status.textContent = "正在识别图片 0%";
+  try {
+    const text = await recognizeImageText(file, (progress) => {
+      if (status) status.textContent = `正在识别图片 ${progress}%`;
+    });
+    const parsed = parseFinanceOcrText(text).transactions || [];
+    const asset = (state.financeAssets || []).find((item) => item.id === assetId);
+    pendingTradeOcrTransactions = dedupeFinanceTransactions(parsed, asset?.transactions || []);
+    pendingTradeOcrAssetId = assetId;
+    if (!pendingTradeOcrTransactions.length) {
+      if (status) status.textContent = "没有识别到完整交易，请使用包含日期、买卖方向、数量和价格的清晰截图。";
+      return;
+    }
+    renderHoldingTabContent("trade", assetId);
+  } catch (error) {
+    console.error("交易图片识别失败", error);
+    if (status) status.textContent = "识别失败，请换一张清晰、方向正常的图片重试。";
+  } finally {
+    if (document.body.contains(event.currentTarget)) event.currentTarget.disabled = false;
+  }
+}
+
+function confirmTradeOcrImport(event) {
+  const assetId = Number(event.currentTarget.dataset.assetId);
+  const asset = (state.financeAssets || []).find((item) => item.id === assetId);
+  if (!asset || pendingTradeOcrAssetId !== assetId) return;
+  const additions = dedupeFinanceTransactions(pendingTradeOcrTransactions, asset.transactions || []);
+  asset.transactions = [...(asset.transactions || []), ...additions];
+  recalcAssetFromTransactions(asset);
+  pendingTradeOcrTransactions = [];
+  pendingTradeOcrAssetId = null;
+  pendingTradeOcrFile = null;
+  if (pendingTradeOcrPreviewUrl) URL.revokeObjectURL(pendingTradeOcrPreviewUrl);
+  pendingTradeOcrPreviewUrl = "";
+  syncAssetClassValuesFromFinance();
+  saveState();
+  renderHoldingTabContent("trade", assetId);
+  render();
+}
+
+function openTradeRecordDialog(assetId) {
+  const form = document.querySelector("#tradeRecordForm");
+  form.reset();
+  form.assetId.value = assetId;
+  form.date.value = new Date().toISOString().slice(0, 10);
+  form.commission.value = "0";
+  form.stampDuty.value = "0";
+  form.transferFee.value = "0";
+  form.amount.value = "0";
+  document.querySelector("#tradeRecordDialog").showModal();
+}
+
+function handleTradeRecordSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  const assetId = Number(data.assetId);
+  const asset = (state.financeAssets || []).find((item) => item.id === assetId);
+  if (!asset) return;
+  const shares = Number(data.shares) || 0;
+  const price = Number(data.price) || 0;
+  const record = {
+    id: Date.now(),
+    direction: data.direction,
+    date: data.date,
+    shares,
+    price,
+    amount: shares * price,
+    commission: Number(data.commission) || 0,
+    stampDuty: Number(data.stampDuty) || 0,
+    transferFee: Number(data.transferFee) || 0,
+  };
+  if (!Array.isArray(asset.transactions)) asset.transactions = [];
+  asset.transactions.push(record);
+  // Recalculate shares/cost from transactions
+  recalcAssetFromTransactions(asset);
+  saveState();
+  document.querySelector("#tradeRecordDialog").close();
+  // Re-render the holding detail trade tab
+  const dialog = document.querySelector("#holdingDetailDialog");
+  if (dialog.open) {
+    const activeTab = document.querySelector(".holding-tab.active");
+    renderHoldingTabContent(activeTab?.dataset.tab || "trade", assetId);
+  }
+  render();
+}
+
+function recalcAssetFromTransactions(asset) {
+  const txns = (asset.transactions || []).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  let shares = 0;
+  let totalCost = 0;
+  for (const t of txns) {
+    const s = Number(t.shares) || 0;
+    const p = Number(t.price) || 0;
+    if (t.direction === "buy") {
+      totalCost += s * p;
+      shares += s;
+    } else {
+      if (shares > 0) {
+        const avgCost = totalCost / shares;
+        totalCost = avgCost * (shares - s);
+        shares -= s;
+      }
+    }
+  }
+  asset.shares = Math.max(0, shares);
+  asset.costPrice = shares > 0 ? totalCost / shares : 0;
+}
+
+function deleteTradeRecord(assetId, index) {
+  const asset = (state.financeAssets || []).find((item) => item.id === assetId);
+  if (!asset || !Array.isArray(asset.transactions)) return;
+  if (!window.confirm("确认删除该条交易记录？")) return;
+  asset.transactions.splice(index, 1);
+  recalcAssetFromTransactions(asset);
+  saveState();
+  const dialog = document.querySelector("#holdingDetailDialog");
+  if (dialog.open) {
+    const activeTab = document.querySelector(".holding-tab.active");
+    renderHoldingTabContent(activeTab?.dataset.tab || "trade", assetId);
+  }
+  render();
+}
+
+// ── 明细 Tab：完整费用明细 + 规则提示 ──
+function renderFeeDetailTab(asset) {
+  const fees = calculateStockFees(asset);
+  const cfg = state.feeConfig || seed.feeConfig;
+  const txns = asset.transactions || [];
+  const txnFees = txns.reduce((s, t) => ({
+    commission: s.commission + (Number(t.commission) || 0),
+    stampDuty: s.stampDuty + (Number(t.stampDuty) || 0),
+    transferFee: s.transferFee + (Number(t.transferFee) || 0),
+  }), { commission: 0, stampDuty: 0, transferFee: 0 });
+  const txnFeeTotal = txnFees.commission + txnFees.stampDuty + txnFees.transferFee;
+  const isStock = asset.kind === "stock";
+  const isDomestic = asset.market === "domestic";
+
+  return `
+    <div class="fee-detail-tab">
+      <section class="fee-section">
+        <h4>交易费用汇总</h4>
+        <div class="fee-detail-table">
+          <div class="fee-detail-row">
+            <span class="fee-label">佣金 <span class="holding-help-icon">?</span>
+              <span class="holding-help-tip" hidden>券商收取的交易佣金，包含净佣金、手续费、证管费等。费率 ${cfg.commissionRate}%，最低 ${cfg.commissionMin} 元。买卖双向收取。</span>
+            </span>
+            <span class="fee-value">${financeLocalMoney(fees.commission + txnFees.commission, asset.currency)}</span>
+          </div>
+          <div class="fee-detail-row">
+            <span class="fee-label">印花税 <span class="holding-help-icon">?</span>
+              <span class="holding-help-tip" hidden>国家税务局收取，仅在卖出时按成交金额的 ${cfg.stampDutyRate}% 收取。由券商代扣后交与交易所，最终由中国结算公司统一收取。</span>
+            </span>
+            <span class="fee-value">${financeLocalMoney(fees.stampDuty + txnFees.stampDuty, asset.currency)}</span>
+          </div>
+          <div class="fee-detail-row">
+            <span class="fee-label">过户费 <span class="holding-help-icon">?</span>
+              <span class="holding-help-tip" hidden>委托券商在中国结算公司办理股权变更时收取的费用。沪市按成交金额的 ${cfg.transferFeeRateSH}% 收取；深市已包含在佣金内。买卖双向收取。</span>
+            </span>
+            <span class="fee-value">${financeLocalMoney(fees.transferFee + txnFees.transferFee, asset.currency)}</span>
+          </div>
+          ${isStock && isDomestic ? `<div class="fee-detail-row">
+            <span class="fee-label">股息红利税 <span class="holding-help-icon">?</span>
+              <span class="holding-help-tip" hidden>个人从公开发行和转让市场取得的上市公司股票，持股期限超过1年的，股息红利所得暂免征收个人所得税。持股1个月以内税率20%，1个月至1年税率10%，卖出时根据持股期限补扣。</span>
+            </span>
+            <span class="fee-value">${financeLocalMoney(fees.dividendTax, asset.currency)}</span>
+          </div>` : ""}
+          <div class="fee-detail-row fee-detail-total">
+            <span class="fee-label">合计</span>
+            <span class="fee-value">${financeLocalMoney(fees.total + txnFeeTotal, asset.currency)}</span>
+          </div>
+        </div>
+      </section>
+      ${!isStock || !isDomestic ? `<p class="fee-note-muted">当前资产类型为${isStock ? '海外股票' : asset.kind === 'fund' ? '基金' : '自定义'}，部分A股费用规则不适用。</p>` : ""}
+    </div>`;
 }
 
 function openAssetClassDialog(item = null) {
@@ -4377,17 +6055,78 @@ function financeTertiaryScopeKey(kind, subcategory) {
   return `${kind}::${subcategory}`;
 }
 
+// ── 根据代码前缀推断板块（三级分类） ──
+function inferBoardFromCode(code) {
+  if (!code) return "";
+  const c = String(code).trim();
+  if (c.startsWith("688")) return "科创板";   // 688 优先于 68
+  if (c.startsWith("68")) return "沪市";
+  if (c.startsWith("60")) return "沪市";
+  if (c.startsWith("30")) return "创业板";
+  if (c.startsWith("00")) return "深市";
+  if (c.startsWith("92")) return "北证";
+  return "";
+}
+
+// A股默认三级分类列表
+const STOCK_A_BOARD_OPTIONS = ["沪市", "深市", "创业板", "科创板", "北证"];
+
 function financeTertiaryOptions(kind, subcategory, preferred = "") {
   const key = financeTertiaryScopeKey(kind, subcategory);
   const saved = state.customCategories.finance.tertiaryByScope[key] || [];
-  return [...new Set(["未分类", ...saved, ...(preferred ? [preferred] : [])])];
+  // A股股票自动包含板块分类
+  const boardDefaults = (kind === "stock" && subcategory === "A股") ? STOCK_A_BOARD_OPTIONS : [];
+  return [...new Set(["未分类", ...boardDefaults, ...saved, ...(preferred ? [preferred] : [])])];
+}
+
+// ── 盈亏自动计算 ──
+// 规则：盈亏额 = (现价 - 持仓成本) × 份额，盈亏率 = (现价 - 持仓成本) / 持仓成本 × 100%
+// 用户正在编辑的字段不覆盖
+function updateFinancePnlPercents(form) {
+  const f = form.elements;
+  const costPrice = Number(f.costPrice.value) || 0;
+  const shares = Number(f.shares.value) || 0;
+  const currentPrice = Number(f.currentPrice.value) || 0;
+  const active = document.activeElement;
+  // 持仓盈亏：根据现价、成本价、份额自动算
+  if (currentPrice > 0 && costPrice > 0 && shares > 0) {
+    const calcPnl = (currentPrice - costPrice) * shares;
+    const calcPnlPct = ((currentPrice - costPrice) / costPrice) * 100;
+    if (active !== f.pnl && active !== f.pnlPercent) {
+      f.pnl.value = calcPnl.toFixed(2);
+      f.pnlPercent.value = calcPnlPct.toFixed(2);
+    } else if (active === f.pnl) {
+      // 用户改了盈亏额 → 反算盈亏率
+      const pnl = Number(f.pnl.value) || 0;
+      if (costPrice > 0 && shares > 0) {
+        f.pnlPercent.value = ((pnl / (costPrice * shares)) * 100).toFixed(2);
+      }
+    } else if (active === f.pnlPercent) {
+      // 用户改了盈亏率 → 反算盈亏额
+      const pct = Number(f.pnlPercent.value) || 0;
+      if (costPrice > 0 && shares > 0) {
+        f.pnl.value = ((pct / 100) * costPrice * shares).toFixed(2);
+      }
+    }
+  }
+  // 当日参考盈亏：根据盈亏额反算盈亏率
+  const todayPnl = Number(f.todayPnl.value) || 0;
+  const totalCost = costPrice * shares;
+  if (active !== f.todayPnl && active !== f.todayPnlPercent) {
+    if (totalCost > 0) f.todayPnlPercent.value = ((todayPnl / totalCost) * 100).toFixed(2);
+  } else if (active === f.todayPnl && totalCost > 0) {
+    f.todayPnlPercent.value = ((todayPnl / totalCost) * 100).toFixed(2);
+  } else if (active === f.todayPnlPercent && totalCost > 0) {
+    const pct = Number(f.todayPnlPercent.value) || 0;
+    f.todayPnl.value = ((pct / 100) * totalCost).toFixed(2);
+  }
 }
 
 function openFinanceAssetDialog(asset = null, preferredKind = "stock") {
   const form = document.querySelector("#financeAssetForm");
   const fields = form.elements;
-  const source = asset || state.financeAssetDraft || {};
-  const kind = normalizeFinanceKind(source.kind || preferredKind || "stock");
+  const kind = normalizeFinanceKind(preferredKind || "stock");
+  const source = asset || state.financeAssetDrafts[kind] || {};
   form.reset();
   fields.assetId.value = asset?.id || "";
   fields.kind.value = kind;
@@ -4405,55 +6144,174 @@ function openFinanceAssetDialog(asset = null, preferredKind = "stock") {
   fields.costPrice.value = source.costPrice ?? "";
   fields.shares.value = source.shares ?? "";
   fields.pnl.value = source.pnl ?? 0;
+  fields.currentPrice.value = source.currentPrice ?? "";
+  fields.avgBuyPrice.value = source.avgBuyPrice ?? "";
+  fields.holdingDays.value = source.holdingDays ?? "";
+  fields.positionWeight.value = source.positionWeight ?? "";
+  fields.totalFees.value = source.totalFees ?? 0;
+  fields.pnlPercent.value = source.pnlPercent ?? "";
+  fields.todayPnl.value = source.todayPnl ?? 0;
+  fields.todayPnlPercent.value = source.todayPnlPercent ?? "";
+  // Auto-calc readonly percent fields
+  updateFinancePnlPercents(form);
+  pendingFinanceOcrTransactions = [];
+  pendingFinanceOcrResult = null;
+  pendingFinanceOcrAssets = [];
+  pendingFinanceOcrRawText = "";
+  pendingFinanceOcrUnassignedTransactions = [];
+  pendingFinanceOcrFile = null;
+  pendingFinanceOcrDetailFile = null;
+  pendingFinanceOcrPasteKind = "list";
+  pendingFinanceOcrConfirmed = false;
   resetFinanceOcrPanel();
+  hideCodeLookupDropdown();
   form.querySelector("h2").textContent = asset ? "编辑理财资产" : "新增理财资产";
   updateFinanceAssetPreview();
+  toggleStockFormFields(kind);
   document.querySelector("#financeAssetDialog").showModal();
+}
+
+/* 根据资产类型切换股票专属字段的显示/隐藏 */
+function toggleStockFormFields(kind) {
+  const form = document.querySelector("#financeAssetForm");
+  if (!form) return;
+  form.querySelectorAll("[data-stock-only]").forEach((el) => {
+    const show = kind === "stock";
+    el.style.display = show ? "" : "none";
+    el.querySelectorAll("input, select, textarea").forEach((input) => {
+      if (show) {
+        if (input.dataset.wasRequired === "true") {
+          input.setAttribute("required", "");
+          delete input.dataset.wasRequired;
+        }
+      } else {
+        if (input.hasAttribute("required")) {
+          input.dataset.wasRequired = "true";
+          input.removeAttribute("required");
+        }
+      }
+    });
+  });
 }
 
 function resetFinanceOcrPanel() {
   const preview = document.querySelector("#financeOcrPreview");
+  const detailPreview = document.querySelector("#financeOcrDetailPreview");
   const status = document.querySelector("#financeOcrStatus");
-  if (preview?.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
-  if (preview) {
-    preview.removeAttribute("src");
-    preview.dataset.objectUrl = "";
-  }
+  const transactions = document.querySelector("#financeOcrTransactions");
+  [preview, detailPreview].forEach((image) => {
+    if (image?.dataset.objectUrl) URL.revokeObjectURL(image.dataset.objectUrl);
+    if (image) {
+      image.removeAttribute("src");
+      image.dataset.objectUrl = "";
+    }
+  });
   if (status) {
     status.textContent = "尚未选择图片";
     status.className = "finance-ocr-status";
   }
+  if (transactions) {
+    transactions.hidden = true;
+    transactions.innerHTML = "";
+  }
+  pendingFinanceOcrResult = null;
+  pendingFinanceOcrAssets = [];
+  pendingFinanceOcrRawText = "";
+  pendingFinanceOcrUnassignedTransactions = [];
+  pendingFinanceOcrFile = null;
+  pendingFinanceOcrDetailFile = null;
+  pendingFinanceOcrPasteKind = "list";
+  pendingFinanceOcrConfirmed = false;
+  updateFinanceOcrKindSwitch();
 }
 
 function handleFinanceImageSelection(event) {
   const file = event.currentTarget.files?.[0];
-  const preview = document.querySelector("#financeOcrPreview");
+  setFinanceOcrFile(file, "list");
+}
+
+function handleFinanceDetailImageSelection(event) {
+  const file = event.currentTarget.files?.[0];
+  setFinanceOcrFile(file, "detail");
+}
+
+function updateFinanceOcrKindSwitch() {
+  document.querySelectorAll("[data-action='set-finance-ocr-kind']").forEach((button) => {
+    button.classList.toggle("active", button.dataset.kind === pendingFinanceOcrPasteKind);
+  });
+  document.querySelectorAll(".finance-ocr-upload[data-ocr-kind]").forEach((upload) => {
+    upload.classList.toggle("is-active", upload.dataset.ocrKind === pendingFinanceOcrPasteKind);
+  });
+}
+
+function handleFinanceOcrKindSwitch(event) {
+  const button = event.target.closest("[data-action='set-finance-ocr-kind']");
+  if (!button) return;
+  pendingFinanceOcrPasteKind = button.dataset.kind === "detail" ? "detail" : "list";
+  updateFinanceOcrKindSwitch();
+}
+
+function setFinanceOcrFile(file, kind = "list") {
+  const isDetail = kind === "detail";
+  const preview = document.querySelector(isDetail ? "#financeOcrDetailPreview" : "#financeOcrPreview");
   const status = document.querySelector("#financeOcrStatus");
   if (!file) {
-    resetFinanceOcrPanel();
+    if (isDetail) pendingFinanceOcrDetailFile = null;
+    else pendingFinanceOcrFile = null;
     return;
   }
   if (!file.type.startsWith("image/")) {
-    event.currentTarget.value = "";
     status.textContent = "请选择 PNG、JPG 或 WebP 图片。";
     status.className = "finance-ocr-status error";
     return;
   }
+  if (isDetail) pendingFinanceOcrDetailFile = file;
+  else pendingFinanceOcrFile = file;
+  pendingFinanceOcrPasteKind = kind;
+  updateFinanceOcrKindSwitch();
+  pendingFinanceOcrResult = null;
+  pendingFinanceOcrConfirmed = false;
+  pendingFinanceOcrTransactions = [];
+  pendingFinanceOcrAssets = [];
+  pendingFinanceOcrRawText = "";
+  pendingFinanceOcrUnassignedTransactions = [];
+  renderFinanceOcrTransactionPreview();
   if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
   const objectUrl = URL.createObjectURL(file);
   preview.src = objectUrl;
   preview.dataset.objectUrl = objectUrl;
-  status.textContent = `已选择 ${file.name}，点击“识别并自动填写”。`;
+  const selected = [
+    pendingFinanceOcrFile ? "列表图" : "",
+    pendingFinanceOcrDetailFile ? "详情图" : "",
+  ].filter(Boolean).join("和");
+  status.textContent = `已选择${selected}，点击“识别图片并预览”。`;
   status.className = "finance-ocr-status";
+}
+
+function imageFromClipboard(event) {
+  return Array.from(event.clipboardData?.items || [])
+    .find((item) => item.type.startsWith("image/"))
+    ?.getAsFile() || null;
+}
+
+function handleFinanceOcrPaste(event) {
+  const file = imageFromClipboard(event);
+  if (!file) return;
+  event.preventDefault();
+  setFinanceOcrFile(
+    new File([file], `clipboard-${pendingFinanceOcrPasteKind}-${Date.now()}.png`, { type: file.type || "image/png" }),
+    pendingFinanceOcrPasteKind,
+  );
 }
 
 async function handleFinanceImageRecognition(event) {
   const form = document.querySelector("#financeAssetForm");
-  const file = form.elements.assetImage.files?.[0];
+  const listFile = pendingFinanceOcrFile || form.elements.assetImage.files?.[0];
+  const detailFile = pendingFinanceOcrDetailFile || form.elements.assetDetailImage.files?.[0];
   const button = event.currentTarget;
   const status = document.querySelector("#financeOcrStatus");
-  if (!file) {
-    status.textContent = "请先上传需要识别的资产图片。";
+  if (!listFile && !detailFile) {
+    status.textContent = "请先上传持仓列表图或详情图。";
     status.className = "finance-ocr-status error";
     return;
   }
@@ -4466,27 +6324,1078 @@ async function handleFinanceImageRecognition(event) {
   button.textContent = "正在识别...";
   status.className = "finance-ocr-status working";
   try {
-    const result = await window.Tesseract.recognize(file, "chi_sim+eng", {
-      workerPath: "/vendor/tesseract-worker.min.js",
-      logger: (message) => {
-        if (message.status !== "recognizing text") return;
-        status.textContent = `正在识别图片 ${Math.round((message.progress || 0) * 100)}%`;
-      },
+    let listText = "";
+    let detailText = "";
+    if (listFile) {
+      listText = await recognizeImageText(listFile, (progress) => {
+        status.textContent = `正在识别列表图片 ${progress}%`;
+      });
+    }
+    if (detailFile) {
+      detailText = await recognizeImageText(detailFile, (progress) => {
+        status.textContent = `正在识别详情图片 ${progress}%`;
+      });
+    }
+    const listResult = listText ? parseFinanceOcrText(listText) : { assets: [], transactions: [], rawText: "" };
+    const detailResult = detailText ? parseBrokerDetailOcrText(detailText) : { assets: [], transactions: [], rawText: "" };
+    const combined = combineFinanceOcrResults(listResult, detailResult);
+    status.textContent = "正在校验证券代码并补全标准资料...";
+    const extracted = await enrichFinanceOcrResult(combined, (current, total) => {
+      status.textContent = `正在补全证券资料 ${current}/${total}`;
     });
-    const extracted = parseFinanceOcrText(result.data.text || "");
-    const filled = applyFinanceOcrResult(extracted);
-    status.textContent = filled.length
-      ? `识别完成，已填写：${filled.join("、")}。请核对后保存。`
+    pendingFinanceOcrResult = extracted;
+    pendingFinanceOcrConfirmed = false;
+    pendingFinanceOcrAssets = extracted.assets || [];
+    pendingFinanceOcrTransactions = extracted.transactions || [];
+    pendingFinanceOcrRawText = extracted.rawText || [listText, detailText].filter(Boolean).join("\n\n");
+    pendingFinanceOcrUnassignedTransactions = extracted.unassignedTransactions || [];
+    renderFinanceOcrResultPreview();
+    const transactionMessage = pendingFinanceOcrTransactions.length
+      ? `，${pendingFinanceOcrTransactions.length} 笔交易`
+      : "";
+    status.textContent = pendingFinanceOcrAssets.length || pendingFinanceOcrTransactions.length
+      ? `识别完成：${pendingFinanceOcrAssets.length} 项资产${transactionMessage}。请选择需要导入的持仓行并核对交易。`
       : "图片识别完成，但没有找到可自动填写的资产字段，请换一张更清晰的截图。";
-    status.className = `finance-ocr-status ${filled.length ? "success" : "error"}`;
+    status.className = `finance-ocr-status ${pendingFinanceOcrAssets.length || pendingFinanceOcrTransactions.length ? "success" : "error"}`;
   } catch (error) {
     console.error("资产图片识别失败", error);
     status.textContent = "图片识别失败，请使用更清晰、文字方向正常的截图重试。";
     status.className = "finance-ocr-status error";
   } finally {
     button.disabled = false;
-    button.textContent = "识别并自动填写";
+    button.textContent = "识别图片并预览";
   }
+}
+
+function financeOcrResultFields(result) {
+  return [
+    ["market", "市场"], ["currency", "货币单位"], ["kind", "资产类型"], ["accountId", "所属账户"],
+    ["category", "资产分类"], ["subcategory", "二级分类"], ["tertiaryCategory", "三级分类"],
+    ["positionGroup", "仓位分组"], ["positionCategory", "仓位分类"], ["name", "资产名称"],
+    ["code", "资产代码"], ["costPrice", "持仓成本"], ["shares", "份额/数量"], ["pnl", "浮动盈亏"],
+    ["currentPrice", "现价"], ["avgBuyPrice", "买入均价"], ["holdingDays", "持仓天数"],
+    ["positionWeight", "个股仓位"], ["totalFees", "税费合计"], ["todayPnl", "当日参考盈亏"],
+  ].filter(([field]) => result[field] !== "" && result[field] !== null && result[field] !== undefined);
+}
+
+function financeOcrPreviewValue(field, value) {
+  if (field === "kind") return financeKindLabel(value);
+  if (field === "market") return financeMarketLabel(value);
+  if (field === "positionGroup") return financePositionGroupLabel(value);
+  if (field === "accountId") return state.accounts.find((account) => account.id === value)?.name || value;
+  return value;
+}
+
+function ocrSelectOptions(values, current, label = (value) => value) {
+  return values.map((value) => `<option value="${escapeAttr(value)}" ${value === current ? "selected" : ""}>${escapeHtml(label(value))}</option>`).join("");
+}
+
+function financeOcrAssetCurrentValue(asset) {
+  if (Number.isFinite(Number(asset.currentValue)) && asset.currentValueSource === "ocr") return Number(asset.currentValue);
+  return (Number(asset.costPrice) || 0) * (Number(asset.shares) || 0) + (Number(asset.pnl) || 0);
+}
+
+function validateFinanceOcrAsset(asset) {
+  const errors = {};
+  [
+    "market", "currency", "kind", "accountId", "category", "subcategory",
+    "positionGroup", "positionCategory", "name", "code",
+  ].forEach((field) => {
+    if (!String(asset[field] || "").trim()) errors[field] = "必填";
+  });
+  if (!(Number(asset.costPrice) > 0)) errors.costPrice = "必须大于 0";
+  if (!(Number(asset.shares) > 0)) errors.shares = "必须大于 0";
+  if (!Number.isFinite(Number(asset.pnl))) errors.pnl = "必须是有效数字";
+  return errors;
+}
+
+function financeOcrInput(field, value, index, errors, type = "text", attributes = "") {
+  const invalid = errors[field] ? " is-invalid" : "";
+  return `<input class="ocr-cell-input${invalid}" data-ocr-index="${index}" data-field="${field}" type="${type}" value="${escapeAttr(value ?? "")}" ${attributes} title="${escapeAttr(errors[field] || "")}" />`;
+}
+
+function renderFinanceOcrAssetRow(asset, index) {
+  const normalized = completeFinanceOcrAssetDefaults(asset);
+  pendingFinanceOcrAssets[index] = normalized;
+  const errors = validateFinanceOcrAsset(normalized);
+  const invalidCount = Object.keys(errors).length;
+  const categories = financeCategoryOptions(normalized.kind, normalized.category);
+  const subcategories = financeSubcategoryOptions(normalized.kind);
+  const tertiary = financeTertiaryOptions(normalized.kind, normalized.subcategory, normalized.tertiaryCategory);
+  const groups = financePositionGroupOptions(normalized.kind);
+  const positions = financePositionCategoryOptions(normalized.kind, normalized.positionGroup);
+  const confidence = Number.isFinite(normalized.confidence) ? `${Math.round(normalized.confidence * 100)}%` : "-";
+  return `<tr class="${invalidCount ? "has-errors" : ""}">
+    <td class="ocr-select-cell"><input type="checkbox" data-ocr-index="${index}" data-field="selected" ${normalized.selected !== false ? "checked" : ""} aria-label="选择第 ${index + 1} 行" /></td>
+    <td>${financeOcrInput("name", normalized.name, index, errors)}</td>
+    <td>${financeOcrInput("code", normalized.code, index, errors)}</td>
+    <td>${financeOcrInput("currentValue", financeOcrAssetCurrentValue(normalized).toFixed(2), index, {}, "number", 'step="0.01" min="0"')}</td>
+    <td>${financeOcrInput("shares", normalized.shares, index, errors, "number", 'step="0.0001" min="0"')}</td>
+    <td>${financeOcrInput("availableShares", normalized.availableShares, index, {}, "number", 'step="0.0001" min="0"')}</td>
+    <td>${financeOcrInput("currentPrice", normalized.currentPrice, index, {}, "number", 'step="0.0001" min="0"')}</td>
+    <td>${financeOcrInput("costPrice", normalized.costPrice, index, errors, "number", 'step="0.0001" min="0"')}</td>
+    <td>${financeOcrInput("pnl", normalized.pnl, index, errors, "number", 'step="0.01"')}</td>
+    <td>${financeOcrInput("pnlPercent", normalized.pnlPercent, index, {}, "number", 'step="0.001"')}</td>
+    <td><select class="${errors.kind ? "is-invalid" : ""}" data-ocr-index="${index}" data-field="kind">${ocrSelectOptions(["stock", "fund", "commodity", "futures", "options", "crypto", "cashflow", "custom"], normalized.kind, financeKindLabel)}</select></td>
+    <td><select class="${errors.market ? "is-invalid" : ""}" data-ocr-index="${index}" data-field="market">${ocrSelectOptions(["domestic", "overseas"], normalized.market, financeMarketLabel)}</select></td>
+    <td><select class="${errors.currency ? "is-invalid" : ""}" data-ocr-index="${index}" data-field="currency">${ocrSelectOptions(["CNH", "HKD", "USD", "EUR", "JPY", "GBP", "AUD", "SGD"], normalized.currency)}</select></td>
+    <td><select class="${errors.accountId ? "is-invalid" : ""}" data-ocr-index="${index}" data-field="accountId">${ocrSelectOptions(state.accounts.map((account) => account.id), normalized.accountId, (id) => state.accounts.find((account) => account.id === id)?.name || id)}</select></td>
+    <td><select class="${errors.category ? "is-invalid" : ""}" data-ocr-index="${index}" data-field="category">${ocrSelectOptions(categories, normalized.category)}</select></td>
+    <td><select class="${errors.subcategory ? "is-invalid" : ""}" data-ocr-index="${index}" data-field="subcategory">${ocrSelectOptions(subcategories, normalized.subcategory)}</select></td>
+    <td><select data-ocr-index="${index}" data-field="tertiaryCategory">${ocrSelectOptions(tertiary, normalized.tertiaryCategory || "未分类")}</select></td>
+    <td><select class="${errors.positionGroup ? "is-invalid" : ""}" data-ocr-index="${index}" data-field="positionGroup">${ocrSelectOptions(groups, normalized.positionGroup, financePositionGroupLabel)}</select></td>
+    <td><select class="${errors.positionCategory ? "is-invalid" : ""}" data-ocr-index="${index}" data-field="positionCategory">${ocrSelectOptions(positions, normalized.positionCategory)}</select></td>
+    <td class="ocr-source-cell"><span title="${escapeAttr(normalized.source || "")}">${escapeHtml(normalized.source || "图片综合识别")}</span><small>置信度 ${confidence} · ${normalized.transactions?.length || 0} 笔交易</small></td>
+    <td><button type="button" class="icon-button danger" data-action="remove-finance-ocr-asset" data-index="${index}" title="删除此候选">×</button></td>
+  </tr>`;
+}
+
+function renderFinanceOcrResultPreview() {
+  const container = document.querySelector("#financeOcrTransactions");
+  if (!container) return;
+  const assets = pendingFinanceOcrAssets || [];
+  container.hidden = assets.length === 0 && pendingFinanceOcrTransactions.length === 0 && !pendingFinanceOcrRawText;
+  const validSelected = assets.filter((asset) => asset.selected !== false && Object.keys(validateFinanceOcrAsset(asset)).length === 0).length;
+  container.innerHTML = `
+    ${assets.length ? `<div class="ocr-preview-heading">
+      <strong>资产候选（${assets.length} 项）</strong>
+      <span>可直接编辑。红框字段补全前不能导入。</span>
+    </div>
+    <div class="ocr-assets-table-wrap">
+      <table class="ocr-assets-table">
+        <thead><tr>
+          <th>选</th><th>名称</th><th>代码</th><th>市值</th><th>持仓</th><th>可用</th>
+          <th>现价</th><th>成本</th><th>持仓盈亏</th><th>盈亏率%</th>
+          <th>类型</th><th>市场</th><th>币种</th><th>账户</th>
+          <th>资产分类</th><th>二级分类</th><th>三级分类</th><th>仓位分组</th><th>仓位分类</th>
+          <th>识别来源</th><th>操作</th>
+        </tr></thead>
+        <tbody>${assets.map(renderFinanceOcrAssetRow).join("")}</tbody>
+      </table>
+    </div>` : `<p class="ocr-empty-result">没有识别到可导入的资产行。</p>`}
+    ${pendingFinanceOcrTransactions.length ? `<details class="ocr-detail-block">
+      <summary>交易明细（${pendingFinanceOcrTransactions.length} 笔）</summary>
+      <div class="ocr-transaction-list">${pendingFinanceOcrTransactions.map((transaction) => `
+        <span>${escapeHtml(transaction.assetName || transaction.assetCode || "未关联")} · ${transaction.date} · ${transaction.direction === "buy" ? "买入" : "卖出"} · ${transaction.shares} × ${transaction.price} · ${Number(transaction.amount || 0).toFixed(2)}</span>
+      `).join("")}</div>
+    </details>` : ""}
+    ${pendingFinanceOcrUnassignedTransactions.length ? `<p class="ocr-unassigned-warning">有 ${pendingFinanceOcrUnassignedTransactions.length} 笔交易无法关联到资产，暂不会导入。</p>` : ""}
+    ${pendingFinanceOcrRawText ? `<details class="ocr-detail-block"><summary>查看原始识别文本</summary><pre>${escapeHtml(pendingFinanceOcrRawText)}</pre></details>` : ""}
+    <div class="ocr-preview-actions">
+      <button type="button" data-action="discard-finance-ocr">清除结果</button>
+      <span>可导入 ${validSelected} 项</span>
+      <button type="button" class="primary" data-action="confirm-finance-ocr" ${validSelected ? "" : "disabled"}>批量导入选中资产</button>
+    </div>`;
+}
+
+function handleFinanceOcrPreviewInput(event) {
+  const index = Number(event.target.dataset.ocrIndex);
+  const field = event.target.dataset.field;
+  if (!Number.isInteger(index) || !field || !pendingFinanceOcrAssets[index]) return;
+  const asset = pendingFinanceOcrAssets[index];
+  if (field === "selected") {
+    asset.selected = event.target.checked;
+  } else if (["costPrice", "shares", "availableShares", "currentPrice", "pnl", "pnlPercent", "currentValue"].includes(field)) {
+    const value = Number(event.target.value);
+    asset[field] = Number.isFinite(value) ? value : null;
+    if (field === "currentValue") {
+      asset.currentValueSource = "ocr";
+      asset.pnl = value - (Number(asset.costPrice) || 0) * (Number(asset.shares) || 0);
+      asset.currentPrice = Number(asset.shares) > 0 ? value / Number(asset.shares) : asset.currentPrice;
+    } else if (field === "currentPrice" || field === "shares") {
+      asset.currentValue = (Number(asset.currentPrice) || 0) * (Number(asset.shares) || 0);
+      asset.pnl = asset.currentValue - (Number(asset.costPrice) || 0) * (Number(asset.shares) || 0);
+      asset.pnlPercent = Number(asset.costPrice) > 0
+        ? ((Number(asset.currentPrice) || 0) - Number(asset.costPrice)) / Number(asset.costPrice) * 100
+        : 0;
+      asset.currentValueSource = "calculated";
+    } else {
+      asset.currentValue = (Number(asset.costPrice) || 0) * (Number(asset.shares) || 0) + (Number(asset.pnl) || 0);
+      asset.pnlPercent = Number(asset.costPrice) > 0 && Number(asset.shares) > 0
+        ? Number(asset.pnl) / (Number(asset.costPrice) * Number(asset.shares)) * 100
+        : 0;
+      asset.currentValueSource = "calculated";
+    }
+  } else {
+    asset[field] = event.target.value;
+  }
+}
+
+function handleFinanceOcrPreviewChange(event) {
+  handleFinanceOcrPreviewInput(event);
+  const field = event.target.dataset.field;
+  const index = Number(event.target.dataset.ocrIndex);
+  if (!Number.isInteger(index) || !pendingFinanceOcrAssets[index]) return;
+  if (["kind", "market", "currency", "subcategory", "positionGroup", "selected"].includes(field)) {
+    pendingFinanceOcrAssets[index] = completeFinanceOcrAssetDefaults(pendingFinanceOcrAssets[index], {}, true);
+  }
+  renderFinanceOcrResultPreview();
+}
+
+function normalizeFinanceOcrPayload(asset, id = Date.now()) {
+  const completed = completeFinanceOcrAssetDefaults(asset);
+  return {
+    id,
+    kind: normalizeFinanceKind(completed.kind),
+    accountId: completed.accountId,
+    category: completed.category,
+    subcategory: completed.subcategory,
+    tertiaryCategory: completed.tertiaryCategory || "未分类",
+    positionGroup: normalizeFinancePositionGroup(completed.positionGroup, completed.kind),
+    positionCategory: completed.positionCategory,
+    market: completed.market,
+    currency: normalizeFinanceCurrency(completed.currency, completed.market),
+    name: String(completed.name || "").trim(),
+    code: normalizeFinanceOcrCode(completed.code),
+    costPrice: Number(completed.costPrice) || 0,
+    shares: Number(completed.shares) || 0,
+    availableShares: Number(completed.availableShares) || 0,
+    currentPrice: Number(completed.currentPrice) || 0,
+    pnl: Number(completed.pnl) || 0,
+    pnlPercent: Number(completed.pnlPercent) || 0,
+    todayPnl: Number(completed.todayPnl) || 0,
+    todayPnlPercent: Number(completed.todayPnlPercent) || 0,
+    transactions: dedupeFinanceTransactions(completed.transactions || []),
+  };
+}
+
+function mergeFinanceOcrAsset(existing, candidate) {
+  const additions = dedupeFinanceTransactions(candidate.transactions || [], existing.transactions || []);
+  const merged = {
+    ...existing,
+    ...candidate,
+    id: existing.id,
+    transactions: [...(existing.transactions || []), ...additions],
+  };
+  if (additions.length) {
+    recalcAssetFromTransactions(merged);
+  } else {
+    merged.costPrice = candidate.costPrice;
+    merged.shares = candidate.shares;
+  }
+  merged.pnl = candidate.pnl;
+  return merged;
+}
+
+function confirmFinanceOcrResult() {
+  const selected = pendingFinanceOcrAssets.filter((asset) => asset.selected !== false);
+  const invalid = selected.filter((asset) => Object.keys(validateFinanceOcrAsset(asset)).length);
+  const status = document.querySelector("#financeOcrStatus");
+  if (!selected.length) {
+    status.textContent = "请至少勾选一项资产。";
+    status.className = "finance-ocr-status error";
+    return;
+  }
+  if (invalid.length) {
+    status.textContent = `还有 ${invalid.length} 项资产存在必填字段缺失或数值无效，请先修正红框字段。`;
+    status.className = "finance-ocr-status error";
+    renderFinanceOcrResultPreview();
+    return;
+  }
+  let created = 0;
+  let merged = 0;
+  selected.forEach((asset, index) => {
+    const payload = normalizeFinanceOcrPayload(asset, Date.now() + index);
+    const existingIndex = state.financeAssets.findIndex((item) =>
+      String(item.accountId) === String(payload.accountId)
+      && normalizeFinanceOcrCode(item.code) === payload.code);
+    if (existingIndex >= 0) {
+      state.financeAssets[existingIndex] = mergeFinanceOcrAsset(state.financeAssets[existingIndex], payload);
+      merged += 1;
+    } else {
+      if (payload.transactions.length) {
+        const snapshot = { shares: payload.shares, costPrice: payload.costPrice };
+        recalcAssetFromTransactions(payload);
+        if (!(payload.shares > 0)) Object.assign(payload, snapshot);
+      }
+      state.financeAssets.unshift(payload);
+      created += 1;
+    }
+  });
+  const lastAsset = selected.at(-1);
+  if (lastAsset) {
+    const draftKind = lastAsset.kind || "stock";
+    if (!state.financeAssetDrafts) state.financeAssetDrafts = {};
+    state.financeAssetDrafts[draftKind] = { ...lastAsset };
+    delete state.financeAssetDrafts[draftKind].transactions;
+    delete state.financeAssetDrafts[draftKind].selected;
+  }
+  syncAssetClassValuesFromFinance();
+  saveState();
+  status.textContent = `导入完成：新增 ${created} 项，合并更新 ${merged} 项。`;
+  status.className = "finance-ocr-status success";
+  pendingFinanceOcrResult = null;
+  pendingFinanceOcrAssets = [];
+  pendingFinanceOcrTransactions = [];
+  pendingFinanceOcrUnassignedTransactions = [];
+  pendingFinanceOcrRawText = "";
+  pendingFinanceOcrConfirmed = true;
+  document.querySelector("#financeAssetDialog").close();
+  render();
+}
+
+function discardFinanceOcrResult() {
+  pendingFinanceOcrResult = null;
+  pendingFinanceOcrAssets = [];
+  pendingFinanceOcrTransactions = [];
+  pendingFinanceOcrUnassignedTransactions = [];
+  pendingFinanceOcrRawText = "";
+  pendingFinanceOcrConfirmed = false;
+  renderFinanceOcrTransactionPreview();
+  const status = document.querySelector("#financeOcrStatus");
+  status.textContent = "识别结果已清除，可重新识别当前图片。";
+  status.className = "finance-ocr-status";
+}
+
+async function recognizeImageText(file, onProgress = () => {}) {
+  if (!window.Tesseract?.recognize) throw new Error("OCR component unavailable");
+  const processed = await preprocessFinanceOcrImage(file);
+  const recognize = async (source, start, span, pageMode) => window.Tesseract.recognize(source, "chi_sim+eng", {
+    workerPath: "/vendor/tesseract-worker.min.js",
+    logger: (message) => {
+      if (message.status === "recognizing text") onProgress(Math.round(start + (message.progress || 0) * span));
+    },
+  }, {
+    tessedit_pageseg_mode: String(pageMode),
+    preserve_interword_spaces: "1",
+  });
+  const enhancedResult = await recognize(processed, 0, 65, 6);
+  const originalResult = await recognize(file, 65, 35, 11);
+  return mergeOcrTexts(enhancedResult.data.text || "", originalResult.data.text || "");
+}
+
+async function preprocessFinanceOcrImage(file) {
+  const bitmap = await createImageBitmap(file);
+  const longest = Math.max(bitmap.width, bitmap.height);
+  const scale = Math.max(0.25, Math.min(3, 2600 / Math.max(longest, 1)));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.filter = "grayscale(1) contrast(1.55)";
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  context.filter = "none";
+  const image = context.getImageData(0, 0, canvas.width, canvas.height);
+  const source = new Uint8ClampedArray(image.data);
+  const width = canvas.width;
+  for (let y = 1; y < canvas.height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const offset = (y * width + x) * 4;
+      const center = source[offset] * 5;
+      const neighbors = source[offset - 4] + source[offset + 4] + source[offset - width * 4] + source[offset + width * 4];
+      const value = Math.max(0, Math.min(255, center - neighbors));
+      image.data[offset] = value;
+      image.data[offset + 1] = value;
+      image.data[offset + 2] = value;
+    }
+  }
+  context.putImageData(image, 0, 0);
+  bitmap.close();
+  return new Promise((resolve, reject) => canvas.toBlob((blob) => {
+    if (blob) resolve(blob);
+    else reject(new Error("图片预处理失败"));
+  }, "image/png"));
+}
+
+function mergeOcrTexts(...texts) {
+  const seen = new Set();
+  return texts
+    .flatMap((text) => String(text || "").split(/\r?\n/))
+    .map((line) => line.trim())
+    .filter((line) => {
+      const key = line.replace(/\s+/g, "").toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join("\n");
+}
+
+function normalizeOcrDate(value) {
+  const match = String(value || "").match(/(20\d{2})[年./-](\d{1,2})[月./-](\d{1,2})/);
+  if (!match) return "";
+  return `${match[1]}-${String(match[2]).padStart(2, "0")}-${String(match[3]).padStart(2, "0")}`;
+}
+
+function financeTransactionKey(transaction) {
+  return [
+    transaction.date,
+    transaction.direction,
+    Number(transaction.shares || 0).toFixed(4),
+    Number(transaction.price || 0).toFixed(4),
+    Number(transaction.amount || 0).toFixed(2),
+  ].join("|");
+}
+
+function dedupeFinanceTransactions(transactions = [], existing = []) {
+  const seen = new Set(existing.map(financeTransactionKey));
+  return transactions.filter((transaction) => {
+    const key = financeTransactionKey(transaction);
+    if (!transaction.date || !transaction.direction || !transaction.shares || !transaction.price || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function parseFinanceTransactions(lines, valueAfterLabel, numberAfterLabel) {
+  const transactions = [];
+  const datePattern = /20\d{2}[年./-]\d{1,2}[月./-]\d{1,2}/;
+  lines.forEach((line, index) => {
+    const direction = /卖出|赎回|减仓|sell/i.test(line)
+      ? "sell"
+      : /买入|申购|加仓|buy/i.test(line)
+        ? "buy"
+        : "";
+    if (!direction) return;
+    const context = [lines[index - 1], line, lines[index + 1]].filter(Boolean).join(" ");
+    const date = normalizeOcrDate(context.match(datePattern)?.[0]);
+    const inferred = inferTransactionNumbers(line.replace(datePattern, " "));
+    const shares = numberFromOcrContext(context, ["数量", "成交数量", "份额", "股数"]) || inferred.shares;
+    const price = numberFromOcrContext(context, ["价格", "成交价", "净值", "单价"]) || inferred.price;
+    let amount = numberFromOcrContext(context, ["金额", "成交金额", "发生金额"]);
+    if (!amount) amount = inferred.amount;
+    if (!shares || !price) return;
+    if (!amount) amount = shares * price;
+    const assetCode = extractFinanceCodes(line)[0] || extractFinanceCodes(context)[0] || "";
+    transactions.push({
+      id: Date.now() + transactions.length,
+      direction,
+      date: date || localDateString(),
+      shares,
+      price,
+      amount,
+      commission: numberFromOcrContext(context, ["佣金", "手续费"]) || 0,
+      stampDuty: numberFromOcrContext(context, ["印花税"]) || 0,
+      transferFee: numberFromOcrContext(context, ["过户费"]) || 0,
+      assetCode,
+      assetName: extractOcrAssetName(line, assetCode) || extractOcrAssetName(context, assetCode),
+      sourceLine: line,
+    });
+  });
+  if (!transactions.length) {
+    const directionText = valueAfterLabel(["交易方向", "买卖方向", "业务名称"]);
+    const direction = /卖出|赎回|sell/i.test(directionText) ? "sell" : /买入|申购|buy/i.test(directionText) ? "buy" : "";
+    const shares = numberAfterLabel(["成交数量", "交易数量", "买入数量", "卖出数量"]);
+    const price = numberAfterLabel(["成交价格", "交易价格", "成交均价"]);
+    if (direction && shares && price) {
+      transactions.push({
+        id: Date.now(),
+        direction,
+        date: normalizeOcrDate(valueAfterLabel(["交易日期", "成交日期", "发生日期"])) || localDateString(),
+        shares,
+        price,
+        amount: numberAfterLabel(["成交金额", "交易金额", "发生金额"]) || shares * price,
+        commission: numberAfterLabel(["佣金", "手续费"]) || 0,
+        stampDuty: numberAfterLabel(["印花税"]) || 0,
+        transferFee: numberAfterLabel(["过户费"]) || 0,
+        assetCode: normalizeFinanceOcrCode(valueAfterLabel(["资产代码", "证券代码", "股票代码", "基金代码", "代码"])),
+        assetName: valueAfterLabel(["资产名称", "证券名称", "股票名称", "基金名称", "名称"]),
+        sourceLine: lines.join(" "),
+      });
+    }
+  }
+  return dedupeFinanceTransactions(transactions);
+}
+
+function inferTransactionNumbers(line) {
+  const values = [...String(line || "").matchAll(/[-+]?\d[\d,]*(?:\.\d+)?/g)]
+    .map((match) => ({ raw: match[0], value: Number(match[0].replaceAll(",", "")) }))
+    .filter((item) => Number.isFinite(item.value))
+    .map((item) => Math.abs(item.value));
+  let best = null;
+  for (let first = 0; first < values.length; first += 1) {
+    for (let second = first + 1; second < values.length; second += 1) {
+      for (let third = second + 1; third < values.length; third += 1) {
+        const triplet = [values[first], values[second], values[third]];
+        [[0, 1, 2], [0, 2, 1], [1, 2, 0]].forEach(([left, right, total]) => {
+          const product = triplet[left] * triplet[right];
+          const difference = Math.abs(product - triplet[total]) / Math.max(triplet[total], 1);
+          if (difference > 0.03 || (best && difference >= best.difference)) return;
+          const pair = [triplet[left], triplet[right]];
+          const integerIndex = pair.findIndex((value) => Number.isInteger(value) && value >= 1);
+          const shares = integerIndex >= 0
+            ? pair[integerIndex]
+            : Math.max(...pair);
+          const price = pair[pair.indexOf(shares) === 0 ? 1 : 0];
+          best = { shares, price, amount: triplet[total], difference };
+        });
+      }
+    }
+  }
+  if (best) return best;
+  if (values.length >= 2) {
+    const shares = values.at(-2);
+    const price = values.at(-1);
+    return { shares, price, amount: shares * price };
+  }
+  return { shares: null, price: null, amount: null };
+}
+
+function numberFromOcrContext(context, labels) {
+  const escaped = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const match = String(context || "").match(new RegExp(`(?:${escaped})\\s*[:：]?\\s*([-+]?\\d[\\d,]*(?:\\.\\d+)?)`, "i"));
+  return match ? Number(match[1].replaceAll(",", "")) : null;
+}
+
+const FINANCE_OCR_CODE_STOPWORDS = new Set([
+  "CNY", "CNH", "HKD", "USD", "EUR", "JPY", "GBP", "AUD", "SGD", "ETF", "LOF",
+  "BUY", "SELL", "RMB", "OCR", "ID", "VIP", "APP", "TOTAL", "PRICE", "MARKET",
+  "SYMBOL", "TICKER", "NAME", "COST", "SHARES", "QTY", "PROFIT", "PNL", "VALUE",
+]);
+
+function normalizeFinanceOcrCode(value = "") {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^(SH|SZ)(?=\d{6}$)/i, "")
+    .replace(/^HK(?=\d{5}(?:\.HK)?$)/i, "")
+    .replace(/^US[.:\s-]+/i, "")
+    .replace(/\.HK$/i, "")
+    .replace(/[^A-Z0-9.-]/g, "");
+}
+
+function extractFinanceCodes(value = "") {
+  const text = String(value || "").toUpperCase();
+  const matches = [
+    ...text.matchAll(/(?<!\d)(?:SH|SZ)?\d{6}(?!\d)/g),
+    ...text.matchAll(/(?<!\d)(?:HK)?\d{5}(?:\.HK)?(?!\d)/g),
+    ...text.matchAll(/\b(?:BTC|ETH|USDT|USDC|BNB|SOL|XRP|DOGE|ADA|XAU|XAG|WTI|BRENT|AU|AG)\b/g),
+    ...text.matchAll(/\b[A-Z]{1,6}(?:\.[A-Z])?\b/g),
+  ].map((match) => normalizeFinanceOcrCode(match[0]))
+    .filter((code) => code && !FINANCE_OCR_CODE_STOPWORDS.has(code));
+  return [...new Set(matches)].filter((code) => {
+    if (/^\d+$/.test(code)) return code.length === 5 || code.length === 6;
+    return code.length >= 1 && code.length <= 7;
+  });
+}
+
+function inferFinanceOcrKind(text = "", code = "") {
+  const source = `${text} ${code}`.toLowerCase();
+  if (/基金|etf|lof|fund/.test(source) || /^(1|5)\d{5}$/.test(code)) return "fund";
+  if (/期货|futures?|\bif\d|\bic\d|\bih\d/.test(source)) return "futures";
+  if (/期权|options?|call|put/.test(source)) return "options";
+  if (/黄金|白银|原油|商品|\bxau\b|\bxag\b|\bwti\b|\bbrent\b/.test(source)) return "commodity";
+  if (/比特币|以太坊|加密|\bbtc\b|\beth\b|\busdt\b|\bcrypto/.test(source)) return "crypto";
+  if (/现金流|备用金|可用现金|cash/.test(source)) return "cashflow";
+  if (/自定义|理财产品/.test(source)) return "custom";
+  return "stock";
+}
+
+function inferFinanceOcrCurrency(text = "", code = "", kind = "stock") {
+  if (/\bHKD\b|港币|港股/i.test(text) || /^\d{5}$/.test(code)) return "HKD";
+  if (/\bUSD\b|美元|美股/i.test(text) || (/^[A-Z]{1,6}(?:\.[A-Z])?$/.test(code) && kind === "stock")) return "USD";
+  if (/\bEUR\b|欧元/i.test(text)) return "EUR";
+  if (/\bJPY\b|日元/i.test(text)) return "JPY";
+  if (/\bGBP\b|英镑/i.test(text)) return "GBP";
+  return "CNH";
+}
+
+function extractOcrAssetName(value = "", code = "") {
+  let text = String(value || "")
+    .replace(new RegExp(code ? code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "(?!)", "ig"), " ")
+    .replace(/(?:SH|SZ|HK|US)[.:\s-]*/ig, " ")
+    .replace(/[-+]?\d[\d,]*(?:\.\d+)?%?/g, " ")
+    .replace(/资产名称|证券名称|股票名称|基金名称|产品名称|名称|代码|持仓|市值|成本|数量|份额|盈亏|买入|卖出|申购|赎回|交易|人民币|港币|美元/gi, " ")
+    .replace(/[|:：;,，()[\]{}]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const chinese = [...text.matchAll(/[\u3400-\u9fff]{2,18}(?:ETF|LOF)?/gi)]
+    .map((match) => match[0])
+    .filter((name) => !/^(今日|昨日|当前|合计|总计|账户|资产|证券|股票|基金|商品|期货|期权|市场|代码|名称)$/.test(name));
+  if (chinese.length) return chinese.sort((a, b) => b.length - a.length)[0];
+  text = text.split(/\s+/)
+    .filter((token) => /[A-Z]/i.test(token) && !FINANCE_OCR_CODE_STOPWORDS.has(token.toUpperCase()))
+    .slice(0, 5)
+    .join(" ");
+  return text.length >= 2 ? text : "";
+}
+
+function createFinanceOcrLabelReaders(lines) {
+  const valueAfterLabel = (labels, scope = lines) => {
+    const labelPattern = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+    for (const line of scope) {
+      const match = line.match(new RegExp(`(?:${labelPattern})\\s*[:：]?\\s*([^|]+)$`, "i"));
+      if (match?.[1]) return match[1].trim();
+    }
+    return "";
+  };
+  const numberAfterLabel = (labels, scope = lines) => {
+    const value = valueAfterLabel(labels, scope);
+    const match = value.match(/[-+]?\d[\d,]*(?:\.\d+)?/);
+    return match ? Number(match[0].replaceAll(",", "")) : null;
+  };
+  return { valueAfterLabel, numberAfterLabel };
+}
+
+function inferFinanceOcrNumbers(line = "", code = "") {
+  const readers = createFinanceOcrLabelReaders([line]);
+  const labeled = {
+    costPrice: readers.numberAfterLabel(["持仓成本", "平均成本", "成本价", "成本单价", "成本"]),
+    shares: readers.numberAfterLabel(["持仓数量", "持有数量", "持有份额", "基金份额", "股票数量", "数量", "份额"]),
+    pnl: readers.numberAfterLabel(["浮动盈亏", "持仓盈亏", "累计盈亏", "盈亏", "盈亏额"]),
+    currentValue: readers.numberAfterLabel(["当前市值", "持仓市值", "资产市值", "当前价值", "市值"]),
+    currentPrice: readers.numberAfterLabel(["现价", "最新价", "当前价格", "市价", "最新价格"]),
+    avgBuyPrice: readers.numberAfterLabel(["买入均价", "持仓均价", "平均买入价", "成本均价"]),
+    holdingDays: readers.numberAfterLabel(["持仓天数", "持股天数", "天数"]),
+    positionWeight: readers.numberAfterLabel(["个股仓位", "仓位占比", "仓位", "占比"]),
+    totalFees: readers.numberAfterLabel(["税费合计", "税费", "费用合计", "总费用", "手续费合计"]),
+    todayPnl: readers.numberAfterLabel(["当日盈亏", "当日参考盈亏", "今日盈亏", "当天盈亏"]),
+  };
+  const withoutCode = String(line).replace(new RegExp(code ? code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "(?!)", "ig"), " ");
+  const values = [...withoutCode.matchAll(/[-+]?\d[\d,]*(?:\.\d+)?/g)]
+    .map((match) => Number(match[0].replaceAll(",", "")))
+    .filter(Number.isFinite)
+    .filter((number) => !(number >= 1900 && number <= 2100));
+  if (labeled.costPrice === null && values.length >= 2) {
+    const positive = values.filter((number) => number > 0);
+    const signed = values.find((number) => number < 0);
+    let best = null;
+    positive.forEach((cost) => positive.forEach((shares) => {
+      if (cost === shares) return;
+      const expected = cost * shares;
+      const marketValue = positive.find((value) => value !== cost && value !== shares && Math.abs(value - expected) / Math.max(value, 1) < 0.35);
+      if (!marketValue) return;
+      const difference = Math.abs(marketValue - expected) / Math.max(marketValue, 1);
+      if (!best || difference < best.difference) best = { cost, shares, marketValue, difference };
+    }));
+    if (best) {
+      labeled.costPrice = best.cost;
+      labeled.shares = best.shares;
+      labeled.currentValue = best.marketValue;
+    } else if (positive.length >= 2) {
+      labeled.costPrice = positive[0];
+      labeled.shares = positive[1];
+    }
+    if (labeled.pnl === null && signed !== undefined) labeled.pnl = signed;
+  }
+  if (labeled.pnl === null && labeled.currentValue !== null && labeled.costPrice !== null && labeled.shares !== null) {
+    labeled.pnl = labeled.currentValue - labeled.costPrice * labeled.shares;
+  }
+  return labeled;
+}
+
+function completeFinanceOcrAssetDefaults(asset = {}, formDefaults = {}, preserveSelections = false) {
+  const form = document.querySelector("#financeAssetForm");
+  const fields = form?.elements;
+  const source = { ...formDefaults, ...asset };
+  const kind = normalizeFinanceKind(source.kind || fields?.kind?.value || "stock");
+  let currency = source.currency || fields?.currency?.value || inferFinanceOcrCurrency(source.source, source.code, kind);
+  let market = source.market || fields?.market?.value || (currency === "CNH" ? "domestic" : "overseas");
+  if (currency !== "CNH") market = "overseas";
+  if (market === "domestic") currency = "CNH";
+  const subcategories = financeSubcategoryOptions(kind);
+  let subcategory = source.subcategory;
+  if (!preserveSelections || !subcategories.includes(subcategory)) {
+    if (kind === "stock" && currency === "HKD") subcategory = "港股";
+    else if (kind === "stock" && currency === "USD") subcategory = "美股";
+    else if (kind === "stock" && currency === "CNH") subcategory = "A股";
+    else subcategory = subcategories.includes(subcategory) ? subcategory : subcategories[0];
+  }
+  const groups = financePositionGroupOptions(kind);
+  const positionGroup = groups.includes(source.positionGroup) ? source.positionGroup : groups[0];
+  const positionCategories = financePositionCategoryOptions(kind, positionGroup);
+  const categoryOptions = financeCategoryOptions(kind, source.category);
+  const inferredCategory = inferFinanceAssetClass(kind);
+  const costPrice = source.costPrice === null || source.costPrice === undefined ? null : Number(source.costPrice);
+  const shares = source.shares === null || source.shares === undefined ? null : Number(source.shares);
+  const pnl = source.pnl === null || source.pnl === undefined ? 0 : Number(source.pnl);
+  const currentValue = source.currentValue === null || source.currentValue === undefined
+    ? (Number(costPrice) || 0) * (Number(shares) || 0) + (Number(pnl) || 0)
+    : Number(source.currentValue);
+  return {
+    ...source,
+    selected: source.selected !== false,
+    kind,
+    market,
+    currency,
+    accountId: source.accountId || fields?.accountId?.value || state.accounts[0]?.id || "",
+    category: categoryOptions.includes(source.category)
+      ? source.category
+      : categoryOptions.includes(inferredCategory)
+        ? inferredCategory
+        : categoryOptions[0],
+    subcategory,
+    tertiaryCategory: source.tertiaryCategory || inferBoardFromCode(source.code) || "未分类",
+    positionGroup,
+    positionCategory: positionCategories.includes(source.positionCategory) ? source.positionCategory : positionCategories[0],
+    name: String(source.name || "").trim(),
+    code: normalizeFinanceOcrCode(source.code),
+    costPrice,
+    shares,
+    pnl: Number.isFinite(pnl) ? pnl : 0,
+    currentValue: Number.isFinite(currentValue) ? currentValue : 0,
+    currentValueSource: source.currentValueSource || (source.currentValue !== null && source.currentValue !== undefined ? "ocr" : "calculated"),
+    availableShares: source.availableShares === null || source.availableShares === undefined ? shares : Number(source.availableShares),
+    currentPrice: source.currentPrice === null || source.currentPrice === undefined ? null : Number(source.currentPrice),
+    pnlPercent: source.pnlPercent === null || source.pnlPercent === undefined
+      ? (Number(costPrice) > 0 ? (Number(pnl) / (Number(costPrice) * Number(shares) || 1)) * 100 : 0)
+      : Number(source.pnlPercent),
+    avgBuyPrice: source.avgBuyPrice === null || source.avgBuyPrice === undefined ? null : Number(source.avgBuyPrice),
+    holdingDays: source.holdingDays === null || source.holdingDays === undefined ? null : Number(source.holdingDays),
+    positionWeight: source.positionWeight === null || source.positionWeight === undefined ? null : Number(source.positionWeight),
+    totalFees: source.totalFees === null || source.totalFees === undefined ? 0 : Number(source.totalFees),
+    todayPnl: source.todayPnl === null || source.todayPnl === undefined ? 0 : Number(source.todayPnl),
+    todayPnlPercent: source.todayPnlPercent === null || source.todayPnlPercent === undefined ? 0 : Number(source.todayPnlPercent),
+    transactions: Array.isArray(source.transactions) ? source.transactions : [],
+  };
+}
+
+function mergeFinanceOcrCandidates(candidates) {
+  const merged = [];
+  candidates.forEach((candidate) => {
+    const keyCode = normalizeFinanceOcrCode(candidate.code);
+    const keyName = String(candidate.name || "").replace(/\s+/g, "").toLowerCase();
+    const found = merged.find((item) =>
+      (keyCode && normalizeFinanceOcrCode(item.code) === keyCode)
+      || (!keyCode && keyName && String(item.name || "").replace(/\s+/g, "").toLowerCase() === keyName));
+    if (!found) {
+      merged.push(candidate);
+      return;
+    }
+    Object.entries(candidate).forEach(([field, value]) => {
+      if ((found[field] === "" || found[field] === null || found[field] === undefined || found[field] === 0) && value !== "" && value !== null && value !== undefined) {
+        found[field] = value;
+      }
+    });
+    found.source = [...new Set([found.source, candidate.source].filter(Boolean))].join(" / ");
+    found.confidence = Math.max(found.confidence || 0, candidate.confidence || 0);
+  });
+  return merged;
+}
+
+function financeOcrNumericTokens(value = "") {
+  return [...String(value).matchAll(/([-+]?\d[\d,]*(?:\.\d+)?)\s*(%?)/g)]
+    .map((match) => ({
+      value: Number(match[1].replaceAll(",", "")),
+      percent: match[2] === "%",
+    }))
+    .filter((item) => Number.isFinite(item.value));
+}
+
+function financeOcrNumberNear(rawValue, expectedValue) {
+  if (!Number.isFinite(rawValue) || !Number.isFinite(expectedValue)) return rawValue;
+  const sign = rawValue < 0 ? -1 : expectedValue < 0 ? -1 : 1;
+  const raw = Math.abs(rawValue);
+  const expected = Math.abs(expectedValue);
+  const candidates = Array.from({ length: 7 }, (_, power) => raw / (10 ** power));
+  const closest = candidates.reduce((best, value) =>
+    Math.abs(value - expected) < Math.abs(best - expected) ? value : best, candidates[0]);
+  return sign * closest;
+}
+
+function normalizeOcrPercent(rawValue, expectedValue = null) {
+  if (!Number.isFinite(rawValue)) return 0;
+  if (Number.isFinite(expectedValue)) return financeOcrNumberNear(rawValue, expectedValue);
+  const sign = rawValue < 0 ? -1 : 1;
+  let value = Math.abs(rawValue);
+  while (value > 100) value /= 10;
+  return sign * value;
+}
+
+function parseBrokerHoldingRows(lines) {
+  const rows = [];
+  const excluded = /名称|市值|持仓\/?可用|现价\/?成本|持仓盈亏|当日盈亏|仓位|合计|总计|持仓|委托成交/;
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const line = lines[index];
+    if (excluded.test(line)) continue;
+    const nameMatch = line.match(/^(.+?)\s+(?=[-+]?\d)/);
+    if (!nameMatch) continue;
+    const rawNameTokens = nameMatch[1].trim().split(/\s+/);
+    if (rawNameTokens.length > 2 && rawNameTokens.at(-1)?.length === 1 && rawNameTokens.at(-2)?.length > 1) {
+      rawNameTokens.pop();
+    }
+    const name = rawNameTokens.join("").replace(/[A-Za-z]+\d+$/g, "").trim();
+    if (!name || !/[\u3400-\u9fffA-Za-z]/.test(name)) continue;
+    const primary = financeOcrNumericTokens(line.slice(nameMatch[0].length - 1));
+    const secondary = financeOcrNumericTokens(lines[index + 1]);
+    if (primary.length < 3 || secondary.length < 4) continue;
+    const shares = primary.length >= 4 ? primary[0].value : secondary[1].value;
+    const currentValue = secondary[0].value;
+    const todayPnl = primary.at(-1).value;
+    const availableShares = secondary[1].value;
+    const costPrice = secondary[2].value;
+    const currentPrice = shares > 0 ? currentValue / shares : primary[primary.length >= 4 ? 1 : 0].value;
+    const expectedPnl = currentValue - costPrice * shares;
+    const pnl = financeOcrNumberNear(primary[primary.length >= 4 ? 2 : 1].value, expectedPnl);
+    const pnlPercentToken = secondary.find((item, itemIndex) => itemIndex >= 3 && item.percent);
+    const todayPnlPercentToken = secondary.filter((item) => item.percent).at(-1);
+    if (!(shares > 0) || !(costPrice > 0) || !(currentValue > 0)) continue;
+    rows.push({
+      name,
+      code: "",
+      kind: "stock",
+      market: "domestic",
+      currency: "CNH",
+      currentValue,
+      currentValueSource: "ocr",
+      shares,
+      availableShares,
+      currentPrice,
+      costPrice,
+      pnl,
+      pnlPercent: normalizeOcrPercent(pnlPercentToken?.value, (pnl / (costPrice * shares)) * 100),
+      todayPnl,
+      todayPnlPercent: normalizeOcrPercent(todayPnlPercentToken?.value),
+      source: `券商持仓列表：${line} / ${lines[index + 1]}`,
+      sourceType: "broker-holding-row",
+      confidence: 0.96,
+    });
+    index += 1;
+  }
+  const merged = [];
+  rows.forEach((row) => {
+    const duplicate = merged.find((item) =>
+      Math.abs(Number(item.currentValue) - Number(row.currentValue)) < 0.1
+      && Math.abs(Number(item.shares) - Number(row.shares)) < 0.0001
+      && Math.abs(Number(item.costPrice) - Number(row.costPrice)) < 0.0001);
+    if (!duplicate) {
+      merged.push(row);
+      return;
+    }
+    const chineseCount = (value) => (String(value || "").match(/[\u3400-\u9fff]/g) || []).length;
+    if (chineseCount(row.name) > chineseCount(duplicate.name)) duplicate.name = row.name;
+    duplicate.source = [...new Set([duplicate.source, row.source])].join(" / ");
+    duplicate.confidence = Math.max(duplicate.confidence || 0, row.confidence || 0);
+  });
+  if (merged.length > 1) merged.forEach((row) => { row.selected = false; });
+  return merged;
+}
+
+function parseBrokerDetailTransactions(lines, asset = {}) {
+  const hasTransactionArea = lines.some((line) => /交易记录/.test(line));
+  if (!hasTransactionArea) return [];
+  const transactions = [];
+  lines.forEach((line, index) => {
+    if (/买\s*[入人信].*卖\s*出.*行情/.test(line)) return;
+    const direction = /卖\s*出/.test(line)
+      ? "sell"
+      : /买\s*[入人信]/.test(line)
+        ? "buy"
+        : "";
+    const dateMatch = line.match(/20\d{2}[年./-]\d{1,2}[月./-]\d{1,2}/);
+    if (!direction || !dateMatch) return;
+    const context = lines.slice(index, Math.min(index + 4, lines.length)).join(" ");
+    const compactContext = context.replace(/\s+/g, "");
+    const cleanedContext = compactContext
+      .replace(/20\d{2}[年./-]\d{1,2}[月./-]\d{1,2}/g, " ")
+      .replace(/\d{1,2}[:：.]\d{2}(?::\d{2})?/g, " ");
+    const inferred = inferTransactionNumbers(cleanedContext);
+    const shares = numberFromOcrContext(compactContext, ["数量", "成交数量", "股数"]) || inferred.shares;
+    const amount = numberFromOcrContext(compactContext, ["金额", "成交金额"]) || inferred.amount;
+    const rawPrice = numberFromOcrContext(compactContext, ["价格", "成交价"]) || inferred.price;
+    const price = shares && amount ? financeOcrNumberNear(rawPrice, amount / shares) : rawPrice;
+    if (!(shares > 0) || !(price > 0)) return;
+    const numericValues = financeOcrNumericTokens(cleanedContext).map((item) => Math.abs(item.value));
+    const inferredFee = numericValues.at(-1) <= 100
+      && Math.abs(numericValues.at(-1) - price) > 0.001
+      ? numericValues.at(-1)
+      : 0;
+    transactions.push({
+      id: Date.now() + transactions.length,
+      direction,
+      date: normalizeOcrDate(dateMatch[0]) || localDateString(),
+      shares,
+      price,
+      amount: amount || shares * price,
+      commission: numberFromOcrContext(compactContext, ["费用", "佣金", "手续费"]) || inferredFee,
+      stampDuty: numberFromOcrContext(compactContext, ["印花税"]) || 0,
+      transferFee: numberFromOcrContext(compactContext, ["过户费"]) || 0,
+      assetCode: asset.code || "",
+      assetName: asset.name || "",
+      sourceLine: context,
+    });
+  });
+  return dedupeFinanceTransactions(transactions);
+}
+
+function parseBrokerDetailOcrText(rawText) {
+  const text = String(rawText || "")
+    .replace(/[，]/g, ",")
+    .replace(/[：]/g, ":")
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/[^\S\r\n]+/g, " ");
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const transactionHeadingIndex = lines.findIndex((line) => /交易记录/.test(line));
+  const summaryLines = transactionHeadingIndex >= 0 ? lines.slice(0, transactionHeadingIndex) : lines.slice(0, 24);
+  const summaryText = summaryLines.join(" ");
+  const compactSummaryText = summaryText.replace(/\s+/g, "");
+  const allCodes = lines.flatMap((line) => extractFinanceCodes(line));
+  const code = allCodes.find((candidate) => /^\d{6}$/.test(candidate))
+    || allCodes.find((candidate) => /^\d{5}$|^[A-Z]{1,6}(?:\.[A-Z])?$/.test(candidate))
+    || "";
+  const headerLine = lines.find((line) => code && line.replace(/[^\dA-Za-z]/g, "").includes(code))
+    || summaryLines.find((line) => /[\u3400-\u9fff]{2,}/.test(line) && !/持仓明细|持仓盈亏|当日参考盈亏/.test(line))
+    || "";
+  const name = extractOcrAssetName(headerLine, code);
+  const kind = inferFinanceOcrKind(summaryText, code);
+  const currency = inferFinanceOcrCurrency(summaryText, code, kind);
+  const pnl = numberFromOcrContext(compactSummaryText, ["持仓盈亏"]);
+  const pnlPercent = numberFromOcrContext(compactSummaryText, ["持仓盈亏率"]) ??
+    [...summaryText.matchAll(/([-+]?\d+(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]))[0];
+  const todayPnl = numberFromOcrContext(compactSummaryText, ["当日参考盈亏", "当日盈亏"]);
+  const percentages = [...summaryText.matchAll(/([-+]?\d+(?:\.\d+)?)\s*%/g)].map((match) => Number(match[1]));
+  const asset = {
+    name,
+    code,
+    kind,
+    market: currency === "CNH" ? "domestic" : "overseas",
+    currency,
+    costPrice: numberFromOcrContext(compactSummaryText, ["成本价", "持仓成本"]),
+    currentPrice: numberFromOcrContext(compactSummaryText, ["现价", "当前价格"]),
+    avgBuyPrice: numberFromOcrContext(compactSummaryText, ["买入均价"]),
+    holdingDays: numberFromOcrContext(compactSummaryText, ["持股天数", "持仓天数"]),
+    positionWeight: numberFromOcrContext(compactSummaryText, ["个股仓位", "仓位"]),
+    totalFees: numberFromOcrContext(compactSummaryText, ["税费合计", "税费"]),
+    pnl,
+    pnlPercent: Number.isFinite(pnlPercent) ? pnlPercent : percentages[0] || 0,
+    todayPnl,
+    todayPnlPercent: percentages.length > 1 ? percentages[1] : 0,
+    source: `券商持仓详情：${headerLine || "图片顶部摘要"}`,
+    sourceType: "broker-holding-detail",
+    confidence: code && name ? 0.98 : 0.84,
+  };
+  const transactions = parseBrokerDetailTransactions(lines, asset);
+  asset.transactions = transactions;
+  return {
+    assets: asset.name || asset.code ? [asset] : [],
+    transactions,
+    unassignedTransactions: [],
+    rawText: text,
+  };
+}
+
+function combineFinanceOcrResults(listResult = {}, detailResult = {}) {
+  const assets = (listResult.assets || []).map((asset) => ({
+    ...asset,
+    transactions: [...(asset.transactions || [])],
+  }));
+  (detailResult.assets || []).forEach((detailAsset) => {
+    const detailCode = normalizeFinanceOcrCode(detailAsset.code);
+    const detailName = String(detailAsset.name || "").replace(/\s+/g, "").toLowerCase();
+    let target = assets.find((asset) =>
+      detailCode && normalizeFinanceOcrCode(asset.code) === detailCode);
+    if (!target && detailName) {
+      target = assets.find((asset) => {
+        const assetName = String(asset.name || "").replace(/\s+/g, "").toLowerCase();
+        return assetName && (assetName.includes(detailName) || detailName.includes(assetName));
+      });
+    }
+    if (!target) {
+      assets.push(detailAsset);
+      return;
+    }
+    [
+      "code", "kind", "market", "currency", "costPrice", "currentPrice", "avgBuyPrice",
+      "holdingDays", "positionWeight", "totalFees", "pnl", "pnlPercent", "todayPnl", "todayPnlPercent",
+    ].forEach((field) => {
+      const value = detailAsset[field];
+      if (
+        value !== "" && value !== null && value !== undefined
+        && (typeof value !== "number" || Number.isFinite(value))
+      ) {
+        target[field] = value;
+      }
+    });
+    target.transactions = dedupeFinanceTransactions(
+      [...(target.transactions || []), ...(detailAsset.transactions || [])],
+    );
+    target.source = [...new Set([target.source, detailAsset.source].filter(Boolean))].join(" / ");
+    target.confidence = Math.max(target.confidence || 0, detailAsset.confidence || 0);
+  });
+  const transactions = dedupeFinanceTransactions([
+    ...(listResult.transactions || []),
+    ...(detailResult.transactions || []),
+  ]);
+  const unassignedTransactions = associateFinanceOcrTransactions(assets, transactions);
+  return {
+    assets,
+    transactions,
+    unassignedTransactions,
+    rawText: [
+      listResult.rawText ? `【列表识别】\n${listResult.rawText}` : "",
+      detailResult.rawText ? `【详情识别】\n${detailResult.rawText}` : "",
+    ].filter(Boolean).join("\n\n"),
+  };
+}
+
+function parseFinanceOcrTableRows(lines) {
+  const aliases = {
+    name: /名称|证券|股票|基金|产品/i,
+    code: /代码|证券号|股票号|基金号|symbol|ticker/i,
+    costPrice: /成本|均价|cost/i,
+    shares: /数量|份额|股数|持仓|shares|qty/i,
+    pnl: /盈亏|收益|profit|pnl/i,
+    currentValue: /市值|当前价值|资产价值|marketvalue/i,
+  };
+  const rows = [];
+  lines.forEach((line, headerIndex) => {
+    const headerTokens = line.split(/\s{1,}|\|/).filter(Boolean);
+    const fields = headerTokens.map((token) => Object.entries(aliases).find(([, pattern]) => pattern.test(token))?.[0] || "");
+    if (new Set(fields.filter(Boolean)).size < 3 || !fields.includes("code")) return;
+    for (let rowIndex = headerIndex + 1; rowIndex < Math.min(lines.length, headerIndex + 30); rowIndex += 1) {
+      const row = lines[rowIndex];
+      if (/合计|总计|资产汇总/.test(row)) break;
+      const tokens = row.split(/\s{1,}|\|/).filter(Boolean);
+      const code = extractFinanceCodes(row)[0] || "";
+      if (!code) continue;
+      const codeTokenIndex = tokens.findIndex((token) => normalizeFinanceOcrCode(token) === code);
+      const aligned = tokens.length === fields.length
+        ? tokens
+        : codeTokenIndex >= 0
+          ? fields.map((field, index) => {
+              const headerCodeIndex = fields.indexOf("code");
+              return tokens[codeTokenIndex + index - headerCodeIndex] || "";
+            })
+          : tokens;
+      const candidate = { code, source: `表格第 ${rowIndex - headerIndex} 行：${row}`, confidence: 0.9 };
+      fields.forEach((field, index) => {
+        if (!field || field === "code") return;
+        const value = aligned[index] || "";
+        if (field === "name") candidate.name = extractOcrAssetName(value, code) || value.replace(/[^\u3400-\u9fffA-Za-z .&-]/g, "").trim();
+        else {
+          const number = Number(String(value).replace(/[,%]/g, ""));
+          if (Number.isFinite(number)) candidate[field] = number;
+        }
+      });
+      rows.push(candidate);
+    }
+  });
+  return rows;
+}
+
+function isFinanceOcrHeaderLine(line = "") {
+  const matches = [
+    /名称|name/i, /代码|symbol|ticker/i, /成本|cost/i, /数量|份额|shares|qty/i,
+    /盈亏|profit|pnl/i, /市值|market\s*value|value/i,
+  ].filter((pattern) => pattern.test(line)).length;
+  return matches >= 3;
+}
+
+function associateFinanceOcrTransactions(assets, transactions) {
+  const unassigned = [];
+  transactions.forEach((transaction) => {
+    const code = normalizeFinanceOcrCode(transaction.assetCode);
+    const name = String(transaction.assetName || "").replace(/\s+/g, "").toLowerCase();
+    let asset = assets.find((item) => code && normalizeFinanceOcrCode(item.code) === code);
+    if (!asset && name) {
+      asset = assets.find((item) => {
+        const candidateName = String(item.name || "").replace(/\s+/g, "").toLowerCase();
+        return candidateName && (candidateName.includes(name) || name.includes(candidateName));
+      });
+    }
+    if (!asset && assets.length === 1) asset = assets[0];
+    if (!asset) {
+      unassigned.push(transaction);
+      return;
+    }
+    transaction.assetCode = asset.code;
+    transaction.assetName = asset.name;
+    asset.transactions = dedupeFinanceTransactions([...(asset.transactions || []), transaction]);
+  });
+  return unassigned;
 }
 
 function parseFinanceOcrText(rawText) {
@@ -4497,57 +7406,173 @@ function parseFinanceOcrText(rawText) {
     .replace(/[）]/g, ")")
     .replace(/[^\S\r\n]+/g, " ");
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const valueAfterLabel = (labels) => {
-    const labelPattern = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-    for (const line of lines) {
-      const match = line.match(new RegExp(`(?:${labelPattern})\\s*[:：]?\\s*([^|]+)$`, "i"));
-      if (match?.[1]) return match[1].trim();
-    }
-    return "";
+  const { valueAfterLabel, numberAfterLabel } = createFinanceOcrLabelReaders(lines);
+  const textMatch = (options) => options.find((option) => option && text.toLowerCase().includes(String(option).toLowerCase())) || "";
+  const codeLabelValue = valueAfterLabel(["资产代码", "证券代码", "股票代码", "基金代码", "产品代码", "代码"]);
+  const labeledCode = normalizeFinanceOcrCode(extractFinanceCodes(codeLabelValue)[0] || "");
+  const nameLabelValue = valueAfterLabel(["资产名称", "证券名称", "股票名称", "基金名称", "产品名称", "名称"]);
+  const labeledName = isFinanceOcrHeaderLine(nameLabelValue)
+    ? ""
+    : nameLabelValue.replace(/\s{2,}.*/, "").trim();
+  const globalKind = inferFinanceOcrKind(text, labeledCode);
+  const globalCurrency = inferFinanceOcrCurrency(text, labeledCode, globalKind);
+  const accountName = textMatch(state.accounts.map((account) => account.name));
+  const accountId = state.accounts.find((account) => account.name === accountName)?.id || "";
+  const brokerRows = parseBrokerHoldingRows(lines);
+  const isBrokerHoldingList = brokerRows.length > 0;
+  const candidates = [...brokerRows, ...(isBrokerHoldingList ? [] : parseFinanceOcrTableRows(lines))].map((candidate) => {
+    const kind = inferFinanceOcrKind(candidate.source, candidate.code);
+    const currency = inferFinanceOcrCurrency(candidate.source, candidate.code, kind);
+    return { ...candidate, kind, currency, market: currency === "CNH" ? "domestic" : "overseas", accountId };
+  });
+
+  if (!isBrokerHoldingList && (labeledCode || labeledName)) {
+    candidates.push({
+      kind: globalKind,
+      currency: globalCurrency,
+      market: globalCurrency === "CNH" ? "domestic" : "overseas",
+      accountId,
+      category: valueAfterLabel(["资产分类", "一级分类"]),
+      subcategory: valueAfterLabel(["资产分类二级", "二级分类"]),
+      tertiaryCategory: valueAfterLabel(["资产三级分类", "三级分类"]),
+      positionCategory: valueAfterLabel(["仓位分类"]),
+      name: labeledName || extractOcrAssetName(text, labeledCode),
+      code: labeledCode,
+      costPrice: numberAfterLabel(["持仓成本", "平均成本", "成本价", "成本单价"]),
+      shares: numberAfterLabel(["持仓数量", "持有数量", "持有份额", "基金份额", "股票数量", "数量", "份额"]),
+      pnl: numberAfterLabel(["浮动盈亏", "持仓盈亏", "累计盈亏", "盈亏", "盈亏额"]),
+      currentValue: numberAfterLabel(["当前市值", "持仓市值", "当前价值", "市值"]),
+      currentPrice: numberAfterLabel(["现价", "最新价", "当前价格", "市价", "最新价格"]),
+      avgBuyPrice: numberAfterLabel(["买入均价", "持仓均价", "平均买入价", "成本均价"]),
+      holdingDays: numberAfterLabel(["持仓天数", "持股天数", "天数"]),
+      positionWeight: numberAfterLabel(["个股仓位", "仓位占比", "仓位", "占比"]),
+      totalFees: numberAfterLabel(["税费合计", "税费", "费用合计", "总费用", "手续费合计"]),
+      todayPnl: numberAfterLabel(["当日盈亏", "当日参考盈亏", "今日盈亏", "当天盈亏"]),
+      source: "带标签字段",
+      confidence: 0.92,
+    });
+  }
+
+  if (!isBrokerHoldingList) lines.forEach((line) => {
+    if (/买入|卖出|申购|赎回|交易日期|成交日期/i.test(line) || isFinanceOcrHeaderLine(line)) return;
+    const codes = extractFinanceCodes(line);
+    codes.forEach((code) => {
+      const name = extractOcrAssetName(line, code);
+      if (!name && /^[A-Z]{1,6}$/.test(code) && !/(股票|基金|证券|持仓|市值|成本|数量|盈亏)/.test(line)) return;
+      const numbers = inferFinanceOcrNumbers(line, code);
+      const kind = inferFinanceOcrKind(line, code);
+      const currency = inferFinanceOcrCurrency(line, code, kind);
+      candidates.push({
+        kind,
+        currency,
+        market: currency === "CNH" ? "domestic" : "overseas",
+        accountId,
+        name,
+        code,
+        ...numbers,
+        source: line,
+        confidence: name ? 0.82 : 0.62,
+      });
+    });
+  });
+
+  let assets = mergeFinanceOcrCandidates(candidates).map((asset) => completeFinanceOcrAssetDefaults(asset));
+  const transactions = parseFinanceTransactions(lines, valueAfterLabel, numberAfterLabel);
+  assets = assets.filter((asset) => asset.code || asset.name);
+  const unassignedTransactions = associateFinanceOcrTransactions(assets, transactions);
+  return {
+    assets,
+    transactions,
+    unassignedTransactions,
+    rawText: text,
+    ...(assets[0] || {}),
   };
-  const numberAfterLabel = (labels) => {
-    const value = valueAfterLabel(labels);
-    const match = value.match(/[-+]?\d[\d,]*(?:\.\d+)?/);
-    return match ? Number(match[0].replaceAll(",", "")) : null;
+}
+
+function financeLookupAssetPatch(item) {
+  const kindMap = {
+    AStock: "stock", HK: "stock", UsStock: "stock", UsADR: "stock",
+    OTCFUND: "fund", ETF: "fund", Index: "custom", Commodity: "commodity",
+    Futures: "futures", Options: "options", Crypto: "crypto",
   };
-  const lower = text.toLowerCase();
-  const kind = /基金|etf|lof/.test(lower)
-    ? "fund"
-    : /期货|futures?/.test(lower)
-      ? "futures"
-      : /期权|options?/.test(lower)
-        ? "options"
-        : /黄金|白银|原油|商品/.test(lower)
-          ? "commodity"
-          : /比特币|btc|eth|加密/.test(lower)
-            ? "crypto"
-            : /股票|证券|持股|stock/.test(lower)
-              ? "stock"
-              : "";
-  const currency = /\bHKD\b|港币/.test(text)
-    ? "HKD"
-    : /\bUSD\b|美元/.test(text)
-      ? "USD"
-      : /\bEUR\b|欧元/.test(text)
-        ? "EUR"
-        : /\bJPY\b|日元/.test(text)
-          ? "JPY"
-          : /\bCNY\b|\bCNH\b|人民币|￥|¥/.test(text)
-            ? "CNH"
-            : "";
-  const labeledName = valueAfterLabel(["资产名称", "证券名称", "股票名称", "基金名称", "产品名称", "名称"]);
-  const codeValue = valueAfterLabel(["资产代码", "证券代码", "股票代码", "基金代码", "产品代码", "代码"]);
-  const fallbackCode = text.match(/\b(?:\d{5,6}|[A-Z]{1,5})\b/)?.[0] || "";
+  const kind = kindMap[item.classify] || inferFinanceOcrKind(`${item.name || ""} ${item.typeName || ""}`, item.code);
+  const isDomestic = ["1", "2", "domestic"].includes(String(item.marketType)) || item.classify === "AStock";
+  const isHK = item.classify === "HK" || String(item.mktNum) === "116";
+  const isUS = item.classify === "UsStock" || item.classify === "UsADR" || ["105", "106", "107"].includes(String(item.mktNum));
+  const currency = isHK ? "HKD" : isUS || !isDomestic ? "USD" : "CNH";
+  let subcategory = financeSubcategoryOptions(kind)[0];
+  if (kind === "stock") subcategory = isHK ? "港股" : isUS ? "美股" : "A股";
+  if (kind === "fund") subcategory = item.classify === "ETF" ? "场内基金" : "场外基金";
+  if (kind === "commodity") {
+    if (["XAG"].includes(String(item.code).toUpperCase())) subcategory = "白银";
+    else if (["WTI", "BRENT"].includes(String(item.code).toUpperCase())) subcategory = "原油";
+    else subcategory = "黄金";
+  }
+  if (kind === "crypto") {
+    if (String(item.code).toUpperCase() === "BTC") subcategory = "比特币";
+    else if (String(item.code).toUpperCase() === "ETH") subcategory = "以太坊";
+    else if (["USDT", "USDC"].includes(String(item.code).toUpperCase())) subcategory = "稳定币";
+  }
   return {
     kind,
+    market: isDomestic ? "domestic" : "overseas",
     currency,
-    market: currency && currency !== "CNH" ? "overseas" : currency ? "domestic" : "",
-    name: labeledName.replace(/\s{2,}.*/, "").trim(),
-    code: (codeValue.match(/[A-Z0-9.-]{2,12}/i)?.[0] || fallbackCode).toUpperCase(),
-    costPrice: numberAfterLabel(["持仓成本", "平均成本", "成本价", "成本单价", "买入均价"]),
-    shares: numberAfterLabel(["持仓数量", "持有数量", "持有份额", "基金份额", "股票数量", "数量", "份额"]),
-    pnl: numberAfterLabel(["浮动盈亏", "持仓盈亏", "累计盈亏", "盈亏"]),
+    name: item.name || "",
+    code: normalizeFinanceOcrCode(item.code),
+    subcategory,
+    tertiaryCategory: kind === "stock" && isDomestic ? inferBoardFromCode(item.code) || "未分类" : "未分类",
   };
+}
+
+async function enrichFinanceOcrResult(result, onProgress = () => {}) {
+  const assets = result.assets || [];
+  const codes = assets.map((asset) => asset.code).filter(Boolean);
+  for (let index = 0; index < assets.length; index += 1) {
+    const asset = assets[index];
+    const query = asset.code || asset.name;
+    if (!query) continue;
+    try {
+      const response = await apiRequest(`/finance/lookup?q=${encodeURIComponent(query)}`);
+      const items = response.items || [];
+      const normalizedCode = normalizeFinanceOcrCode(asset.code);
+      const normalizedName = String(asset.name || "").replace(/\s+/g, "").toLowerCase();
+      const exactNameMatch = items.find((item) => String(item.name || "").replace(/\s+/g, "").toLowerCase() === normalizedName);
+      const fuzzyNameMatch = items.find((item) => {
+        const itemName = String(item.name || "").replace(/\s+/g, "").toLowerCase();
+        return normalizedName.length >= 4 && itemName.length >= 4
+          && (itemName.includes(normalizedName) || normalizedName.includes(itemName));
+      });
+      const match = items.find((item) => normalizedCode && normalizeFinanceOcrCode(item.code) === normalizedCode)
+        || exactNameMatch
+        || fuzzyNameMatch
+        || (asset.code ? items[0] : null);
+      if (match) {
+        const patch = financeLookupAssetPatch(match);
+        assets[index] = completeFinanceOcrAssetDefaults({
+          ...asset,
+          ...patch,
+          costPrice: asset.costPrice ?? match.price ?? null,
+          shares: asset.shares,
+          pnl: asset.pnl,
+          currentValue: asset.currentValue,
+          availableShares: asset.availableShares,
+          currentPrice: asset.currentPrice ?? match.price ?? null,
+          pnlPercent: asset.pnlPercent,
+          todayPnl: asset.todayPnl,
+          todayPnlPercent: asset.todayPnlPercent,
+          selected: asset.selected,
+          source: `${asset.source || "图片识别"} / 证券资料补全`,
+          confidence: Math.max(asset.confidence || 0, 0.96),
+        });
+      }
+    } catch (error) {
+      console.warn(`证券资料 ${query} 补全失败`, error);
+    }
+    onProgress(Math.min(index + 1, codes.length || assets.length), codes.length || assets.length);
+  }
+  result.assets = assets;
+  result.unassignedTransactions = associateFinanceOcrTransactions(assets, result.transactions || []);
+  return result;
 }
 
 function applyFinanceOcrResult(result) {
@@ -4566,30 +7591,163 @@ function applyFinanceOcrResult(result) {
   }
   if (result.currency) {
     fields.currency.value = result.currency;
+    // 非 CNH 货币自动切换为海外市场
+    if (result.currency !== "CNH") {
+      fields.market.value = "overseas";
+      updateFinanceCurrencyOptions(result.currency);
+    }
     syncFinanceSubcategoryByCurrency(result.currency);
+    updateFinanceCurrencyRate();
     filled.push("货币单位");
+  }
+  if (result.accountId && Array.from(fields.accountId.options).some((option) => option.value === result.accountId)) {
+    fields.accountId.value = result.accountId;
+    filled.push("所属账户");
+  }
+  if (result.category && Array.from(fields.category.options).some((option) => option.value === result.category)) {
+    fields.category.value = result.category;
+    filled.push("资产分类");
+  }
+  if (result.subcategory && Array.from(fields.subcategory.options).some((option) => option.value === result.subcategory)) {
+    fields.subcategory.value = result.subcategory;
+    updateFinanceTertiaryCategories(result.tertiaryCategory);
+    filled.push("二级分类");
+  }
+  if (result.tertiaryCategory) {
+    updateFinanceTertiaryCategories(result.tertiaryCategory);
+    filled.push("三级分类");
+  }
+  if (result.positionGroup && Array.from(fields.positionGroup.options).some((option) => option.value === result.positionGroup)) {
+    fields.positionGroup.value = result.positionGroup;
+    updateFinancePositionCategories(result.positionCategory);
+    filled.push("仓位分组");
+  }
+  if (result.positionCategory && Array.from(fields.positionCategory.options).some((option) => option.value === result.positionCategory)) {
+    fields.positionCategory.value = result.positionCategory;
+    filled.push("仓位分类");
   }
   [["name", "资产名称"], ["code", "资产代码"]].forEach(([field, label]) => {
     if (!result[field]) return;
     fields[field].value = result[field];
     filled.push(label);
   });
-  [["costPrice", "持仓成本"], ["shares", "份额/数量"], ["pnl", "浮动盈亏"]].forEach(([field, label]) => {
+  [["costPrice", "持仓成本"], ["shares", "份额/数量"], ["pnl", "浮动盈亏"],
+   ["currentPrice", "现价"], ["avgBuyPrice", "买入均价"], ["holdingDays", "持仓天数"],
+   ["positionWeight", "个股仓位"], ["totalFees", "税费合计"], ["todayPnl", "当日参考盈亏"]].forEach(([field, label]) => {
     if (result[field] === null || !Number.isFinite(result[field])) return;
     fields[field].value = result[field];
     filled.push(label);
   });
+  updateFinancePnlPercents(form);
   updateFinanceAssetPreview();
   saveFinanceAssetDraftFromForm();
   return filled;
 }
 
+function renderFinanceOcrTransactionPreview() {
+  const container = document.querySelector("#financeOcrTransactions");
+  if (!container) return;
+  container.hidden = pendingFinanceOcrTransactions.length === 0;
+  container.innerHTML = pendingFinanceOcrTransactions.length
+    ? `<strong>待同步交易明细（${pendingFinanceOcrTransactions.length} 笔）</strong>
+      <div class="ocr-transaction-list">${pendingFinanceOcrTransactions.map((transaction) => `
+        <span>${transaction.date} · ${transaction.direction === "buy" ? "买入" : "卖出"} · ${transaction.shares} × ${transaction.price} · ${transaction.amount.toFixed(2)}</span>
+      `).join("")}</div>`
+    : "";
+}
+
 function handleFinanceKindChange() {
+  const kind = document.querySelector("#financeAssetForm [name='kind']").value;
   updateFinanceAssetCategories();
   updateFinanceSubcategories();
   updateFinanceTertiaryCategories();
   updateFinancePositionGroups();
   updateFinancePositionCategories();
+  toggleStockFormFields(kind);
+}
+
+// ─── Finance code lookup (东方财富 API) ───
+async function fetchCodeLookup(query) {
+  const dropdown = document.querySelector("#codeLookupDropdown");
+  const status = document.querySelector("#codeLookupStatus");
+  if (!dropdown) return;
+  if (status) { status.textContent = "查询中…"; status.className = "code-lookup-status loading"; }
+  try {
+    const res = await apiRequest(`/finance/lookup?q=${encodeURIComponent(query)}`);
+    const items = res.items || [];
+    if (!items.length) {
+      dropdown.hidden = true;
+      if (status) { status.textContent = ""; status.className = "code-lookup-status"; }
+      return;
+    }
+    dropdown.innerHTML = items.map((it, idx) => {
+      const priceCls = it.changePct > 0 ? "up" : it.changePct < 0 ? "down" : "";
+      const isHK = it.classify === "HK" || it.mktNum === "116";
+      const isUS = it.classify === "UsStock" || it.classify === "UsADR" || ["105", "106", "107"].includes(it.mktNum);
+      const currencySymbol = isHK ? "HK$" : isUS ? "$" : "¥";
+      const priceTxt = it.price != null ? `${currencySymbol}${it.price}` : "";
+      const chgTxt = it.changePct != null ? `${it.changePct > 0 ? "+" : ""}${it.changePct}%` : "";
+      return `<div class="code-lookup-item" data-idx="${idx}" data-code="${escapeAttr(it.code)}" data-name="${escapeAttr(it.name)}" data-classify="${escapeAttr(it.classify)}" data-typename="${escapeAttr(it.typeName)}" data-markettype="${escapeAttr(it.marketType)}" data-mktnum="${escapeAttr(it.mktNum)}" data-price="${it.price ?? ""}">
+        <div class="code-lookup-item-head">
+          <span class="code-lookup-item-code">${it.code}</span>
+          <span class="code-lookup-item-type">${it.typeName || it.classify}</span>
+        </div>
+        <div class="code-lookup-item-name">${it.name}</div>
+        <div class="code-lookup-item-price">
+          <span>${priceTxt}</span>
+          <span class="${priceCls}">${chgTxt}</span>
+        </div>
+      </div>`;
+    }).join("");
+    dropdown.hidden = false;
+    dropdown.querySelectorAll(".code-lookup-item").forEach((el) => {
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        applyCodeLookupResult({
+          code: el.dataset.code,
+          name: el.dataset.name,
+          classify: el.dataset.classify,
+          typeName: el.dataset.typename,
+          marketType: el.dataset.markettype,
+          mktNum: el.dataset.mktnum,
+          price: el.dataset.price ? Number(el.dataset.price) : null,
+        });
+      });
+    });
+    if (status) { status.textContent = `找到 ${items.length} 个匹配项`; status.className = "code-lookup-status"; }
+  } catch (err) {
+    dropdown.hidden = true;
+    if (status) { status.textContent = "查询失败"; status.className = "code-lookup-status error"; }
+  }
+}
+
+function hideCodeLookupDropdown() {
+  const dropdown = document.querySelector("#codeLookupDropdown");
+  if (dropdown) dropdown.hidden = true;
+}
+
+function applyCodeLookupResult(item) {
+  const form = document.querySelector("#financeAssetForm");
+  const fields = form.elements;
+  const patch = financeLookupAssetPatch(item);
+  fields.code.value = patch.code;
+  fields.name.value = patch.name;
+  fields.kind.value = patch.kind;
+  handleFinanceKindChange();
+  fields.market.value = patch.market;
+  updateFinanceCurrencyOptions(patch.currency);
+  const subOptions = Array.from(fields.subcategory.options).map((option) => option.value);
+  if (subOptions.includes(patch.subcategory)) fields.subcategory.value = patch.subcategory;
+  updateFinanceTertiaryCategories(patch.tertiaryCategory);
+  // Fill price if available
+  if (item.price != null && Number.isFinite(item.price)) {
+    fields.costPrice.value = item.price;
+  }
+  updateFinanceAssetPreview();
+  saveFinanceAssetDraftFromForm();
+  hideCodeLookupDropdown();
+  const status = document.querySelector("#codeLookupStatus");
+  if (status) { status.textContent = `已选择 ${item.name} (${item.code})`; status.className = "code-lookup-status"; }
 }
 
 function updateFinanceAssetCategories(preferred = "") {
@@ -4652,6 +7810,27 @@ function updateFinanceCurrencyOptions(preferred = "") {
   fields.currency.innerHTML = options.map((item) => `<option value="${item}">${item}</option>`).join("");
   const normalized = normalizeFinanceCurrency(preferred || fields.currency.value, fields.market.value);
   fields.currency.value = fields.market.value === "domestic" ? "CNH" : normalized === "CNH" ? "HKD" : normalized;
+  updateFinanceCurrencyRate();
+}
+
+function updateFinanceCurrencyRate() {
+  const rateEl = document.querySelector("#financeCurrencyRate");
+  if (!rateEl) return;
+  const form = document.querySelector("#financeAssetForm");
+  const currency = form?.elements?.currency?.value;
+  if (!currency || currency === "CNH") {
+    rateEl.textContent = "";
+    rateEl.hidden = true;
+    return;
+  }
+  const rate = state.rates[currency];
+  if (rate == null) {
+    rateEl.textContent = "";
+    rateEl.hidden = true;
+    return;
+  }
+  rateEl.hidden = false;
+  rateEl.textContent = `当前汇率: 1 ${currency} ≈ ${rate} CNY`;
 }
 
 function handleFinanceCurrencyChange() {
@@ -4666,6 +7845,7 @@ function handleFinanceCurrencyChange() {
     updateFinanceCurrencyOptions("CNH");
   }
   syncFinanceSubcategoryByCurrency(fields.currency.value);
+  updateFinanceCurrencyRate();
   handleFinanceAssetFormChange();
 }
 
@@ -4731,8 +7911,9 @@ function updateFinanceAssetPreview() {
 }
 
 function handleFinanceAssetFormChange() {
-  updateFinanceAssetPreview();
   const form = document.querySelector("#financeAssetForm");
+  if (form) updateFinancePnlPercents(form);
+  updateFinanceAssetPreview();
   if (!form?.elements || form.elements.assetId.value) return;
   saveFinanceAssetDraftFromForm();
 }
@@ -4741,7 +7922,9 @@ function saveFinanceAssetDraftFromForm() {
   const form = document.querySelector("#financeAssetForm");
   if (!form?.elements) return;
   const data = Object.fromEntries(new FormData(form));
-  state.financeAssetDraft = {
+  const kind = normalizeFinanceKind(data.kind);
+  if (!state.financeAssetDrafts) state.financeAssetDrafts = {};
+  state.financeAssetDrafts[kind] = {
     kind: normalizeFinanceKind(data.kind),
     accountId: data.accountId,
     category: data.category,
@@ -4756,6 +7939,14 @@ function saveFinanceAssetDraftFromForm() {
     costPrice: data.costPrice,
     shares: data.shares,
     pnl: data.pnl,
+    currentPrice: data.currentPrice,
+    avgBuyPrice: data.avgBuyPrice,
+    holdingDays: data.holdingDays,
+    positionWeight: data.positionWeight,
+    totalFees: data.totalFees,
+    pnlPercent: data.pnlPercent,
+    todayPnl: data.todayPnl,
+    todayPnlPercent: data.todayPnlPercent,
   };
   saveState();
 }
@@ -4765,6 +7956,11 @@ function handleFinanceAssetSubmit(event) {
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
   const id = Number(data.assetId) || Date.now();
+  const existingAsset = state.financeAssets.find((item) => item.id === id);
+  const transactions = [
+    ...(existingAsset?.transactions || []),
+    ...dedupeFinanceTransactions(pendingFinanceOcrConfirmed ? pendingFinanceOcrTransactions : [], existingAsset?.transactions || []),
+  ];
   const payload = {
     id,
     kind: normalizeFinanceKind(data.kind),
@@ -4781,6 +7977,15 @@ function handleFinanceAssetSubmit(event) {
     costPrice: Number(data.costPrice) || 0,
     shares: Number(data.shares) || 0,
     pnl: Number(data.pnl) || 0,
+    currentPrice: Number(data.currentPrice) || 0,
+    avgBuyPrice: Number(data.avgBuyPrice) || 0,
+    holdingDays: Number(data.holdingDays) || 0,
+    positionWeight: Number(data.positionWeight) || 0,
+    totalFees: Number(data.totalFees) || 0,
+    pnlPercent: Number(data.pnlPercent) || 0,
+    todayPnl: Number(data.todayPnl) || 0,
+    todayPnlPercent: Number(data.todayPnlPercent) || 0,
+    transactions,
   };
   if (
     !payload.market ||
@@ -4792,9 +7997,7 @@ function handleFinanceAssetSubmit(event) {
     !payload.positionCategory ||
     !payload.currency ||
     !payload.name ||
-    !payload.code ||
-    payload.costPrice <= 0 ||
-    payload.shares <= 0 ||
+    (payload.kind === "stock" && (!payload.code || payload.costPrice <= 0 || payload.shares <= 0)) ||
     !Number.isFinite(payload.pnl)
   ) return;
   const index = state.financeAssets.findIndex((item) => item.id === id);
@@ -4803,12 +8006,30 @@ function handleFinanceAssetSubmit(event) {
   } else {
     state.financeAssets.unshift(payload);
   }
-  state.financeAssetDraft = { ...payload };
-  delete state.financeAssetDraft.id;
+  const kind = payload.kind || "stock";
+  if (!state.financeAssetDrafts) state.financeAssetDrafts = {};
+  state.financeAssetDrafts[kind] = { ...payload };
+  delete state.financeAssetDrafts[kind].id;
+  delete state.financeAssetDrafts[kind].transactions;
+  pendingFinanceOcrTransactions = [];
+  pendingFinanceOcrConfirmed = false;
   syncAssetClassValuesFromFinance();
   saveState();
   document.querySelector("#financeAssetDialog").close();
   render();
+  // 编辑保存后，如果明细弹窗正在查看同一资产，立刻刷新内容
+  const holdingDialog = document.querySelector("#holdingDetailDialog");
+  if (holdingDialog?.open) {
+    const dialogAssetId = Number(holdingDialog.dataset.assetId);
+    if (dialogAssetId === id) {
+      const freshAsset = (state.financeAssets || []).find((a) => a.id === id);
+      if (freshAsset) {
+        document.querySelector("#holdingDetailTitle").textContent = `${freshAsset.name} (${freshAsset.code})`;
+        const activeTab = document.querySelector(".holding-tab.active");
+        renderHoldingTabContent(activeTab?.dataset.tab || "holding", id);
+      }
+    }
+  }
 }
 
 function updateDebtPreview() {
