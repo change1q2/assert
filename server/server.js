@@ -76,26 +76,7 @@ const mimeTypes = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
 };
-const premiumMarketSources = [
-  {
-    key: "qdii",
-    label: "QDII",
-    url: "https://www.jisilu.cn/data/qdii/qdii_list/?___jsl=LST___t=1",
-    referer: "https://www.jisilu.cn/data/qdii/",
-  },
-  {
-    key: "etf",
-    label: "ETF",
-    url: "https://www.jisilu.cn/data/etf/etf_list/?___jsl=LST___t=1",
-    referer: "https://www.jisilu.cn/data/etf/",
-  },
-  {
-    key: "lof",
-    label: "LOF",
-    url: "https://www.jisilu.cn/data/lof/stock_lof_list/?___jsl=LST___t=1",
-    referer: "https://www.jisilu.cn/data/lof/",
-  },
-];
+const PREMIUM_API_URL = "http://8.220.240.126:8787/api/latest-lite";
 let premiumMarketCache = {
   expiresAt: 0,
   payload: null,
@@ -168,6 +149,110 @@ function premiumReference(cell) {
   return { reference: null, premiumRate: null, basis: "暂无参考" };
 }
 
+function normalizePremiumRowNew(row) {
+  // New data format: [代码, 投资方向, 名称, LOF基金申购上限, T0净值模拟, 现价, 实时溢价率]
+  if (!row || row.length < 7) return null;
+  
+  const code = String(row[0] || "").trim();
+  const direction = String(row[1] || "");
+  const name = String(row[2] || "").trim();
+  const applyLimit = parseFloat(String(row[3] || "0")) || 0;
+  const t0Nav = parseFloat(String(row[4] || "0")) || 0;
+  const price = parseFloat(String(row[5] || "0")) || 0;
+  const premiumRate = parseFloat(String(row[6] || "0")) || 0;
+  
+  if (!code || !name || price === 0) return null;
+  
+  // Determine type (LOF or ETF) from code
+  const isETF = code.toLowerCase().includes('etf') || 
+                name.includes('ETF') || 
+                (!code.startsWith('16') && !code.startsWith('15'));
+  const type = isETF ? 'ETF' : 'LOF';
+  
+  // Determine dataType2 based on direction
+  const directionLower = direction.toLowerCase();
+  
+  let dataType2 = '其他国家标的'; // default
+  
+  // Check for US markets
+  if (directionLower.includes('美国') || 
+      directionLower.includes('美股') || 
+      directionLower.includes('纳斯达克') || 
+      directionLower.includes('标普') ||
+      directionLower.includes('美元')) {
+    dataType2 = '美国标的';
+  }
+  // Check for commodity - crude oil
+  else if (directionLower.includes('原油') || 
+           directionLower.includes('oil') ||
+           directionLower.includes('能源')) {
+    dataType2 = '原油';
+  }
+  // Check for commodity - gold
+  else if (directionLower.includes('黄金') || 
+           directionLower.includes('gold')) {
+    dataType2 = '黄金';
+  }
+  // Check for commodity - silver
+  else if (directionLower.includes('白银') || 
+           directionLower.includes('silver')) {
+    dataType2 = '白银';
+  }
+  // Check for other commodities
+  else if (directionLower.includes('商品') || 
+           directionLower.includes('大宗') ||
+           directionLower.includes('豆粕') ||
+           directionLower.includes('黄')) {
+    dataType2 = '其他商品';
+  }
+  
+  // Convert premiumRate to percentage first
+  const premiumRatePercent = premiumRate * 100;
+  
+  // Check if arbitrage is possible: premium > 4% and applyLimit != 0
+  const canArbitrage = premiumRatePercent > 4 && applyLimit !== 0;
+  
+  // Determine status based on premium rate
+  const status = premiumRatePercent > 0.5 ? "premium" : premiumRatePercent < -0.5 ? "discount" : "flat";
+  
+  // Determine transfer recommendation
+  let transferRecommend = { level: 'none', text: '不需要转出', color: 'gray' };
+  
+  if (premiumRatePercent > 20) {
+    transferRecommend = { level: 'must-sell', text: '必须转出', color: 'red' };
+  } else if (premiumRatePercent > 10) {
+    transferRecommend = { level: 'suggest-sell', text: '建议转出', color: 'orange' };
+  } else if (premiumRatePercent > 6) {
+    transferRecommend = { level: 'can-sell', text: '可以转出', color: 'yellow' };
+  } else if (premiumRatePercent > 4) {
+    transferRecommend = { level: 'no-action', text: '不需要转出', color: 'gray' };
+  } else if (premiumRatePercent > -3) {
+    // -3% to 4%: normal range
+    transferRecommend = { level: 'normal', text: '正常持有', color: 'gray' };
+  } else if (premiumRatePercent > -10) {
+    // -10% to -3%: suggest buy
+    transferRecommend = { level: 'suggest-buy', text: '建议转入', color: 'green-light' };
+  } else {
+    // < -10%: strongly buy
+    transferRecommend = { level: 'strong-buy', text: '强烈转入', color: 'green' };
+  }
+  
+  return {
+    code: code,
+    direction: direction,
+    name: name,
+    type: type,
+    dataType2: dataType2,
+    applyLimit: applyLimit,
+    t0Nav: t0Nav,
+    price: price,
+    premiumRate: premiumRatePercent,
+    canArbitrage: canArbitrage,
+    status: status,
+    transferRecommend: transferRecommend,
+  };
+}
+
 function normalizePremiumRow(cell, source) {
   const price = marketNumber(cell.price);
   const reference = premiumReference(cell);
@@ -196,42 +281,47 @@ async function fetchPremiumMarket(force = false) {
   if (!force && premiumMarketCache.payload && premiumMarketCache.expiresAt > now) {
     return { ...premiumMarketCache.payload, cached: true };
   }
-  const results = await Promise.allSettled(premiumMarketSources.map(async (source) => {
-    const response = await fetch(source.url, {
+  try {
+    const response = await fetch(PREMIUM_API_URL, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; PersonalAssetPlatform/1.8)",
-        "X-Requested-With": "XMLHttpRequest",
-        Referer: source.referer,
+        Accept: "application/json",
       },
       signal: AbortSignal.timeout(12000),
     });
-    if (!response.ok) throw new Error(`${source.label} 行情源返回 ${response.status}`);
-    const payload = await response.json();
-    return (payload.rows || [])
-      .map((row) => normalizePremiumRow(row.cell || {}, source))
+    if (!response.ok) throw new Error(`行情源返回 ${response.status}`);
+    const data = await response.json();
+    
+    // Parse the new data format
+    const values = data.values || [];
+    if (values.length < 2) {
+      if (premiumMarketCache.payload) return { ...premiumMarketCache.payload, cached: true, stale: true };
+      throw new Error("数据格式不正确");
+    }
+    
+    const rows = values.slice(1) // Skip header row
+      .map((row) => normalizePremiumRowNew(row))
       .filter(Boolean);
-  }));
-  const successfulRows = results
-    .filter((result) => result.status === "fulfilled")
-    .flatMap((result) => result.value);
-  if (!successfulRows.length) {
-    if (premiumMarketCache.payload) return { ...premiumMarketCache.payload, cached: true, stale: true };
-    throw new Error("暂时无法连接行情源");
+    
+    const sortedRows = rows.sort((a, b) => b.premiumRate - a.premiumRate);
+    const payload = {
+      rows: sortedRows,
+      fetchedAt: data.timestamp || new Date().toISOString(),
+      source: "Sea叔",
+      sourceCount: 1,
+      failedSources: 0,
+    };
+    premiumMarketCache = {
+      expiresAt: now + 30_000, // Cache for 30 seconds
+      payload,
+    };
+    return payload;
+  } catch (error) {
+    if (premiumMarketCache.payload) {
+      return { ...premiumMarketCache.payload, cached: true, stale: true };
+    }
+    throw new Error(`行情获取失败: ${error.message}`);
   }
-  const uniqueRows = [...new Map(successfulRows.map((row) => [row.code, row])).values()]
-    .sort((a, b) => b.premiumRate - a.premiumRate);
-  const payload = {
-    rows: uniqueRows,
-    fetchedAt: new Date().toISOString(),
-    source: "公开基金行情聚合",
-    sourceCount: results.filter((result) => result.status === "fulfilled").length,
-    failedSources: results.filter((result) => result.status === "rejected").length,
-  };
-  premiumMarketCache = {
-    expiresAt: now + 15_000,
-    payload,
-  };
-  return payload;
 }
 
 function refreshPremiumMarketInBackground() {

@@ -307,38 +307,58 @@
       <form id="financeAssetForm" method="dialog" class="modal-form finance-asset-form">
         <h2>新增理财资产</h2>
         <input name="assetId" type="hidden" />
+        
+        <!-- 平台选择区域 -->
+        <section class="platform-selector-section">
+          <div class="platform-selector-header">
+            <strong>📊 识别平台设置</strong>
+            <span>选择对应平台可提高识别准确率</span>
+          </div>
+          <div class="platform-selector-row">
+            <label class="platform-option-inline">
+              <span class="platform-label-inline">一级分类（地区）</span>
+              <select id="ocrPlatformRegion" class="platform-select-inline">
+                <option value="domestic">国内平台</option>
+                <option value="overseas">海外平台</option>
+              </select>
+            </label>
+            <label class="platform-option-inline">
+              <span class="platform-label-inline">二级分类（类型）</span>
+              <select id="ocrPlatformType" class="platform-select-inline">
+                <option value="broker">券商</option>
+                <option value="bank">银行</option>
+                <option value="fund">基金平台</option>
+              </select>
+            </label>
+            <label class="platform-option-inline">
+              <span class="platform-label-inline">三级分类（具体平台）</span>
+              <select id="ocrPlatformName" class="platform-select-inline">
+                <option value="">请选择平台</option>
+              </select>
+            </label>
+          </div>
+        </section>
+        
         <section class="finance-ocr-panel" tabindex="0">
           <div class="finance-ocr-copy">
-            <strong>持仓图片识别</strong>
-            <span>列表图用于选择资产行，详情图仅识别持仓摘要和交易记录；支持分别上传或 Ctrl+V 粘贴。</span>
-          </div>
-          <div class="finance-ocr-kind-switch" role="tablist" aria-label="选择粘贴图片类型">
-            <button type="button" class="active" data-action="set-finance-ocr-kind" data-kind="list">列表识别</button>
-            <button type="button" data-action="set-finance-ocr-kind" data-kind="detail">详情识别</button>
+            <strong>持仓列表识别</strong>
+            <span>上传持仓列表图片，可识别多项资产并选择需要导入的行；也支持 Ctrl+V 粘贴图片。</span>
           </div>
           <div class="finance-ocr-upload-grid">
-            <label class="finance-ocr-upload" data-ocr-kind="list">
-              <b>列表识别</b>
-              <span>上传持仓列表，可识别多行并选择一行</span>
+            <label class="finance-ocr-upload is-active">
+              <b>上传持仓列表</b>
+              <span>识别名称、市值、持仓/可用、现价/成本和持仓盈亏</span>
               <input name="assetImage" type="file" accept="image/png,image/jpeg,image/webp" />
             </label>
-            <label class="finance-ocr-upload" data-ocr-kind="detail">
-              <b>详情识别</b>
-              <span>上传持仓明细，只读取顶部摘要和交易记录</span>
-              <input name="assetDetailImage" type="file" accept="image/png,image/jpeg,image/webp" />
-            </label>
           </div>
+          
           <div class="finance-ocr-preview-grid">
             <figure>
               <figcaption>列表图片</figcaption>
               <img id="financeOcrPreview" alt="待识别持仓列表图片预览" />
             </figure>
-            <figure>
-              <figcaption>详情图片</figcaption>
-              <img id="financeOcrDetailPreview" alt="待识别持仓详情图片预览" />
-            </figure>
           </div>
-          <button type="button" data-action="recognize-finance-image">识别图片并预览</button>
+          <button type="button" data-action="recognize-finance-image">识别列表并预览</button>
           <p id="financeOcrStatus" class="finance-ocr-status" role="status">尚未选择图片</p>
           <div id="financeOcrTransactions" class="ocr-transaction-preview" hidden></div>
         </section>
@@ -401,44 +421,44 @@
           </span>
         </label>
         <label>持仓成本
-          <input name="costPrice" type="number" step="0.0001" min="0" required />
+          <input name="costPrice" type="number" step="0.001" min="0" required />
         </label>
         <label>份额 / 数量
-          <input name="shares" type="number" step="0.0001" min="0" required />
+          <input name="shares" type="number" step="0.001" min="0" required />
         </label>
         <label>现价
-          <input name="currentPrice" type="number" step="0.0001" min="0" />
+          <input name="currentPrice" type="number" step="0.001" min="0" />
         </label>
         <label data-stock-only>买入均价
-          <input name="avgBuyPrice" type="number" step="0.0001" min="0" />
+          <input name="avgBuyPrice" type="number" step="0.001" min="0" />
         </label>
         <label data-stock-only>持仓天数
           <input name="holdingDays" type="number" step="1" min="0" />
         </label>
         <label data-stock-only class="stock-auto-field">个股仓位 (%)
-          <input name="positionWeight" type="number" step="0.01" min="0" max="100" />
+          <input name="positionWeight" type="number" step="0.001" min="0" max="100" />
         </label>
         <label data-stock-only class="stock-auto-field">税费合计
-          <input name="totalFees" type="number" step="0.01" min="0" value="0" />
+          <input name="totalFees" type="number" step="0.001" min="0" value="0" />
         </label>
         <div class="form-group-row">
           <label class="group-label">持仓盈亏
             <div class="group-fields">
-              <input name="pnl" type="number" step="0.01" value="0" required placeholder="盈亏额" />
-              <input name="pnlPercent" type="number" step="0.01" placeholder="盈亏率%" />
+              <input name="pnl" type="number" step="0.001" value="0" required placeholder="盈亏额" />
+              <input name="pnlPercent" type="number" step="0.001" placeholder="盈亏率%" />
             </div>
           </label>
         </div>
         <div class="form-group-row">
           <label class="group-label">当日参考盈亏
             <div class="group-fields">
-              <input name="todayPnl" type="number" step="0.01" value="0" placeholder="盈亏额" />
-              <input name="todayPnlPercent" type="number" step="0.01" placeholder="盈亏率%" />
+              <input name="todayPnl" type="number" step="0.001" value="0" placeholder="盈亏额" />
+              <input name="todayPnlPercent" type="number" step="0.001" placeholder="盈亏率%" />
             </div>
           </label>
         </div>
         <label>当前价值
-          <input name="currentValue" type="number" step="0.01" readonly />
+          <input name="currentValue" type="number" step="0.001" readonly />
         </label>
         <menu>
           <button value="cancel" type="button" id="cancelFinanceAsset">取消</button>
@@ -497,6 +517,29 @@
       </form>
     </dialog>
 
+    <dialog id="annualGoalDialog">
+      <form id="annualGoalForm" method="dialog" class="modal-form">
+        <h2 id="annualGoalTitle">编辑年度目标</h2>
+        <input name="year" type="hidden" />
+        <label>年份
+          <input name="yearDisplay" type="number" min="2000" max="2100" required />
+        </label>
+        <label>期初资产（元）
+          <input name="opening" type="number" step="0.01" min="0" required />
+        </label>
+        <label>目标年化收益率（%）
+          <input name="targetRate" type="number" step="0.1" min="0" required />
+        </label>
+        <label>实际收益额（元）
+          <input name="actualProfit" type="number" step="0.01" />
+        </label>
+        <menu>
+          <button value="cancel" type="button" id="cancelAnnualGoal">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="feeDetailDialog">
       <div class="fee-detail-modal">
         <h2>费用详情</h2>
@@ -506,6 +549,21 @@
           <button value="cancel" type="button" id="cancelFeeDetail">关闭</button>
         </menu>
       </div>
+    </dialog>
+
+    <dialog id="editFeeTotalDialog">
+      <form id="editFeeTotalForm" method="dialog" class="modal-form">
+        <h2>手动修改税费合计</h2>
+        <p class="fee-config-hint">手动输入的税费合计将覆盖自动计算值，以您输入的值为准。</p>
+        <input name="assetId" type="hidden" />
+        <label>税费合计（元）
+          <input name="customFeeTotal" type="number" step="0.01" min="0" required />
+        </label>
+        <menu>
+          <button value="cancel" type="button" id="cancelEditFeeTotal">取消</button>
+          <button value="default" class="primary">保存</button>
+        </menu>
+      </form>
     </dialog>
 
     <dialog id="feeConfigDialog">
@@ -546,10 +604,6 @@
       <div class="holding-detail-modal">
         <div class="holding-detail-header">
           <h2 id="holdingDetailTitle"></h2>
-          <div class="holding-detail-actions">
-            <button type="button" class="holding-detail-edit" id="editHoldingAsset" title="编辑资产">编辑</button>
-            <button type="button" class="holding-detail-close" id="closeHoldingDetail">&times;</button>
-          </div>
         </div>
         <div class="holding-tabs">
           <button class="holding-tab active" data-tab="holding">持仓</button>
@@ -599,8 +653,8 @@
             <option value="sell">卖出</option>
           </select>
         </label>
-        <label>交易日期
-          <input name="date" type="date" required />
+        <label>交易时间
+          <input name="date" type="datetime-local" step="1" required />
         </label>
         <label>数量（股/份）
           <input name="shares" type="number" step="0.0001" min="0.0001" required />
