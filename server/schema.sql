@@ -275,6 +275,7 @@ CREATE TABLE IF NOT EXISTS feedback (
   type VARCHAR(50) NOT NULL DEFAULT '问题',
   title VARCHAR(255) NOT NULL DEFAULT '',
   content TEXT NOT NULL,
+  attachments_json JSON,
   status VARCHAR(50) NOT NULL DEFAULT 'pending',
   admin_reply TEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -21,7 +21,16 @@ const today = new Date().toISOString().slice(0, 10);
 const API_BASE = ["127.0.0.1", "localhost"].includes(window.location.hostname)
   ? "http://127.0.0.1:3000/api"
   : "/api";
-let legacyStatePending = Boolean(localStorage.getItem("asset-platform-v18")) && !localStorage.getItem("asset-platform-token");
+
+function clearPersistedAuth() {
+  localStorage.removeItem("asset-platform-token");
+  localStorage.removeItem("asset-platform-account");
+  localStorage.removeItem("asset-platform-auth-v1");
+}
+
+clearPersistedAuth();
+
+let legacyStatePending = Boolean(localStorage.getItem("asset-platform-v18"));
 const seed = {
   user: {
     name: "演示用户",
@@ -115,6 +124,7 @@ let stateSaveTimer = null;
 let stateSaveInFlight = Promise.resolve();
 let authMode = "login";
 let authLoginMethod = "account";
+let feedbackDraftAttachments = [];
 let currentModule = "overview";
 let ledgerPeriodMode = "month";
 let ledgerPeriod = `month-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
@@ -330,21 +340,15 @@ function syncAssetClassValuesFromFinance() {
 }
 
 function loadAuth() {
-  const token = localStorage.getItem("asset-platform-token") || "";
-  const account = localStorage.getItem("asset-platform-account") || "";
   return {
-    token,
-    currentUser: account,
-    users: account ? [{ account, profile: { ...seed.user, account } }] : [],
+    token: "",
+    currentUser: "",
+    users: [],
   };
 }
 
 function saveAuth() {
-  if (auth.token) localStorage.setItem("asset-platform-token", auth.token);
-  else localStorage.removeItem("asset-platform-token");
-  if (auth.currentUser) localStorage.setItem("asset-platform-account", auth.currentUser);
-  else localStorage.removeItem("asset-platform-account");
-  localStorage.removeItem("asset-platform-auth-v1");
+  clearPersistedAuth();
 }
 
 function isAuthenticated() {
@@ -784,6 +788,16 @@ function premiumRowHasHolding(row) {
   const amount = Number(holdingsData.amount);
   const ratio = Number(holdingsData.ratio);
   return Number.isFinite(amount) && Number.isFinite(ratio) && amount !== 0 && ratio !== 0;
+}
+
+function hasActivePremiumFilters() {
+  return premiumQuickFilter !== "all"
+    || premiumType1Filter !== "all"
+    || premiumDataType2Filter !== "all"
+    || premiumArbitrageFilter !== "all"
+    || premiumTransferFilter !== "all"
+    || premiumStatusFilter !== "all"
+    || Boolean(premiumQuery.trim());
 }
 
 function normalizePremiumHoldingCode(value = "") {
@@ -4596,7 +4610,7 @@ function premiumTool() {
               <option value="premium" ${premiumStatusFilter === 'premium' ? 'selected' : ''}>溢价</option>
               <option value="discount" ${premiumStatusFilter === 'discount' ? 'selected' : ''}>折价</option>
             </select>
-            ${premiumQuickFilter !== 'all' ? '<button class="premium-reset-btn-inline" data-action="reset-premium-filter" title="还原全部数据">↺ 还原</button>' : ''}
+            ${hasActivePremiumFilters() ? '<button class="premium-reset-btn-inline" data-action="reset-premium-filter" title="还原全部数据">↺ 还原</button>' : ''}
           </div>
         </label>
       </div>
@@ -4957,6 +4971,34 @@ function localDateTimeString(date = new Date()) {
   return `${localDateString(date)} ${hours}:${minutes}:${seconds}`;
 }
 
+function normalizeFeedbackAttachments(value) {
+  let list = value;
+  if (typeof list === "string") {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      list = [];
+    }
+  }
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((item) => String(item || "").trim())
+    .filter((item) => /^data:image\/(png|jpe?g|webp);base64,/i.test(item))
+    .slice(0, 6);
+}
+
+function feedbackAttachmentPreviewMarkup(images = feedbackDraftAttachments, editable = true) {
+  if (!images.length) {
+    return `<div class="feedback-attachment-empty">暂无截图，支持直接粘贴截图或上传图片。</div>`;
+  }
+  return images.map((src, index) => `
+    <figure class="feedback-attachment-item">
+      <img src="${src}" alt="反馈截图 ${index + 1}" />
+      ${editable ? `<button type="button" class="feedback-attachment-remove" data-action="remove-feedback-attachment" data-index="${index}" aria-label="删除截图 ${index + 1}">×</button>` : ""}
+    </figure>
+  `).join("");
+}
+
 function transactionDateTimeInputValue(value = "") {
   const normalized = normalizeOcrDate(value);
   return normalized ? normalized.replace(" ", "T") : "";
@@ -5060,6 +5102,18 @@ function profile() {
       <label>详细内容
         <textarea name="content" rows="4" placeholder="请详细描述您遇到的问题或建议…" required></textarea>
       </label>
+      <div class="feedback-attachments-field">
+        <div class="feedback-attachments-head">
+          <span>截图附件</span>
+          <button type="button" class="secondary ghost" data-action="pick-feedback-image">上传图片</button>
+        </div>
+        <div id="feedbackPasteZone" class="feedback-paste-zone" tabindex="0">
+          <strong>支持复制粘贴截图</strong>
+          <span id="feedbackAttachmentHint">在这里按 Ctrl+V 粘贴截图，或点击右上角上传图片。</span>
+        </div>
+        <input id="feedbackAttachmentInput" type="file" accept="image/*" multiple hidden />
+        <div id="feedbackAttachmentPreview" class="feedback-attachment-preview"></div>
+      </div>
       <div class="feedback-form-actions">
         <button class="primary" type="submit">提交反馈</button>
       </div>
@@ -5520,6 +5574,7 @@ function bindViewActions() {
     button.setAttribute("aria-label", showPassword ? "隐藏密码" : "显示密码");
     button.title = showPassword ? "隐藏密码" : "显示密码";
   }));
+  bindFeedbackComposer();
   document.querySelector("#authForm")?.addEventListener("submit", handleAuthSubmit);
   document.querySelector("#profileForm")?.addEventListener("submit", handleProfileSubmit);
   document.querySelector("#preferenceForm")?.addEventListener("submit", handlePreferenceSubmit);
@@ -5991,6 +6046,108 @@ function completeAuthentication(payload) {
   render();
 }
 
+function renderFeedbackAttachmentPreview() {
+  const preview = document.querySelector("#feedbackAttachmentPreview");
+  const hint = document.querySelector("#feedbackAttachmentHint");
+  if (!preview) return;
+  preview.innerHTML = feedbackAttachmentPreviewMarkup();
+  if (hint) {
+    hint.textContent = feedbackDraftAttachments.length
+      ? `已添加 ${feedbackDraftAttachments.length} 张截图，可继续粘贴、上传，也可以点右上角删除。`
+      : "在这里按 Ctrl+V 粘贴截图，或点击右上角上传图片。";
+  }
+  document.querySelectorAll("[data-action='remove-feedback-attachment']").forEach((button) => button.addEventListener("click", () => {
+    feedbackDraftAttachments.splice(Number(button.dataset.index), 1);
+    renderFeedbackAttachmentPreview();
+  }));
+}
+
+async function imageFileToCompressedDataUrl(file, options = {}) {
+  const maxWidth = Number(options.maxWidth || 1600);
+  const maxHeight = Number(options.maxHeight || 1600);
+  const quality = Number(options.quality || 0.84);
+  const fileDataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", () => reject(new Error("图片读取失败")));
+    reader.readAsDataURL(file);
+  });
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("图片加载失败"));
+    img.src = fileDataUrl;
+  });
+  const scale = Math.min(1, maxWidth / image.width, maxHeight / image.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const outputType = /png|webp/i.test(file.type) ? "image/png" : "image/jpeg";
+  return canvas.toDataURL(outputType, quality);
+}
+
+async function addFeedbackAttachments(files = []) {
+  const imageFiles = files.filter((file) => file && String(file.type || "").startsWith("image/"));
+  if (!imageFiles.length) return;
+  const remain = Math.max(0, 6 - feedbackDraftAttachments.length);
+  if (!remain) {
+    window.alert("最多可添加 6 张截图。");
+    return;
+  }
+  const nextFiles = imageFiles.slice(0, remain);
+  const nextImages = await Promise.all(nextFiles.map((file) => imageFileToCompressedDataUrl(file)));
+  feedbackDraftAttachments.push(...nextImages);
+  renderFeedbackAttachmentPreview();
+}
+
+async function handleFeedbackAttachmentPaste(event) {
+  const files = Array.from(event.clipboardData?.items || [])
+    .filter((item) => item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (!files.length) return;
+  event.preventDefault();
+  await addFeedbackAttachments(files);
+}
+
+function bindFeedbackComposer() {
+  const form = document.querySelector("#feedbackForm");
+  if (!form) return;
+  const textarea = form.querySelector("textarea[name='content']");
+  const pasteZone = form.querySelector("#feedbackPasteZone");
+  const fileInput = form.querySelector("#feedbackAttachmentInput");
+  document.querySelectorAll("[data-action='pick-feedback-image']").forEach((button) => button.addEventListener("click", () => {
+    fileInput?.click();
+  }));
+  fileInput?.addEventListener("change", async () => {
+    await addFeedbackAttachments(Array.from(fileInput.files || []));
+    fileInput.value = "";
+  });
+  [textarea, pasteZone].forEach((node) => node?.addEventListener("paste", (event) => {
+    handleFeedbackAttachmentPaste(event).catch((error) => {
+      console.error("反馈截图粘贴失败", error);
+      window.alert("截图粘贴失败，请重试。");
+    });
+  }));
+  pasteZone?.addEventListener("click", () => textarea?.focus());
+  pasteZone?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    pasteZone.classList.add("is-dragover");
+  });
+  pasteZone?.addEventListener("dragleave", () => pasteZone.classList.remove("is-dragover"));
+  pasteZone?.addEventListener("drop", (event) => {
+    event.preventDefault();
+    pasteZone.classList.remove("is-dragover");
+    addFeedbackAttachments(Array.from(event.dataTransfer?.files || [])).catch((error) => {
+      console.error("反馈截图拖拽失败", error);
+      window.alert("图片处理失败，请重试。");
+    });
+  });
+  renderFeedbackAttachmentPreview();
+}
+
 function handleProfileSubmit(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget));
@@ -6039,9 +6196,11 @@ async function handleFeedbackSubmit(event) {
   try {
     await apiRequest("/feedback", {
       method: "POST",
-      body: { type: data.type, title: data.title.trim(), content },
+      body: { type: data.type, title: data.title.trim(), content, attachments: feedbackDraftAttachments },
     });
     form.reset();
+    feedbackDraftAttachments = [];
+    renderFeedbackAttachmentPreview();
     window.alert("感谢您的反馈，我们会尽快处理！");
     loadFeedbackList();
   } catch (err) {
@@ -6072,6 +6231,7 @@ async function loadFeedbackList() {
           <span class="muted" style="margin-left:auto;font-size:11px">${fb.created_at || ""}</span>
         </div>
         <p class="feedback-item-content">${escapeAttr(fb.content)}</p>
+        ${normalizeFeedbackAttachments(fb.attachments).length ? `<div class="feedback-item-images">${feedbackAttachmentPreviewMarkup(normalizeFeedbackAttachments(fb.attachments), false)}</div>` : ""}
         ${fb.admin_reply ? `<div class="feedback-item-reply"><strong>管理员回复：</strong>${escapeAttr(fb.admin_reply)}</div>` : ""}
       </div>
     `).join("");

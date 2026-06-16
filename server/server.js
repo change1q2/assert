@@ -32,6 +32,10 @@ const initDb = pool.query(schemaSql).then(async () => {
     await pool.query("ALTER TABLE user_settings ADD COLUMN overview_goals_json JSON AFTER fee_config_json");
     console.log("Added overview_goals_json column to user_settings");
   } catch (_) { /* column already exists */ }
+  try {
+    await pool.query("ALTER TABLE feedback ADD COLUMN attachments_json JSON AFTER content");
+    console.log("Added attachments_json column to feedback");
+  } catch (_) { /* column already exists */ }
   const financeAssetColumns = [
     ["available_shares", "DOUBLE NOT NULL DEFAULT 0 AFTER shares"],
     ["current_price", "DOUBLE NOT NULL DEFAULT 0 AFTER available_shares"],
@@ -380,6 +384,18 @@ const maybeParseJson = (val) => {
   if (val === null || val === undefined) return val;
   if (typeof val === "string") return JSON.parse(val);
   return val; // mysql2 auto-parses JSON columns
+};
+const feedbackAttachments = (val) => {
+  try {
+    const list = maybeParseJson(val);
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((item) => text(item).trim())
+      .filter((item) => /^data:image\/(png|jpe?g|webp);base64,/i.test(item))
+      .slice(0, 6);
+  } catch {
+    return [];
+  }
 };
 const fmtDt = (d) => {
   const date = d instanceof Date ? d : new Date(d);
@@ -1478,15 +1494,16 @@ const server = http.createServer(async (req, res) => {
       const type = text(body.type).trim() || "问题";
       const title = text(body.title).trim();
       const content = text(body.content).trim();
+      const attachments = feedbackAttachments(body.attachments);
       if (!content) {
         json(res, 400, { message: "请输入反馈内容。" }, origin);
         return;
       }
       const result = await sqlRun(pool,
-        "INSERT INTO feedback (user_id, type, title, content) VALUES (?, ?, ?, ?)",
-        [currentUser.id, type, title, content]
+        "INSERT INTO feedback (user_id, type, title, content, attachments_json) VALUES (?, ?, ?, ?, ?)",
+        [currentUser.id, type, title, content, JSON.stringify(attachments)]
       );
-      json(res, 201, { id: result.insertId, ok: true }, origin);
+      json(res, 201, { id: result.insertId, ok: true, attachments }, origin);
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/feedback") {
@@ -1494,7 +1511,12 @@ const server = http.createServer(async (req, res) => {
         "SELECT f.*, up.name AS user_name FROM feedback f LEFT JOIN user_profiles up ON up.user_id = f.user_id WHERE f.user_id = ? ORDER BY f.created_at DESC",
         [currentUser.id]
       );
-      json(res, 200, { feedback: rows }, origin);
+      json(res, 200, {
+        feedback: rows.map((row) => ({
+          ...row,
+          attachments: feedbackAttachments(row.attachments_json),
+        })),
+      }, origin);
       return;
     }
 
