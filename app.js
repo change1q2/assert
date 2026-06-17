@@ -125,6 +125,7 @@ let stateSaveInFlight = Promise.resolve();
 let authMode = "login";
 let authLoginMethod = "account";
 let feedbackDraftAttachments = [];
+let mobileMoreOpen = false;
 let currentModule = "overview";
 let ledgerPeriodMode = "month";
 let ledgerPeriod = `month-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
@@ -708,12 +709,53 @@ function initDialogCloseButtons() {
 
 function renderNav() {
   const nav = document.querySelector("#moduleNav");
-  nav.innerHTML = modules.map(([id, name, icon]) => `<button data-module="${id}" class="${id === currentModule ? "active" : ""}"><span class="nav-icon">${icon}</span><span class="nav-label">${name}</span></button>`).join("");
+  nav.innerHTML = modules.map(([id, name, icon]) => `<button data-module="${id}" class="${id === currentModule ? "active" : ""}"><span class="nav-icon">${icon}</span><span class="nav-label overflow-title-target">${name}</span></button>`).join("");
   const bottomNav = document.querySelector("#mobileBottomNav");
+  const morePanel = document.querySelector("#mobileMorePanel");
+  const moreBackdrop = document.querySelector("#mobileMoreBackdrop");
   if (bottomNav) {
-    bottomNav.querySelectorAll("button[data-module]").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.module === currentModule);
-    });
+    const mobileShortNames = {
+      overview: "总览",
+      records: "收支",
+      finance: "理财",
+      debts: "债务",
+    };
+    const primaryModules = modules.slice(0, 4);
+    const overflowModules = modules.slice(4);
+    const overflowActive = overflowModules.some(([id]) => id === currentModule);
+    bottomNav.innerHTML = `${primaryModules.map(([id, name, icon]) => `
+      <button data-module="${id}" class="${id === currentModule ? "active" : ""}" title="${mobileShortNames[id] || name}">
+        <span class="nav-icon">${icon}</span>
+        <span class="nav-label overflow-title-target">${mobileShortNames[id] || name}</span>
+      </button>
+    `).join("")}
+    <button type="button" data-action="toggle-mobile-more" class="${mobileMoreOpen || overflowActive ? "active" : ""}" aria-expanded="${mobileMoreOpen ? "true" : "false"}" title="更多模块">
+      <span class="nav-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="5" cy="12" r="1.6"></circle>
+          <circle cx="12" cy="12" r="1.6"></circle>
+          <circle cx="19" cy="12" r="1.6"></circle>
+        </svg>
+      </span>
+      <span class="nav-label overflow-title-target">更多</span>
+    </button>`;
+    if (morePanel) {
+      morePanel.innerHTML = `
+        <div class="mobile-more-panel-head">
+          <strong>更多模块</strong>
+          <button type="button" class="text-button" data-action="close-mobile-more">收起</button>
+        </div>
+        <div class="mobile-more-grid">
+          ${overflowModules.map(([id, name, icon]) => `
+            <button type="button" data-module="${id}" class="${id === currentModule ? "active" : ""}" title="${name}">
+              <span class="nav-icon">${icon}</span>
+              <span class="nav-label overflow-title-target">${name}</span>
+            </button>
+          `).join("")}
+        </div>`;
+      morePanel.classList.toggle("is-open", mobileMoreOpen);
+    }
+    moreBackdrop?.classList.toggle("is-open", mobileMoreOpen);
   }
 }
 
@@ -905,6 +947,7 @@ function bindGlobalActions() {
     const button = event.target.closest("button[data-module]");
     if (!button) return;
     currentModule = button.dataset.module;
+    mobileMoreOpen = false;
     document.querySelector(".shell").scrollTop = 0;
     const sb = document.querySelector("#sidebar");
     const ov = document.querySelector("#sidebarOverlay");
@@ -957,9 +1000,16 @@ function bindGlobalActions() {
   const bottomNav = document.querySelector("#mobileBottomNav");
   if (bottomNav) {
     bottomNav.addEventListener("click", (event) => {
+      const toggle = event.target.closest("[data-action='toggle-mobile-more']");
+      if (toggle) {
+        mobileMoreOpen = !mobileMoreOpen;
+        renderNav();
+        return;
+      }
       const button = event.target.closest("button[data-module]");
       if (!button) return;
       currentModule = button.dataset.module;
+      mobileMoreOpen = false;
       document.querySelector(".shell").scrollTop = 0;
       const sb = document.querySelector("#sidebar");
       const ov = document.querySelector("#sidebarOverlay");
@@ -969,8 +1019,27 @@ function bindGlobalActions() {
       if (currentModule === "finance") fetchRealtimeQuotes();
     });
   }
+  document.querySelector("#mobileMorePanel")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-action='close-mobile-more']")) {
+      mobileMoreOpen = false;
+      renderNav();
+      return;
+    }
+    const button = event.target.closest("button[data-module]");
+    if (!button) return;
+    currentModule = button.dataset.module;
+    mobileMoreOpen = false;
+    document.querySelector(".shell").scrollTop = 0;
+    render();
+    if (currentModule === "finance") fetchRealtimeQuotes();
+  });
+  document.querySelector("#mobileMoreBackdrop")?.addEventListener("click", () => {
+    mobileMoreOpen = false;
+    renderNav();
+  });
   document.querySelector("#userEntry").addEventListener("click", () => {
     currentModule = "profile";
+    mobileMoreOpen = false;
     document.querySelector(".shell").scrollTop = 0;
     render();
   });
@@ -1199,6 +1268,7 @@ function render() {
           : "账号登录";
     document.querySelector("#view").innerHTML = authPage();
     bindViewActions();
+    scheduleOverflowTitleRefresh();
     return;
   }
   document.querySelector(".filters").classList.toggle("is-hidden", ["overview", "profile", "records", "finance", "financeAnalysis", "debts", "tools", "premiumTool", "analysis", "classes"].includes(currentModule));
@@ -1220,6 +1290,37 @@ function render() {
   if (currentModule === "premiumTool" && !premiumLoading && !premiumLoadedAt) {
     void loadPremiumMarket();
   }
+  scheduleOverflowTitleRefresh();
+}
+
+let overflowTitleFrame = 0;
+function scheduleOverflowTitleRefresh() {
+  if (overflowTitleFrame) cancelAnimationFrame(overflowTitleFrame);
+  overflowTitleFrame = requestAnimationFrame(() => {
+    overflowTitleFrame = 0;
+    document.querySelectorAll([
+      ".overflow-title-target",
+      ".premium-summary article small",
+      ".premium-summary .premium-time",
+      ".feedback-item-title",
+      ".feedback-attachment-empty",
+      ".feedback-paste-zone span",
+      ".premium-symbol span",
+      ".premium-status small",
+      ".column-value"
+    ].join(",")).forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      const text = node.textContent?.replace(/\s+/g, " ").trim();
+      if (!text) {
+        node.removeAttribute("title");
+        return;
+      }
+      const overflowX = node.scrollWidth - node.clientWidth > 1;
+      const overflowY = node.scrollHeight - node.clientHeight > 1;
+      if (overflowX || overflowY) node.title = text;
+      else node.removeAttribute("title");
+    });
+  });
 }
 
 function metric(label, value, hint = "") {
@@ -6226,7 +6327,7 @@ async function loadFeedbackList() {
       <div class="feedback-item">
         <div class="feedback-item-head">
           <span class="badge">${fb.type || "问题"}</span>
-          <span class="feedback-item-title">${escapeAttr(fb.title) || "无标题"}</span>
+          <span class="feedback-item-title overflow-title-target">${escapeAttr(fb.title) || "无标题"}</span>
           <span class="feedback-status feedback-status-${statusClass[fb.status] || 'warn'}">${statusMap[fb.status] || fb.status}</span>
           <span class="muted" style="margin-left:auto;font-size:11px">${fb.created_at || ""}</span>
         </div>
@@ -9732,3 +9833,5 @@ if (document.readyState === 'loading') {
     render();
   });
 }
+
+window.addEventListener("resize", scheduleOverflowTitleRefresh);
