@@ -4,3 +4,7 @@ server/data/
 .env
 *.db
 *.sqlite
+.codex-logs/
+.api-*.log
+.web-*.log
+nul

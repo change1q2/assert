@@ -29,6 +29,33 @@ $env:PORT=80
 npm start
 ```
 
+## GitHub 推送
+
+这个仓库已经固定为：
+
+- `fetch` 走 HTTPS
+- `push` 走 GitHub SSH over `443`
+
+首次或换机器时先执行：
+
+```powershell
+npm run push:setup
+```
+
+日常推送：
+
+```powershell
+npm run push:github -- "这里写提交说明"
+```
+
+说明：
+
+- 如果当前没有改动，会直接推送当前分支
+- 如果当前有改动，会自动 `add` + `commit` + `push`
+- 推送使用本机 `C:\Users\YZ-X-096\.ssh\codex_github_assert`
+- SSH 配置会自动写入 `C:\Users\YZ-X-096\.ssh\config`
+- 推送脚本使用 Node 执行，不依赖 PowerShell 的 SSH 字符串配置
+
 ## API
 
 - `POST /api/auth/register` 注册并登录
