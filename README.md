@@ -1,18 +1,18 @@
-# 个人资产管理平台
+# Assert Workspace
 
-项目已改为前后端分离架构：
+当前仓库已升级为多项目结构：
 
-- 前端：原生 HTML / CSS / JavaScript，本地开发运行在 `http://127.0.0.1:4173`
-- 后端：Node.js HTTP API，本地运行在 `http://127.0.0.1:3000`
-- 生产环境：Node.js 可在同一端口提供前端文件和 `/api`
-- 数据库：SQLite，文件位于 `server/data/asset-platform.sqlite`
-- SQLite 驱动：`better-sqlite3`
-- 鉴权：随机会话令牌
-- 密码：Node.js `scrypt` 加盐哈希，不保存明文密码
+- `assert_PLATFORM`：后端平台、MySQL schema、发布清单接口、后续同步服务
+- `assert_WEB`：主 Web 端，包含产品下载页
+- `assert_PC`：Windows 客户端骨架
+- `assert_ANDROID`：Android 客户端骨架
+- `assert_IOS`：iOS 客户端骨架
+- `assert_HARMONY`：HarmonyOS 客户端骨架
+- `packages`：共享清单格式与后续协议
 
-## 启动
+## 本地启动
 
-分别打开两个终端：
+在仓库根目录执行：
 
 ```powershell
 npm run api
@@ -22,21 +22,36 @@ npm run api
 npm run web
 ```
 
-生产服务器可只运行：
+默认地址：
+
+- Web：`http://127.0.0.1:4173`
+- API：`http://127.0.0.1:3000`
+
+## 安装包发布
+
+服务器发布目录默认使用：
+
+- `/opt/assert-releases/web`
+- `/opt/assert-releases/pc`
+- `/opt/assert-releases/android`
+- `/opt/assert-releases/ios`
+- `/opt/assert-releases/harmony`
+
+本地开发默认使用：
+
+- `assert_PLATFORM/releases/<platform>/`
+
+发布一个新安装包：
 
 ```powershell
-$env:PORT=80
-npm start
+npm run release:publish -- --platform=pc --file=F:\builds\Assert_PC_Setup.exe --version=2.1.0 --build=20260617.1 --notes="修复同步与下载页"
 ```
+
+发布后，`assert_PLATFORM/releases/<platform>/manifest.json` 会自动更新，Web 端“产品下载页”刷新后即可看到最新包。
 
 ## GitHub 推送
 
-这个仓库已经固定为：
-
-- `fetch` 走 HTTPS
-- `push` 走 GitHub SSH over `443`
-
-首次或换机器时先执行：
+首次或换机器时：
 
 ```powershell
 npm run push:setup
@@ -47,56 +62,3 @@ npm run push:setup
 ```powershell
 npm run push:github -- "这里写提交说明"
 ```
-
-说明：
-
-- 如果当前没有改动，会直接推送当前分支
-- 如果当前有改动，会自动 `add` + `commit` + `push`
-- 推送使用本机 `C:\Users\YZ-X-096\.ssh\codex_github_assert`
-- SSH 配置会自动写入 `C:\Users\YZ-X-096\.ssh\config`
-- 推送脚本使用 Node 执行，不依赖 PowerShell 的 SSH 字符串配置
-
-## API
-
-- `POST /api/auth/register` 注册并登录
-- `POST /api/auth/login` 登录
-- `POST /api/auth/logout` 退出登录
-- `GET /api/auth/me` 获取当前用户
-- `GET /api/state` 加载当前用户全部平台数据
-- `PUT /api/state` 事务保存当前用户全部平台数据
-- `GET /api/health` 后端健康检查
-
-除注册、登录和健康检查外，接口均要求：
-
-```http
-Authorization: Bearer <token>
-```
-
-## 数据表
-
-数据库结构见 [`server/schema.sql`](server/schema.sql)，核心表包括：
-
-- `users`：登录账号及密码哈希
-- `sessions`：登录会话
-- `user_profiles`：个人中心资料与偏好
-- `exchange_rates`：用户汇率
-- `accounts`：账户管理
-- `asset_classes`：资产分类
-- `records`：收支流水
-- `budgets`：预算数据
-- `finance_assets`：股票、基金、商品等理财资产
-- `custom_record_categories`：自定义收支分类
-- `finance_tertiary_categories`：理财三级分类
-- `record_tags`：标签与分类默认标签
-- `recorders`：记录人
-- `reminders`：提醒
-- `debts`：债务
-- `debt_payments`：债务分期还款状态
-- `strategies`：业务策略
-- `user_settings`：其他用户设置
-
-每张业务表都包含 `user_id`，所有查询和保存均按当前登录用户隔离。
-
-## 数据迁移
-
-升级前如果浏览器中存在 `asset-platform-v18` 本地数据，首次注册数据库账号时会自动将其迁移到该账号。迁移后，数据保存到数据库；不同账号之间不会共享业务数据。

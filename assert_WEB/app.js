@@ -5,10 +5,144 @@ const modules = [
   ["debts", "债务模块", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>'],
   ["classes", "资产分类", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>'],
   ["analysis", "统计分析", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>'],
+  ["downloads", "产品下载页", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'],
   ["tools", "辅助工具", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'],
   ["strategies", "业务设计", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'],
   ["accounts", "账户管理", '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'],
 ];
+
+const auxiliaryTools = [
+  {
+    id: "premium",
+    mode: "internal",
+    title: "溢价查询",
+    description: "实时筛选 ETF、LOF、QDII 溢价标的",
+    iconLabel: "％",
+    action: "open-premium-tool",
+  },
+  {
+    id: "serenity",
+    mode: "external",
+    title: "白毛股神追踪",
+    description: "进入 Serenity 页面，跟踪白毛股神主题内容与人物观察。",
+    category: "AIChainMap / 人物追踪",
+    url: "https://aichainmap.com/serenity/",
+    iconPath: "assets/tool-icons/serenity-avatar.png",
+  },
+  {
+    id: "atlas",
+    mode: "external",
+    title: "产业链图谱",
+    description: "打开 AI 产业链图谱，查看上下游结构与核心节点关系。",
+    category: "AIChainMap / 产业链",
+    url: "https://aichainmap.com/atlas",
+    iconPath: "assets/tool-icons/aichainmap-network.png",
+  },
+  {
+    id: "reports",
+    mode: "external",
+    title: "AI深度报告解析",
+    description: "查看 AI 深度报告解析与可视化研究内容。",
+    category: "AIChainMap / 研究报告",
+    url: "https://aichainmap.com/reports/",
+    iconPath: "assets/tool-icons/aichainmap-network.png",
+  },
+  {
+    id: "buffett",
+    mode: "external",
+    title: "巴菲特知识库",
+    description: "阅读巴菲特股东信、投资理念与核心案例整理。",
+    category: "投资人物 / 巴菲特",
+    url: "https://learnbuffett.com/",
+    iconPath: "assets/tool-icons/buffett-portrait.jpg",
+  },
+  {
+    id: "munger",
+    mode: "external",
+    title: "查理·芒格的思维模型",
+    description: "进入芒格思维模型知识库，查看模型、学科与场景关联。",
+    category: "投资人物 / 芒格",
+    url: "https://mungermodels.com/",
+    iconPath: "assets/tool-icons/munger-portrait.jpg",
+  },
+  {
+    id: "ark-tracker",
+    mode: "external",
+    title: "木头姐ARK追踪",
+    description: "查看 Cathie Wood 旗下 ARK 基金全部持仓与调仓追踪。",
+    category: "投资人物 / 木头姐",
+    url: "https://arktracker.com/all-ark-holdings/",
+    iconLabel: "A",
+  },
+  {
+    id: "btc-indicator",
+    mode: "external",
+    title: "BTC指标",
+    description: "打开 CoinGlass AHR999 逃顶指标页面，查看 BTC 周期参考数据。",
+    category: "加密货币 / BTC",
+    url: "https://www.coinglass.com/zh/pro/i/ahr999-escape",
+    iconLabel: "₿",
+  },
+  {
+    id: "housing-trend",
+    mode: "external",
+    title: "房产趋势追踪",
+    description: "打开房产趋势追踪页面，查看房地产市场趋势与相关数据。",
+    category: "房产 / 趋势",
+    url: "https://wxaurl.cn/jJh2iE8xOjt",
+    iconLabel: "⌂",
+    openMode: "wechat-copy",
+  },
+];
+
+const externalToolMap = Object.fromEntries(
+  auxiliaryTools
+    .filter((tool) => tool.mode === "external")
+    .map((tool) => [tool.id, tool]),
+);
+
+const toolPanels = {
+  root: {
+    title: "辅助工具",
+    eyebrow: "行情与分析工具",
+    description: "把常用的投资研究能力集中在这里，减少在多个网站之间切换。",
+    items: [
+      auxiliaryTools.find((tool) => tool.id === "premium"),
+      {
+        id: "ai-tracking",
+        mode: "panel",
+        panelId: "ai",
+        title: "AI追踪",
+        description: "集中查看 AI 产业链图谱与 AI 深度报告解析。",
+        category: "AI / 研究工具",
+        iconLabel: "AI",
+      },
+      {
+        id: "celebrity-tracking",
+        mode: "panel",
+        panelId: "celebrity",
+        title: "名人追踪",
+        description: "集中查看白毛股神、巴菲特、芒格与木头姐相关追踪工具。",
+        category: "人物 / 投资者",
+        iconLabel: "人",
+      },
+      auxiliaryTools.find((tool) => tool.id === "btc-indicator"),
+      auxiliaryTools.find((tool) => tool.id === "housing-trend"),
+    ].filter(Boolean),
+  },
+  ai: {
+    title: "AI追踪",
+    eyebrow: "AI / 研究工具",
+    description: "把 AI 产业链与深度报告类工具统一放在这里，方便连续研究。",
+    items: auxiliaryTools.filter((tool) => ["atlas", "reports"].includes(tool.id)),
+  },
+  celebrity: {
+    title: "名人追踪",
+    eyebrow: "人物 / 投资者",
+    description: "集中查看重点投资人物与持仓风格追踪工具。",
+    items: auxiliaryTools.filter((tool) => ["serenity", "buffett", "munger", "ark-tracker"].includes(tool.id)),
+  },
+};
 
 const fixedAssetClassNames = {
   equity: "权益类",
@@ -127,6 +261,9 @@ let authLoginMethod = "account";
 let feedbackDraftAttachments = [];
 let mobileMoreOpen = false;
 let currentModule = "overview";
+let currentToolPanel = "root";
+let activeExternalToolId = "serenity";
+let externalToolFrameTimer = 0;
 let ledgerPeriodMode = "month";
 let ledgerPeriod = `month-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
 let ledgerDayDate = formatDate(new Date());
@@ -150,6 +287,13 @@ let financeStockFilters = {
   market: "all",
   currency: "all",
   accountId: "all",
+};
+let downloadPlatformFilter = "all";
+let releaseCatalogState = {
+  items: [],
+  loading: false,
+  loadedAt: "",
+  error: "",
 };
 
 // ── 股票列表列配置 ──
@@ -410,6 +554,24 @@ async function bootstrapSession() {
   }
 }
 
+async function loadReleaseCatalog(force = false) {
+  if (releaseCatalogState.loading) return;
+  if (releaseCatalogState.loadedAt && !force) return;
+  releaseCatalogState.loading = true;
+  releaseCatalogState.error = "";
+  if (currentModule === "downloads") render();
+  try {
+    const payload = await apiRequest("/v2/releases");
+    releaseCatalogState.items = Array.isArray(payload.releases) ? payload.releases : [];
+    releaseCatalogState.loadedAt = new Date().toISOString();
+  } catch (error) {
+    releaseCatalogState.error = error.message || "发布清单读取失败";
+  } finally {
+    releaseCatalogState.loading = false;
+    if (currentModule === "downloads") render();
+  }
+}
+
 function showSyncStatus(message) {
   const status = document.querySelector("#syncStatus");
   if (status) status.textContent = message;
@@ -437,6 +599,22 @@ function formatDate(date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function fileSizeLabel(value) {
+  const size = Number(value || 0);
+  if (!Number.isFinite(size) || size <= 0) return "-";
+  if (size >= 1024 ** 3) return `${(size / 1024 ** 3).toFixed(2)} GB`;
+  if (size >= 1024 ** 2) return `${(size / 1024 ** 2).toFixed(2)} MB`;
+  if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${size} B`;
 }
 
 function startOfWeek(date) {
@@ -709,7 +887,8 @@ function initDialogCloseButtons() {
 
 function renderNav() {
   const nav = document.querySelector("#moduleNav");
-  nav.innerHTML = modules.map(([id, name, icon]) => `<button data-module="${id}" class="${id === currentModule ? "active" : ""}"><span class="nav-icon">${icon}</span><span class="nav-label overflow-title-target">${name}</span></button>`).join("");
+  const activeNavModule = ["premiumTool", "externalTool"].includes(currentModule) ? "tools" : currentModule;
+  nav.innerHTML = modules.map(([id, name, icon]) => `<button data-module="${id}" class="${id === activeNavModule ? "active" : ""}"><span class="nav-icon">${icon}</span><span class="nav-label overflow-title-target">${name}</span></button>`).join("");
   const bottomNav = document.querySelector("#mobileBottomNav");
   const morePanel = document.querySelector("#mobileMorePanel");
   const moreBackdrop = document.querySelector("#mobileMoreBackdrop");
@@ -722,9 +901,9 @@ function renderNav() {
     };
     const primaryModules = modules.slice(0, 4);
     const overflowModules = modules.slice(4);
-    const overflowActive = overflowModules.some(([id]) => id === currentModule);
+    const overflowActive = overflowModules.some(([id]) => id === activeNavModule);
     bottomNav.innerHTML = `${primaryModules.map(([id, name, icon]) => `
-      <button data-module="${id}" class="${id === currentModule ? "active" : ""}" title="${mobileShortNames[id] || name}">
+      <button data-module="${id}" class="${id === activeNavModule ? "active" : ""}" title="${mobileShortNames[id] || name}">
         <span class="nav-icon">${icon}</span>
         <span class="nav-label overflow-title-target">${mobileShortNames[id] || name}</span>
       </button>
@@ -747,7 +926,7 @@ function renderNav() {
         </div>
         <div class="mobile-more-grid">
           ${overflowModules.map(([id, name, icon]) => `
-            <button type="button" data-module="${id}" class="${id === currentModule ? "active" : ""}" title="${name}">
+            <button type="button" data-module="${id}" class="${id === activeNavModule ? "active" : ""}" title="${name}">
               <span class="nav-icon">${icon}</span>
               <span class="nav-label overflow-title-target">${name}</span>
             </button>
@@ -947,6 +1126,7 @@ function bindGlobalActions() {
     const button = event.target.closest("button[data-module]");
     if (!button) return;
     currentModule = button.dataset.module;
+    if (currentModule === "tools") currentToolPanel = "root";
     mobileMoreOpen = false;
     document.querySelector(".shell").scrollTop = 0;
     const sb = document.querySelector("#sidebar");
@@ -1009,6 +1189,7 @@ function bindGlobalActions() {
       const button = event.target.closest("button[data-module]");
       if (!button) return;
       currentModule = button.dataset.module;
+      if (currentModule === "tools") currentToolPanel = "root";
       mobileMoreOpen = false;
       document.querySelector(".shell").scrollTop = 0;
       const sb = document.querySelector("#sidebar");
@@ -1028,6 +1209,7 @@ function bindGlobalActions() {
     const button = event.target.closest("button[data-module]");
     if (!button) return;
     currentModule = button.dataset.module;
+    if (currentModule === "tools") currentToolPanel = "root";
     mobileMoreOpen = false;
     document.querySelector(".shell").scrollTop = 0;
     render();
@@ -1271,24 +1453,33 @@ function render() {
     scheduleOverflowTitleRefresh();
     return;
   }
-  document.querySelector(".filters").classList.toggle("is-hidden", ["overview", "profile", "records", "finance", "financeAnalysis", "debts", "tools", "premiumTool", "analysis", "classes"].includes(currentModule));
+  document.querySelector(".filters").classList.toggle("is-hidden", ["overview", "profile", "records", "finance", "financeAnalysis", "debts", "downloads", "tools", "premiumTool", "externalTool", "analysis", "classes"].includes(currentModule));
   const moduleName = currentModule === "profile"
     ? "个人中心"
     : currentModule === "financeAnalysis"
       ? "汇总盈亏分析"
       : currentModule === "premiumTool"
         ? "溢价查询"
-      : modules.find(([id]) => id === currentModule)?.[1] || "资产总览";
+      : currentModule === "externalTool"
+        ? getActiveExternalTool().title
+        : modules.find(([id]) => id === currentModule)?.[1] || "资产总览";
   document.querySelector("#pageTitle").textContent = moduleName;
   const view = document.querySelector("#view");
   syncAssetClassValuesFromFinance();
   const data = compute();
-  const renderers = { overview, records, finance, financeAnalysis, debts, analysis, accounts, classes: assetClasses, tools, premiumTool, strategies, profile };
+  const renderers = { overview, records, finance, financeAnalysis, debts, analysis, accounts, classes: assetClasses, downloads, tools, premiumTool, externalTool: externalToolView, strategies, profile };
   view.innerHTML = renderers[currentModule](data);
   bindViewActions();
   syncPremiumAutoRefresh();
+  if (currentModule !== "externalTool" && externalToolFrameTimer) {
+    window.clearTimeout(externalToolFrameTimer);
+    externalToolFrameTimer = 0;
+  }
   if (currentModule === "premiumTool" && !premiumLoading && !premiumLoadedAt) {
     void loadPremiumMarket();
+  }
+  if (currentModule === "downloads" && !releaseCatalogState.loading && !releaseCatalogState.loadedAt) {
+    void loadReleaseCatalog();
   }
   scheduleOverflowTitleRefresh();
 }
@@ -4466,23 +4657,139 @@ function assetClasses() {
 }
 
 function tools() {
+  const panel = toolPanels[currentToolPanel] || toolPanels.root;
+  const showBack = currentToolPanel !== "root";
   return `<section class="tool-hub">
     <div class="tool-hub-intro">
-      <div>
-        <p class="eyebrow">行情与分析工具</p>
-        <h2>辅助工具</h2>
-        <p class="muted">把常用的投资研究能力集中在这里，减少在多个网站之间切换。</p>
+      <div class="tool-hub-intro-main">
+        ${showBack ? '<button class="icon-button premium-back tool-panel-back" data-action="back-tool-panel" title="返回辅助工具" aria-label="返回辅助工具">‹</button>' : ""}
+        <div>
+          <p class="eyebrow">${escapeHtml(panel.eyebrow || "行情与分析工具")}</p>
+          <h2>${escapeHtml(panel.title || "辅助工具")}</h2>
+          <p class="muted">${escapeHtml(panel.description || "")}</p>
+        </div>
       </div>
     </div>
     <div class="tool-grid">
-      <button class="tool-entry" data-action="open-premium-tool">
-        <span class="tool-entry-icon" aria-hidden="true">％</span>
-        <span class="tool-entry-copy">
-          <strong>溢价查询</strong>
-          <small>实时筛选 ETF、LOF、QDII 溢价标的</small>
-        </span>
-        <span class="tool-entry-arrow" aria-hidden="true">›</span>
-      </button>
+      ${panel.items.map(toolEntryMarkup).join("")}
+    </div>
+  </section>`;
+}
+
+function toolEntryMarkup(tool) {
+  const icon = tool.iconPath
+    ? `<span class="tool-entry-icon tool-entry-icon--image" aria-hidden="true"><img src="${escapeAttr(tool.iconPath)}" alt="" loading="lazy" /></span>`
+    : `<span class="tool-entry-icon" aria-hidden="true">${tool.iconLabel || "•"}</span>`;
+  const eyebrow = tool.category ? `<small class="tool-entry-eyebrow">${escapeHtml(tool.category)}</small>` : "";
+  const actionAttrs = tool.mode === "internal"
+    ? `data-action="${escapeAttr(tool.action)}"`
+    : tool.mode === "panel"
+      ? `data-action="open-tool-panel" data-panel-id="${escapeAttr(tool.panelId)}"`
+      : `data-action="jump-external-tool" data-tool-id="${escapeAttr(tool.id)}"`;
+  return `<button class="tool-entry" ${actionAttrs}>
+    ${icon}
+    <span class="tool-entry-copy">
+      ${eyebrow}
+      <strong>${escapeHtml(tool.title)}</strong>
+      <small>${escapeHtml(tool.description)}</small>
+    </span>
+    <span class="tool-entry-arrow" aria-hidden="true">›</span>
+  </button>`;
+}
+
+function getActiveExternalTool() {
+  return externalToolMap[activeExternalToolId] || auxiliaryTools.find((tool) => tool.mode === "external") || {
+    title: "外部工具",
+    description: "外部工具页面",
+    url: "about:blank",
+    iconPath: "",
+    category: "工具",
+  };
+}
+
+function isWechatCopyTool(tool) {
+  return tool?.openMode === "wechat-copy";
+}
+
+function externalToolView() {
+  const tool = getActiveExternalTool();
+  if (isWechatCopyTool(tool)) {
+    return `<section class="external-tool-page">
+      <div class="external-tool-toolbar">
+        <div class="premium-title">
+          <button class="icon-button premium-back" data-action="back-tools" title="返回辅助工具" aria-label="返回辅助工具">‹</button>
+          <div class="external-tool-title-copy">
+            <p class="eyebrow">${escapeHtml(tool.category || "外部工具")}</p>
+            <h2>${escapeHtml(tool.title)}</h2>
+            <p class="muted">${escapeHtml(tool.description)}</p>
+          </div>
+        </div>
+      </div>
+      <div class="external-tool-hero card">
+        <div class="external-tool-hero-icon">
+          <span class="external-tool-symbol">${escapeHtml(tool.iconLabel || "⌂")}</span>
+        </div>
+        <div class="external-tool-hero-copy">
+          <span class="eyebrow">微信小程序链接</span>
+          <strong>${escapeHtml(tool.title)}</strong>
+          <p class="muted">该工具由小程序开发，请复制下面的网址后到微信中打开。</p>
+        </div>
+      </div>
+      <div class="external-tool-copy-card">
+        <div class="external-tool-copy-head">
+          <strong>请复制下面的网址到微信中打开</strong>
+          <span class="muted">复制后可直接粘贴到微信会话、文件传输助手或收藏中访问。</span>
+        </div>
+        <div class="external-tool-copy-row">
+          <code class="external-tool-copy-url">${escapeHtml(tool.url)}</code>
+          <button class="primary" data-action="copy-external-tool-url" data-tool-id="${escapeAttr(tool.id)}">复制网址</button>
+        </div>
+      </div>
+    </section>`;
+  }
+  return `<section class="external-tool-page">
+    <div class="external-tool-toolbar">
+      <div class="premium-title">
+        <button class="icon-button premium-back" data-action="back-tools" title="返回辅助工具" aria-label="返回辅助工具">‹</button>
+        <div class="external-tool-title-copy">
+          <p class="eyebrow">${escapeHtml(tool.category || "外部工具")}</p>
+          <h2>${escapeHtml(tool.title)}</h2>
+          <p class="muted">${escapeHtml(tool.description)}</p>
+        </div>
+      </div>
+      <div class="external-tool-actions">
+        <button class="ghost" data-action="open-external-tool-tab" data-tool-id="${escapeAttr(tool.id)}">在新标签打开</button>
+      </div>
+    </div>
+    <div class="external-tool-hero card">
+      <div class="external-tool-hero-icon">
+        <img src="${escapeAttr(tool.iconPath)}" alt="${escapeAttr(tool.title)}" loading="lazy" />
+      </div>
+      <div class="external-tool-hero-copy">
+        <span class="eyebrow">${escapeHtml(new URL(tool.url).hostname)}</span>
+        <strong>${escapeHtml(tool.title)}</strong>
+        <p class="muted">优先在应用内直接打开；若目标站点后续限制 iframe，可使用右上角按钮在新标签继续访问。</p>
+      </div>
+    </div>
+    <div class="external-tool-frame-card">
+      <div class="external-tool-frame-status" id="externalToolFrameStatus">
+        <strong>正在加载 ${escapeHtml(tool.title)}</strong>
+        <span class="muted">如果较长时间没有显示内容，请点击“在新标签打开”。</span>
+      </div>
+      <div class="external-tool-frame-shell">
+        <div class="external-tool-fallback-note" id="externalToolFallbackNote" hidden>
+          <strong>这个站点可能限制了应用内嵌打开。</strong>
+          <span>你可以继续使用右上角的“在新标签打开”。</span>
+        </div>
+        <iframe
+          id="externalToolFrame"
+          class="external-tool-frame"
+          src="${escapeAttr(tool.url)}"
+          title="${escapeAttr(tool.title)}"
+          loading="eager"
+          referrerpolicy="strict-origin-when-cross-origin"
+        ></iframe>
+      </div>
     </div>
   </section>`;
 }
@@ -5303,6 +5610,128 @@ function calendarCard(days) {
   </section>`;
 }
 
+function downloadPlatformLabel(platform) {
+  return ({
+    web: "Web",
+    pc: "PC（Windows）",
+    android: "Android",
+    ios: "iOS",
+    harmony: "HarmonyOS",
+  })[platform] || platform;
+}
+
+function detectRecommendedDownloadPlatform() {
+  const ua = navigator.userAgent || "";
+  if (/HarmonyOS/i.test(ua)) return "harmony";
+  if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
+  if (/Android/i.test(ua)) return "android";
+  if (/Windows/i.test(ua)) return "pc";
+  return "web";
+}
+
+function downloadLatestCard(item, recommendedPlatform) {
+  const latest = item.latest;
+  const recommended = item.platform === recommendedPlatform;
+  const recommendedTag = recommended ? `<span class="badge is-primary">推荐下载</span>` : "";
+  if (!latest) {
+    return `<article class="download-card">
+      <div class="download-card-head">
+        <div><p class="eyebrow">${downloadPlatformLabel(item.platform)}</p><h3>${downloadPlatformLabel(item.platform)}</h3></div>
+        ${recommendedTag}
+      </div>
+      <p class="muted">暂未发布安装包。新包进入服务器发布目录后，这里会自动显示最新版本和历史记录。</p>
+    </article>`;
+  }
+  return `<article class="download-card">
+    <div class="download-card-head">
+      <div><p class="eyebrow">${downloadPlatformLabel(item.platform)}</p><h3>${downloadPlatformLabel(item.platform)}</h3></div>
+      ${recommendedTag}
+    </div>
+    <div class="download-meta-grid">
+      <div><span>最新版本</span><strong>${latest.version || "-"}</strong></div>
+      <div><span>构建号</span><strong>${latest.buildNumber || "-"}</strong></div>
+      <div><span>发布时间</span><strong>${formatDateTime(latest.publishedAt)}</strong></div>
+      <div><span>文件大小</span><strong>${fileSizeLabel(latest.fileSize)}</strong></div>
+    </div>
+    <p class="download-notes">${latest.releaseNotes || "暂无更新说明"}</p>
+    <div class="download-card-actions">
+      ${latest.fileUrl ? `<a class="primary" href="${latest.fileUrl}">下载最新包</a>` : `<span class="ghost disabled">暂不可下载</span>`}
+      <span class="muted">最低系统：${latest.minSystemVersion || "未限制"}</span>
+    </div>
+  </article>`;
+}
+
+function downloadHistoryTable(history = []) {
+  if (!history.length) {
+    return `<div class="download-empty">暂无历史版本</div>`;
+  }
+  return `<div class="download-history-wrap"><table class="table download-history-table">
+    <thead><tr><th>版本号</th><th>构建号</th><th>发布时间</th><th>大小</th><th>更新说明</th><th>操作</th></tr></thead>
+    <tbody>${history.map((entry) => `<tr>
+      <td>${entry.version || "-"}</td>
+      <td>${entry.buildNumber || "-"}</td>
+      <td>${formatDateTime(entry.publishedAt)}</td>
+      <td>${fileSizeLabel(entry.fileSize)}</td>
+      <td>${entry.releaseNotes || "-"}</td>
+      <td>${entry.fileUrl ? `<a href="${entry.fileUrl}">下载</a>` : `<span class="muted">暂无</span>`}</td>
+    </tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
+function downloads() {
+  const recommendedPlatform = detectRecommendedDownloadPlatform();
+  const items = releaseCatalogState.items.filter((item) => downloadPlatformFilter === "all" || item.platform === downloadPlatformFilter);
+  const platformOrder = ["web", "pc", "android", "ios", "harmony"];
+  const sortedItems = [...items].sort((a, b) => platformOrder.indexOf(a.platform) - platformOrder.indexOf(b.platform));
+  const recommendedItem = releaseCatalogState.items.find((item) => item.platform === recommendedPlatform);
+
+  return `<section class="downloads-page">
+    <section class="downloads-hero card">
+      <div>
+        <p class="eyebrow">多端产品发布中心</p>
+        <h2>产品下载页</h2>
+        <p class="muted">这里集中展示 Web、PC、Android、iOS 和 HarmonyOS 的最新安装包。只要服务器发布目录产出新包并更新清单，这里就会自动显示出来。</p>
+      </div>
+      <div class="downloads-hero-side">
+        <div class="downloads-inline-meta">
+          <span>推荐平台</span>
+          <strong>${downloadPlatformLabel(recommendedPlatform)}</strong>
+        </div>
+        <div class="downloads-inline-meta">
+          <span>最近刷新</span>
+          <strong>${formatDateTime(releaseCatalogState.loadedAt)}</strong>
+        </div>
+        <button class="primary" type="button" data-action="refresh-release-catalog">刷新清单</button>
+      </div>
+    </section>
+    <section class="card downloads-web-entry">
+      <div class="section-title">
+        <h2>Web 在线访问</h2>
+        <span class="badge">${window.location.origin}</span>
+      </div>
+      <div class="download-meta-grid">
+        <div><span>访问入口</span><strong>${window.location.origin}</strong></div>
+        <div><span>部署包状态</span><strong>${recommendedItem?.platform === "web" && recommendedItem.latest ? "已发布" : "可在线访问"}</strong></div>
+      </div>
+    </section>
+    <section class="card downloads-filter-card">
+      <div class="downloads-filter-row">
+        <div class="segmented">
+          ${["all", "web", "pc", "android", "ios", "harmony"].map((platform) => `<button type="button" data-action="filter-release-platform" data-platform="${platform}" class="${downloadPlatformFilter === platform ? "active" : ""}">${platform === "all" ? "全部平台" : downloadPlatformLabel(platform)}</button>`).join("")}
+        </div>
+        ${releaseCatalogState.loading ? `<span class="muted">正在读取发布清单...</span>` : releaseCatalogState.error ? `<span class="danger">${releaseCatalogState.error}</span>` : `<span class="muted">共 ${sortedItems.length} 个平台分组</span>`}
+      </div>
+    </section>
+    <section class="downloads-grid">
+      ${sortedItems.map((item) => `<section class="card downloads-platform-card">
+        ${downloadLatestCard(item, recommendedPlatform)}
+        <div class="section-title"><h2>${downloadPlatformLabel(item.platform)} 历史版本</h2><span class="badge">${item.history.length} 条记录</span></div>
+        ${downloadHistoryTable(item.history)}
+      </section>`).join("") || `<section class="card"><p class="muted">当前没有可展示的平台发布记录。</p></section>`}
+    </section>
+  </section>`;
+}
+
 function backtestCard(model) {
   const width = 760;
   const height = 220;
@@ -5421,19 +5850,100 @@ function bindViewActions() {
     };
     render();
   }));
+  document.querySelectorAll("[data-action='filter-release-platform']").forEach((button) => button.addEventListener("click", () => {
+    downloadPlatformFilter = button.dataset.platform || "all";
+    render();
+  }));
+  document.querySelectorAll("[data-action='refresh-release-catalog']").forEach((button) => button.addEventListener("click", () => {
+    releaseCatalogState.loadedAt = "";
+    void loadReleaseCatalog(true);
+  }));
   document.querySelectorAll("[data-action='open-premium-tool']").forEach((button) => button.addEventListener("click", () => {
     currentModule = "premiumTool";
     document.querySelector(".shell").scrollTop = 0;
     render();
   }));
-  document.querySelectorAll("[data-action='back-tools']").forEach((button) => button.addEventListener("click", () => {
-    currentModule = "tools";
+  document.querySelectorAll("[data-action='open-tool-panel']").forEach((button) => button.addEventListener("click", () => {
+    currentToolPanel = button.dataset.panelId || "root";
     document.querySelector(".shell").scrollTop = 0;
     render();
+  }));
+  document.querySelectorAll("[data-action='back-tool-panel']").forEach((button) => button.addEventListener("click", () => {
+    currentToolPanel = "root";
+    document.querySelector(".shell").scrollTop = 0;
+    render();
+  }));
+  document.querySelectorAll("[data-action='jump-external-tool']").forEach((button) => button.addEventListener("click", () => {
+    const tool = externalToolMap[button.dataset.toolId || ""];
+    if (!tool?.url) return;
+    if (isWechatCopyTool(tool)) {
+      activeExternalToolId = tool.id;
+      currentModule = "externalTool";
+      document.querySelector(".shell").scrollTop = 0;
+      render();
+      return;
+    }
+    window.location.href = tool.url;
+  }));
+  document.querySelectorAll("[data-action='back-tools']").forEach((button) => button.addEventListener("click", () => {
+    currentModule = "tools";
+    currentToolPanel = "root";
+    document.querySelector(".shell").scrollTop = 0;
+    render();
+  }));
+  document.querySelectorAll("[data-action='open-external-tool-tab']").forEach((button) => button.addEventListener("click", () => {
+    const tool = externalToolMap[button.dataset.toolId || ""] || getActiveExternalTool();
+    window.open(tool.url, "_blank", "noopener,noreferrer");
+  }));
+  document.querySelectorAll("[data-action='copy-external-tool-url']").forEach((button) => button.addEventListener("click", async () => {
+    const tool = externalToolMap[button.dataset.toolId || ""] || getActiveExternalTool();
+    if (!tool?.url) return;
+    const originalLabel = button.textContent;
+    try {
+      await navigator.clipboard.writeText(tool.url);
+      button.textContent = "已复制";
+      button.disabled = true;
+      window.setTimeout(() => {
+        button.textContent = originalLabel;
+        button.disabled = false;
+      }, 1800);
+    } catch {
+      button.textContent = "复制失败";
+      window.setTimeout(() => {
+        button.textContent = originalLabel;
+      }, 1800);
+    }
   }));
   document.querySelectorAll("[data-action='refresh-premium']").forEach((button) => button.addEventListener("click", () => {
     void loadPremiumMarket(true);
   }));
+  const externalToolFrame = document.querySelector("#externalToolFrame");
+  if (externalToolFrame) {
+    const status = document.querySelector("#externalToolFrameStatus");
+    const fallbackNote = document.querySelector("#externalToolFallbackNote");
+    let frameSettled = false;
+    if (externalToolFrameTimer) {
+      window.clearTimeout(externalToolFrameTimer);
+      externalToolFrameTimer = 0;
+    }
+    externalToolFrameTimer = window.setTimeout(() => {
+      if (currentModule === "externalTool" && !frameSettled && fallbackNote && fallbackNote.hidden) {
+        fallbackNote.hidden = false;
+        status?.classList.add("is-warning");
+      }
+    }, 4500);
+    externalToolFrame.addEventListener("load", () => {
+      frameSettled = true;
+      if (externalToolFrameTimer) {
+        window.clearTimeout(externalToolFrameTimer);
+        externalToolFrameTimer = 0;
+      }
+      if (fallbackNote) fallbackNote.hidden = true;
+      status?.classList.remove("is-warning");
+      status?.classList.add("is-loaded");
+      status && (status.innerHTML = `<strong>已在应用内打开 ${escapeHtml(getActiveExternalTool().title)}</strong><span class="muted">如需完整浏览器能力，可随时点击右上角“在新标签打开”。</span>`);
+    }, { once: true });
+  }
   // Handle filter changes
   window.updatePremiumFilter = function(filterType, value) {
     if (filterType === 'type1') {

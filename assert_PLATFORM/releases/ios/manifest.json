@@ -1,0 +1,35 @@
+{
+  "platform": "ios",
+  "platformLabel": "iOS",
+  "updatedAt": "2026-06-17T09:43:47.783Z",
+  "latest": {
+    "platform": "ios",
+    "version": "0.1.0",
+    "buildNumber": "20260617-ios-scaffold",
+    "fileName": "Assert_IOS_0.1.0_scaffold.zip",
+    "fileUrl": "/api/v2/releases/file/ios/Assert_IOS_0.1.0_scaffold.zip",
+    "fileSize": 423,
+    "publishedAt": "2026-06-17T09:43:47.783Z",
+    "releaseNotes": "iOS 端当前为项目骨架包，正式 IPA 或 TestFlight 版本发布后会自动替换。",
+    "isLatest": true,
+    "minSystemVersion": "",
+    "sha256": "33e9332760171b3a4013165fb1d80c2556f9b8450bf7dda082a719b9b0c10e65",
+    "distribution": "direct"
+  },
+  "history": [
+    {
+      "platform": "ios",
+      "version": "0.1.0",
+      "buildNumber": "20260617-ios-scaffold",
+      "fileName": "Assert_IOS_0.1.0_scaffold.zip",
+      "fileUrl": "/api/v2/releases/file/ios/Assert_IOS_0.1.0_scaffold.zip",
+      "fileSize": 423,
+      "publishedAt": "2026-06-17T09:43:47.783Z",
+      "releaseNotes": "iOS 端当前为项目骨架包，正式 IPA 或 TestFlight 版本发布后会自动替换。",
+      "isLatest": true,
+      "minSystemVersion": "",
+      "sha256": "33e9332760171b3a4013165fb1d80c2556f9b8450bf7dda082a719b9b0c10e65",
+      "distribution": "direct"
+    }
+  ]
+}

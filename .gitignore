@@ -1,5 +1,18 @@
 node_modules/
-server/data/
+assert_PC/node_modules/
+assert_PC/dist/
+assert_ANDROID/node_modules/
+assert_ANDROID/.gradle/
+assert_ANDROID/capacitor.config.tsbuildinfo
+assert_ANDROID/build/
+assert_ANDROID/.android-sdk/
+assert_ANDROID/android/.gradle/
+assert_ANDROID/android/build/
+assert_ANDROID/android/app/build/
+assert_ANDROID/android/local.properties
+assert_WEB/dist/
+build-artifacts/
+assert_PLATFORM/server/data/
 *.log
 .env
 *.db
@@ -8,3 +21,5 @@ server/data/
 .api-*.log
 .web-*.log
 nul
+assert_PLATFORM/releases/*/packages/*
+!assert_PLATFORM/releases/*/packages/.gitkeep

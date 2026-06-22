@@ -1,0 +1,6 @@
+{
+  "name": "assert-harmony",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Assert HarmonyOS client scaffold"
+}

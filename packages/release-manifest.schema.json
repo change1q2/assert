@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Assert Release Manifest",
+  "type": "object",
+  "properties": {
+    "platform": {
+      "type": "string",
+      "enum": ["web", "pc", "android", "ios", "harmony"]
+    },
+    "channel": {
+      "type": "string",
+      "default": "stable"
+    },
+    "updatedAt": {
+      "type": "string"
+    },
+    "latest": {
+      "type": ["object", "null"]
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["platform", "version", "buildNumber", "fileName", "fileUrl", "fileSize", "publishedAt", "releaseNotes", "isLatest", "sha256"],
+        "properties": {
+          "platform": { "type": "string" },
+          "version": { "type": "string" },
+          "buildNumber": { "type": "string" },
+          "fileName": { "type": "string" },
+          "fileUrl": { "type": "string" },
+          "fileSize": { "type": "integer" },
+          "publishedAt": { "type": "string" },
+          "releaseNotes": { "type": "string" },
+          "isLatest": { "type": "boolean" },
+          "minSystemVersion": { "type": "string" },
+          "sha256": { "type": "string" },
+          "distribution": { "type": "string" }
+        }
+      }
+    }
+  },
+  "required": ["platform", "updatedAt", "history"]
+}

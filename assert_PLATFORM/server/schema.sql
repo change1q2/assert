@@ -299,3 +299,64 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (admin_id) REFERENCES admin_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS devices (
+  user_id INTEGER NOT NULL,
+  device_id VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL DEFAULT '',
+  platform VARCHAR(100) NOT NULL DEFAULT '',
+  app_version VARCHAR(100) NOT NULL DEFAULT '',
+  last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, device_id),
+  INDEX idx_devices_platform (platform),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id INTEGER NOT NULL,
+  owner_type VARCHAR(100) NOT NULL,
+  owner_id VARCHAR(255) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(100) NOT NULL DEFAULT '',
+  file_size BIGINT NOT NULL DEFAULT 0,
+  storage_path VARCHAR(512) NOT NULL,
+  sha256 VARCHAR(128) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_attachments_owner (user_id, owner_type, owner_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS sync_change_log (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id INTEGER NOT NULL,
+  device_id VARCHAR(255) NOT NULL DEFAULT '',
+  entity_type VARCHAR(100) NOT NULL,
+  entity_id VARCHAR(255) NOT NULL,
+  operation_type VARCHAR(50) NOT NULL DEFAULT 'upsert',
+  payload_json JSON NOT NULL,
+  client_version BIGINT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_sync_change_log_user (user_id, id),
+  INDEX idx_sync_change_log_entity (user_id, entity_type, entity_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS release_packages (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  platform VARCHAR(50) NOT NULL,
+  version VARCHAR(100) NOT NULL,
+  build_number VARCHAR(100) NOT NULL DEFAULT '',
+  file_name VARCHAR(255) NOT NULL,
+  file_url VARCHAR(512) NOT NULL,
+  file_size BIGINT NOT NULL DEFAULT 0,
+  published_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  release_notes TEXT NOT NULL,
+  is_latest TINYINT NOT NULL DEFAULT 0,
+  min_system_version VARCHAR(100) NOT NULL DEFAULT '',
+  sha256 VARCHAR(128) NOT NULL DEFAULT '',
+  distribution VARCHAR(100) NOT NULL DEFAULT 'direct',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_release_packages_platform (platform, published_at DESC)
+) ENGINE=InnoDB;

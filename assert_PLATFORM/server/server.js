@@ -6,7 +6,17 @@ import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const publicRoot = path.resolve(__dirname, "..");
+const publicRoot = path.resolve(__dirname, "..", "..", "assert_WEB");
+const releasesRoot = process.env.RELEASES_ROOT
+  ? path.resolve(process.env.RELEASES_ROOT)
+  : path.resolve(__dirname, "..", "releases");
+const releasePlatforms = [
+  ["web", "Web"],
+  ["pc", "PC（Windows）"],
+  ["android", "Android"],
+  ["ios", "iOS"],
+  ["harmony", "HarmonyOS"],
+];
 
 const pool = mysql.createPool({
   host: process.env.MYSQL_HOST || "127.0.0.1",
@@ -53,6 +63,46 @@ const initDb = pool.query(schemaSql).then(async () => {
       console.log(`Added ${column} column to finance_assets`);
     } catch (_) { /* column already exists */ }
   }
+  const syncColumns = [
+    ["accounts", "sync_version", "BIGINT NOT NULL DEFAULT 0"],
+    ["accounts", "deleted_at", "DATETIME NULL DEFAULT NULL"],
+    ["accounts", "origin_device_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["accounts", "client_op_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["asset_classes", "sync_version", "BIGINT NOT NULL DEFAULT 0"],
+    ["asset_classes", "deleted_at", "DATETIME NULL DEFAULT NULL"],
+    ["asset_classes", "origin_device_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["asset_classes", "client_op_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["records", "sync_version", "BIGINT NOT NULL DEFAULT 0"],
+    ["records", "deleted_at", "DATETIME NULL DEFAULT NULL"],
+    ["records", "origin_device_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["records", "client_op_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["finance_assets", "sync_version", "BIGINT NOT NULL DEFAULT 0"],
+    ["finance_assets", "deleted_at", "DATETIME NULL DEFAULT NULL"],
+    ["finance_assets", "origin_device_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["finance_assets", "client_op_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["finance_asset_transactions", "sync_version", "BIGINT NOT NULL DEFAULT 0"],
+    ["finance_asset_transactions", "deleted_at", "DATETIME NULL DEFAULT NULL"],
+    ["finance_asset_transactions", "origin_device_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["finance_asset_transactions", "client_op_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["debts", "sync_version", "BIGINT NOT NULL DEFAULT 0"],
+    ["debts", "deleted_at", "DATETIME NULL DEFAULT NULL"],
+    ["debts", "origin_device_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["debts", "client_op_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["debt_payments", "sync_version", "BIGINT NOT NULL DEFAULT 0"],
+    ["debt_payments", "deleted_at", "DATETIME NULL DEFAULT NULL"],
+    ["debt_payments", "origin_device_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["debt_payments", "client_op_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["feedback", "sync_version", "BIGINT NOT NULL DEFAULT 0"],
+    ["feedback", "deleted_at", "DATETIME NULL DEFAULT NULL"],
+    ["feedback", "origin_device_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+    ["feedback", "client_op_id", "VARCHAR(255) NOT NULL DEFAULT ''"],
+  ];
+  for (const [table, column, definition] of syncColumns) {
+    try {
+      await pool.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+      console.log(`Added ${column} column to ${table}`);
+    } catch (_) { /* column already exists */ }
+  }
   console.log("MySQL schema initialized");
 }).catch((err) => {
   console.error("Failed to initialize MySQL schema:", err.message);
@@ -79,6 +129,12 @@ const mimeTypes = {
   ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
+  ".exe": "application/vnd.microsoft.portable-executable",
+  ".zip": "application/zip",
+  ".apk": "application/vnd.android.package-archive",
+  ".aab": "application/octet-stream",
+  ".ipa": "application/octet-stream",
+  ".hap": "application/octet-stream",
 };
 const PREMIUM_API_URL = "http://8.220.240.126:8787/api/latest-lite";
 let premiumMarketCache = {
@@ -351,6 +407,104 @@ function serveStatic(url, res) {
   res.writeHead(200, {
     "Content-Type": mimeTypes[extension] || "application/octet-stream",
     "Cache-Control": extension === ".html" ? "no-cache" : "public, max-age=3600",
+  });
+  fs.createReadStream(filePath).pipe(res);
+}
+
+function safeReleasePlatform(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+}
+
+function safeReleaseFileName(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9._-]/g, "");
+}
+
+function releaseDir(platform) {
+  return path.join(releasesRoot, platform);
+}
+
+function releaseManifestPath(platform) {
+  return path.join(releaseDir(platform), "manifest.json");
+}
+
+function defaultReleaseManifest(platform) {
+  return {
+    platform,
+    platformLabel: Object.fromEntries(releasePlatforms)[platform] || platform,
+    updatedAt: "",
+    latest: null,
+    history: [],
+  };
+}
+
+function readReleaseManifest(platform) {
+  const filePath = releaseManifestPath(platform);
+  if (!fs.existsSync(filePath)) return defaultReleaseManifest(platform);
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    return {
+      ...defaultReleaseManifest(platform),
+      ...raw,
+      platform,
+      history: Array.isArray(raw.history) ? raw.history : [],
+    };
+  } catch {
+    return defaultReleaseManifest(platform);
+  }
+}
+
+function normalizeReleaseEntry(platform, entry) {
+  if (!entry) return null;
+  const fileName = safeReleaseFileName(entry.fileName);
+  return {
+    platform,
+    platformLabel: Object.fromEntries(releasePlatforms)[platform] || platform,
+    version: String(entry.version || ""),
+    buildNumber: String(entry.buildNumber || ""),
+    fileName,
+    fileUrl: fileName ? `/api/v2/releases/file/${platform}/${encodeURIComponent(fileName)}` : String(entry.fileUrl || ""),
+    fileSize: Number(entry.fileSize || 0),
+    publishedAt: String(entry.publishedAt || ""),
+    releaseNotes: String(entry.releaseNotes || ""),
+    isLatest: Boolean(entry.isLatest),
+    minSystemVersion: String(entry.minSystemVersion || ""),
+    sha256: String(entry.sha256 || ""),
+    distribution: String(entry.distribution || "direct"),
+  };
+}
+
+function loadReleaseCatalog() {
+  return releasePlatforms.map(([platform]) => {
+    const manifest = readReleaseManifest(platform);
+    const history = (manifest.history || [])
+      .map((entry) => normalizeReleaseEntry(platform, entry))
+      .filter(Boolean);
+    const latest = history.find((entry) => entry.isLatest) || history[0] || null;
+    return {
+      ...manifest,
+      platform,
+      platformLabel: Object.fromEntries(releasePlatforms)[platform] || platform,
+      latest,
+      history,
+      updatedAt: manifest.updatedAt || latest?.publishedAt || "",
+    };
+  });
+}
+
+function serveReleaseFile(platform, fileName, res) {
+  const safePlatform = safeReleasePlatform(platform);
+  const safeFileName = safeReleaseFileName(fileName);
+  const filePath = path.join(releaseDir(safePlatform), "packages", safeFileName);
+  if (!safePlatform || !safeFileName || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ message: "安装包不存在。" }));
+    return;
+  }
+  const extension = path.extname(filePath).toLowerCase();
+  res.writeHead(200, {
+    "Content-Type": mimeTypes[extension] || "application/octet-stream",
+    "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(safeFileName)}`,
+    "Cache-Control": "public, max-age=300",
   });
   fs.createReadStream(filePath).pipe(res);
 }
@@ -920,6 +1074,36 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, await fetchPremiumMarket(), origin);
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/v2/releases") {
+      json(res, 200, { releases: loadReleaseCatalog() }, origin);
+      return;
+    }
+    const releaseFileMatch = req.method === "GET"
+      ? url.pathname.match(/^\/api\/v2\/releases\/file\/([a-z0-9_-]+)\/([^/]+)$/i)
+      : null;
+    if (releaseFileMatch) {
+      serveReleaseFile(releaseFileMatch[1], decodeURIComponent(releaseFileMatch[2]), res);
+      return;
+    }
+    const releasePlatformMatch = req.method === "GET"
+      ? url.pathname.match(/^\/api\/v2\/releases\/([a-z0-9_-]+)$/i)
+      : null;
+    if (releasePlatformMatch) {
+      const platform = safeReleasePlatform(releasePlatformMatch[1]);
+      if (platform === "latest") {
+        json(res, 200, {
+          releases: loadReleaseCatalog().map((item) => item.latest).filter(Boolean),
+        }, origin);
+        return;
+      }
+      const manifest = loadReleaseCatalog().find((item) => item.platform === platform);
+      if (!manifest) {
+        json(res, 404, { message: "平台不存在。" }, origin);
+        return;
+      }
+      json(res, 200, { release: manifest }, origin);
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/api/auth/sms/send") {
       const body = await readBody(req);
       const phone = text(body.phone).trim();
@@ -1146,6 +1330,81 @@ const server = http.createServer(async (req, res) => {
     const currentUser = await authenticatedUser(req);
     if (!currentUser) {
       json(res, 401, { message: "登录已失效，请重新登录。" }, origin);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/v2/bootstrap") {
+      json(res, 200, {
+        user: await profileForUser(currentUser.id),
+        state: await loadUserState(currentUser.id),
+        capabilities: {
+          offline: "full",
+          sync: true,
+          uploads: true,
+          releases: true,
+        },
+      }, origin);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/v2/devices/register") {
+      const body = await readBody(req);
+      const deviceId = text(body.deviceId).trim() || crypto.randomUUID();
+      const name = text(body.name).trim() || "未命名设备";
+      const platform = text(body.platform).trim() || "unknown";
+      const appVersion = text(body.appVersion).trim();
+      await sqlRun(pool, `INSERT INTO devices (user_id, device_id, name, platform, app_version, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE
+          name = VALUES(name),
+          platform = VALUES(platform),
+          app_version = VALUES(app_version),
+          last_seen_at = NOW()`, [currentUser.id, deviceId, name, platform, appVersion]);
+      json(res, 200, { ok: true, deviceId }, origin);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/v2/sync/push") {
+      const body = await readBody(req);
+      const deviceId = text(body.deviceId).trim() || "unknown-device";
+      const changes = Array.isArray(body.changes) ? body.changes : [];
+      const clientVersion = Number(body.clientVersion || 0);
+      for (const change of changes) {
+        await sqlRun(pool, `INSERT INTO sync_change_log
+          (user_id, device_id, entity_type, entity_id, operation_type, payload_json, client_version)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`, [
+          currentUser.id,
+          deviceId,
+          text(change.entityType).trim() || "unknown",
+          text(change.entityId).trim() || crypto.randomUUID(),
+          text(change.operationType).trim() || "upsert",
+          JSON.stringify(change.payload ?? {}),
+          clientVersion,
+        ]);
+      }
+      json(res, 200, {
+        ok: true,
+        accepted: changes.length,
+        serverVersion: Date.now(),
+      }, origin);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/v2/sync/pull") {
+      const sinceVersion = Number(url.searchParams.get("sinceVersion") || 0);
+      const rows = await sqlAll(pool, `SELECT id, device_id, entity_type, entity_id, operation_type, payload_json, created_at
+        FROM sync_change_log
+        WHERE user_id = ? AND id > ?
+        ORDER BY id ASC
+        LIMIT 500`, [currentUser.id, sinceVersion]);
+      json(res, 200, {
+        changes: rows.map((row) => ({
+          version: Number(row.id),
+          deviceId: row.device_id,
+          entityType: row.entity_type,
+          entityId: row.entity_id,
+          operationType: row.operation_type,
+          payload: maybeParseJson(row.payload_json) || {},
+          createdAt: row.created_at,
+        })),
+        serverVersion: rows.length ? Number(rows.at(-1).id) : sinceVersion,
+      }, origin);
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/auth/me") {
