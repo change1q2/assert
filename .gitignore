@@ -20,6 +20,7 @@ assert_PLATFORM/server/data/
 .codex-logs/
 .api-*.log
 .web-*.log
+.ssh-key-temp
 nul
 assert_PLATFORM/releases/*/packages/*
 !assert_PLATFORM/releases/*/packages/.gitkeep
