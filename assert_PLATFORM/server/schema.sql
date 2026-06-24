@@ -266,6 +266,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   finance_asset_draft_json JSON NOT NULL,
   fee_config_json JSON,
   overview_goals_json JSON,
+  hk_ipo_rules_json JSON,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 

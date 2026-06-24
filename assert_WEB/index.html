@@ -662,6 +662,52 @@
       </form>
     </dialog>
 
+    <dialog id="hkIpoRowEditDialog">
+      <form id="hkIpoRowEditForm" method="dialog" class="modal-form hk-ipo-row-edit-form">
+        <h2>编辑港股打新行</h2>
+        <input name="_rowKey" type="hidden" />
+        <div class="hk-ipo-edit-grid">
+          <label>代码<input name="code" /></label>
+          <label>公司名称<input name="companyName" /></label>
+          <label>状态<input name="status" /></label>
+          <label>1手股数<input name="boardLot" type="number" step="1" /></label>
+          <label>1手入场金额<input name="entryAmount" type="number" step="0.01" /></label>
+          <label>总市值<input name="totalMarketCap" type="number" step="0.01" /></label>
+          <label>H股市值<input name="hMarketCap" type="number" step="0.01" /></label>
+          <label>入通涨幅<input name="connectRise" /></label>
+          <label>一手预计收益<input name="oneLotExpectedProfit" type="number" step="0.001" /></label>
+          <label>公开总手数<input name="publicTotalHands" type="number" step="1" /></label>
+          <label>实际认购倍数<input name="actualMultiple" type="number" step="0.01" /></label>
+          <label>富途预测一手中签率<input name="allotmentRate" /></label>
+          <label>申购时间<input name="subscriptionTime" /></label>
+          <label>资金锁定期<input name="resultDate" /></label>
+          <label>暗盘时间<input name="greyDate" /></label>
+          <label>上市日期<input name="listingDate" /></label>
+          <label>基本面<input name="fundamentals" /></label>
+          <label>行业<input name="industry" /></label>
+          <label>发行价<input name="offerPrice" type="number" step="0.001" /></label>
+          <label>得分<input name="score" type="number" step="0.001" /></label>
+          <label>申购态度<input name="attitude" /></label>
+          <label>是否打
+            <select name="shouldApply">
+              <option value="是">是</option>
+              <option value="否">否</option>
+            </select>
+          </label>
+          <label>建议甲组/乙组<input name="tailFunds" /></label>
+          <label>首日涨幅<input name="firstDayChange" /></label>
+          <label>累计涨跌幅<input name="cumulativeChange" /></label>
+          <label>最新价<input name="latestVsOffer" type="number" step="0.001" /></label>
+        </div>
+        <label class="full-width">策略<input name="strategy" /></label>
+        <label class="full-width">总结<input name="summary" /></label>
+        <menu>
+          <button value="cancel" type="button" id="cancelHkIpoRowEdit">取消</button>
+          <button type="button" class="primary" id="saveHkIpoRowEdit">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
     <script src="./vendor/tesseract.min.js?v=5.1.1"></script>
     <script src="./app.js?v=wealth36"></script>
   </body>

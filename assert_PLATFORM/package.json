@@ -8,6 +8,7 @@
     "start": "node --env-file=../.env server/server.js"
   },
   "dependencies": {
-    "mysql2": "^3.22.5"
+    "mysql2": "^3.22.5",
+    "xlsx": "^0.18.5"
   }
 }

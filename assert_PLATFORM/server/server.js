@@ -2,8 +2,10 @@ import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
+import XLSX from "xlsx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicRoot = path.resolve(__dirname, "..", "..", "assert_WEB");
@@ -41,6 +43,10 @@ const initDb = pool.query(schemaSql).then(async () => {
   try {
     await pool.query("ALTER TABLE user_settings ADD COLUMN overview_goals_json JSON AFTER fee_config_json");
     console.log("Added overview_goals_json column to user_settings");
+  } catch (_) { /* column already exists */ }
+  try {
+    await pool.query("ALTER TABLE user_settings ADD COLUMN hk_ipo_rules_json JSON AFTER overview_goals_json");
+    console.log("Added hk_ipo_rules_json column to user_settings");
   } catch (_) { /* column already exists */ }
   try {
     await pool.query("ALTER TABLE feedback ADD COLUMN attachments_json JSON AFTER content");
@@ -142,6 +148,10 @@ let premiumMarketCache = {
   payload: null,
 };
 let premiumMarketRefreshPromise = null;
+let hkIpoCache = {
+  sourceMtimeMs: 0,
+  payload: null,
+};
 
 const json = (res, status, payload, origin = "") => {
   if (allowedOrigins.has(origin)) {
@@ -879,8 +889,545 @@ const numericIfPossible = (value) => String(Number(value)) === String(value) ? N
 const text = (value) => String(value ?? "");
 const number = (value) => Number(value) || 0;
 
+const HK_IPO_SOURCE_FILE = process.env.HK_IPO_SOURCE_FILE
+  ? path.resolve(process.env.HK_IPO_SOURCE_FILE)
+  : "C:/Users/YZ-X-096/Documents/港股分析/tools/build_hk_ipo_current_20260623.mjs";
+const HK_IPO_CONNECT_MARKET_CAP = 103.19;
+const HK_IPO_DEFAULT_YEAR = 2026;
+const HK_IPO_DEFAULT_THRESHOLD = 6;
+
+function extractConstArrayFromSource(source, name) {
+  const marker = `const ${name}`;
+  const start = source.indexOf(marker);
+  if (start < 0) return [];
+  const equals = source.indexOf("=", start);
+  const open = source.indexOf("[", equals);
+  if (equals < 0 || open < 0) return [];
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+  for (let i = open; i < source.length; i += 1) {
+    const char = source[i];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (char === "\"" || char === "'" || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char === "[") depth += 1;
+    if (char === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        const literal = source.slice(open, i + 1);
+        return vm.runInNewContext(literal, Object.freeze({}));
+      }
+    }
+  }
+  return [];
+}
+
+function parseHkIpoDate(value, fallbackYear = HK_IPO_DEFAULT_YEAR) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "TBD" || raw === "-") return "";
+  const dateLike = raw.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (dateLike) {
+    return `${dateLike[1]}-${String(dateLike[2]).padStart(2, "0")}-${String(dateLike[3]).padStart(2, "0")}`;
+  }
+  const md = raw.match(/(\d{1,2})[-/](\d{1,2})/);
+  if (!md) return "";
+  return `${fallbackYear}-${String(md[1]).padStart(2, "0")}-${String(md[2]).padStart(2, "0")}`;
+}
+
+function parseHkIpoRange(value) {
+  const raw = String(value ?? "").trim();
+  const matches = [...raw.matchAll(/(\d{1,2})[-/](\d{1,2})/g)];
+  if (!matches.length) return { start: "", end: "" };
+  if (matches.length === 1) {
+    const date = parseHkIpoDate(matches[0][0]);
+    return { start: date, end: date };
+  }
+  return {
+    start: parseHkIpoDate(matches[0][0]),
+    end: parseHkIpoDate(matches.at(-1)[0]),
+  };
+}
+
+function hkIpoStatus(row, now = new Date()) {
+  const todayIso = now.toISOString().slice(0, 10);
+  const subscriptionStart = row.subscriptionStart || "";
+  const subscriptionEnd = row.subscriptionEnd || "";
+  const greyDate = row.greyDate || "";
+  const listingDate = row.listingDate || "";
+  const hasListedData = ["firstDayChange", "cumulativeChange", "latestVsOffer"].some((key) => {
+    const value = String(row[key] ?? "").trim();
+    return value && value !== "TBD" && value !== "-";
+  });
+  if ((listingDate && todayIso >= listingDate) || hasListedData) return "已上市";
+  if (greyDate && todayIso === greyDate) return "暗盘";
+  if (subscriptionStart && subscriptionEnd && todayIso >= subscriptionStart && todayIso <= subscriptionEnd) return "招股中";
+  return "待上市";
+}
+
+function hkIpoNum(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const raw = String(value ?? "").replace(/[,%亿万港元元]/g, "").trim();
+  if (!raw || raw === "TBD" || raw === "-") return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function hkIpoCell(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return Number(value.toFixed(3));
+  return String(value);
+}
+
+function hkIpoRuleId(row, index) {
+  return crypto.createHash("sha1").update(`${row[0] || ""}|${row[1] || ""}|${row[2] || ""}|${index}`).digest("hex").slice(0, 16);
+}
+
+function normalizeHkIpoRules(ruleRows = [], savedRules = []) {
+  const savedMap = new Map((savedRules || []).map((rule) => [String(rule.id), rule]));
+  const systemRules = ruleRows.slice(1).map((row, index) => {
+    const id = hkIpoRuleId(row, index);
+    const saved = savedMap.get(id);
+    const defaultScore = Number(row[3]);
+    return {
+      id,
+      category: text(row[0]),
+      item: text(row[1]),
+      condition: text(row[2]),
+      score: Number.isFinite(Number(saved?.score)) ? Number(saved.score) : (Number.isFinite(defaultScore) ? defaultScore : 0),
+      defaultScore: Number.isFinite(defaultScore) ? defaultScore : text(row[3]),
+      system: true,
+      custom: false,
+    };
+  });
+  const customRules = (savedRules || [])
+    .filter((rule) => rule?.custom || !systemRules.some((item) => item.id === rule.id))
+    .map((rule) => ({
+      id: text(rule.id) || crypto.randomUUID(),
+      category: text(rule.category || "自定义"),
+      item: text(rule.item || "自定义评分项"),
+      condition: text(rule.condition || ""),
+      score: Number(rule.score) || 0,
+      defaultScore: Number(rule.defaultScore) || 0,
+      system: false,
+      custom: true,
+    }));
+  return [...systemRules, ...customRules];
+}
+
+function hkIpoRuleScore(rules, item, originalScore, context = "") {
+  if (!Number(originalScore)) return 0;
+  const candidates = rules.filter((rule) => rule.item === item);
+  const exact = candidates.find((rule) => Number(rule.defaultScore) === Number(originalScore));
+  if (exact) return Number(exact.score) || 0;
+  const lowerContext = String(context).toLowerCase();
+  const textual = candidates.find((rule) => lowerContext && lowerContext.includes(String(rule.condition || "").toLowerCase()));
+  if (textual) return Number(textual.score) || 0;
+  return Number(originalScore) || 0;
+}
+
+function hkIpoScoreKey(code, offerPrice = "") {
+  const normalizedCode = text(code).trim();
+  const priceNumber = Number(offerPrice);
+  const normalizedPrice = Number.isFinite(priceNumber) ? Number(priceNumber.toFixed(3)) : text(offerPrice).trim();
+  return `${normalizedCode}|${normalizedPrice}`;
+}
+
+function applyHkIpoScenarioTags(rows) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const key = row.code || row.companyName;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+  for (const groupRows of groups.values()) {
+    if (groupRows.length <= 1) {
+      groupRows[0].scenarioTags = [];
+      continue;
+    }
+    const offerPrices = [...new Set(groupRows.map((row) => Number(row.offerPrice)).filter(Number.isFinite))].sort((a, b) => a - b);
+    const publicHands = [...new Set(groupRows.map((row) => Number(row.publicTotalHands)).filter(Number.isFinite))].sort((a, b) => a - b);
+    const hasPriceRange = offerPrices.length > 1;
+    const hasHandsRange = publicHands.length > 1;
+    groupRows.forEach((row) => {
+      const tags = [];
+      const offerPrice = Number(row.offerPrice);
+      const hands = Number(row.publicTotalHands);
+      const mechanism = text(row.mechanism).toUpperCase();
+      if (hasPriceRange && Number.isFinite(offerPrice)) {
+        if (offerPrice === offerPrices[0]) tags.push("低");
+        if (offerPrice === offerPrices.at(-1)) tags.push("高");
+      }
+      if (text(row.ahType).toUpperCase() === "AH") tags.push("AH");
+      if (hasHandsRange && Number.isFinite(hands)) {
+        if (mechanism === "A") {
+          tags.push(hands === publicHands[0] ? "A小" : "A大");
+        } else if (mechanism === "18C") {
+          tags.push(hands === publicHands[0] ? "18C小" : "18C大");
+        }
+      }
+      row.scenarioTags = tags;
+      row.scenarioLabel = tags.join(" / ");
+    });
+  }
+  return rows;
+}
+
+function buildHkIpoTableRows(rawRows = []) {
+  return rawRows.map((row) => {
+    const isAH = row[18] === "AH";
+    const hMarketCap = Number(row[6]);
+    const offerPrice = Number(row[2]);
+    const boardLot = Number(row[3]);
+    if (isAH || !Number.isFinite(hMarketCap) || !Number.isFinite(offerPrice) || !Number.isFinite(boardLot)) {
+      return [
+        ...row.slice(0, 7),
+        "",
+        "",
+        "",
+        "",
+        "",
+        row[10],
+        row[11],
+        row[12],
+        row[12],
+        ...row.slice(13, 25),
+        "TBD",
+        "TBD",
+        "TBD",
+        "TBD",
+        "TBD",
+        ...row.slice(25),
+      ];
+    }
+    const amountNeeded = HK_IPO_CONNECT_MARKET_CAP - hMarketCap;
+    const requiredRise = amountNeeded / hMarketCap;
+    const postConnectPrice = offerPrice * (HK_IPO_CONNECT_MARKET_CAP / hMarketCap);
+    const expectedOneLotProfit = (postConnectPrice - offerPrice) * boardLot;
+    return [
+      ...row.slice(0, 7),
+      HK_IPO_CONNECT_MARKET_CAP,
+      `${(requiredRise * 100).toFixed(1)}%`,
+      `${amountNeeded.toFixed(2)}亿`,
+      Number(postConnectPrice.toFixed(2)),
+      Number(expectedOneLotProfit.toFixed(0)),
+      row[10],
+      row[11],
+      row[12],
+      row[12],
+      ...row.slice(13, 25),
+      "TBD",
+      "TBD",
+      "TBD",
+      "TBD",
+      "TBD",
+      ...row.slice(25),
+    ];
+  });
+}
+
+function normalizeHkIpoRow(headers, row, index) {
+  const record = Object.fromEntries(headers.map((header, i) => [header, hkIpoCell(row[i])]));
+  const subscription = parseHkIpoRange(record["申购时间"]);
+  const resultDate = parseHkIpoDate(record["资金锁定期（中签结果）"]);
+  const greyDate = parseHkIpoDate(record["暗盘时间"]);
+  const listingDate = parseHkIpoDate(record["上市日期"]) || greyDate || resultDate;
+  const normalized = {
+    id: `${record["代码编号"] || "ipo"}-${index}`,
+    code: text(record["代码编号"]),
+    companyName: text(record["公司名称"]),
+    offerPrice: record["发行价格"],
+    boardLot: record["1手股数"],
+    entryAmount: record["1手入场金额"],
+    totalMarketCap: record["总市值（亿）"],
+    hMarketCap: record["H股市值（亿）"],
+    connectMarketCap: record["入通市值（亿）"],
+    connectRise: record["入通涨幅"],
+    oneLotExpectedProfit: record["一手预计收益"],
+    publicShares: record["公开股数(万股)"],
+    publicTotalHands: record["公开总手数"],
+    actualMultiple: record["实际认购倍数"],
+    allotmentRate: record["中签率"],
+    cornerstoneShare: record["基石占比"],
+    sponsor: record["保推人"],
+    mechanism: record["机制"],
+    ahType: record["是否AH/UH"],
+    discountRate: record["折价率"],
+    subscriptionTime: record["申购时间"],
+    subscriptionStart: subscription.start,
+    subscriptionEnd: subscription.end,
+    resultDate,
+    greyDate,
+    listingDate,
+    greyChange: record["暗盘涨幅"],
+    firstDayChange: record["首日涨幅"],
+    cumulativeChange: record["累计涨跌幅"],
+    latestVsOffer: record["最新价/发行价"],
+    fundamentals: record["基本面"],
+    industry: record["行业"],
+    score: hkIpoNum(record["得分（6分以上可以打）"]),
+    attitude: text(record["申购态度"]),
+    shouldApply: text(record["是否打"]),
+    strategy: text(record["策略"]),
+    tailFunds: text(record["甲尾乙头资金"]),
+    summary: text(record["总结"]),
+    raw: record,
+  };
+  normalized.status = hkIpoStatus(normalized);
+  return normalized;
+}
+
+function loadHkIpoRawDataset() {
+  const stat = fs.statSync(HK_IPO_SOURCE_FILE);
+  if (hkIpoCache.payload && hkIpoCache.sourceMtimeMs === stat.mtimeMs) return hkIpoCache.payload;
+  const source = fs.readFileSync(HK_IPO_SOURCE_FILE, "utf8");
+  const payload = {
+    headers: extractConstArrayFromSource(source, "headers"),
+    rows: extractConstArrayFromSource(source, "rows"),
+    recommendations: extractConstArrayFromSource(source, "recommendation"),
+    scoreHeaders: extractConstArrayFromSource(source, "scoreHeaders"),
+    scoreRows: extractConstArrayFromSource(source, "scoreRows"),
+    ruleRows: extractConstArrayFromSource(source, "ruleRows"),
+    bigVRows: extractConstArrayFromSource(source, "bigVRows"),
+    validationRows: extractConstArrayFromSource(source, "validationRows"),
+    fetchedAt: new Date(stat.mtimeMs).toISOString(),
+    source: HK_IPO_SOURCE_FILE,
+  };
+  hkIpoCache = { sourceMtimeMs: stat.mtimeMs, payload };
+  return payload;
+}
+
+function buildHkIpoPayload(rulesConfig = {}) {
+  const raw = loadHkIpoRawDataset();
+  const rules = normalizeHkIpoRules(raw.ruleRows, Array.isArray(rulesConfig.rules) ? rulesConfig.rules : []);
+  const threshold = Number(rulesConfig.threshold) || HK_IPO_DEFAULT_THRESHOLD;
+  const tableRows = buildHkIpoTableRows(raw.rows);
+  const rows = applyHkIpoScenarioTags(tableRows.map((row, index) => normalizeHkIpoRow(raw.headers, row, index)));
+  const scoreHeader = raw.scoreHeaders || [];
+  const scoreObjects = raw.scoreRows.map((row, index) => ({
+    id: `${row[0] || "score"}-${index}`,
+    raw: Object.fromEntries(scoreHeader.map((header, i) => [header, hkIpoCell(row[i])])),
+  }));
+  const scoreByExactKey = new Map(scoreObjects.map((item) => [hkIpoScoreKey(item.raw["代码"], item.raw["发行价"]), item.raw]));
+  const scoreByCode = new Map();
+  for (const item of scoreObjects) {
+    const code = text(item.raw["代码"]).trim();
+    if (code && !scoreByCode.has(code)) scoreByCode.set(code, item.raw);
+  }
+  const recalculatedRows = rows.map((row) => {
+    const scoreRaw = scoreByExactKey.get(hkIpoScoreKey(row.code, row.offerPrice)) || scoreByCode.get(row.code) || {};
+    const components = [
+      "旧股", "保荐人", "明星基石", "IPO前投资者", "行业",
+      "估值", "机制", "认购倍数", "基石份额", "大V意向",
+    ].map((item) => ({
+      item,
+      originalScore: hkIpoNum(scoreRaw[item]),
+      score: hkIpoRuleScore(rules, item, hkIpoNum(scoreRaw[item]), `${row.summary} ${row.strategy} ${row.fundamentals}`),
+    }));
+    for (const rule of rules.filter((rule) => rule.custom)) {
+      const haystack = `${row.companyName} ${row.industry} ${row.strategy} ${row.summary} ${row.fundamentals}`;
+      if (rule.condition && haystack.includes(rule.condition)) {
+        components.push({ item: rule.item, originalScore: Number(rule.defaultScore) || 0, score: Number(rule.score) || 0 });
+      }
+    }
+    const totalScore = Number(components.reduce((sum, item) => sum + (Number(item.score) || 0), 0).toFixed(3));
+    const shouldApply = totalScore >= threshold ? "是" : "否";
+    const attitude = totalScore >= 8 ? "可以梭哈" : totalScore >= threshold ? "谨慎" : totalScore >= 4 ? "观察" : "不打";
+    return { ...row, score: totalScore, shouldApply, attitude, scoreComponents: components };
+  });
+  const bigVRows = raw.bigVRows.slice(1).map((row, index) => ({
+    id: `bigv-${index}`,
+    code: text(row[0]),
+    companyName: text(row[1]),
+    bigV: text(row[2]),
+    intention: text(row[3]),
+    reason: text(row[4]),
+    note: text(row[5]),
+  }));
+  const validationRows = raw.validationRows.slice(1).map((row, index) => ({
+    id: `validation-${index}`,
+    field: text(row[0]),
+    issue: text(row[1]),
+    level: text(row[2]),
+    suggestion: text(row[3]),
+  }));
+  const scoreRows = recalculatedRows.map((row) => ({
+    id: row.id,
+    code: row.code,
+    companyName: row.companyName,
+    score: row.score,
+    shouldApply: row.shouldApply,
+    attitude: row.attitude,
+    components: row.scoreComponents,
+  }));
+  const recommendations = [...recalculatedRows]
+    .sort((a, b) => {
+      const applyWeight = (value) => value === "是" ? 2 : value === "可小打" ? 1 : 0;
+      return applyWeight(b.shouldApply) - applyWeight(a.shouldApply)
+        || hkIpoNum(b.score) - hkIpoNum(a.score)
+        || hkIpoNum(b.oneLotExpectedProfit) - hkIpoNum(a.oneLotExpectedProfit)
+        || hkIpoNum(b.publicTotalHands) - hkIpoNum(a.publicTotalHands);
+    })
+    .map((row, index) => ({
+      rank: index + 1,
+      code: row.code,
+      companyName: row.companyName,
+      status: row.status,
+      score: row.score,
+      shouldApply: row.shouldApply,
+      oneLotExpectedProfit: row.oneLotExpectedProfit,
+      publicTotalHands: row.publicTotalHands,
+      strategy: row.strategy,
+      reason: row.summary,
+    }));
+  return {
+    rows: recalculatedRows,
+    recommendations,
+    bigVRows,
+    scoreRows,
+    validationRows,
+    rules,
+    threshold,
+    fetchedAt: raw.fetchedAt,
+    source: "C:\\Users\\YZ-X-096\\Documents\\港股分析",
+  };
+}
+
+function hkIpoMatchesFilters(row, params) {
+  const status = text(params.status || "all");
+  if (status !== "all" && row.status !== status) return false;
+  const query = text(params.query).trim().toLowerCase();
+  if (query) {
+    const haystack = `${row.code} ${row.companyName}`.toLowerCase();
+    if (!haystack.includes(query)) return false;
+  }
+  const startDate = text(params.startDate);
+  const endDate = text(params.endDate);
+  if (startDate || endDate) {
+    const dates = [row.subscriptionStart, row.subscriptionEnd, row.resultDate, row.greyDate, row.listingDate].filter(Boolean);
+    if (!dates.length) return false;
+    const inRange = dates.some((date) => (!startDate || date >= startDate) && (!endDate || date <= endDate));
+    if (!inRange) return false;
+  }
+  return true;
+}
+
+function hkIpoStats(rows) {
+  const recommended = rows.filter((row) => row.shouldApply === "是");
+  const recommendedCompanyCount = new Set(recommended.map((row) => row.companyName || row.code).filter(Boolean)).size;
+  const bestScore = rows.reduce((best, row) => (hkIpoNum(row.score) > hkIpoNum(best?.score) ? row : best), null);
+  const bestProfit = rows.reduce((best, row) => (hkIpoNum(row.oneLotExpectedProfit) > hkIpoNum(best?.oneLotExpectedProfit) ? row : best), null);
+  const statusCounts = rows.reduce((acc, row) => {
+    acc[row.status] = (acc[row.status] || 0) + 1;
+    return acc;
+  }, {});
+  const avgScore = rows.length ? rows.reduce((sum, row) => sum + hkIpoNum(row.score), 0) / rows.length : 0;
+  return {
+    total: rows.length,
+    recommended: recommendedCompanyCount,
+    averageScore: Number(avgScore.toFixed(3)),
+    bestScoreProject: bestScore ? `${bestScore.companyName} ${bestScore.score}` : "",
+    bestProfitProject: bestProfit ? `${bestProfit.companyName} ${bestProfit.oneLotExpectedProfit}` : "",
+    statusCounts,
+    scoreDistribution: [0, 3, 6, 9, 12].map((min, index, list) => {
+      const max = list[index + 1] ?? Infinity;
+      return {
+        label: max === Infinity ? `${min}+` : `${min}-${max}`,
+        count: rows.filter((row) => hkIpoNum(row.score) >= min && hkIpoNum(row.score) < max).length,
+      };
+    }),
+    profitRanking: [...rows]
+      .filter((row) => row.status === "招股中")
+      .sort((a, b) => hkIpoNum(b.oneLotExpectedProfit) - hkIpoNum(a.oneLotExpectedProfit))
+      .map((row) => ({
+        code: row.code,
+        companyName: row.companyName,
+        value: hkIpoNum(row.oneLotExpectedProfit),
+        scenarioTags: Array.isArray(row.scenarioTags) ? row.scenarioTags : [],
+        priceTag: (Array.isArray(row.scenarioTags) ? row.scenarioTags : []).find((tag) => ["高", "低"].includes(tag)) || "",
+      })),
+  };
+}
+
+function filterHkIpoPayload(payload, params = {}) {
+  const rows = payload.rows.filter((row) => hkIpoMatchesFilters(row, params));
+  const codeSet = new Set(rows.map((row) => row.code));
+  return {
+    ...payload,
+    rows,
+    recommendations: payload.recommendations.filter((row) => codeSet.has(row.code)),
+    bigVRows: payload.bigVRows.filter((row) => !row.code || codeSet.has(row.code)),
+    scoreRows: payload.scoreRows.filter((row) => codeSet.has(row.code)),
+    validationRows: payload.validationRows,
+    stats: hkIpoStats(rows),
+  };
+}
+
+async function loadHkIpoRulesConfig(userId) {
+  const row = await sqlGet(pool, "SELECT hk_ipo_rules_json FROM user_settings WHERE user_id = ?", [userId]);
+  try {
+    return row ? maybeParseJson(row.hk_ipo_rules_json) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveHkIpoRulesConfig(userId, config) {
+  await sqlRun(pool, `INSERT INTO user_settings
+    (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json)
+    VALUES (?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE hk_ipo_rules_json = VALUES(hk_ipo_rules_json)`,
+    [userId, "{}", null, null, config ? JSON.stringify(config) : null]);
+}
+
+function hkIpoSheetRows(rows) {
+  return rows.map((row) => ({
+    代码: row.code,
+    公司名称: row.companyName,
+    场景标签: Array.isArray(row.scenarioTags) ? row.scenarioTags.join(" / ") : "",
+    状态: row.status,
+    "1手股数": row.boardLot,
+    "1手入场金额": row.entryAmount,
+    总市值: row.totalMarketCap,
+    H股市值: row.hMarketCap,
+    入通涨幅: row.connectRise,
+    一手预计收益: row.oneLotExpectedProfit,
+    公开总手数: row.publicTotalHands,
+    实际认购倍数: row.actualMultiple,
+    富途预测一手中签率: row.allotmentRate,
+    申购时间: row.subscriptionTime,
+    资金锁定期: row.resultDate,
+    暗盘时间: row.greyDate,
+    上市日期: row.listingDate,
+    基本面: row.fundamentals,
+    行业: row.industry,
+    得分: row.score,
+    申购态度: row.attitude,
+    是否打: row.shouldApply,
+    策略: row.strategy,
+    建议甲组乙组: row.tailFunds,
+    总结: row.summary,
+    首日涨幅: row.firstDayChange,
+    累计涨跌幅: row.cumulativeChange,
+    最新价: row.latestVsOffer,
+    发行价: row.offerPrice,
+  }));
+}
+
 async function saveUserState(conn, userId, state) {
   const user = state.user || {};
+  const previousSettings = await sqlGet(conn, "SELECT hk_ipo_rules_json FROM user_settings WHERE user_id = ?", [userId]);
   await sqlRun(conn, `
     UPDATE user_profiles SET name=?, phone=?, email=?, currency=?, theme=?, avatar=?, birthday=?, city=?,
     occupation=?, risk_level=?, privacy_lock=?, data_mask=?, device_name=? WHERE user_id=?
@@ -1006,9 +1553,9 @@ async function saveUserState(conn, userId, state) {
       [userId, Number(row.id), text(row.name), row.active ? 1 : 0, text(row.target),
        JSON.stringify(row.allocation || []), number(row.debtLimit), number(row.annualReturn), text(row.risk)]);
   }
-  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json) VALUES (?, ?, ?, ?)",
+  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json) VALUES (?, ?, ?, ?, ?)",
     [userId, JSON.stringify(state.financeAssetDraft || {}), JSON.stringify(state.feeConfig || {}),
-     JSON.stringify(state.overviewGoals || {})]);
+     JSON.stringify(state.overviewGoals || {}), previousSettings?.hk_ipo_rules_json || null]);
 }
 
 async function createUser({ account, password, name, phone, email, currency }) {
@@ -1414,6 +1961,99 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {
       await sqlRun(pool, "DELETE FROM sessions WHERE token_hash = ?", [currentUser.tokenHash]);
       json(res, 200, { ok: true }, origin);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/tools/hk-ipo/rules") {
+      const saved = await loadHkIpoRulesConfig(currentUser.id);
+      const payload = buildHkIpoPayload(saved || {});
+      json(res, 200, {
+        rules: payload.rules,
+        threshold: payload.threshold,
+        updatedAt: saved?.updatedAt || "",
+      }, origin);
+      return;
+    }
+    if (req.method === "PUT" && url.pathname === "/api/tools/hk-ipo/rules") {
+      const body = await readBody(req);
+      if (body.reset) {
+        await saveHkIpoRulesConfig(currentUser.id, null);
+        const payload = buildHkIpoPayload({});
+        json(res, 200, {
+          ok: true,
+          rules: payload.rules,
+          threshold: payload.threshold,
+          stats: hkIpoStats(payload.rows),
+        }, origin);
+        return;
+      }
+      const rules = Array.isArray(body.rules) ? body.rules.map((rule) => ({
+        id: text(rule.id) || crypto.randomUUID(),
+        category: text(rule.category),
+        item: text(rule.item),
+        condition: text(rule.condition),
+        score: Number.isFinite(Number(rule.score)) ? Number(rule.score) : text(rule.score),
+        defaultScore: Number.isFinite(Number(rule.defaultScore)) ? Number(rule.defaultScore) : text(rule.defaultScore),
+        system: Boolean(rule.system),
+        custom: Boolean(rule.custom),
+      })) : [];
+      const threshold = Number(body.threshold) || HK_IPO_DEFAULT_THRESHOLD;
+      const config = { rules, threshold, updatedAt: new Date().toISOString() };
+      await saveHkIpoRulesConfig(currentUser.id, config);
+      const payload = buildHkIpoPayload(config);
+      json(res, 200, {
+        ok: true,
+        rules: payload.rules,
+        threshold: payload.threshold,
+        stats: hkIpoStats(payload.rows),
+        updatedAt: config.updatedAt,
+      }, origin);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/tools/hk-ipo/export") {
+      const saved = await loadHkIpoRulesConfig(currentUser.id);
+      const payload = filterHkIpoPayload(buildHkIpoPayload(saved || {}), {
+        status: url.searchParams.get("status") || "all",
+        query: url.searchParams.get("query") || "",
+        startDate: url.searchParams.get("startDate") || "",
+        endDate: url.searchParams.get("endDate") || "",
+      });
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(hkIpoSheetRows(payload.rows)), "主表");
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(payload.recommendations), "推荐排序");
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(payload.bigVRows), "大V意向");
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(payload.rules), "评分规则");
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(payload.scoreRows.map((row) => ({
+        代码: row.code,
+        公司名称: row.companyName,
+        得分: row.score,
+        申购态度: row.attitude,
+        是否打: row.shouldApply,
+        评分明细: row.components.map((item) => `${item.item}:${item.score}`).join("；"),
+      }))), "评分明细");
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(payload.validationRows), "数据校验");
+      const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+      const fileName = `港股打新分析_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      if (allowedOrigins.has(origin)) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Vary", "Origin");
+      }
+      res.writeHead(200, {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        "Cache-Control": "no-cache",
+      });
+      res.end(buffer);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/tools/hk-ipo") {
+      const saved = await loadHkIpoRulesConfig(currentUser.id);
+      const payload = filterHkIpoPayload(buildHkIpoPayload(saved || {}), {
+        status: url.searchParams.get("status") || "all",
+        query: url.searchParams.get("query") || "",
+        startDate: url.searchParams.get("startDate") || "",
+        endDate: url.searchParams.get("endDate") || "",
+      });
+      json(res, 200, payload, origin);
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/state") {
