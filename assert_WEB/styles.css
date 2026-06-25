@@ -5934,6 +5934,59 @@ button.is-loading {
   color: var(--primary);
   border-color: var(--primary);
 }
+.hk-ipo-multiple-up strong {
+  color: #dc2626;
+}
+.hk-ipo-multiple-up small {
+  display: block;
+  margin-top: 3px;
+  color: #dc2626;
+  font-size: .72rem;
+  font-weight: 800;
+}
+.hk-ipo-bigv-form {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(110px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+.hk-ipo-bigv-form input,
+.hk-ipo-bigv-form select {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: var(--surface);
+  color: var(--text);
+}
+.hk-ipo-bigv-form button,
+.hk-ipo-inline-btn {
+  border: 1px solid var(--primary);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: rgba(99, 102, 241, .1);
+  color: var(--primary);
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.hk-ipo-inline-btn {
+  padding: 5px 9px;
+  border-color: var(--border);
+  background: var(--surface);
+}
+.hk-ipo-validation-issues {
+  margin-top: 14px;
+}
+.hk-ipo-table a {
+  color: var(--primary);
+  font-weight: 800;
+  text-decoration: none;
+}
+.hk-ipo-table a:hover {
+  text-decoration: underline;
+}
 .hk-ipo-company-cell {
   display: table-cell;
 }
@@ -5982,18 +6035,74 @@ button.is-loading {
   color: var(--primary);
 }
 .hk-ipo-rule-table input,
+.hk-ipo-rule-table textarea,
 .hk-ipo-threshold {
   width: 100%;
-  min-width: 90px;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 7px 9px;
   background: var(--surface);
   color: var(--text);
 }
-.hk-ipo-rule-table input[readonly] {
+.hk-ipo-rule-table {
+  min-width: 1460px;
+  width: 100%;
+  table-layout: fixed;
+}
+.hk-ipo-rule-table th:nth-child(1), .hk-ipo-rule-table td:nth-child(1) { width: 120px; max-width: 120px; }
+.hk-ipo-rule-table th:nth-child(2), .hk-ipo-rule-table td:nth-child(2) { width: 140px; max-width: 140px; }
+.hk-ipo-rule-table th:nth-child(3), .hk-ipo-rule-table td:nth-child(3) { width: 560px; max-width: 560px; }
+.hk-ipo-rule-table th:nth-child(4), .hk-ipo-rule-table td:nth-child(4) {
+  width: 86px;
+  max-width: 86px;
+  min-width: 86px;
+  text-align: center;
+  white-space: nowrap;
+}
+.hk-ipo-rule-table th:nth-child(5), .hk-ipo-rule-table td:nth-child(5) { width: 110px; max-width: 110px; }
+.hk-ipo-rule-table th:nth-child(6), .hk-ipo-rule-table td:nth-child(6) { width: 100px; max-width: 100px; white-space: nowrap; }
+.hk-ipo-rule-table th:nth-child(7), .hk-ipo-rule-table td:nth-child(7) { width: 210px; max-width: 210px; }
+.hk-ipo-rule-table textarea {
+  width: 50ch;
+  min-width: 50ch;
+  max-width: 50ch;
+  min-height: 38px;
+  height: auto;
+  resize: none;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+.hk-ipo-rule-table input[readonly],
+.hk-ipo-rule-table textarea[readonly] {
   background: rgba(148, 163, 184, .08);
   color: var(--muted);
+}
+.hk-ipo-rule-table tr.is-editing input,
+.hk-ipo-rule-table tr.is-editing textarea {
+  border-color: var(--primary);
+  background: var(--surface);
+  color: var(--text-strong);
+}
+.hk-ipo-rule-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+.hk-ipo-rule-actions button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--surface);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+.hk-ipo-rule-actions button:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 .hk-ipo-rules-head {
   display: flex;
@@ -6048,6 +6157,9 @@ button.is-loading {
   .hk-ipo-bar-item {
     grid-template-columns: 1fr;
     gap: 6px;
+  }
+  .hk-ipo-bigv-form {
+    grid-template-columns: 1fr;
   }
   .hk-ipo-table {
     min-width: 920px;

@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="黄仁勋知识库 — 30年创业历程，AI革命的缔造者">
+    <title>黄仁勋知识库 | Jensen Huang Knowledge Base</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Hero -->
+    <header class="hero">
+        <div class="hero-content">
+            <div class="logo-badge">JH</div>
+            <h1>黄仁勋知识库</h1>
+            <p class="subtitle">Jensen Huang · NVIDIA 创始人 · AI 教父</p>
+            <p class="description">30 年创业智慧，从濒临破产到万亿美元帝国<br>点击任意卡片展开完整内容</p>
+            <div class="stats-bar">
+                <div class="stat-item"><div class="stat-value">30+</div><div class="stat-label">年执掌 NVIDIA</div></div>
+                <div class="stat-item"><div class="stat-value">$3T+</div><div class="stat-label">市值峰值</div></div>
+                <div class="stat-item"><div class="stat-value">100+</div><div class="stat-label">重要演讲</div></div>
+                <div class="stat-item"><div class="stat-value">450万</div><div class="stat-label">CUDA 开发者</div></div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- 搜索栏 -->
+        <div class="search-bar" id="searchBar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="searchInput" placeholder="搜索理念、公司、人物、演讲…" />
+            <span class="search-count" id="searchCount"></span>
+        </div>
+
+        <!-- 导航卡片 -->
+        <nav class="nav-cards">
+            <a href="#timeline" class="nav-card"><div class="nav-icon">📜</div><h3>发展历程</h3><span class="nav-count">30+ 里程碑</span></a>
+            <a href="#concepts" class="nav-card"><div class="nav-icon">💡</div><h3>核心理念</h3><span class="nav-count">12 个</span></a>
+            <a href="#quotes" class="nav-card"><div class="nav-icon">💬</div><h3>经典语录</h3><span class="nav-count">12 条</span></a>
+            <a href="#companies" class="nav-card"><div class="nav-icon">🏢</div><h3>关键公司</h3><span class="nav-count">8 家</span></a>
+            <a href="#people" class="nav-card"><div class="nav-icon">👥</div><h3>核心人物</h3><span class="nav-count">8 位</span></a>
+            <a href="#speeches" class="nav-card"><div class="nav-icon">🎤</div><h3>重要演讲</h3><span class="nav-count">6 场</span></a>
+        </nav>
+
+        <!-- AI 问答 -->
+        <section class="ai-chat-section">
+            <div class="ai-chat-header"><h2>🤖 黄仁勋 AI 问答</h2><span class="beta-badge">BETA</span></div>
+            <p class="ai-chat-desc">想了解黄仁勋的商业哲学？向 AI 助手提问，获取知识库原文溯源的回答。</p>
+            <button class="ai-chat-btn" id="aiChatBtn">开始对话 →</button>
+        </section>
+
+        <!-- ====== 发展历程 ====== -->
+        <section id="timeline" class="content-section searchable" data-section="timeline">
+            <h2 class="section-title">发展历程</h2>
+            <p class="section-subtitle">从 Denny's 餐厅餐巾纸上的构想到全球市值最高的公司</p>
+            <div class="timeline">
+                <div class="timeline-item" data-keywords="创立 创业 1993 Denny's 餐厅 Malachowsky Priem">
+                    <div class="timeline-year">1993</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline">
+                            <h3>创立 NVIDIA</h3><span class="toggle-icon">+</span>
+                        </div>
+                        <div class="card-detail">
+                            <p>黄仁勋、Chris Malachowsky、Curtis Priem 三人在加州 Sunnyvale 的 Denny's 餐厅餐巾纸上构想 NVIDIA 蓝图。黄仁勋当时年仅 30 岁，此前在 AMD 和 LSI Logic 担任芯片工程师。公司名取自拉丁语 "invidia"（羡慕），寓意打造令人羡慕的技术。创业初期连商业计划书都不会写，但前老板向红杉资本创始人 Don Valentine 推荐了他。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="NV1 首款产品 1995 失败 濒临破产">
+                    <div class="timeline-year">1995</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>首款产品 NV1 — 失败与教训</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>发布第一个多媒体加速芯片 NV1，集成游戏端口、声效、2D/3D 显示。但与 SEGA 合作开发的方案不兼容微软 DirectX 主流标准，市场遇冷。公司资金几乎耗尽，濒临破产。黄仁勋后来回忆："我厚着脸皮求合作方解除合同，还求人家支付费用。我拿到了钱，用那笔资金发明了沿用至今的芯片设计方法。"</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="RIVA 128 起死回生 DirectX 1997">
+                    <div class="timeline-year">1997</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>RIVA 128 — 起死回生</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>果断放弃自有标准，转向支持 DirectX，推出全球首款 128 位 3D 处理器 RIVA 128。四个月内销量突破百万台，公司扭亏为盈。这是黄仁勋"战略性撤退"理念的首次实践——放弃沉没成本，拥抱行业标准。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="台积电 TSMC 合作 Fabless 1998">
+                    <div class="timeline-year">1998</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>与台积电结盟</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>与台积电建立战略合作伙伴关系，确立 Fabless（无晶圆厂）模式——NVIDIA 专注芯片设计，制造交给台积电。这一合作延续至今超过 27 年，成为半导体行业最成功的长期合作关系之一。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item highlight" data-keywords="GPU GeForce 256 发明 上市 纳斯达克 1999">
+                    <div class="timeline-year">1999</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>⭐ 发明 GPU · 纳斯达克上市</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>发布划时代的 GeForce 256，首次提出 GPU（图形处理器）概念，集成硬件变换与光照引擎（T&L），不再依赖 CPU 完成 3D 渲染。同年 1 月在纳斯达克上市，首日股价涨 41%。这一创新重新定义了计算机图形技术，也奠定了 NVIDIA 在游戏市场的统治地位。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="收购 3dfx Xbox 微软 2000">
+                    <div class="timeline-year">2000</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>收购 3dfx · 称霸显卡</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>收购 90 年代显卡霸主 3dfx（Voodoo 系列创造者）的知识产权，在独立显卡市场彻底站稳脚跟。同年获选为微软第一代 Xbox 游戏机指定图形处理单元，GeForce 2 GTS 成为全球首款每条渲染线可着色的 GPU。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item highlight" data-keywords="CUDA 并行计算 通用计算 GPGPU 豪赌 2006">
+                    <div class="timeline-year">2006</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>⭐ 推出 CUDA — 惊天豪赌</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>发布 CUDA 并行计算平台，让 GPU 从图形渲染跨界到科学计算和 AI 领域。为此在每颗 GPU 中集成 CUDA 核心，导致芯片成本飙升、利润暴跌，股价从 $30+ 跌至个位数。华尔街骂声一片，但黄仁勋顶住压力坚持。2007 年 CUDA 内置于所有 GPU。这一决定彻底改变了 NVIDIA 和未来 AI 产业的命运。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="AlexNet 深度学习 ImageNet 2012 GPU">
+                    <div class="timeline-year">2012</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>AlexNet — 深度学习引爆点</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>多伦多大学 Alex Krizhevsky 用两块 GTX 580 GPU 训练出 AlexNet，ImageNet 图像识别错误率从 26% 骤降至 15.3%。这是深度学习的"iPhone 时刻"，证明了 GPU 在 AI 训练上的巨大潜力。此后 CUDA 下载量飙升，2017 年达到 270 万次。NVIDIA 从游戏芯片公司正式转型为 AI 基础设施公司。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="Pascal DGX-1 AlphaGo AI 2016">
+                    <div class="timeline-year">2016</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>AI 时代全面到来</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>发布 Pascal 架构与 DGX-1 AI 超级计算机。AlphaGo 使用 128 块 NVIDIA GPU 击败李世石。NVIDIA 推出 NVLink 高速互联技术，突破多 GPU 协同通信瓶颈。黄仁勋在 GTC 大会上宣布"AI 是计算的下一个平台"。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="Volta Tensor Core 2017 V100">
+                    <div class="timeline-year">2017</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>Volta 架构 — AI 原生加速</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>Volta 架构首次集成 Tensor Core，专为深度学习矩阵运算加速。V100 GPU 拥有 211 亿晶体管，AI 训练性能较 Pascal 提升 12 倍。同年推出 TensorRT 推理优化引擎，AI 推理性能提升 4 倍以上。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="Turing RTX 光线追踪 2018">
+                    <div class="timeline-year">2018</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>Turing 架构 — 实时光线追踪</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>发布 Turing 架构与 RTX 系列显卡，首次在消费级 GPU 整合 RT Core（光线追踪核心）+ Tensor Core，实现实时光线追踪技术。这重新定义了游戏与专业可视化的未来。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="Ampere A100 2020 大模型">
+                    <div class="timeline-year">2020</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>Ampere 架构 — 大模型标配</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>发布 Ampere 架构与 A100 GPU，540 亿晶体管。Tensor Core 3.0 + NVLink 3.0 让 A100 成为大模型训练的标配。TF32/BF16 混合精度训练成为标准。同年 NVIDIA 市值突破 $3000 亿。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item highlight" data-keywords="H100 Hopper ChatGPT 万亿 2022 2023">
+                    <div class="timeline-year">2022-23</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>⭐ H100 · ChatGPT 背后的算力</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>发布 Hopper 架构 H100 GPU，800 亿晶体管，Tensor Core 4.0 + NVLink 4.0，FP16 算力达 1 PFLOPS。ChatGPT 背后正是数千块 H100 组成的算力集群。NVIDIA 市值突破万亿美元，黄仁勋被誉为"AI 教父"，登上《时代》杂志封面。CUDA 生态开发者突破 400 万。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item highlight" data-keywords="Blackwell B200 GB200 市值第一 2024">
+                    <div class="timeline-year">2024</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>⭐ Blackwell · 全球市值第一</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>发布 Blackwell 架构 B200/GB200 GPU，支持 HBM3e、FP4/FP8，面向万亿参数训练与高吞吐推理。NVIDIA 市值一度超越苹果和微软，成为全球最高（$3T+）。黄仁勋入选美国工程院院士，以 $1061 亿净资产位列全球富豪榜第 13 位。GTC 大会成为全球 AI 行业风向标。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="NVLink Fusion 英特尔 合作 时代年度人物 2025">
+                    <div class="timeline-year">2025</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>时代年度人物 · 开放生态</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>获伊丽莎白女王工程奖、斯蒂芬·霍金奖学金。GTC 发布 NVLink Fusion 开放策略，允许客户构建半定制化 AI 基础设施。与英特尔达成 $50 亿合作，从 33 年对手变为战略盟友。央视《面对面》专访，评价华为"对手不是敌人"。当选《时代》杂志 2025 年度人物——"AI 的缔造者"。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-item" data-keywords="GTC 2026 Rubin 芯片 AI工厂">
+                    <div class="timeline-year">2026</div>
+                    <div class="timeline-card">
+                        <div class="card-header" data-toggle="timeline"><h3>GTC 2026 · Rubin 芯片</h3><span class="toggle-icon">+</span></div>
+                        <div class="card-detail">
+                            <p>GTC 2026 发布多款"世界前所未见"的全新芯片（预计为 Rubin 系列衍生品），采用 HBM4 显存与 NVLink 6。CMU 毕业演讲火爆全网——"能有多难？"。宣布 NVIDIA 从芯片公司转向 AI 工厂与 AI 基础设施公司。发布 7 款新芯片，涵盖人形机器人、智能驾驶等领域。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ====== 核心理念 ====== -->
+        <section id="concepts" class="content-section searchable" data-section="concepts">
+            <h2 class="section-title">核心商业理念</h2>
+            <p class="section-subtitle">黄仁勋 30 年商业思考的精华提炼</p>
+            <div class="concepts-grid">
+                <div class="concept-card" data-keywords="加速计算 GPU 并行 核心使命">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">⚡</div><h3>加速计算</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>NVIDIA 的核心使命——用并行计算替代通用计算。"我们不会去和别人争夺已经商品化的市场，而是做以前从未做过的事情。为什么要浪费这些才华横溢的人的生命去做一些已经做过的事情？"从 GPU 到 CUDA 到 Tensor Core，每一代架构都在拓展加速计算的边界。</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="黄氏定律 6个月 迭代 速度">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">🔁</div><h3>黄氏定律</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>每 6 个月推出新品，远超行业 18 个月的迭代周期。这一策略让 NVIDIA 迅速淘汰了 S3、3dfx、ATI 等竞争对手。黄仁勋说："我不要一晚上做出一个杀手级产品，我只需要一个能赢的产品，赢的目的是，再来一局。"从 Tesla 到 Blackwell，NVIDIA 保持了每代架构的性能飞跃。</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="CUDA 生态 开发者 护城河 通用计算">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">🧠</div><h3>CUDA 生态</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>2006 年推出的并行计算平台，如今拥有 450 万+ 开发者、450+ 加速库、支持 40+ 主流 AI 框架（PyTorch、TensorFlow 等）。迁移成本极高——更换平台综合成本增加 40%+。形成了完美飞轮：吸引开发者→丰富应用→拉动硬件销售→更多资源投入生态。2012 年 AlexNet 是转折点，CUDA 从科学计算小众工具变成 AI 产业地基。</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="死地战略 背水一战 全力以赴 押注">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">🎯</div><h3>死地战略</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>"唯一的生存之道，便是寻得一手好牌，押上所有筹码，然后一次又一次地重复。"黄仁勋在多个关键时刻都采取了背水一战的策略：NV1 失败后全力转向 DirectX、CUDA 豪赌不顾华尔街反对、放弃手机芯片全力押注 AI。"我生存的意志超过了几乎所有人杀死我的意志。"</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="自我蚕食 创新 颠覆 老产品">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">🔄</div><h3>自我蚕食</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>"如果你想成为市场领导者，你必须主动蚕食自己的老产品。让你的新想法去蚕食老想法。"NVIDIA 从不守成——从 GeForce 到 CUDA、从游戏到 AI、从 FP32 到 Tensor Core，每次都是用自己的新产品颠覆旧产品。"经常鞭策公司回归问题本质，会创造大量机会。"</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="30天 破产 危机感 生存">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">💀</div><h3>30 天破产思维</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>"我们公司离破产只有 30 天。"这句话至今仍是 NVIDIA 的核心信条。源自创业初期 NV1 失败后濒临破产的经历。黄仁勋将此作为企业文化灌输到每一位员工——无论公司多大，始终保持创业公司的危机感和紧迫感。</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="奔跑 跑步 全力以赴 跑吧">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">🏃</div><h3>奔跑哲学</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>"不论是为了食物而奔跑，或不被他人当做食物而奔跑。你往往无法知道自己正处在哪一种情况，但无论如何，都要保持奔跑。"黄仁勋 15 岁时曾是乒乓球选手（美国公开赛青年组双打季军），这种竞技精神贯穿了他的整个创业生涯。"可能有人比我聪明，但没人比我更努力。"</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="合作 竞争 NVLink Fusion 开放 生态">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">🤝</div><h3>合作代替竞争</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>NVLink Fusion 策略开放生态，允许客户整合自家或第三方芯片。与英特尔从 33 年对手变为 $50 亿恋人——"我们是恋人，不是战士"。评价华为："他们是竞争对手，但对手不是敌人，可以钦佩和尊重竞争对手。"合作代替竞争，构建更广泛的 AI 生态。</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="洞见 本质 问题 思考 市场规模">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">📖</div><h3>洞见驱动</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>"洞见很重要。"2009 年斯坦福演讲中反反复复强调的核心理念。"注重工作的重要性而非市场规模。因为工作的重要性是未来市场存在的早期指标。""你应该寻找未来成功的早期指标，而且越早越好。"从问题本质出发，而非追逐市场热点。</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="卖铲子 淘金 基础设施 平台">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">🔧</div><h3>卖铲子不淘金</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>NVIDIA 的定位是 AI 基础设施供应商——"卖铲子"而非直接去 AI 数据矿洞"淘金"。构建系统生态，筑高门槛防止对手"抱走肥肉"。提供"烧 Token"的工具（DGX、NVLink），引入数字孪生仿真 + Agent，优化系统降低 Token 成本。"我们正在整个 AI 技术栈上进行投资——能源、半导体、数据中心、云计算以及应用。"</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="学习 阅读 谦逊 永不厌倦 CEO">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">📚</div><h3>永不厌倦</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>"一个科技公司 CEO 怎么可能任职这么长时间？唯一的方式就是保持阅读、学习、倾听、关注。唯一真正让你学习的态度是保持谦逊。"黄仁勋每周工作 7 天，拥有 40 名直接下属，推崇扁平管理。"人们喜欢教导那些伟大的学生，所以我投入了很多时间去成为一名好学生。"</p>
+                    </div>
+                </div>
+                <div class="concept-card" data-keywords="简单 执行 完美 宏伟 再来一局">
+                    <div class="card-header" data-toggle="concept">
+                        <div class="concept-icon">🎯</div><h3>简单而完美</h3><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>"拥有一个可以完美执行的简单想法，有时候比拥有一个无法执行的宏伟想法更好。我不要一晚上做出杀手级产品，我只需要一个能赢的产品，赢的目的是，再来一局。"NVIDIA 从不做完美产品，而是做足够简单能完美执行的产品，然后用 50 年持续迭代。</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ====== 经典语录 ====== -->
+        <section id="quotes" class="content-section searchable" data-section="quotes">
+            <h2 class="section-title">经典语录</h2>
+            <p class="section-subtitle">黄仁勋的商业智慧与人生哲学（点击复制）</p>
+            <div class="quotes-grid">
+                <blockquote class="quote-card featured" data-keywords="绝望 成功 灵感"><p>"绝望才是成功之母，灵感不是。"</p><cite>— 黄仁勋</cite></blockquote>
+                <blockquote class="quote-card" data-keywords="突破 人生"><p>"你此刻在做的事，可能是你人生的重大突破。"</p><cite>— 斯坦福毕业演讲</cite></blockquote>
+                <blockquote class="quote-card" data-keywords="坦诚 错误 谦卑 帮助"><p>"坦诚面对错误，谦卑寻求帮助，是聪明、成功人士最难学会的。"</p><cite>— 黄仁勋</cite></blockquote>
+                <blockquote class="quote-card" data-keywords="CUDA 痛苦 品格 愿景"><p>"我们为 AI 发明了 CUDA，承受痛苦和苦难，是在追求愿景的路上必经之痛。"</p><cite>— 黄仁勋</cite></blockquote>
+                <blockquote class="quote-card" data-keywords="撤退 牺牲 放弃 战略"><p>"战略性的撤退、牺牲、决定放弃什么，是成功的核心。"</p><cite>— 台大毕业演讲 2023</cite></blockquote>
+                <blockquote class="quote-card featured" data-keywords="奔跑 食物 跑吧"><p>"不论是为了食物而奔跑，或不被他人当做食物而奔跑。无论如何，都要保持奔跑。"</p><cite>— 黄仁勋</cite></blockquote>
+                <blockquote class="quote-card" data-keywords="期望 韧性 复原力"><p>"期望太高的人，往往复原力很低。韧性对于成功来说至关重要。"</p><cite>— 斯坦福 SIEPR 演讲</cite></blockquote>
+                <blockquote class="quote-card" data-keywords="洗碗 低贱 全力以赴"><p>"没有任何工作是低贱的。我在餐厅洗碗时，就会全力以赴地去洗。"</p><cite>— 黄仁勋</cite></blockquote>
+                <blockquote class="quote-card" data-keywords="痛苦 煎熬 CEO 厌倦"><p>"CEO 的工作主要关乎痛苦与煎熬。永不厌倦，而且别被炒鱿鱼。"</p><cite>— 剑桥大学霍金奖学金</cite></blockquote>
+                <blockquote class="quote-card" data-keywords="失败 公开"><p>"失败必须被公开。"</p><cite>— NVIDIA 管理哲学</cite></blockquote>
+                <blockquote class="quote-card" data-keywords="破产 30天 信条"><p>"公司离破产永远只有 30 天。"</p><cite>— NVIDIA 核心信条</cite></blockquote>
+                <blockquote class="quote-card" data-keywords="能有多难 How hard"><p>"能有多难？（How hard can it be?）"</p><cite>— CMU 毕业演讲 2026</cite></blockquote>
+            </div>
+        </section>
+
+        <!-- ====== 关键公司 ====== -->
+        <section id="companies" class="content-section searchable" data-section="companies">
+            <h2 class="section-title">关键公司</h2>
+            <p class="section-subtitle">NVIDIA 商业版图中的核心玩家</p>
+            <div class="company-grid">
+                <div class="company-card" data-keywords="NVIDIA 英伟达 GPU AI 1993 万亿">
+                    <div class="card-header" data-toggle="company"><h3>NVIDIA 英伟达</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>1993 年创立于加州，从 Denny's 餐厅的构想到全球市值最高公司。核心业务：GPU（GeForce/Quadro/Tesla）、AI 基础设施（DGX/HGX）、自动驾驶（DRIVE）、机器人（Isaac）。9 代 GPU 架构演进（Tesla→Blackwell），CUDA 生态 450 万+ 开发者。2024 年市值突破 $3T，超越苹果和微软。扁平管理，CEO 有 40 名直接下属。</p>
+                        <div class="detail-stats"><span>成立: 1993</span><span>员工: 3万+</span><span>市值: $3T+</span></div>
+                    </div>
+                </div>
+                <div class="company-card" data-keywords="台积电 TSMC 代工 制造 合作">
+                    <div class="card-header" data-toggle="company"><h3>台积电 TSMC</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>NVIDIA 最核心的代工伙伴，1998 年起合作至今 27 年。为 NVIDIA 生产从 90nm 到 3nm 的所有先进制程芯片。NVIDIA 采用 Fabless 模式，制造完全依赖台积电。这一合作关系是半导体行业最成功的长期合作之一。</p>
+                        <div class="detail-stats"><span>合作: 27 年</span><span>最新制程: 4nm/3nm</span></div>
+                    </div>
+                </div>
+                <div class="company-card" data-keywords="AMD 竞争 Lisa Su GPU CPU ATI">
+                    <div class="card-header" data-toggle="company"><h3>AMD</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>主要竞争对手。2006 年收购 ATI 后形成"红蓝绿"三足鼎立格局。CEO Lisa Su（苏姿丰）是黄仁勋最强对手，带领 AMD 从濒临破产到强势复兴。在 GPU（Radeon vs GeForce）和 CPU（EPYC/ Ryzen vs Xeon）两个市场展开激烈竞争。</p>
+                        <div class="detail-stats"><span>CEO: Lisa Su</span><span>竞争: GPU/CPU</span></div>
+                    </div>
+                </div>
+                <div class="company-card" data-keywords="英特尔 Intel 对手 合作 50亿 陈立武">
+                    <div class="card-header" data-toggle="company"><h3>英特尔 Intel</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>33 年对手变 $50 亿恋人。2025 年达成合作协议，共同面向数据中心开发定制芯片。黄仁勋："英特尔花了 33 年时间试图'消灭'我们，现在我们是恋人，不是战士。"促成合作的关键因素之一是黄仁勋与英特尔 CEO 陈立武的长期友谊。</p>
+                        <div class="detail-stats"><span>合作: $50 亿</span><span>领域: 数据中心</span></div>
+                    </div>
+                </div>
+                <div class="company-card" data-keywords="华为 Huawei 竞争 芯片设计 尊重">
+                    <div class="card-header" data-toggle="company"><h3>华为 Huawei</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>"华为比我们大得多，从规模、人员规模和技术能力来看，他们既广又深。这是一家拥有强大芯片设计能力的公司。他们是我们的竞争对手，但对手不是敌人，你仍然可以钦佩和尊重竞争对手。"——黄仁勋 2025 年央视专访</p>
+                        <div class="detail-stats"><span>关系: 竞争+尊重</span><span>领域: 芯片设计</span></div>
+                    </div>
+                </div>
+                <div class="company-card" data-keywords="小米 Xiaomi 雷军 合作 自动驾驶 AI">
+                    <div class="card-header" data-toggle="company"><h3>小米 Xiaomi</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>"我与雷军合作已经很久了。我们一起做过手机，现在正在共同开发 AI、自动驾驶软件等等，还有很多项目正在合作。"——黄仁勋 2025 年央视《面对面》专访中透露。</p>
+                        <div class="detail-stats"><span>合作: 长期</span><span>领域: AI · 自动驾驶</span></div>
+                    </div>
+                </div>
+                <div class="company-card" data-keywords="ARM 收购 400亿 移动 架构 失败">
+                    <div class="card-header" data-toggle="company"><h3>ARM</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>移动芯片架构领导者。NVIDIA 曾计划 $400 亿收购软银持有的 ARM，但因美国、英国、欧盟监管阻力于 2022 年宣告失败。这是科技史上最大的未遂收购之一。NVIDIA 后来转向 NVLink Fusion 策略，以更开放的方式构建生态。</p>
+                        <div class="detail-stats"><span>收购: 失败</span><span>金额: $400 亿</span></div>
+                    </div>
+                </div>
+                <div class="company-card" data-keywords="3dfx Voodoo 收购 显卡 先驱">
+                    <div class="card-header" data-toggle="company"><h3>3dfx</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>90 年代显卡霸主，Voodoo 系列显卡的创造者，曾是 3D 图形市场的王者。因战略失误破产，2000 年被 NVIDIA 收购。这标志着 NVIDIA 在独立显卡市场的统治正式确立，消灭了最后的宿敌。</p>
+                        <div class="detail-stats"><span>收购: 2000</span><span>意义: 称霸显卡</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ====== 核心人物 ====== -->
+        <section id="people" class="content-section searchable" data-section="people">
+            <h2 class="section-title">核心人物</h2>
+            <p class="section-subtitle">NVIDIA 帝国背后的关键人物</p>
+            <div class="people-grid">
+                <div class="person-card" data-keywords="黄仁勋 Jensen Huang 创始人 CEO 台湾 斯坦福">
+                    <div class="card-header" data-toggle="person"><h3>黄仁勋 Jensen Huang</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>1963 年生于台湾台南，祖籍浙江青田。9 岁赴美，在肯塔基州基督学校成长。送过报纸、做过洗碗工。15 岁获美国乒乓球公开赛青年组双打季军。俄勒冈州立大学电机工程学士（1984），斯坦福大学电子工程硕士（1990）。先后在 AMD（1983-85）、LSI Logic（1985-93）任职。1993 年创立 NVIDIA，成为全球任期最长的科技公司 CEO。2025 年当选《时代》年度人物。</p>
+                        <div class="person-tags"><span>AI 教父</span><span>时代年度人物</span><span>美国工程院院士</span></div>
+                    </div>
+                </div>
+                <div class="person-card" data-keywords="Chris Malachowsky 联合创始人 工程师 惠普">
+                    <div class="card-header" data-toggle="person"><h3>Chris Malachowsky</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>NVIDIA 联合创始人，现任 NVIDIA Fellow。出身电气工程师，早年在惠普和 Sun Microsystems 担任技术主管。与黄仁勋在 Denny's 餐厅共同构想 NVIDIA。历任工程和运营高级副总裁，拥有 40+ 年从业经验和几十项集成电路专利，是 GPU 架构和并行计算领域的传奇人物。热心教育慈善，斥资数千万美元在母校佛罗里达大学筹建计算机科学中心。</p>
+                        <div class="person-tags"><span>创始班底</span><span>GPU 架构先驱</span></div>
+                    </div>
+                </div>
+                <div class="person-card" data-keywords="Curtis Priem 联合创始人 图形">
+                    <div class="card-header" data-toggle="person"><h3>Curtis Priem</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>NVIDIA 第三位联合创始人。与黄仁勋、Malachowsky 共同在 1993 年创立公司。在早期图形芯片技术方面做出了关键贡献，参与了 NV1 等早期产品的设计工作。</p>
+                        <div class="person-tags"><span>联合创始人</span><span>图形技术</span></div>
+                    </div>
+                </div>
+                <div class="person-card" data-keywords="Colette Kress CFO 财务 资本">
+                    <div class="card-header" data-toggle="person"><h3>Colette Kress</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>2013 年加入 NVIDIA，担任执行副总裁兼首席财务官。在 NVIDIA 从游戏公司转型为 AI 巨头的过程中，负责财务战略和资本运作，见证了公司市值从 $100 亿到 $3T 的飞跃。</p>
+                        <div class="person-tags"><span>CFO</span><span>财务战略</span></div>
+                    </div>
+                </div>
+                <div class="person-card" data-keywords="Debora Shoquist 运营 供应链">
+                    <div class="card-header" data-toggle="person"><h3>Debora Shoquist</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>2007 年加入 NVIDIA，担任执行副总裁负责全球运营管理。在 NVIDIA 快速扩张期间，确保供应链和生产体系的高效运转，是 NVIDIA Fabless 模式成功运转的关键人物。</p>
+                        <div class="person-tags"><span>运营管理</span><span>供应链</span></div>
+                    </div>
+                </div>
+                <div class="person-card" data-keywords="Bill Dally 首席科学家 斯坦福 教授">
+                    <div class="card-header" data-toggle="person"><h3>Bill Dally</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>2009 年加入 NVIDIA 担任首席科学家，同时是斯坦福大学计算机科学和电气工程教授。NVIDIA 技术研究的核心智囊，推动 GPU 在 AI 和科学计算领域的应用。在并行计算架构和互连网络领域有深厚造诣。</p>
+                        <div class="person-tags"><span>首席科学家</span><span>斯坦福教授</span></div>
+                    </div>
+                </div>
+                <div class="person-card" data-keywords="Lisa Su 苏姿丰 AMD CEO 竞争 对手">
+                    <div class="card-header" data-toggle="person"><h3>Lisa Su 苏姿丰</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>AMD CEO，黄仁勋最强竞争对手。MIT 电机工程博士，2014 年出任 AMD CEO。带领 AMD 从濒临破产到强势复兴，在 GPU（Radeon）和 CPU（EPYC/Ryzen）两个市场与 NVIDIA 展开激烈竞争。被业界称为"硅谷最成功的转型 CEO"。</p>
+                        <div class="person-tags"><span>AMD CEO</span><span>最强竞争对手</span></div>
+                    </div>
+                </div>
+                <div class="person-card" data-keywords="雷军 小米 合作 自动驾驶 手机">
+                    <div class="card-header" data-toggle="person"><h3>雷军</h3><span class="toggle-icon">+</span></div>
+                    <div class="card-detail">
+                        <p>小米创始人。"我与雷军合作已经很久了。我们一起做过手机，现在正在共同开发 AI、自动驾驶软件等等，还有很多项目正在合作。"——黄仁勋 2025 年央视《面对面》专访。NVIDIA 与小米在手机游戏、AI、自动驾驶等多个领域保持长期合作。</p>
+                        <div class="person-tags"><span>长期合作伙伴</span><span>小米创始人</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ====== 重要演讲 ====== -->
+        <section id="speeches" class="content-section searchable" data-section="speeches">
+            <h2 class="section-title">重要演讲</h2>
+            <p class="section-subtitle">黄仁勋最重要的公开演讲与分享</p>
+            <div class="speech-list">
+                <div class="speech-card" data-keywords="斯坦福 2009 公开课 洞见 商业逻辑">
+                    <div class="card-header" data-toggle="speech">
+                        <div class="speech-meta"><span class="speech-year">2009</span><h3>斯坦福大学公开课</h3></div><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>黄仁勋最经典的一场演讲，被评价为"了解黄仁勋和英伟达最重要的素材，没有之一"。层层递进讲述商业逻辑和思维方式，反反复复强调"洞见很重要"。包含大量芒格式思维——"反过来想"和"理性的诚实"。15 年后回看，其中的商业洞见依然精准。正值英伟达上市后财报承压最厉害的阶段，但黄仁勋展现了"韧劲"的天赋。</p>
+                        <p class="speech-quote">"如果你想成为市场的领导者，你必须主动蚕食自己的老产品。"</p>
+                    </div>
+                </div>
+                <div class="speech-card" data-keywords="GTC 大会 主题演讲 皮衣 芯片 AI">
+                    <div class="card-header" data-toggle="speech">
+                        <div class="speech-meta"><span class="speech-year">2016+</span><h3>GTC 大会主题演讲</h3></div><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>NVIDIA 年度技术盛会，黄仁勋身穿标志性黑色皮衣、手持 GPU 芯片登台。从 AI 训练到推理、从数据中心到人形机器人，GTC 已成为全球 AI 行业的风向标。2024 年 GTC 发布 Blackwell 架构，2025 年发布 NVLink Fusion 开放策略，2026 年发布 Rubin 系列芯片。每届 GTC 都是 AI 产业的重大事件。</p>
+                        <p class="speech-quote">"AI 不仅仅是模型，它是一个完整的产业。"——GTC 2026</p>
+                    </div>
+                </div>
+                <div class="speech-card" data-keywords="斯坦福 2024 SIEPR 痛苦 韧性 毕业">
+                    <div class="card-header" data-toggle="speech">
+                        <div class="speech-meta"><span class="speech-year">2024</span><h3>斯坦福 SIEPR 演讲</h3></div><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>在斯坦福商学院经济政策研究所发表演讲。最出圈的言论："我希望你们经历大量的痛苦和磨难。"解释："成功不是来自于智慧，而是来自于性格，而性格是经历苦难塑造出来的。""对自己期望非常高的人，韧性都很低。不幸的是，韧性对成功至关重要。"分享三个核心观点：经营好过去、回归问题本质、保持低期望高韧性。</p>
+                        <p class="speech-quote">"我祝愿你们经历足够的痛苦。"——台下一片寂静，随后掌声如潮。</p>
+                    </div>
+                </div>
+                <div class="speech-card" data-keywords="剑桥 霍金 奖学金 炖菜 裁员 2025">
+                    <div class="card-header" data-toggle="speech">
+                        <div class="speech-meta"><span class="speech-year">2025</span><h3>剑桥大学霍金奖学金</h3></div><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>获颁 2025 年斯蒂芬·霍金奖学金后的访谈。分享管理哲学：公司应该像一锅丰富的"炖菜"而非清汤。"永不裁员后面的人。"回忆早年移居美国经历，母亲拿着字典教他英语，始终灌输"你很特别""你能做到"的信念，养成了"这能有多难？"的心态。幽默总结 CEO 长寿秘诀："永不厌倦，而且别被炒鱿鱼。"</p>
+                        <p class="speech-quote">"CEO 的工作主要关乎痛苦与煎熬。"</p>
+                    </div>
+                </div>
+                <div class="speech-card" data-keywords="央视 面对面 专访 华为 雷军 中国 2025">
+                    <div class="card-header" data-toggle="speech">
+                        <div class="speech-meta"><span class="speech-year">2025</span><h3>央视《面对面》专访</h3></div><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>时隔多年再次到北京，凌晨四点起床准备。开场用中文打招呼但很快放弃——"如果我全程用中文讲，得花半个小时。"评价华为："他们比我们大得多，拥有强大的芯片设计能力。他们是竞争对手，但对手不是敌人。"透露与雷军的长期合作关系，展现对中国市场的重视。为链博会发表演讲。</p>
+                        <p class="speech-quote">"华为依然极具竞争力，但对手不是敌人。"</p>
+                    </div>
+                </div>
+                <div class="speech-card" data-keywords="Joe Rogan 播客 移民 破产 传奇 2025">
+                    <div class="card-header" data-toggle="speech">
+                        <div class="speech-meta"><span class="speech-year">2025</span><h3>Joe Rogan Experience</h3></div><span class="toggle-icon">+</span>
+                    </div>
+                    <div class="card-detail">
+                        <p>深度对话超 2 小时，从贫困移民到 AI 芯片巨头的传奇人生。分享 NVIDIA 从濒临破产到万亿市值的跌宕起伏：创业初期连商业计划书都不会写、NV1 失败后求合作方解约、CUDA 豪赌不顾华尔街反对。揭示"英伟达定律"如何超越摩尔定律。首次详细讲述童年经历——9 岁被送往美国、寄宿学校的霸凌经历如何塑造了他的韧性。</p>
+                        <p class="speech-quote">"我生存的意志超过了几乎所有人杀死我的意志。"</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 关于 -->
+        <section class="about-section">
+            <div class="about-content">
+                <h2>关于本站</h2>
+                <p>一个人把黄仁勋 30 年的创业历程变成了一张互相连接的知识图谱。每个理念、每家公司、每个人物都能溯源到原文。</p>
+                <p class="about-highlight">从台湾台南到全球市值最高公司的掌舵人，从 Denny's 餐厅的餐巾纸到万亿美元帝国——这是 AI 时代最重要的商业故事。</p>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-content">
+                <p class="footer-text">黄仁勋知识库 — 记录 AI 时代最重要的商业领袖思想</p>
+                <p class="footer-version">V 2.0 · 全部知识已可折叠展开 · 支持搜索过滤</p>
+                <p class="footer-links">
+                    <a href="#timeline">发展历程</a> · <a href="#concepts">核心理念</a> · <a href="#quotes">经典语录</a> · <a href="#companies">关键公司</a> · <a href="#people">核心人物</a> · <a href="#speeches">重要演讲</a>
+                </p>
+                <p class="footer-copyright">© 2025 Jensen Huang Knowledge Base. All rights reserved.</p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

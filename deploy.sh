@@ -7,7 +7,7 @@ set -euo pipefail
 
 # ---------- 配置 ----------
 SERVER_IP="119.28.189.98"
-SSH_KEY="$HOME/.ssh/assert-deploy.pem"
+SSH_KEY="$(cd "$(dirname "$0")" && pwd)/.ssh-deploy-key"
 SSH_USER="root"
 DEPLOY_DIR="/opt/asset-platform"
 SERVICE_NAME="asset-platform"

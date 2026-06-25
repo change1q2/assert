@@ -21,6 +21,7 @@ assert_PLATFORM/server/data/
 .api-*.log
 .web-*.log
 .ssh-key-temp
+.ssh-deploy-key
 nul
 assert_PLATFORM/releases/*/packages/*
 !assert_PLATFORM/releases/*/packages/.gitkeep

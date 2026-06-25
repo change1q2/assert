@@ -395,6 +395,8 @@ let hkIpoStatusFilter = "all";
 let hkIpoQuery = "";
 let hkIpoRulesDirty = false;
 let hkIpoActiveView = "main";
+let hkIpoEditingRuleId = "";
+let hkIpoManualBigVRows = [];
 let hkIpoStrategyShowAll = false;
 let hkIpoStrategyEdits = { overrides: {}, deleted: {} };
 let hkIpoRowEdits = { overrides: {}, deleted: {} };
@@ -404,7 +406,8 @@ const hkIpoAllCols = [
   ["code", "代码"], ["companyName", "公司名称"], ["status", "状态"],
   ["boardLot", "1手股数"], ["entryAmount", "1手入场金额"], ["totalMarketCap", "总市值"],
   ["hMarketCap", "H股市值"], ["connectRise", "入通涨幅"], ["oneLotExpectedProfit", "一手预计收益"],
-  ["publicTotalHands", "公开总手数"], ["actualMultiple", "实际认购倍数"], ["allotmentRate", "富途预测一手中签率"],
+  ["publicTotalHands", "公开总手数"], ["actualMultiple", "实际认购倍数"], ["sponsor", "保荐人"], ["cornerstoneShare", "基石占比"],
+  ["greenshoe", "绿鞋"], ["allocationOption", "发行调配权"],
   ["subscriptionTime", "申购时间"], ["resultDate", "资金锁定期"], ["greyDate", "暗盘时间"],
   ["listingDate", "上市日期"], ["fundamentals", "基本面"], ["industry", "行业"],
   ["score", "得分"], ["attitude", "申购态度"], ["shouldApply", "是否打"], ["strategy", "策略"],
@@ -419,6 +422,10 @@ const hkIpoFilterFields = [
   { key: "oneLotExpectedProfit", label: "一手预计收益", type: "range" },
   { key: "publicTotalHands", label: "公开总手数", type: "range" },
   { key: "actualMultiple", label: "实际认购倍数", type: "range" },
+  { key: "sponsor", label: "保荐人", type: "text" },
+  { key: "cornerstoneShare", label: "基石占比", type: "text" },
+  { key: "greenshoe", label: "绿鞋", type: "text" },
+  { key: "allocationOption", label: "发行调配权", type: "text" },
   { key: "subscriptionTime", label: "申购时间", type: "text" },
   { key: "resultDate", label: "资金锁定期", type: "text" },
   { key: "greyDate", label: "暗盘时间", type: "text" },
@@ -1592,6 +1599,9 @@ function render() {
   }
   if (currentModule === "downloads" && !releaseCatalogState.loading && !releaseCatalogState.loadedAt) {
     void loadReleaseCatalog();
+  }
+  if (currentModule === "hkIpoTool") {
+    autosizeHkIpoRuleTextareas();
   }
   scheduleOverflowTitleRefresh();
 }
@@ -4924,6 +4934,7 @@ async function loadHkIpo(force = false) {
   hkIpoError = "";
   loadHkIpoStrategyEdits();
   loadHkIpoRowEdits();
+  loadHkIpoManualBigVRows();
   if (currentModule === "hkIpoTool") render();
   try {
     const payload = await apiRequest(`/tools/hk-ipo?${hkIpoQueryString(force ? { refresh: "1" } : {})}`);
@@ -4934,11 +4945,13 @@ async function loadHkIpo(force = false) {
       scoreRows: Array.isArray(payload.scoreRows) ? payload.scoreRows : [],
       rules: Array.isArray(payload.rules) ? payload.rules : [],
       validationRows: Array.isArray(payload.validationRows) ? payload.validationRows : [],
+      dataSources: Array.isArray(payload.dataSources) ? payload.dataSources : [],
       stats: payload.stats || null,
       fetchedAt: payload.fetchedAt || "",
       source: payload.source || "",
       threshold: Number(payload.threshold) || 6,
     };
+    mergeHkIpoManualBigVRows();
     applyHkIpoRowEdits();
     hkIpoLoadedAt = new Date().toISOString();
     hkIpoRulesDirty = false;
@@ -4962,6 +4975,7 @@ async function saveHkIpoRules() {
         threshold: hkIpoPayload.threshold,
       },
     });
+    hkIpoEditingRuleId = "";
     hkIpoLoadedAt = "";
     await loadHkIpo(true);
   } catch (error) {
@@ -5130,6 +5144,56 @@ function hkIpoStrategyStorageKey() {
 
 function hkIpoRowStorageKey() {
   return `hk_ipo_row_edits_${auth.currentUser || "guest"}`;
+}
+
+function hkIpoManualBigVStorageKey() {
+  return `hk_ipo_manual_bigv_${auth.currentUser || "guest"}`;
+}
+
+function hkIpoBigVManualScore(total, positive) {
+  const sampleCount = Math.max(0, Number(total) || 0);
+  const positiveCount = Math.max(0, Number(positive) || 0);
+  if (!sampleCount || !positiveCount) return 0;
+  const ratio = Math.min(1, positiveCount / sampleCount);
+  if (ratio >= 1) return 4;
+  const quantityWeight = 0.75 + Math.min(sampleCount, 4) * 0.0625;
+  return Number(Math.min(3.999, ratio * 4 * quantityWeight).toFixed(3));
+}
+
+function loadHkIpoManualBigVRows() {
+  try {
+    const saved = localStorage.getItem(hkIpoManualBigVStorageKey());
+    hkIpoManualBigVRows = saved ? JSON.parse(saved) : [];
+  } catch {
+    hkIpoManualBigVRows = [];
+  }
+  if (!Array.isArray(hkIpoManualBigVRows)) hkIpoManualBigVRows = [];
+}
+
+function saveHkIpoManualBigVRows() {
+  localStorage.setItem(hkIpoManualBigVStorageKey(), JSON.stringify(hkIpoManualBigVRows));
+}
+
+function mergeHkIpoManualBigVRows() {
+  const validRows = hkIpoManualBigVRows.filter((row) => row.code || row.companyName || row.bigVName);
+  const existingIds = new Set((hkIpoPayload.bigVRows || []).map((row) => row.id));
+  const manualRows = validRows.map((row, index) => ({
+    id: row.id || `manual-bigv-${Date.now()}-${index}`,
+    code: String(row.code || "").trim(),
+    companyName: String(row.companyName || "").trim(),
+    bigV: `${Number(row.positiveCount) || 0}/${Number(row.sampleCount) || 0}`,
+    bigVName: String(row.bigVName || "手动录入").trim(),
+    intention: row.sampleCount ? `${Number(((Number(row.positiveCount) || 0) / Number(row.sampleCount) * 100).toFixed(1))}%` : "未获取",
+    reason: String(row.reason || "谨慎").trim(),
+    score: hkIpoBigVManualScore(row.sampleCount, row.positiveCount),
+    confidence: "手动",
+    sampleCount: Number(row.sampleCount) || 0,
+    positiveCount: Number(row.positiveCount) || 0,
+    note: String(row.note || "手动增加").trim(),
+    manual: true,
+  })).filter((row) => !existingIds.has(row.id));
+  hkIpoPayload.bigVRows = [...(hkIpoPayload.bigVRows || []), ...manualRows]
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
 }
 
 function loadHkIpoStrategyEdits() {
@@ -5326,6 +5390,12 @@ function hkIpoMainTable(rows) {
         <button type="button" data-action="hk-ipo-delete-row" data-key="${escapeAttr(rowKey)}">删除</button>
       </td>`;
     }
+    if (key === "actualMultiple") {
+      return `<td class="${row.actualMultipleIncreased ? "hk-ipo-multiple-up" : ""}">
+        <strong>${escapeHtml(row[key] ?? "-")}</strong>
+        ${row.actualMultipleIncreased ? `<small>捷利更新 ↑</small>` : ""}
+      </td>`;
+    }
     return `<td>${escapeHtml(row[key] ?? "-")}</td>`;
   };
   return `<div class="hk-ipo-table-wrap"><table class="table hk-ipo-table">
@@ -5346,16 +5416,37 @@ function hkIpoRecommendationTable(rows) {
 }
 
 function hkIpoBigVTable(rows) {
-  return `<div class="hk-ipo-table-wrap"><table class="table hk-ipo-table">
-    <thead><tr><th>代码</th><th>公司</th><th>大V</th><th>意向</th><th>理由</th><th>备注</th></tr></thead>
+  const scoreText = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toFixed(3).replace(/\.?0+$/, "") : String(value || 0);
+  };
+  return `<form id="hkIpoBigVManualForm" class="hk-ipo-bigv-form">
+    <input name="code" placeholder="代码" />
+    <input name="companyName" placeholder="公司名称" />
+    <input name="bigVName" placeholder="大V名称" required />
+    <select name="reason">
+      <option value="梭哈">申购意见：梭哈</option>
+      <option value="小仓位参与">申购意见：小仓位参与</option>
+      <option value="谨慎">申购意见：谨慎</option>
+      <option value="放弃">申购意见：放弃</option>
+    </select>
+    <input name="positiveCount" type="number" min="0" step="1" placeholder="支持数量" />
+    <input name="sampleCount" type="number" min="0" step="1" placeholder="总数量" />
+    <button type="submit">增加大V</button>
+  </form>
+  <div class="hk-ipo-table-wrap"><table class="table hk-ipo-table">
+    <thead><tr><th>代码</th><th>公司</th><th>大V</th><th>大V名称</th><th>意向占比</th><th>申购意见</th><th>评分</th><th>置信度</th><th>样本说明</th><th>操作</th></tr></thead>
     <tbody>${rows.map((row) => `<tr>
       <td>${escapeHtml(row.code)}</td><td>${escapeHtml(row.companyName)}</td><td>${escapeHtml(row.bigV)}</td>
-      <td>${escapeHtml(row.intention)}</td><td>${escapeHtml(row.reason)}</td><td>${escapeHtml(row.note)}</td>
-    </tr>`).join("") || `<tr><td colspan="6" class="muted">暂无大V意向数据</td></tr>`}</tbody>
+      <td><strong>${escapeHtml(row.bigVName)}</strong></td><td>${escapeHtml(row.intention)}</td><td>申购意见：${escapeHtml(row.reason)}</td>
+      <td><strong>${escapeHtml(scoreText(row.score))}</strong></td><td>${escapeHtml(row.confidence)}</td><td>${escapeHtml(row.note)}</td>
+      <td>${row.manual ? `<button type="button" class="hk-ipo-inline-btn" data-action="hk-ipo-delete-manual-bigv" data-id="${escapeAttr(row.id)}">删除</button>` : `<span class="muted">自动</span>`}</td>
+    </tr>`).join("") || `<tr><td colspan="10" class="muted">暂无大V意向数据</td></tr>`}</tbody>
   </table></div>`;
 }
 
 function hkIpoRulesTable(rules) {
+  const visibleRules = (rules || []).filter((rule) => !rule.deleted);
   return `<div class="hk-ipo-rules-head">
     <label>可打阈值 <input class="hk-ipo-threshold" type="number" step="0.5" value="${escapeAttr(hkIpoPayload.threshold)}" data-action="hk-ipo-threshold" /></label>
     <div class="hk-ipo-rule-buttons">
@@ -5367,16 +5458,21 @@ function hkIpoRulesTable(rules) {
   </div>
   <div class="hk-ipo-table-wrap"><table class="table hk-ipo-table hk-ipo-rule-table">
     <thead><tr><th>分类</th><th>评分项</th><th>判定文本</th><th>默认分</th><th>分数</th><th>类型</th><th>操作</th></tr></thead>
-    <tbody>${rules.map((rule) => {
-      const editableMeta = rule.custom ? "" : "readonly";
-      return `<tr data-rule-id="${escapeAttr(rule.id)}">
-        <td><input data-field="category" value="${escapeAttr(rule.category)}" ${editableMeta} /></td>
-        <td><input data-field="item" value="${escapeAttr(rule.item)}" ${editableMeta} /></td>
-        <td><input data-field="condition" value="${escapeAttr(rule.condition)}" ${editableMeta} /></td>
+    <tbody>${visibleRules.map((rule) => {
+      const editing = hkIpoEditingRuleId === rule.id;
+      const readonly = editing ? "" : "readonly";
+      return `<tr data-rule-id="${escapeAttr(rule.id)}" class="${editing ? "is-editing" : ""}">
+        <td><input data-field="category" value="${escapeAttr(rule.category)}" ${readonly} /></td>
+        <td><input data-field="item" value="${escapeAttr(rule.item)}" ${readonly} /></td>
+        <td><textarea class="hk-ipo-rule-condition" data-field="condition" rows="1" ${readonly}>${escapeHtml(rule.condition)}</textarea></td>
         <td>${escapeHtml(rule.defaultScore)}</td>
-        <td><input data-field="score" type="number" step="0.5" value="${escapeAttr(rule.score)}" /></td>
+        <td><input data-field="score" type="number" step="0.5" value="${escapeAttr(rule.score)}" ${readonly} /></td>
         <td>${rule.custom ? "自定义" : "默认规则"}</td>
-        <td>${rule.custom ? `<button type="button" data-action="hk-ipo-delete-rule" data-rule-id="${escapeAttr(rule.id)}">删除</button>` : `<span class="muted">保留</span>`}</td>
+        <td class="hk-ipo-rule-actions">
+          <button type="button" data-action="hk-ipo-edit-rule" data-rule-id="${escapeAttr(rule.id)}">${editing ? "完成" : "编辑"}</button>
+          <button type="button" data-action="hk-ipo-insert-rule" data-rule-id="${escapeAttr(rule.id)}">插入</button>
+          <button type="button" data-action="hk-ipo-delete-rule" data-rule-id="${escapeAttr(rule.id)}">删除</button>
+        </td>
       </tr>`;
     }).join("") || `<tr><td colspan="7" class="muted">暂无评分规则</td></tr>`}</tbody>
   </table></div>`;
@@ -5393,9 +5489,21 @@ function hkIpoScoreTable(rows) {
 }
 
 function hkIpoValidationTable(rows) {
+  const sourceRows = rows.filter((row) => row.sourceName || row.sourceUrl);
+  const issueRows = rows.filter((row) => !row.sourceName && !row.sourceUrl);
   return `<div class="hk-ipo-table-wrap"><table class="table hk-ipo-table">
+    <thead><tr><th>数据源</th><th>类型</th><th>可校验字段</th><th>用途 / 自动化状态</th><th>链接</th></tr></thead>
+    <tbody>${sourceRows.map((row) => `<tr>
+      <td><strong>${escapeHtml(row.sourceName || row.issue)}</strong></td>
+      <td>${escapeHtml(row.sourceTier || row.level)}</td>
+      <td>${escapeHtml(row.sourceFields || row.field)}</td>
+      <td>${escapeHtml(`${row.sourceUsage || ""}${row.sourceAutoCheck ? `；${row.sourceAutoCheck}` : ""}`)}</td>
+      <td>${row.sourceUrl && /^https?:\/\//.test(row.sourceUrl) ? `<a href="${escapeAttr(row.sourceUrl)}" target="_blank" rel="noopener">打开</a>` : escapeHtml(row.sourceUrl || row.sourceAccess || "-")}</td>
+    </tr>`).join("") || `<tr><td colspan="5" class="muted">暂无数据源配置</td></tr>`}</tbody>
+  </table></div>
+  <div class="hk-ipo-table-wrap hk-ipo-validation-issues"><table class="table hk-ipo-table">
     <thead><tr><th>字段</th><th>问题</th><th>级别</th><th>建议</th></tr></thead>
-    <tbody>${rows.map((row) => `<tr>
+    <tbody>${issueRows.map((row) => `<tr>
       <td>${escapeHtml(row.field)}</td><td>${escapeHtml(row.issue)}</td><td>${escapeHtml(row.level)}</td><td>${escapeHtml(row.suggestion)}</td>
     </tr>`).join("") || `<tr><td colspan="4" class="muted">暂无校验问题</td></tr>`}</tbody>
   </table></div>`;
@@ -5506,6 +5614,26 @@ function hkIpoTool() {
       <div class="hk-ipo-table-footer"><span>${escapeHtml(activeTable.title)}：${escapeHtml(activeTable.badge)}</span></div>
     </section>
   </section>`;
+}
+
+function handleHkIpoDelegatedClick(event) {
+  const viewButton = event.target.closest?.("[data-action='hk-ipo-view']");
+  if (!viewButton) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  const nextView = viewButton.dataset.view || "main";
+  if (hkIpoActiveView !== nextView) {
+    hkIpoActiveView = nextView;
+    render();
+  }
+  return true;
+}
+
+function autosizeHkIpoRuleTextareas() {
+  document.querySelectorAll(".hk-ipo-rule-condition").forEach((textarea) => {
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.max(38, textarea.scrollHeight)}px`;
+  });
 }
 
 function premiumTool() {
@@ -5741,7 +5869,6 @@ function premiumTool() {
         <button type="submit">查询</button>
       </form>
     </div>
-
     ${premiumError ? `<div class="premium-alert" role="alert">${escapeHtml(premiumError)}</div>` : ""}
     <div class="premium-table-wrap">
       <table class="premium-table premium-table-left">
@@ -6609,10 +6736,7 @@ function bindViewActions() {
     hkIpoLoadedAt = "";
     void loadHkIpo(true);
   }));
-  document.querySelectorAll("[data-action='hk-ipo-view']").forEach((button) => button.addEventListener("click", () => {
-    hkIpoActiveView = button.dataset.view || "main";
-    render();
-  }));
+  document.querySelector(".hk-ipo-page")?.addEventListener("click", handleHkIpoDelegatedClick);
   document.querySelectorAll("[data-action='hk-ipo-reset-filter']").forEach((button) => button.addEventListener("click", () => {
     hkIpoStatusFilter = "all";
     hkIpoQuery = "";
@@ -6675,13 +6799,19 @@ function bindViewActions() {
     hkIpoPayload.threshold = Number(input.value) || 6;
     hkIpoRulesDirty = true;
   }));
-  document.querySelectorAll(".hk-ipo-rule-table input[data-field]").forEach((input) => input.addEventListener("input", () => {
+  document.querySelectorAll(".hk-ipo-rule-table [data-field]").forEach((input) => input.addEventListener("input", () => {
     const row = input.closest("tr");
     const rule = hkIpoPayload.rules.find((item) => item.id === row?.dataset.ruleId);
     if (!rule) return;
     const field = input.dataset.field;
     rule[field] = field === "score" ? Number(input.value) : input.value;
     hkIpoRulesDirty = true;
+    if (input.classList.contains("hk-ipo-rule-condition")) autosizeHkIpoRuleTextareas();
+  }));
+  document.querySelectorAll("[data-action='hk-ipo-edit-rule']").forEach((button) => button.addEventListener("click", () => {
+    const ruleId = button.dataset.ruleId || "";
+    hkIpoEditingRuleId = hkIpoEditingRuleId === ruleId ? "" : ruleId;
+    render();
   }));
   document.querySelectorAll("[data-action='hk-ipo-save-rules']").forEach((button) => button.addEventListener("click", () => {
     void saveHkIpoRules();
@@ -6690,8 +6820,9 @@ function bindViewActions() {
     void resetHkIpoRules();
   }));
   document.querySelectorAll("[data-action='hk-ipo-add-rule']").forEach((button) => button.addEventListener("click", () => {
+    const id = `custom-${Date.now()}`;
     hkIpoPayload.rules.push({
-      id: `custom-${Date.now()}`,
+      id,
       category: "自定义",
       item: "自定义评分项",
       condition: "",
@@ -6700,12 +6831,66 @@ function bindViewActions() {
       system: false,
       custom: true,
     });
+    hkIpoEditingRuleId = id;
+    hkIpoRulesDirty = true;
+    render();
+  }));
+  document.querySelectorAll("[data-action='hk-ipo-insert-rule']").forEach((button) => button.addEventListener("click", () => {
+    const anchorId = button.dataset.ruleId;
+    const anchorIndex = hkIpoPayload.rules.findIndex((rule) => rule.id === anchorId);
+    const id = `custom-${Date.now()}`;
+    const anchor = hkIpoPayload.rules[anchorIndex] || {};
+    const nextRule = {
+      id,
+      category: anchor.category || "自定义",
+      item: anchor.item || "自定义评分项",
+      condition: "",
+      score: 0,
+      defaultScore: 0,
+      system: false,
+      custom: true,
+    };
+    hkIpoPayload.rules.splice(anchorIndex >= 0 ? anchorIndex + 1 : hkIpoPayload.rules.length, 0, nextRule);
+    hkIpoEditingRuleId = id;
     hkIpoRulesDirty = true;
     render();
   }));
   document.querySelectorAll("[data-action='hk-ipo-delete-rule']").forEach((button) => button.addEventListener("click", () => {
-    hkIpoPayload.rules = hkIpoPayload.rules.filter((rule) => rule.id !== button.dataset.ruleId);
+    const ruleId = button.dataset.ruleId;
+    hkIpoPayload.rules = hkIpoPayload.rules.flatMap((rule) => {
+      if (rule.id !== ruleId) return [rule];
+      if (rule.custom) return [];
+      return [{ ...rule, deleted: true }];
+    });
+    if (hkIpoEditingRuleId === ruleId) hkIpoEditingRuleId = "";
     hkIpoRulesDirty = true;
+    render();
+  }));
+  document.querySelector("#hkIpoBigVManualForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const row = {
+      id: `manual-bigv-${Date.now()}`,
+      code: String(form.get("code") || "").trim(),
+      companyName: String(form.get("companyName") || "").trim(),
+      bigVName: String(form.get("bigVName") || "").trim(),
+      reason: String(form.get("reason") || "谨慎").trim(),
+      positiveCount: Number(form.get("positiveCount")) || 0,
+      sampleCount: Number(form.get("sampleCount")) || 0,
+      note: "手动增加",
+    };
+    if (!row.bigVName) return;
+    if (row.sampleCount < row.positiveCount) row.sampleCount = row.positiveCount;
+    hkIpoManualBigVRows.push(row);
+    saveHkIpoManualBigVRows();
+    mergeHkIpoManualBigVRows();
+    render();
+  });
+  document.querySelectorAll("[data-action='hk-ipo-delete-manual-bigv']").forEach((button) => button.addEventListener("click", () => {
+    const id = button.dataset.id || "";
+    hkIpoManualBigVRows = hkIpoManualBigVRows.filter((row) => row.id !== id);
+    saveHkIpoManualBigVRows();
+    hkIpoPayload.bigVRows = (hkIpoPayload.bigVRows || []).filter((row) => row.id !== id);
     render();
   }));
   document.querySelectorAll("[data-action='hk-ipo-toggle-strategy-all']").forEach((button) => button.addEventListener("click", () => {
@@ -6752,7 +6937,10 @@ function bindViewActions() {
     setVal("oneLotExpectedProfit", row.oneLotExpectedProfit);
     setVal("publicTotalHands", row.publicTotalHands);
     setVal("actualMultiple", row.actualMultiple);
-    setVal("allotmentRate", row.allotmentRate);
+    setVal("sponsor", row.sponsor);
+    setVal("cornerstoneShare", row.cornerstoneShare);
+    setVal("greenshoe", row.greenshoe);
+    setVal("allocationOption", row.allocationOption);
     setVal("subscriptionTime", row.subscriptionTime);
     setVal("resultDate", row.resultDate);
     setVal("greyDate", row.greyDate);
@@ -6794,7 +6982,7 @@ function bindViewActions() {
     const fields = [
       "code", "companyName", "status", "boardLot", "entryAmount",
       "totalMarketCap", "hMarketCap", "connectRise", "oneLotExpectedProfit",
-      "publicTotalHands", "actualMultiple", "allotmentRate", "subscriptionTime",
+      "publicTotalHands", "actualMultiple", "sponsor", "cornerstoneShare", "greenshoe", "allocationOption", "subscriptionTime",
       "resultDate", "greyDate", "listingDate", "fundamentals", "industry",
       "offerPrice", "score", "attitude", "shouldApply", "tailFunds",
       "firstDayChange", "cumulativeChange", "latestVsOffer", "strategy", "summary"
