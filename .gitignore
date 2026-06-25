@@ -11,6 +11,11 @@ assert_ANDROID/android/build/
 assert_ANDROID/android/app/build/
 assert_ANDROID/android/local.properties
 assert_WEB/dist/
+assert_HARMONY/node_modules/
+assert_HARMONY/dist/
+assert_IOS/node_modules/
+dist/
+build/
 build-artifacts/
 assert_PLATFORM/server/data/
 *.log
@@ -22,6 +27,8 @@ assert_PLATFORM/server/data/
 .web-*.log
 .ssh-key-temp
 .ssh-deploy-key
+.DS_Store
+Thumbs.db
 nul
 assert_PLATFORM/releases/*/packages/*
 !assert_PLATFORM/releases/*/packages/.gitkeep
