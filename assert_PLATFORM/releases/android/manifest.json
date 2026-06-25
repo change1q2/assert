@@ -1,0 +1,49 @@
+{
+  "platform": "android",
+  "platformLabel": "Android",
+  "updatedAt": "2026-06-22T10:09:56.876Z",
+  "latest": {
+    "platform": "android",
+    "version": "2.0.0",
+    "buildNumber": "20260622.1",
+    "fileName": "app-debug.apk",
+    "fileUrl": "/api/v2/releases/file/android/app-debug.apk",
+    "fileSize": 3747908,
+    "publishedAt": "2026-06-22T10:09:56.876Z",
+    "releaseNotes": "Android 调试安装包，原生 WebView 壳，可直接安装后访问线上 Wealth OS。",
+    "isLatest": true,
+    "minSystemVersion": "",
+    "sha256": "e4cc4b6fdc107226631f4f1c235c645ebadafe180b987aac2a75a1e46b70791f",
+    "distribution": "direct"
+  },
+  "history": [
+    {
+      "platform": "android",
+      "version": "2.0.0",
+      "buildNumber": "20260622.1",
+      "fileName": "app-debug.apk",
+      "fileUrl": "/api/v2/releases/file/android/app-debug.apk",
+      "fileSize": 3747908,
+      "publishedAt": "2026-06-22T10:09:56.876Z",
+      "releaseNotes": "Android 调试安装包，原生 WebView 壳，可直接安装后访问线上 Wealth OS。",
+      "isLatest": true,
+      "minSystemVersion": "",
+      "sha256": "e4cc4b6fdc107226631f4f1c235c645ebadafe180b987aac2a75a1e46b70791f",
+      "distribution": "direct"
+    },
+    {
+      "platform": "android",
+      "version": "0.1.0",
+      "buildNumber": "20260617-android-scaffold",
+      "fileName": "Assert_ANDROID_0.1.0_scaffold.zip",
+      "fileUrl": "/api/v2/releases/file/android/Assert_ANDROID_0.1.0_scaffold.zip",
+      "fileSize": 431,
+      "publishedAt": "2026-06-17T09:43:47.589Z",
+      "releaseNotes": "Android 端当前为项目骨架包，正式 APK/AAB 构建后会自动替换。",
+      "isLatest": false,
+      "minSystemVersion": "",
+      "sha256": "da2e7c39db356eaf6ecadb27fee9a9d462586167e8bab68bff19cec517b51199",
+      "distribution": "direct"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "platform": "harmony",
+  "platformLabel": "HarmonyOS",
+  "updatedAt": "2026-06-17T09:43:48.085Z",
+  "latest": {
+    "platform": "harmony",
+    "version": "0.1.0",
+    "buildNumber": "20260617-harmony-scaffold",
+    "fileName": "Assert_HARMONY_0.1.0_scaffold.zip",
+    "fileUrl": "/api/v2/releases/file/harmony/Assert_HARMONY_0.1.0_scaffold.zip",
+    "fileSize": 441,
+    "publishedAt": "2026-06-17T09:43:48.085Z",
+    "releaseNotes": "HarmonyOS 端当前为项目骨架包，正式 HAP 构建后会自动替换。",
+    "isLatest": true,
+    "minSystemVersion": "",
+    "sha256": "a2f89b371053c968398740caf656be26e4c7c5e07c57f72f9aed0ae133936b0d",
+    "distribution": "direct"
+  },
+  "history": [
+    {
+      "platform": "harmony",
+      "version": "0.1.0",
+      "buildNumber": "20260617-harmony-scaffold",
+      "fileName": "Assert_HARMONY_0.1.0_scaffold.zip",
+      "fileUrl": "/api/v2/releases/file/harmony/Assert_HARMONY_0.1.0_scaffold.zip",
+      "fileSize": 441,
+      "publishedAt": "2026-06-17T09:43:48.085Z",
+      "releaseNotes": "HarmonyOS 端当前为项目骨架包，正式 HAP 构建后会自动替换。",
+      "isLatest": true,
+      "minSystemVersion": "",
+      "sha256": "a2f89b371053c968398740caf656be26e4c7c5e07c57f72f9aed0ae133936b0d",
+      "distribution": "direct"
+    }
+  ]
+}

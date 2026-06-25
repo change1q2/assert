@@ -1,0 +1,46 @@
+{
+  "name": "assert-pc",
+  "version": "2.0.0",
+  "private": true,
+  "author": "change1q2",
+  "description": "Assert Windows desktop client",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable nsis",
+    "build:portable": "electron-builder --win portable",
+    "build:folder": "electron-packager . \"Assert PC\" --platform=win32 --arch=x64 --out=dist --overwrite --asar --prune=true --ignore=\"^/dist$|^/node_modules$|^/README.md$\"",
+    "build:zip": "powershell -NoLogo -NoProfile -Command \"if (Test-Path dist\\\\Assert_PC_2.0.0_portable.zip) { Remove-Item dist\\\\Assert_PC_2.0.0_portable.zip -Force }; Compress-Archive -Path dist\\\\'Assert PC-win32-x64'\\\\* -DestinationPath dist\\\\Assert_PC_2.0.0_portable.zip -Force\""
+  },
+  "build": {
+    "appId": "com.wealthos.assert.pc",
+    "productName": "Assert PC",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "artifactName": "${productName}_${version}_${target}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Assert_PC_${version}_installer.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "electron-packager": "^17.1.2"
+  }
+}

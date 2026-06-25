@@ -1,0 +1,9 @@
+{
+  "name": "assert-web",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "web": "npx http-server . -p 4173 -c-1"
+  }
+}

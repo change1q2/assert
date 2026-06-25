@@ -1,0 +1,63 @@
+{
+  "platform": "web",
+  "platformLabel": "Web",
+  "updatedAt": "2026-06-24T03:38:59.683Z",
+  "latest": {
+    "platform": "web",
+    "version": "2.1.0",
+    "buildNumber": "20260623.1",
+    "fileName": "Assert_WEB_2.1.0_bundle.zip",
+    "fileUrl": "/api/v2/releases/file/web/Assert_WEB_2.1.0_bundle.zip",
+    "fileSize": 315272,
+    "publishedAt": "2026-06-24T03:38:59.683Z",
+    "releaseNotes": "港股打新功能增强 - 优化排行展示、添加高级筛选与列显示控制",
+    "isLatest": true,
+    "minSystemVersion": "",
+    "sha256": "53bfd4179881ed976de85f56280a3d47c5b3241d3e53e7e4bb5c964a049d81cf",
+    "distribution": "direct"
+  },
+  "history": [
+    {
+      "platform": "web",
+      "version": "2.1.0",
+      "buildNumber": "20260623.1",
+      "fileName": "Assert_WEB_2.1.0_bundle.zip",
+      "fileUrl": "/api/v2/releases/file/web/Assert_WEB_2.1.0_bundle.zip",
+      "fileSize": 315272,
+      "publishedAt": "2026-06-24T03:38:59.683Z",
+      "releaseNotes": "港股打新功能增强 - 优化排行展示、添加高级筛选与列显示控制",
+      "isLatest": true,
+      "minSystemVersion": "",
+      "sha256": "53bfd4179881ed976de85f56280a3d47c5b3241d3e53e7e4bb5c964a049d81cf",
+      "distribution": "direct"
+    },
+    {
+      "platform": "web",
+      "version": "2.0.0",
+      "buildNumber": "20260617-web-bundle",
+      "fileName": "Assert_WEB_2.0.0_bundle.zip",
+      "fileUrl": "/api/v2/releases/file/web/Assert_WEB_2.0.0_bundle.zip",
+      "fileSize": 304439,
+      "publishedAt": "2026-06-17T09:43:47.264Z",
+      "releaseNotes": "Web 端当前可用发布包，包含前端页面与产品下载页。",
+      "isLatest": false,
+      "minSystemVersion": "",
+      "sha256": "3502a22aff4213ec830a63aa7ad40d55cca801ba13b0870dc4a393bed72f59d4",
+      "distribution": "direct"
+    },
+    {
+      "platform": "web",
+      "version": "2.0.0",
+      "buildNumber": "20260617-web",
+      "fileName": "index.html",
+      "fileUrl": "/api/v2/releases/file/web/index.html",
+      "fileSize": 28907,
+      "publishedAt": "2026-06-17T09:34:22.001Z",
+      "releaseNotes": "Web 端多项目结构与下载页初始化",
+      "isLatest": false,
+      "minSystemVersion": "",
+      "sha256": "dd8b82a6dca708f0773b7f824d993cdacd369a09931dbaabb948499e77ac8408",
+      "distribution": "direct"
+    }
+  ]
+}
