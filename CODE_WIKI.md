@@ -242,7 +242,7 @@ f:\code_x\assert\
 MYSQL_HOST=127.0.0.1
 MYSQL_PORT=3306
 MYSQL_USER=root
-MYSQL_PASSWORD=123456
+MYSQL_PASSWORD=<your-mysql-password>
 MYSQL_DATABASE=asset_platform
 
 # API 服务端口
@@ -256,14 +256,16 @@ RELEASES_ROOT=/opt/assert-releases
 
 # 短信服务 Webhook
 SMS_WEBHOOK_URL=https://your-sms-service.com/send
-SMS_WEBHOOK_TOKEN=your-token
+SMS_WEBHOOK_TOKEN=<your-sms-token>
 
-# 管理员默认密码（首次启动创建）
-ADMIN_PASSWORD=admin123
+# 管理员默认密码（首次启动创建，请立即修改为强密码）
+ADMIN_PASSWORD=<your-admin-password>
 
-# 港股打新数据源文件（可选）
-HK_IPO_SOURCE_FILE=C:/path/to/hk_ipo_data.mjs
+# 港股打新数据源文件（可选，默认为 tools/build_hk_ipo_current.mjs）
+HK_IPO_SOURCE_FILE=<path-to-hk-ipo-data-file>
 ```
+
+> ⚠️ 安全提示：请勿使用弱密码，生产环境请务必修改为强密码，并将 .env 加入 .gitignore。
 
 ### 核心常量
 
@@ -883,7 +885,9 @@ npm run web
 
 首次启动后端时，会自动创建默认管理员账号：
 - 账号：`admin`
-- 密码：`admin123`（或通过 `ADMIN_PASSWORD` 环境变量设置）
+- 密码：由 `ADMIN_PASSWORD` 环境变量设置（**必须使用强密码，禁止使用 admin123 等弱密码**）
+
+> ⚠️ 安全提醒：部署生产环境前，请务必修改默认管理员密码。
 
 ### PC客户端开发
 

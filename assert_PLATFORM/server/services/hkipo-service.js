@@ -3,8 +3,8 @@ import crypto from "node:crypto";
 import { pool } from "../db/index.js";
 import { sqlRun, sqlGet, maybeParseJson } from "../utils/db.js";
 import { text } from "../utils/validators.js";
+import { HK_IPO_DATA_SOURCES } from "../data/hk-ipo-sources.js";
 import {
-  HK_IPO_DATA_SOURCES,
   HK_IPO_SOURCE_FILE,
   HK_IPO_CONNECT_MARKET_CAP,
   HK_IPO_DEFAULT_THRESHOLD,

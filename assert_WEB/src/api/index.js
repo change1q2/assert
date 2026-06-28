@@ -1,8 +1,4 @@
-import { mockAssets, mockRecords, mockDebts, mockAccounts, mockAssetClasses, mockAnalysis } from '../data/mockData'
-
-const API_BASE = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
-  ? 'http://127.0.0.1:3000/api'
-  : '/api'
+const API_BASE = '/api'
 
 async function request(url, options = {}) {
   const response = await fetch(`${API_BASE}${url}`, {
@@ -26,63 +22,63 @@ async function request(url, options = {}) {
 export async function fetchAssets() {
   try {
     const response = await request('/assets')
-    return response.data || mockAssets
+    return response.data || []
   } catch {
-    return mockAssets
+    return []
   }
 }
 
 export async function fetchOverview() {
   try {
     const response = await request('/overview')
-    return response.data || mockAnalysis
+    return response.data || {}
   } catch {
-    return mockAnalysis
+    return {}
   }
 }
 
 export async function fetchRecords() {
   try {
     const response = await request('/records')
-    return response.data || mockRecords
+    return response.data || []
   } catch {
-    return mockRecords
+    return []
   }
 }
 
 export async function fetchDebts() {
   try {
     const response = await request('/debts')
-    return response.data || mockDebts
+    return response.data || []
   } catch {
-    return mockDebts
+    return []
   }
 }
 
 export async function fetchAccounts() {
   try {
     const response = await request('/accounts')
-    return response.data || mockAccounts
+    return response.data || []
   } catch {
-    return mockAccounts
+    return []
   }
 }
 
 export async function fetchAssetClasses() {
   try {
     const response = await request('/asset-classes')
-    return response.data || mockAssetClasses
+    return response.data || []
   } catch {
-    return mockAssetClasses
+    return []
   }
 }
 
 export async function fetchAnalysis() {
   try {
     const response = await request('/analysis')
-    return response.data || mockAnalysis
+    return response.data || {}
   } catch {
-    return mockAnalysis
+    return {}
   }
 }
 
@@ -138,18 +134,18 @@ export async function fetchState() {
   try {
     const response = await request('/state')
     return response.data || {
-      debts: mockDebts,
-      records: mockRecords,
-      accounts: mockAccounts,
-      assetClasses: mockAssetClasses,
+      debts: [],
+      records: [],
+      accounts: [],
+      assetClasses: [],
       overviewGoals: {},
     }
   } catch {
     return {
-      debts: mockDebts,
-      records: mockRecords,
-      accounts: mockAccounts,
-      assetClasses: mockAssetClasses,
+      debts: [],
+      records: [],
+      accounts: [],
+      assetClasses: [],
       overviewGoals: {},
     }
   }
@@ -164,5 +160,38 @@ export async function saveState(state) {
     return response
   } catch {
     return { success: false, error: '保存状态失败' }
+  }
+}
+
+export async function fetchBooks() {
+  try {
+    const response = await request('/state')
+    return response.data?.books || []
+  } catch {
+    return []
+  }
+}
+
+export async function createBook(data) {
+  try {
+    const response = await request('/books', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+    return response
+  } catch {
+    return { success: true, data: { ...data, id: Date.now() } }
+  }
+}
+
+export async function saveBooks(books) {
+  try {
+    const response = await request('/state', {
+      method: 'PUT',
+      body: JSON.stringify({ books }),
+    })
+    return response
+  } catch {
+    return { success: false, error: '保存账本失败' }
   }
 }

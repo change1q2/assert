@@ -19,11 +19,9 @@
   "engines": {
     "node": ">=22.5.0"
   },
-  "dependencies": {
-    "better-sqlite3": "^12.4.1",
-    "mysql2": "^3.22.5"
-  },
+  "dependencies": {},
   "devDependencies": {
+    "better-sqlite3": "^12.4.1",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0"
   }
