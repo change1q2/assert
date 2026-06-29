@@ -77,7 +77,8 @@ async function loadUserState(userId) {
     );
     return {
       id: numericIfPossible(row.id), category: row.category, type: row.type, debtCategory: row.debt_category, name: row.name,
-      creditorName: row.creditor_name, debtorName: row.debtor_name, principal: row.principal,
+      creditor: row.creditor_name, debtor: row.debtor_name, creditorName: row.creditor_name, debtorName: row.debtor_name,
+      principal: row.principal,
       annualRate: row.annual_rate, amount: row.amount, paidAmount: row.paid_amount,
       note: row.note, attachment: row.attachment, startDate: row.start_date, dueDate: row.due_date,
       repaymentMethod: row.repayment_method, payments,
@@ -225,11 +226,14 @@ async function saveUserState(conn, userId, state) {
   let debtOrder = 0;
   for (const row of (state.debts || [])) {
     const debtId = text(row.id);
+    const creditor = row.creditor || row.creditorName || '';
+    const debtor = row.debtor || row.debtorName || '';
+    const name = row.name || creditor || '';
     await sqlRun(conn, `INSERT INTO debts
       (user_id, id, category, type, debt_category, name, creditor_name, debtor_name, principal, annual_rate, amount, paid_amount, note, attachment, start_date, due_date, repayment_method, sort_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, debtId, text(row.category), text(row.type), text(row.debtCategory || ''), text(row.name), text(row.creditorName),
-       text(row.debtorName), number(row.principal), number(row.annualRate), number(row.amount),
+      [userId, debtId, text(row.category), text(row.type), text(row.debtCategory || ''), text(name), text(creditor),
+       text(debtor), number(row.principal), number(row.annualRate), number(row.amount),
        number(row.paidAmount), text(row.note), text(row.attachment), text(row.startDate),
        text(row.dueDate), text(row.repaymentMethod), debtOrder++]);
     for (const [period, status] of Object.entries(row.payments || {})) {

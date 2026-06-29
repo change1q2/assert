@@ -26,86 +26,6 @@ function formatCurrency(value) {
   }).format(value || 0);
 }
 
-function renderCategoryCard(cat, catDebts, totalAmount, cardKey, isExpanded, color) {
-  const colorClasses = {
-    red: {
-      bg: isExpanded ? 'bg-red-500' : 'bg-red-300',
-      text: 'text-red-600',
-    },
-    emerald: {
-      bg: isExpanded ? 'bg-emerald-500' : 'bg-emerald-300',
-      text: 'text-emerald-600',
-    },
-  };
-  const cls = colorClasses[color] || colorClasses.red;
-  
-  return (
-    <div key={cardKey} className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 overflow-hidden">
-      <div
-        className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700/50"
-        onClick={() => setExpandedCards((prev) => ({ ...prev, [cardKey]: !prev[cardKey] }))}
-      >
-        <div className="flex items-center gap-3">
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium ${cls.bg}`}>
-            {cat.name.charAt(0)}
-          </div>
-          <div>
-            <div className="font-medium text-gray-900 dark:text-white">{cat.name}</div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">{catDebts.length} 笔</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <div className={`font-bold tabular-nums ${cls.text}`}>{formatCurrency(totalAmount)}</div>
-            <div className="text-xs text-gray-400">汇总金额</div>
-          </div>
-          <ChevronRight className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-        </div>
-      </div>
-      {isExpanded && (
-        <div className="border-t border-gray-100 dark:border-slate-700">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 dark:bg-slate-700/50">
-                <th className="text-left py-2.5 px-4 text-gray-500 font-medium">名称</th>
-                <th className="text-right py-2.5 px-4 text-gray-500 font-medium">金额</th>
-                <th className="text-right py-2.5 px-4 text-gray-500 font-medium">本金</th>
-                <th className="text-left py-2.5 px-4 text-gray-500 font-medium">还款日期</th>
-                <th className="text-center py-2.5 px-4 text-gray-500 font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {catDebts.map((debt, idx) => (
-                <tr key={debt.id || idx} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30">
-                  <td className="py-2.5 px-4 text-gray-900 dark:text-white font-medium">{debt.creditor || debt.name || '未知'}</td>
-                  <td className={`py-2.5 px-4 text-right font-medium tabular-nums ${cls.text}`}>{formatCurrency(debt.amount || 0)}</td>
-                  <td className="py-2.5 px-4 text-right text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.principal || debt.amount || 0)}</td>
-                  <td className="py-2.5 px-4 text-gray-600 dark:text-gray-300">{formatDate(debt.dueDate)}</td>
-                  <td className="py-2.5 px-4 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      {debt.attachment && (
-                        <button onClick={() => setPreviewImage(debt.attachment)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded text-indigo-600">
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button onClick={() => openEditModal(debt)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded text-gray-500">
-                        <EditIcon className="w-3.5 h-3.5" />
-                      </button>
-                      <button onClick={() => handleDelete(debt)} className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-500">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function formatNumber(value, digits = 2) {
   return (value || 0).toFixed(digits);
 }
@@ -130,6 +50,86 @@ export default function Debts() {
   const [editingCategory, setEditingCategory] = useState(null);
   const [categoryName, setCategoryName] = useState('');
   const [expandedCards, setExpandedCards] = useState({});
+
+  const renderCategoryCard = (cat, catDebts, totalAmount, cardKey, isExpanded, color) => {
+    const colorClasses = {
+      red: {
+        bg: isExpanded ? 'bg-red-500' : 'bg-red-300',
+        text: 'text-red-600',
+      },
+      emerald: {
+        bg: isExpanded ? 'bg-emerald-500' : 'bg-emerald-300',
+        text: 'text-emerald-600',
+      },
+    };
+    const cls = colorClasses[color] || colorClasses.red;
+    
+    return (
+      <div key={cardKey} className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 overflow-hidden">
+        <div
+          className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700/50"
+          onClick={() => setExpandedCards((prev) => ({ ...prev, [cardKey]: !prev[cardKey] }))}
+        >
+          <div className="flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium ${cls.bg}`}>
+              {cat.name.charAt(0)}
+            </div>
+            <div>
+              <div className="font-medium text-gray-900 dark:text-white">{cat.name}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{catDebts.length} 笔</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <div className={`font-bold tabular-nums ${cls.text}`}>{formatCurrency(totalAmount)}</div>
+              <div className="text-xs text-gray-400">汇总金额</div>
+            </div>
+            <ChevronRight className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+          </div>
+        </div>
+        {isExpanded && (
+          <div className="border-t border-gray-100 dark:border-slate-700">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 dark:bg-slate-700/50">
+                  <th className="text-left py-2.5 px-4 text-gray-500 font-medium">名称</th>
+                  <th className="text-right py-2.5 px-4 text-gray-500 font-medium">金额</th>
+                  <th className="text-right py-2.5 px-4 text-gray-500 font-medium">本金</th>
+                  <th className="text-left py-2.5 px-4 text-gray-500 font-medium">还款日期</th>
+                  <th className="text-center py-2.5 px-4 text-gray-500 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {catDebts.map((debt, idx) => (
+                  <tr key={debt.id || idx} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30">
+                    <td className="py-2.5 px-4 text-gray-900 dark:text-white font-medium">{debt.creditor || debt.name || '未知'}</td>
+                    <td className={`py-2.5 px-4 text-right font-medium tabular-nums ${cls.text}`}>{formatCurrency(debt.amount || 0)}</td>
+                    <td className="py-2.5 px-4 text-right text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.principal || debt.amount || 0)}</td>
+                    <td className="py-2.5 px-4 text-gray-600 dark:text-gray-300">{formatDate(debt.dueDate)}</td>
+                    <td className="py-2.5 px-4 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        {debt.attachment && (
+                          <button onClick={() => setPreviewImage(debt.attachment)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded text-indigo-600">
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <button onClick={() => openEditModal(debt)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded text-gray-500">
+                          <EditIcon className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => handleDelete(debt)} className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-500">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const DEFAULT_CATEGORIES = ['信用卡', '房贷', '车贷', '消费贷', '亲友借款', '其他'];
   const defaultCategories = DEFAULT_CATEGORIES.map((name, idx) => ({ id: `cat_${idx}`, name }));
