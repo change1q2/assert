@@ -1,0 +1,15 @@
+- [x] Checkpoint 1: 右侧日期筛选按钮已删除（2026年、本月等）
+- [x] Checkpoint 2: 收支分析卡片移至页面最顶部
+- [x] Checkpoint 3: 刷新按钮在收支分析卡片最右侧
+- [x] Checkpoint 4: 新增按钮在收支记录列表右上角
+- [x] Checkpoint 5: 账户概念已删除，统一为账本
+- [x] Checkpoint 6: 新增弹窗中账户字段改为账本字段
+- [x] Checkpoint 7: 列表中无账户列
+- [x] Checkpoint 8: 日常模式日历表清楚标记每日收支
+- [x] Checkpoint 9: 月统计模式显示1-12月收支柱状图
+- [x] Checkpoint 10: 年统计模式显示年度收支趋势图
+- [x] Checkpoint 11: 自定义模式支持日期区间选择
+- [x] Checkpoint 12: 自定义模式根据区间长度自动切换显示粒度
+- [x] Checkpoint 13: 前后端数据结构统一，数据正确保存和加载
+- [x] Checkpoint 14: 前端构建成功
+- [x] Checkpoint 15: 整体功能测试通过

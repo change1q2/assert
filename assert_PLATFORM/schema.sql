@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS records (
   note TEXT NOT NULL,
   created_at VARCHAR(50) NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0,
+  book_id VARCHAR(255) NOT NULL DEFAULT '',
   PRIMARY KEY (user_id, id),
   INDEX idx_records_user_date (user_id, record_date),
   INDEX idx_records_user_account (user_id, account_id),
@@ -174,6 +175,7 @@ CREATE TABLE IF NOT EXISTS custom_record_categories (
   user_id INTEGER NOT NULL,
   record_type VARCHAR(50) NOT NULL,
   name VARCHAR(255) NOT NULL,
+  icon VARCHAR(100) NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (user_id, record_type, name),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -188,13 +190,23 @@ CREATE TABLE IF NOT EXISTS finance_tertiary_categories (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS record_tags (
+CREATE TABLE IF NOT EXISTS record_tags_old (
   user_id INTEGER NOT NULL,
   category VARCHAR(255) NOT NULL,
   tag VARCHAR(255) NOT NULL,
   is_last TINYINT NOT NULL DEFAULT 0,
   sort_order INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (user_id, category, tag),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS record_tags (
+  record_id VARCHAR(255) NOT NULL,
+  tag_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  PRIMARY KEY (record_id, tag_id, user_id),
+  INDEX idx_record_tags_user (user_id),
+  INDEX idx_record_tags_tag (tag_id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -370,4 +382,29 @@ CREATE TABLE IF NOT EXISTS release_packages (
   distribution VARCHAR(100) NOT NULL DEFAULT 'direct',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_release_packages_platform (platform, published_at DESC)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS books (
+  id VARCHAR(255) NOT NULL,
+  user_id INTEGER NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  icon VARCHAR(100) NOT NULL DEFAULT '',
+  color VARCHAR(50) NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_books_user (user_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS tags (
+  id VARCHAR(255) NOT NULL,
+  user_id INTEGER NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  color VARCHAR(50) NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_tags_user (user_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

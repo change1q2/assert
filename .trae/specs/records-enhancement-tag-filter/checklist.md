@@ -1,0 +1,8 @@
+- [x] Checkpoint 1: 新增记录弹窗中存在标签输入字段
+- [x] Checkpoint 2: 标签输入字段可正常输入和保存
+- [x] Checkpoint 3: 列表筛选项移至日期/账本表头行上方
+- [x] Checkpoint 4: 筛选功能正常工作，默认值为"全部"
+- [x] Checkpoint 5: 新增记录后数据正确保存到后端
+- [x] Checkpoint 6: 页面刷新后标签字段正确显示
+- [x] Checkpoint 7: 标签筛选功能正常工作
+- [x] Checkpoint 8: 整体功能测试通过

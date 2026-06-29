@@ -10,7 +10,6 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
   X,
   BookOpen,
   Settings,
@@ -21,6 +20,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { CURRENCIES, getCurrencySymbol, DEFAULT_BASE_CURRENCY, convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency.js';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 function formatCurrency(value, currencyCode) {
   const symbol = getCurrencySymbol(currencyCode);
@@ -57,31 +57,25 @@ const defaultCategories = {
   },
 };
 
-const defaultAccounts = [
-  { id: '1', name: '现金' },
-  { id: '2', name: '支付宝' },
-  { id: '3', name: '微信支付' },
-  { id: '4', name: '银行卡' },
-];
-
 export default function Records() {
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [timePeriod, setTimePeriod] = useState('月统计');
+  const [timePeriod, setTimePeriod] = useState('全部');
   const [selectedMonth, setSelectedMonth] = useState('本月');
   const [calendarDate, setCalendarDate] = useState(new Date());
+  const [chartYear, setChartYear] = useState(new Date().getFullYear());
   const [selectedDate, setSelectedDate] = useState(null);
+  const [calendarSize, setCalendarSize] = useState('normal');
   const [showAddModal, setShowAddModal] = useState(false);
   const [baseCurrency, setBaseCurrency] = useState(DEFAULT_BASE_CURRENCY);
   const [selectedCurrencyFilter, setSelectedCurrencyFilter] = useState(DEFAULT_BASE_CURRENCY);
-  const [newRecord, setNewRecord] = useState({ date: '', type: 'expense', category: '', subCategory: '', amount: '', account: '', book: '', note: '', currency: DEFAULT_BASE_CURRENCY });
+  const [newRecord, setNewRecord] = useState({ date: '', type: 'expense', category: '', subCategory: '', amount: '', book: '', note: '', tag: '', currency: DEFAULT_BASE_CURRENCY });
   const [saving, setSaving] = useState(false);
   const [selectedBook, setSelectedBook] = useState(null);
   const [books, setBooks] = useState([]);
   const [categories, setCategories] = useState(defaultCategories);
-  const [accounts, setAccounts] = useState(defaultAccounts);
-  const [account, setAccount] = useState(null);
+  const [tags, setTags] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [listFilters, setListFilters] = useState({
@@ -128,23 +122,23 @@ export default function Records() {
     setCurrentPage(1);
   };
 
-  const [showAccountModal, setShowAccountModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showSubCategoryModal, setShowSubCategoryModal] = useState(false);
   const [showBookModal, setShowBookModal] = useState(false);
   const [showTagModal, setShowTagModal] = useState(false);
   const [showExchangeRateModal, setShowExchangeRateModal] = useState(false);
-  const [showSettingsSection, setShowSettingsSection] = useState(false);
-  const [accountToEdit, setAccountToEdit] = useState(null);
-  const [newAccountName, setNewAccountName] = useState('');
   const [categoryToEdit, setCategoryToEdit] = useState(null);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [newBookName, setNewBookName] = useState('');
+  const [newTagName, setNewTagName] = useState('');
   const [subCategoryToEdit, setSubCategoryToEdit] = useState(null);
   const [newSubCategoryName, setNewSubCategoryName] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   const [uploadedImage, setUploadedImage] = useState(null);
   const [ocrResult, setOcrResult] = useState(null);
+  const [customStartDate, setCustomStartDate] = useState(formatDate(new Date(new Date().setMonth(new Date().getMonth() - 1))));
+  const [customEndDate, setCustomEndDate] = useState(formatDate(new Date()));
 
   const { records = [] } = stateData || {};
 
@@ -156,6 +150,32 @@ export default function Records() {
     setCurrentPage(1);
   }, [timePeriod, selectedMonth, selectedDate, selectedBook, selectedCurrencyFilter]);
 
+  const getStatLabels = () => {
+    switch (timePeriod) {
+      case '全部':
+        return { income: '总收入', expense: '总支出', net: '净收入' };
+      case '日常':
+        return { income: '当日收入', expense: '当日支出', net: '当日净收入' };
+      case '月统计':
+        return { income: '当月收入', expense: '当月支出', net: '当月净收入' };
+      case '年统计':
+        return { income: '当年收入', expense: '当年支出', net: '当年净收入' };
+      case '自定义':
+        const start = new Date(customStartDate);
+        const end = new Date(customEndDate);
+        const days = Math.floor((end - start) / (1000 * 60 * 60 * 24)) + 1;
+        if (days <= 30) {
+          return { income: '区间收入', expense: '区间支出', net: '区间净收入' };
+        } else if (days <= 365) {
+          return { income: '期间收入', expense: '期间支出', net: '期间净收入' };
+        } else {
+          return { income: '跨年收入', expense: '跨年支出', net: '跨年净收入' };
+        }
+      default:
+        return { income: '总收入', expense: '总支出', net: '净收入' };
+    }
+  };
+
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -164,8 +184,7 @@ export default function Records() {
       setStateData(data);
       setBooks(data.books || []);
       setCategories(data.categories || defaultCategories);
-      setAccounts(data.accounts || defaultAccounts);
-      setAccount(data.accounts?.[0] || defaultAccounts[0]);
+      setTags(data.tags || []);
     } catch (err) {
       console.error('Failed to load records data:', err);
       setError('加载数据失败');
@@ -183,10 +202,10 @@ export default function Records() {
     if (!recordsToFilter) return [];
     return recordsToFilter.filter((record) => {
       if (listFilters.date && !formatDate(record.date).includes(listFilters.date)) return false;
-      if (listFilters.book && record.book !== listFilters.book) return false;
+      if (listFilters.book && (books.find(b => b.id === record.bookId)?.name || record.book) !== listFilters.book) return false;
       if (listFilters.type !== 'all' && record.type !== listFilters.type) return false;
       if (listFilters.category && !(record.category || '').includes(listFilters.category)) return false;
-      if (listFilters.subCategory && !(record.subCategory || '').includes(listFilters.subCategory)) return false;
+      if (listFilters.subCategory && !(record.sub || record.subCategory || '').includes(listFilters.subCategory)) return false;
 
       const displayAmount = convertAmount(Math.abs(record.amount || 0), record.currency || DEFAULT_BASE_CURRENCY, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
       if (listFilters.amountMin && displayAmount < parseFloat(listFilters.amountMin)) return false;
@@ -197,7 +216,7 @@ export default function Records() {
       if (listFilters.cnvMax && baseAmount > parseFloat(listFilters.cnvMax)) return false;
 
       if (listFilters.tag) {
-        const tags = record.tags || [];
+        const tags = record.tag || [];
         const tagStr = Array.isArray(tags) ? tags.join(',') : String(tags || '');
         if (!tagStr.includes(listFilters.tag)) return false;
       }
@@ -225,6 +244,10 @@ export default function Records() {
       const recordYear = recordDate.getFullYear();
       const recordMonth = recordDate.getMonth();
 
+      if (timePeriod === '全部') {
+        return true;
+      }
+
       if (timePeriod === '日常') {
         if (selectedDate) {
           return recordDate.toDateString() === selectedDate.toDateString();
@@ -237,7 +260,7 @@ export default function Records() {
         return recordYear === currentYear;
       }
 
-      if (timePeriod === '月统计' || timePeriod === '自定义') {
+      if (timePeriod === '月统计') {
         let targetYear = currentYear;
         let targetMonth = currentMonth;
 
@@ -257,6 +280,12 @@ export default function Records() {
         return recordYear === targetYear && recordMonth === targetMonth;
       }
 
+      if (timePeriod === '自定义') {
+        const startDate = new Date(customStartDate);
+        const endDate = new Date(customEndDate);
+        return recordDate >= startDate && recordDate <= endDate;
+      }
+
       return true;
     });
   };
@@ -270,21 +299,23 @@ export default function Records() {
       const newRecordData = {
         ...newRecord,
         amount: finalAmount,
-        account: newRecord.account || account?.name || '',
-        book: newRecord.book || selectedBook || '',
+        bookId: books.find(b => b.name === newRecord.book)?.id || '',
+        sub: newRecord.subCategory || '',
+        tag: newRecord.tag || '',
         id: Date.now(),
       };
+      delete newRecordData.book;
+      delete newRecordData.subCategory;
 
       const updatedRecords = [...records, newRecordData];
       await saveState({
         ...stateData,
         records: updatedRecords,
         categories,
-        accounts,
       });
 
       setShowAddModal(false);
-      setNewRecord({ date: '', type: 'expense', category: '', subCategory: '', amount: '', account: '', book: '', note: '', currency: baseCurrency });
+      setNewRecord({ date: '', type: 'expense', category: '', subCategory: '', amount: '', book: '', note: '', tag: '', currency: baseCurrency });
       setUploadedImage(null);
       setOcrResult(null);
       loadData();
@@ -293,41 +324,6 @@ export default function Records() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleSaveAccounts = async () => {
-    await saveState({
-      ...stateData,
-      accounts,
-    });
-  };
-
-  const handleAddAccount = () => {
-    if (!newAccountName.trim()) return;
-    const newAccount = {
-      id: Date.now().toString(),
-      name: newAccountName.trim(),
-    };
-    setAccounts([...accounts, newAccount]);
-    setNewAccountName('');
-    handleSaveAccounts();
-  };
-
-  const handleEditAccount = (account) => {
-    setAccountToEdit(account);
-  };
-
-  const handleSaveAccountEdit = () => {
-    if (!accountToEdit || !accountToEdit.name.trim()) return;
-    setAccounts(accounts.map(acc => acc.id === accountToEdit.id ? accountToEdit : acc));
-    setAccountToEdit(null);
-    handleSaveAccounts();
-  };
-
-  const handleDeleteAccount = async (accountId) => {
-    setAccounts(accounts.filter(acc => acc.id !== accountId));
-    setDeleteConfirm(null);
-    handleSaveAccounts();
   };
 
   const handleSaveCategories = async () => {
@@ -392,6 +388,40 @@ export default function Records() {
     }
     setDeleteConfirm(null);
     handleSaveCategories();
+  };
+
+  const handleAddTag = async () => {
+    if (!newTagName.trim()) return;
+    const newTag = { id: Date.now(), name: newTagName.trim(), color: '#8B5CF6', createdAt: new Date().toISOString() };
+    const updatedTags = [...tags, newTag];
+    const currentState = stateData || await fetchState();
+    await saveState({ ...currentState, tags: updatedTags });
+    setNewTagName('');
+    loadData();
+  };
+
+  const handleDeleteTag = async (tagToDelete) => {
+    const updatedTags = tags.filter(t => t.id !== tagToDelete.id && t.name !== tagToDelete.name);
+    const currentState = stateData || await fetchState();
+    await saveState({ ...currentState, tags: updatedTags });
+    loadData();
+  };
+
+  const handleAddBook = async () => {
+    if (!newBookName.trim()) return;
+    const newBook = { id: Date.now(), name: newBookName.trim(), icon: '', color: '#6366F1', createdAt: new Date().toISOString() };
+    const updatedBooks = [...books, newBook];
+    const currentState = stateData || await fetchState();
+    await saveState({ ...currentState, books: updatedBooks });
+    setNewBookName('');
+    loadData();
+  };
+
+  const handleDeleteBook = async (bookToDelete) => {
+    const updatedBooks = books.filter(b => b.id !== bookToDelete.id && b.name !== bookToDelete.name);
+    const currentState = stateData || await fetchState();
+    await saveState({ ...currentState, books: updatedBooks });
+    loadData();
   };
 
   const handleAddSubCategory = () => {
@@ -525,6 +555,134 @@ export default function Records() {
     return totals;
   };
 
+  const getMonthlyData = () => {
+    const monthlyData = [];
+    const months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+    const filteredRecords = records.filter(r => new Date(r.date).getFullYear() === chartYear);
+    
+    months.forEach((month, idx) => {
+      const monthRecords = filteredRecords.filter(r => new Date(r.date).getMonth() === idx);
+      const income = monthRecords
+        .filter(r => r.type === 'income')
+        .reduce((sum, r) => {
+          const rawAmount = Math.abs(r.amount || 0);
+          const fromCurrency = r.currency || DEFAULT_BASE_CURRENCY;
+          return sum + convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+        }, 0);
+      const expense = monthRecords
+        .filter(r => r.type === 'expense')
+        .reduce((sum, r) => {
+          const rawAmount = Math.abs(r.amount || 0);
+          const fromCurrency = r.currency || DEFAULT_BASE_CURRENCY;
+          return sum + convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+        }, 0);
+      monthlyData.push({ month, income, expense });
+    });
+    
+    return monthlyData;
+  };
+
+  const getYearlyData = () => {
+    const yearlyData = [];
+    const years = [...new Set(records.map(r => new Date(r.date).getFullYear()))];
+    if (years.length === 0) years.push(new Date().getFullYear());
+    years.sort((a, b) => a - b);
+    
+    years.forEach(year => {
+      const yearRecords = records.filter(r => new Date(r.date).getFullYear() === year);
+      const income = yearRecords
+        .filter(r => r.type === 'income')
+        .reduce((sum, r) => {
+          const rawAmount = Math.abs(r.amount || 0);
+          const fromCurrency = r.currency || DEFAULT_BASE_CURRENCY;
+          return sum + convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+        }, 0);
+      const expense = yearRecords
+        .filter(r => r.type === 'expense')
+        .reduce((sum, r) => {
+          const rawAmount = Math.abs(r.amount || 0);
+          const fromCurrency = r.currency || DEFAULT_BASE_CURRENCY;
+          return sum + convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+        }, 0);
+      yearlyData.push({ year: year.toString(), income, expense });
+    });
+    
+    return yearlyData;
+  };
+
+  const getCustomData = () => {
+    const start = new Date(customStartDate);
+    const end = new Date(customEndDate);
+    const diffTime = end.getTime() - start.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    let displayMode = 'day';
+    if (diffDays > 365) {
+      displayMode = 'year';
+    } else if (diffDays > 30) {
+      displayMode = 'month';
+    }
+    
+    const filteredRecords = records.filter(r => {
+      const rDate = new Date(r.date);
+      return rDate >= start && rDate <= end;
+    });
+    
+    const data = [];
+    const symbol = getCurrencySymbol(selectedCurrencyFilter);
+    
+    if (displayMode === 'year') {
+      const years = [...new Set(filteredRecords.map(r => new Date(r.date).getFullYear()))];
+      years.sort((a, b) => a - b);
+      years.forEach(year => {
+        const yearRecords = filteredRecords.filter(r => new Date(r.date).getFullYear() === year);
+        const income = yearRecords.filter(r => r.type === 'income').reduce((sum, r) => {
+          const rawAmount = Math.abs(r.amount || 0);
+          const fromCurrency = r.currency || DEFAULT_BASE_CURRENCY;
+          return sum + convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+        }, 0);
+        const expense = yearRecords.filter(r => r.type === 'expense').reduce((sum, r) => {
+          const rawAmount = Math.abs(r.amount || 0);
+          const fromCurrency = r.currency || DEFAULT_BASE_CURRENCY;
+          return sum + convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+        }, 0);
+        data.push({ label: year.toString(), income, expense });
+      });
+    } else if (displayMode === 'month') {
+      const monthMap = {};
+      filteredRecords.forEach(r => {
+        const d = new Date(r.date);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        monthMap[key] = monthMap[key] || { income: 0, expense: 0 };
+        const rawAmount = Math.abs(r.amount || 0);
+        const fromCurrency = r.currency || DEFAULT_BASE_CURRENCY;
+        const amount = convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+        if (r.type === 'income') monthMap[key].income += amount;
+        else monthMap[key].expense += amount;
+      });
+      Object.keys(monthMap).sort().forEach(key => {
+        data.push({ label: key.substring(5) + '月', ...monthMap[key] });
+      });
+    } else {
+      const dayMap = {};
+      filteredRecords.forEach(r => {
+        const d = new Date(r.date);
+        const key = formatDate(d);
+        dayMap[key] = dayMap[key] || { income: 0, expense: 0 };
+        const rawAmount = Math.abs(r.amount || 0);
+        const fromCurrency = r.currency || DEFAULT_BASE_CURRENCY;
+        const amount = convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+        if (r.type === 'income') dayMap[key].income += amount;
+        else dayMap[key].expense += amount;
+      });
+      Object.keys(dayMap).sort().forEach(key => {
+        data.push({ label: key.substring(5), ...dayMap[key] });
+      });
+    }
+    
+    return { data, displayMode };
+  };
+
   const renderCalendar = () => {
     const year = calendarDate.getFullYear();
     const month = calendarDate.getMonth();
@@ -537,6 +695,34 @@ export default function Records() {
     for (let i = 1; i <= dayCount; i++) days.push(i);
     const totals = getDailyTotals();
 
+    const sizeClasses = {
+      small: 'gap-0.5',
+      normal: 'gap-1',
+      large: 'gap-2',
+    };
+
+    const cellPaddingClasses = {
+      small: 'p-0.5',
+      normal: 'p-1',
+      large: 'p-2',
+    };
+
+    const fontSizeClasses = {
+      small: 'text-[8px]',
+      normal: 'text-xs',
+      large: 'text-sm',
+    };
+
+    const maxAmount = Math.max(
+      ...Object.values(totals).map(t => Math.max(t.income, t.expense)),
+      1
+    );
+
+    const getBarWidth = (amount) => {
+      const percent = (amount / maxAmount) * 100;
+      return Math.min(Math.max(percent, 5), 100);
+    };
+
     return (
       <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700">
         <div className="flex items-center justify-between mb-3">
@@ -544,31 +730,267 @@ export default function Records() {
           <span className="font-semibold">{year}年{month + 1}月</span>
           <button onClick={() => setCalendarDate(new Date(year, month + 1, 1))} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded"><ChevronRight className="w-5 h-5" /></button>
         </div>
-        <div className="grid grid-cols-7 gap-1 text-center text-xs">
-          {['日', '一', '二', '三', '四', '五', '六'].map(d => <span key={d} className="text-gray-400 py-1">{d}</span>)}
+        <div className={`grid grid-cols-7 ${sizeClasses[calendarSize]} text-center ${fontSizeClasses[calendarSize]}`}>
+          {['日', '一', '二', '三', '四', '五', '六'].map(d => (
+            <span key={d} className="text-gray-400 py-1 font-medium">{d}</span>
+          ))}
           {days.map((day, idx) => {
             if (!day) return <span key={`empty-${idx}`} />;
             const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             const dayTotals = totals[dateStr] || { income: 0, expense: 0 };
             const isToday = dateStr === todayStr;
             const isSelected = selectedDate && formatDate(selectedDate) === dateStr;
+
             return (
               <button
                 key={day}
-                onClick={() => { setSelectedDate(new Date(year, month, day)); setSelectedDate(new Date(year, month, day)); }}
-                className={`p-1.5 rounded-lg text-xs relative ${isSelected ? 'bg-primary-500 text-white' : isToday ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600' : 'hover:bg-gray-100 dark:hover:bg-slate-700'} ${dayTotals.income > 0 || dayTotals.expense > 0 ? 'font-semibold' : ''}`}
+                onClick={() => setSelectedDate(new Date(year, month, day))}
+                className={`${cellPaddingClasses[calendarSize]} rounded-lg relative transition-all duration-200 ${
+                  isSelected
+                    ? 'bg-primary-500 text-white shadow-lg shadow-primary-500/30 ring-2 ring-primary-300'
+                    : isToday
+                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 border border-primary-200'
+                    : 'hover:bg-gray-100 dark:hover:bg-slate-700'
+                }`}
               >
-                {day}
-                {dayTotals.expense > 0 && <span className={`absolute bottom-0 left-0 right-0 text-[8px] ${isSelected ? 'text-white/80' : 'text-red-500'}`}>支{dayTotals.expense > 999 ? (dayTotals.expense / 1000).toFixed(0) + 'k' : dayTotals.expense}</span>}
-                {dayTotals.income > 0 && <span className={`absolute top-0 right-0 text-[8px] ${isSelected ? 'text-white/80' : 'text-green-500'}`}>+{dayTotals.income > 999 ? (dayTotals.income / 1000).toFixed(0) + 'k' : dayTotals.income}</span>}
+                <div className={`flex justify-center items-center ${calendarSize === 'large' ? 'h-6' : ''}`}>
+                  <span className={`font-semibold ${calendarSize === 'small' ? 'text-[10px]' : calendarSize === 'large' ? 'text-base' : 'text-xs'}`}>
+                    {day}
+                  </span>
+                </div>
+                {(dayTotals.income > 0 || dayTotals.expense > 0) && (
+                  <div className="mt-0.5 space-y-0.5">
+                    {dayTotals.expense > 0 && (
+                      <div className="flex items-center gap-0.5">
+                        <div
+                          className={`h-1 rounded-full bg-red-400 ${isSelected ? 'bg-red-300' : ''}`}
+                          style={{ width: `${getBarWidth(dayTotals.expense)}%` }}
+                        />
+                        <span className={`${calendarSize === 'small' ? 'text-[6px]' : calendarSize === 'large' ? 'text-xs' : 'text-[8px]'} ${isSelected ? 'text-white/80' : 'text-red-500'} flex-shrink-0`}>
+                          {dayTotals.expense > 999 ? (dayTotals.expense / 1000).toFixed(1) + 'k' : Math.floor(dayTotals.expense)}
+                        </span>
+                      </div>
+                    )}
+                    {dayTotals.income > 0 && (
+                      <div className="flex items-center gap-0.5">
+                        <div
+                          className={`h-1 rounded-full bg-green-400 ${isSelected ? 'bg-green-300' : ''}`}
+                          style={{ width: `${getBarWidth(dayTotals.income)}%` }}
+                        />
+                        <span className={`${calendarSize === 'small' ? 'text-[6px]' : calendarSize === 'large' ? 'text-xs' : 'text-[8px]'} ${isSelected ? 'text-white/80' : 'text-green-500'} flex-shrink-0`}>
+                          +{dayTotals.income > 999 ? (dayTotals.income / 1000).toFixed(1) + 'k' : Math.floor(dayTotals.income)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </button>
             );
           })}
         </div>
-        <div className="flex gap-4 mt-3 text-xs">
-          <button onClick={() => { setSelectedDate(new Date()); setSelectedDate(new Date()); }} className={`px-3 py-1 rounded-full ${!selectedDate || formatDate(selectedDate) === todayStr ? 'bg-primary-500 text-white' : 'bg-gray-100 dark:bg-slate-700'}`}>今日</button>
-          <button onClick={() => { const y = new Date(); y.setDate(y.getDate() - 1); setSelectedDate(y); setSelectedDate(y); }} className="px-3 py-1 rounded-full bg-gray-100 dark:bg-slate-700">昨日</button>
-          {selectedDate && <button onClick={() => setSelectedDate(null)} className="px-3 py-1 rounded-full bg-gray-100 dark:bg-slate-700 flex items-center gap-1"><X className="w-3 h-3" />清除</button>}
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
+          <div className="flex gap-4 text-xs">
+            <button
+              onClick={() => setSelectedDate(new Date())}
+              className={`px-3 py-1 rounded-full transition-colors ${
+                !selectedDate || formatDate(selectedDate) === todayStr
+                  ? 'bg-primary-500 text-white'
+                  : 'bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600'
+              }`}
+            >
+              今日
+            </button>
+            <button
+              onClick={() => {
+                const y = new Date();
+                y.setDate(y.getDate() - 1);
+                setSelectedDate(y);
+              }}
+              className="px-3 py-1 rounded-full bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors"
+            >
+              昨日
+            </button>
+            {selectedDate && (
+              <button
+                onClick={() => setSelectedDate(null)}
+                className="px-3 py-1 rounded-full bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600 transition-colors flex items-center gap-1"
+              >
+                <X className="w-3 h-3" />
+                清除
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 dark:text-gray-400">卡片大小:</span>
+            {[
+              { size: 'small', label: '小' },
+              { size: 'normal', label: '中' },
+              { size: 'large', label: '大' },
+            ].map(({ size, label }) => (
+              <button
+                key={size}
+                onClick={() => setCalendarSize(size)}
+                className={`px-2 py-1 rounded text-xs transition-colors ${
+                  calendarSize === size
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center justify-center gap-6 mt-3 text-xs text-gray-500 dark:text-gray-400">
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-1 bg-red-400 rounded-full" />
+            <span>支出</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-1 bg-green-400 rounded-full" />
+            <span>收入</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMonthlyChart = () => {
+    const data = getMonthlyData();
+    const symbol = getCurrencySymbol(selectedCurrencyFilter);
+    
+    return (
+      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700">
+        <div className="flex items-center justify-between mb-4">
+          <span className="font-semibold">月度收支统计 - {chartYear}年</span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setChartYear(chartYear - 1)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded">
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <input
+              type="number"
+              value={chartYear}
+              onChange={(e) => setChartYear(Math.max(2000, Math.min(2100, parseInt(e.target.value) || 2000)))}
+              className="w-16 px-2 py-1 text-center border border-gray-300 dark:border-slate-600 rounded text-sm dark:bg-slate-700"
+            />
+            <button onClick={() => setChartYear(chartYear + 1)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded">
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" className="dark:stroke-slate-700" />
+              <XAxis dataKey="month" className="dark:text-gray-400" />
+              <YAxis className="dark:text-gray-400" tickFormatter={(value) => `${symbol}${value.toLocaleString()}`} />
+              <Tooltip
+                formatter={(value) => [`${symbol}${value.toLocaleString()}`, value > 0 ? '收入' : '支出']}
+                contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '8px' }}
+              />
+              <Legend />
+              <Bar dataKey="income" name="收入" fill="#10B981" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="expense" name="支出" fill="#EF4444" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  };
+
+  const renderYearlyChart = () => {
+    const data = getYearlyData();
+    const symbol = getCurrencySymbol(selectedCurrencyFilter);
+    
+    return (
+      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700">
+        <div className="flex items-center justify-between mb-4">
+          <span className="font-semibold">年度收支趋势</span>
+        </div>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" className="dark:stroke-slate-700" />
+              <XAxis dataKey="year" className="dark:text-gray-400" />
+              <YAxis className="dark:text-gray-400" tickFormatter={(value) => `${symbol}${value.toLocaleString()}`} />
+              <Tooltip
+                formatter={(value) => [`${symbol}${value.toLocaleString()}`, value > 0 ? '收入' : '支出']}
+                contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '8px' }}
+              />
+              <Legend />
+              <Line type="monotone" dataKey="income" name="收入" stroke="#10B981" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              <Line type="monotone" dataKey="expense" name="支出" stroke="#EF4444" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCustomRange = () => {
+    const { data, displayMode } = getCustomData();
+    const symbol = getCurrencySymbol(selectedCurrencyFilter);
+    
+    const chartConfig = {
+      day: { title: '按日统计', Chart: BarChart, Series: Bar },
+      month: { title: '按月统计', Chart: BarChart, Series: Bar },
+      year: { title: '按年统计', Chart: LineChart, Series: Line },
+    };
+    
+    const { title, Chart, Series } = chartConfig[displayMode];
+    
+    return (
+      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700">
+        <div className="flex flex-wrap items-center gap-4 mb-4">
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600 dark:text-gray-400">起始日期:</label>
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={(e) => setCustomStartDate(e.target.value)}
+              className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm dark:bg-slate-700"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600 dark:text-gray-400">结束日期:</label>
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={(e) => setCustomEndDate(e.target.value)}
+              className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm dark:bg-slate-700"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500 dark:text-gray-400">显示模式:</span>
+            <span className="px-3 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-full text-sm font-medium">
+              {title}
+            </span>
+          </div>
+        </div>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <Chart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" className="dark:stroke-slate-700" />
+              <XAxis dataKey="label" className="dark:text-gray-400" />
+              <YAxis className="dark:text-gray-400" tickFormatter={(value) => `${symbol}${value.toLocaleString()}`} />
+              <Tooltip
+                formatter={(value) => [`${symbol}${value.toLocaleString()}`, value > 0 ? '收入' : '支出']}
+                contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '8px' }}
+              />
+              <Legend />
+              {displayMode === 'year' ? (
+                <>
+                  <Series type="monotone" dataKey="income" name="收入" stroke="#10B981" strokeWidth={2} dot={{ r: 4 }} />
+                  <Series type="monotone" dataKey="expense" name="支出" stroke="#EF4444" strokeWidth={2} dot={{ r: 4 }} />
+                </>
+              ) : (
+                <>
+                  <Series dataKey="income" name="收入" fill="#10B981" radius={[4, 4, 0, 0]} />
+                  <Series dataKey="expense" name="支出" fill="#EF4444" radius={[4, 4, 0, 0]} />
+                </>
+              )}
+            </Chart>
+          </ResponsiveContainer>
         </div>
       </div>
     );
@@ -649,43 +1071,6 @@ export default function Records() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 sm:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 sm:px-7 shadow-soft border border-gray-100 dark:border-slate-700">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center gap-1">
-              {['日常', '月统计', '年统计', '自定义'].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setTimePeriod(tab)}
-                  className={`px-4 py-1.5 rounded-full text-sm transition-all ${
-                    timePeriod === tab
-                      ? 'bg-primary-500 text-white font-medium'
-                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-primary-500 mr-1">2026年</span>
-              {['本月', '上月', '4月', '3月', '2月', '1月'].map((month) => (
-                <button
-                  key={month}
-                  onClick={() => setSelectedMonth(month)}
-                  className={`px-3 py-1 rounded-full text-xs transition-all ${
-                    selectedMonth === month
-                      ? 'bg-primary-500 text-white font-medium'
-                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  {month}
-                </button>
-              ))}
-            </div>
-          </div>
-          {timePeriod === '日常' && renderCalendar()}
-        </div>
-
         <section
           className="rounded-2xl p-6 sm:p-7"
           style={{
@@ -730,13 +1115,6 @@ export default function Records() {
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <button
-                  onClick={() => { setNewRecord({ date: formatDate(new Date()), type: 'expense', category: '', subCategory: '', amount: '', account: account?.name || '', book: selectedBook || '', note: '', currency: baseCurrency }); setShowAddModal(true); }}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
-                >
-                  <Plus className="w-4 h-4" />
-                  新增
-                </button>
-                <button
                   onClick={loadData}
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary-500 text-primary-500 text-sm font-medium hover:bg-primary-500 hover:text-white transition-colors"
                 >
@@ -747,11 +1125,44 @@ export default function Records() {
             </div>
           </div>
         </section>
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 sm:px-7 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="flex items-center justify-center gap-1">
+            {['全部', '日常', '月统计', '年统计', '自定义'].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setTimePeriod(tab)}
+                className={`px-4 py-1.5 rounded-full text-sm transition-all ${
+                  timePeriod === tab
+                    ? 'bg-primary-500 text-white font-medium'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+          {timePeriod === '日常' && renderCalendar()}
+          {timePeriod === '月统计' && renderMonthlyChart()}
+          {timePeriod === '年统计' && renderYearlyChart()}
+          {timePeriod === '自定义' && renderCustomRange()}
+          {timePeriod === '全部' && (
+            <div className="py-8 text-center text-gray-400 dark:text-gray-500">
+              <div className="text-lg font-medium mb-1">全部数据概览</div>
+              <div className="text-sm">查看下方统计卡片了解整体收支情况</div>
+            </div>
+          )}
+        </div>
+
+
 
         <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {(() => {
+            const labels = getStatLabels();
+            return (
+              <>
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-500 dark:text-gray-400">总收入</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">{labels.income}</span>
               <div className="bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full p-2">
                 <TrendingUp className="w-5 h-5" />
               </div>
@@ -767,7 +1178,7 @@ export default function Records() {
 
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-500 dark:text-gray-400">总支出</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">{labels.expense}</span>
               <div className="bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full p-2">
                 <TrendingDown className="w-5 h-5" />
               </div>
@@ -783,7 +1194,7 @@ export default function Records() {
 
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-500 dark:text-gray-400">净收入</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">{labels.net}</span>
               <div className={`rounded-full p-2 ${
                 netIncome >= 0
                   ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
@@ -802,6 +1213,9 @@ export default function Records() {
               <span>收入 - 支出</span>
             </div>
           </div>
+              </>
+            );
+          })()}
         </section>
 
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -921,6 +1335,13 @@ export default function Records() {
             <h3 className="text-base font-semibold text-gray-900 dark:text-white">收支记录</h3>
             <div className="flex items-center gap-2">
               <button
+                onClick={() => { setNewRecord({ date: formatDate(new Date()), type: 'expense', category: '', subCategory: '', amount: '', book: selectedBook || '', note: '', tag: '', currency: baseCurrency }); setShowAddModal(true); }}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                新增
+              </button>
+              <button
                 onClick={() => {
                   setListFilters({
                     date: '',
@@ -951,6 +1372,84 @@ export default function Records() {
             </div>
           </div>
           <div className="overflow-x-auto">
+            <div className="flex border-b border-gray-200 dark:border-slate-700">
+              {visibleColumns.date && (
+                <div className="py-2 px-3" style={{ width: '150px', flexShrink: 0 }}>
+                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">日期：</label>
+                  <select
+                    value={listFilters.date}
+                    onChange={(e) => handleFilterChange('date', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">全部</option>
+                    <option value="today">今日</option>
+                    <option value="yesterday">昨日</option>
+                    <option value="week">本周</option>
+                    <option value="month">本月</option>
+                    <option value="lastMonth">上月</option>
+                  </select>
+                </div>
+              )}
+              {visibleColumns.book && (
+                <div className="py-2 px-3" style={{ width: '140px', flexShrink: 0 }}>
+                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">账本：</label>
+                  <select
+                    value={listFilters.book}
+                    onChange={(e) => handleFilterChange('book', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">全部</option>
+                    {books.map((book) => (
+                      <option key={book.id} value={book.name}>{book.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {visibleColumns.type && (
+                <div className="py-2 px-3" style={{ width: '120px', flexShrink: 0 }}>
+                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">类型：</label>
+                  <select
+                    value={listFilters.type}
+                    onChange={(e) => handleFilterChange('type', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="all">全部</option>
+                    <option value="income">收入</option>
+                    <option value="expense">支出</option>
+                  </select>
+                </div>
+              )}
+              {visibleColumns.category && (
+                <div className="py-2 px-3" style={{ width: '140px', flexShrink: 0 }}>
+                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">一级分类：</label>
+                  <select
+                    value={listFilters.category}
+                    onChange={(e) => { handleFilterChange('category', e.target.value); handleFilterChange('subCategory', ''); }}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">全部</option>
+                    {[...new Set([...Object.keys(categories.income || {}), ...Object.keys(categories.expense || {})])].map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {visibleColumns.subCategory && (
+                <div className="py-2 px-3" style={{ width: '140px', flexShrink: 0 }}>
+                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">二级分类：</label>
+                  <select
+                    value={listFilters.subCategory}
+                    onChange={(e) => handleFilterChange('subCategory', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">全部</option>
+                    {listFilters.category ? getSubCategories(listFilters.category) : [...new Set([...Object.values(categories.income || {}), ...Object.values(categories.expense || {})].flat())].map((subCat) => (
+                      <option key={subCat} value={subCat}>{subCat}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
@@ -964,130 +1463,6 @@ export default function Records() {
                   {visibleColumns.tag && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">标签</th>}
                   {visibleColumns.note && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">备注</th>}
                 </tr>
-                <tr className="border-b border-gray-200 dark:border-slate-700">
-                  {visibleColumns.date && (
-                    <td className="py-2 px-3">
-                      <input
-                        type="text"
-                        placeholder="筛选日期"
-                        value={listFilters.date}
-                        onChange={(e) => handleFilterChange('date', e.target.value)}
-                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                      />
-                    </td>
-                  )}
-                  {visibleColumns.book && (
-                    <td className="py-2 px-3">
-                      <select
-                        value={listFilters.book}
-                        onChange={(e) => handleFilterChange('book', e.target.value)}
-                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                      >
-                        <option value="">全部</option>
-                        {books.map((book) => (
-                          <option key={book.id} value={book.name}>{book.name}</option>
-                        ))}
-                      </select>
-                    </td>
-                  )}
-                  {visibleColumns.type && (
-                    <td className="py-2 px-3">
-                      <select
-                        value={listFilters.type}
-                        onChange={(e) => handleFilterChange('type', e.target.value)}
-                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                      >
-                        <option value="all">全部</option>
-                        <option value="income">收入</option>
-                        <option value="expense">支出</option>
-                      </select>
-                    </td>
-                  )}
-                  {visibleColumns.category && (
-                    <td className="py-2 px-3">
-                      <input
-                        type="text"
-                        placeholder="筛选一级"
-                        value={listFilters.category}
-                        onChange={(e) => handleFilterChange('category', e.target.value)}
-                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                      />
-                    </td>
-                  )}
-                  {visibleColumns.subCategory && (
-                    <td className="py-2 px-3">
-                      <input
-                        type="text"
-                        placeholder="筛选二级"
-                        value={listFilters.subCategory}
-                        onChange={(e) => handleFilterChange('subCategory', e.target.value)}
-                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                      />
-                    </td>
-                  )}
-                  {visibleColumns.amount && (
-                    <td className="py-2 px-3">
-                      <div className="flex flex-col gap-1">
-                        <input
-                          type="number"
-                          placeholder="最小"
-                          value={listFilters.amountMin}
-                          onChange={(e) => handleFilterChange('amountMin', e.target.value)}
-                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                        />
-                        <input
-                          type="number"
-                          placeholder="最大"
-                          value={listFilters.amountMax}
-                          onChange={(e) => handleFilterChange('amountMax', e.target.value)}
-                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                        />
-                      </div>
-                    </td>
-                  )}
-                  {visibleColumns.cnv && (
-                    <td className="py-2 px-3">
-                      <div className="flex flex-col gap-1">
-                        <input
-                          type="number"
-                          placeholder="最小"
-                          value={listFilters.cnvMin}
-                          onChange={(e) => handleFilterChange('cnvMin', e.target.value)}
-                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                        />
-                        <input
-                          type="number"
-                          placeholder="最大"
-                          value={listFilters.cnvMax}
-                          onChange={(e) => handleFilterChange('cnvMax', e.target.value)}
-                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                        />
-                      </div>
-                    </td>
-                  )}
-                  {visibleColumns.tag && (
-                    <td className="py-2 px-3">
-                      <input
-                        type="text"
-                        placeholder="筛选标签"
-                        value={listFilters.tag}
-                        onChange={(e) => handleFilterChange('tag', e.target.value)}
-                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                      />
-                    </td>
-                  )}
-                  {visibleColumns.note && (
-                    <td className="py-2 px-3">
-                      <input
-                        type="text"
-                        placeholder="筛选备注"
-                        value={listFilters.note}
-                        onChange={(e) => handleFilterChange('note', e.target.value)}
-                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                      />
-                    </td>
-                  )}
-                </tr>
               </thead>
               <tbody>
                 {paginatedRecords.map((record) => (
@@ -1099,7 +1474,7 @@ export default function Records() {
                     )}
                     {visibleColumns.book && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                        {record.book || '-'}
+                        {books.find(b => b.id === record.bookId)?.name || (record.book || '-')}
                       </td>
                     )}
                     {visibleColumns.type && (
@@ -1120,7 +1495,7 @@ export default function Records() {
                     )}
                     {visibleColumns.subCategory && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                        {record.subCategory || '-'}
+                        {record.sub || '-'}
                       </td>
                     )}
                     {visibleColumns.amount && (
@@ -1137,7 +1512,7 @@ export default function Records() {
                     )}
                     {visibleColumns.tag && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                        {Array.isArray(record.tags) ? record.tags.join(', ') : (record.tags || '-')}
+                        {Array.isArray(record.tag) ? record.tag.join(', ') : (record.tag || '-')}
                       </td>
                     )}
                     {visibleColumns.note && (
@@ -1256,18 +1631,19 @@ export default function Records() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">账户</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">账本</label>
                   <div className="flex gap-2">
                     <select
-                      value={newRecord.account}
-                      onChange={e => setNewRecord({ ...newRecord, account: e.target.value })}
+                      value={newRecord.book}
+                      onChange={e => setNewRecord({ ...newRecord, book: e.target.value })}
                       className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
                     >
-                      {accounts.map((acc) => (
-                        <option key={acc.id || acc.name} value={acc.name}>{acc.name}</option>
+                      <option value="">请选择账本</option>
+                      {books.map((book) => (
+                        <option key={book.id || book.name} value={book.name}>{book.name}</option>
                       ))}
                     </select>
-                    <button onClick={() => setShowAccountModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
+                    <button onClick={() => setShowBookModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
                   </div>
                 </div>
                 <div>
@@ -1327,66 +1703,25 @@ export default function Records() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">备注</label>
                   <input type="text" value={newRecord.note} onChange={e => setNewRecord({ ...newRecord, note: e.target.value })} placeholder="可选" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
                 </div>
-                <div className="border border-gray-200 dark:border-slate-700 rounded-lg overflow-hidden">
-                  <button
-                    onClick={() => setShowSettingsSection(!showSettingsSection)}
-                    className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
-                  >
-                    <span className="flex items-center gap-2"><Settings className="w-4 h-4" />设置</span>
-                    <ChevronDown className={`w-4 h-4 transition-transform ${showSettingsSection ? 'rotate-180' : ''}`} />
-                  </button>
-                  {showSettingsSection && (
-                    <div className="px-3 py-3 border-t border-gray-200 dark:border-slate-700 grid grid-cols-2 gap-2">
-                      <button onClick={() => setShowBookModal(true)} className="px-3 py-2 text-sm text-left rounded-lg bg-gray-50 dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-300">账本管理</button>
-                      <button onClick={() => setShowTagModal(true)} className="px-3 py-2 text-sm text-left rounded-lg bg-gray-50 dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-300">标签管理</button>
-                      <button onClick={() => setShowCategoryModal(true)} className="px-3 py-2 text-sm text-left rounded-lg bg-gray-50 dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-300">分类管理</button>
-                      <button onClick={() => setShowExchangeRateModal(true)} className="px-3 py-2 text-sm text-left rounded-lg bg-gray-50 dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-300">汇率设置</button>
-                    </div>
-                  )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">标签</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={newRecord.tag}
+                      onChange={(e) => setNewRecord({ ...newRecord, tag: e.target.value })}
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                    >
+                      <option value="">请选择标签</option>
+                      {tags.map((tag) => (
+                        <option key={tag.id || tag.name} value={tag.name}>{tag.name}</option>
+                      ))}
+                    </select>
+                    <button onClick={() => setShowTagModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
+                  </div>
                 </div>
                 <div className="flex gap-3 pt-2">
                   <button onClick={() => setShowAddModal(false)} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
                   <button onClick={handleAddRecord} disabled={saving || !newRecord.date || !newRecord.amount || !newRecord.category} className="flex-1 py-2.5 rounded-lg bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-50">{saving ? '保存中...' : '保存'}</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showAccountModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">账户管理</h3>
-                <button onClick={() => setShowAccountModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-3">
-                <div className="flex gap-2">
-                  <input type="text" value={newAccountName} onChange={e => setNewAccountName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddAccount()} placeholder="输入账户名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddAccount} className="px-3 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"><Plus className="w-4 h-4" /></button>
-                </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {accounts.map((acc) => (
-                    <div key={acc.id} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
-                      {accountToEdit?.id === acc.id ? (
-                        <>
-                          <input type="text" value={accountToEdit.name} onChange={e => setAccountToEdit({ ...accountToEdit, name: e.target.value })} className="flex-1 px-2 py-1 border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-600 dark:text-white" autoFocus />
-                          <button onClick={handleSaveAccountEdit} className="p-1 text-green-600 hover:bg-green-100 rounded"><Edit2 className="w-4 h-4" /></button>
-                          <button onClick={() => setAccountToEdit(null)} className="p-1 text-gray-500 hover:bg-gray-200 rounded"><X className="w-4 h-4" /></button>
-                        </>
-                      ) : (
-                        <>
-                          <span className="flex-1 text-gray-700 dark:text-gray-300">{acc.name}</span>
-                          <button onClick={() => handleEditAccount(acc)} className="p-1 text-blue-600 hover:bg-blue-100 rounded"><Edit2 className="w-4 h-4" /></button>
-                          {deleteConfirm === `account-${acc.id}` ? (
-                            <button onClick={() => handleDeleteAccount(acc.id)} className="p-1 text-red-600 hover:bg-red-100 rounded">确认</button>
-                          ) : (
-                            <button onClick={() => setDeleteConfirm(`account-${acc.id}`)} className="p-1 text-red-500 hover:bg-red-100 rounded"><Trash2 className="w-4 h-4" /></button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  ))}
                 </div>
               </div>
             </div>
@@ -1503,6 +1838,53 @@ export default function Records() {
                   </label>
                 ))}
               </div>
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
+                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">高级筛选</h4>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">金额范围</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        placeholder="最小"
+                        value={listFilters.amountMin}
+                        onChange={(e) => handleFilterChange('amountMin', e.target.value)}
+                        className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      />
+                      <input
+                        type="number"
+                        placeholder="最大"
+                        value={listFilters.amountMax}
+                        onChange={(e) => handleFilterChange('amountMax', e.target.value)}
+                        className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">标签</label>
+                    <select
+                      value={listFilters.tag}
+                      onChange={(e) => handleFilterChange('tag', e.target.value)}
+                      className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                    >
+                      <option value="">全部</option>
+                      {tags.map((tag) => (
+                        <option key={tag.id || tag.name} value={tag.name}>{tag.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">备注</label>
+                    <input
+                      type="text"
+                      placeholder="筛选备注"
+                      value={listFilters.note}
+                      onChange={(e) => handleFilterChange('note', e.target.value)}
+                      className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                    />
+                  </div>
+                </div>
+              </div>
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={() => setShowColumnSettingsModal(false)}
@@ -1510,6 +1892,64 @@ export default function Records() {
                 >
                   关闭
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showTagModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">标签管理</h3>
+                <button onClick={() => setShowTagModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <input type="text" value={newTagName} onChange={(e) => setNewTagName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddTag()} placeholder="输入标签名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <button onClick={handleAddTag} className="px-3 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"><Plus className="w-4 h-4" /></button>
+                </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {tags.map((tag) => (
+                    <div key={tag.id || tag.name} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                      <span className="flex-1 text-gray-700 dark:text-gray-300">{tag.name}</span>
+                      <button onClick={() => { setNewRecord({ ...newRecord, tag: tag.name }); setShowTagModal(false); }} className="p-1 text-gray-500 hover:bg-gray-200 rounded">选择</button>
+                      <button onClick={() => handleDeleteTag(tag)} className="p-1 text-red-500 hover:bg-red-100 rounded"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                  {tags.length === 0 && (
+                    <div className="text-center text-sm text-gray-400 py-4">暂无标签</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showBookModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">账本管理</h3>
+                <button onClick={() => setShowBookModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <input type="text" value={newBookName} onChange={(e) => setNewBookName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddBook()} placeholder="输入账本名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <button onClick={handleAddBook} className="px-3 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"><Plus className="w-4 h-4" /></button>
+                </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {books.map((book) => (
+                    <div key={book.id || book.name} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                      <span className="flex-1 text-gray-700 dark:text-gray-300">{book.name}</span>
+                      <button onClick={() => { setNewRecord({ ...newRecord, book: book.name }); setShowBookModal(false); }} className="p-1 text-gray-500 hover:bg-gray-200 rounded">选择</button>
+                      <button onClick={() => handleDeleteBook(book)} className="p-1 text-red-500 hover:bg-red-100 rounded"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                  {books.length === 0 && (
+                    <div className="text-center text-sm text-gray-400 py-4">暂无账本</div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
