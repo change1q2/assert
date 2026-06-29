@@ -10,6 +10,7 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   X,
   BookOpen,
   Settings,
@@ -17,14 +18,19 @@ import {
   Trash2,
   Upload,
   Image,
+  SlidersHorizontal,
 } from 'lucide-react';
+import { CURRENCIES, getCurrencySymbol, DEFAULT_BASE_CURRENCY, convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency.js';
 
-function formatCurrency(value) {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
+function formatCurrency(value, currencyCode) {
+  const symbol = getCurrencySymbol(currencyCode);
+  const isNegative = (value || 0) < 0;
+  const absValue = Math.abs(value || 0);
+  const formatted = absValue.toLocaleString('zh-CN', {
     minimumFractionDigits: 0,
-  }).format(value);
+    maximumFractionDigits: 2,
+  });
+  return `${isNegative ? '-' : ''}${symbol}${formatted}`;
 }
 
 function formatDate(dateStr) {
@@ -67,17 +73,68 @@ export default function Records() {
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newRecord, setNewRecord] = useState({ date: '', type: 'expense', category: '', subCategory: '', amount: '', account: '', book: '', note: '' });
+  const [baseCurrency, setBaseCurrency] = useState(DEFAULT_BASE_CURRENCY);
+  const [selectedCurrencyFilter, setSelectedCurrencyFilter] = useState(DEFAULT_BASE_CURRENCY);
+  const [newRecord, setNewRecord] = useState({ date: '', type: 'expense', category: '', subCategory: '', amount: '', account: '', book: '', note: '', currency: DEFAULT_BASE_CURRENCY });
   const [saving, setSaving] = useState(false);
   const [selectedBook, setSelectedBook] = useState(null);
   const [books, setBooks] = useState([]);
   const [categories, setCategories] = useState(defaultCategories);
   const [accounts, setAccounts] = useState(defaultAccounts);
   const [account, setAccount] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [listFilters, setListFilters] = useState({
+    date: '',
+    book: '',
+    type: 'all',
+    category: '',
+    subCategory: '',
+    amountMin: '',
+    amountMax: '',
+    cnyMin: '',
+    cnyMax: '',
+    tag: '',
+    note: '',
+  });
+
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    try {
+      const saved = localStorage.getItem('recordsVisibleColumns');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return {
+      date: true,
+      book: true,
+      type: true,
+      category: true,
+      subCategory: true,
+      amount: true,
+      cny: true,
+      tag: true,
+      note: true,
+    };
+  });
+  const [showColumnSettingsModal, setShowColumnSettingsModal] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('recordsVisibleColumns', JSON.stringify(visibleColumns));
+  }, [visibleColumns]);
+
+  const handleFilterChange = (key, value) => {
+    setListFilters(prev => ({ ...prev, [key]: value }));
+    setCurrentPage(1);
+  };
 
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showSubCategoryModal, setShowSubCategoryModal] = useState(false);
+  const [showBookModal, setShowBookModal] = useState(false);
+  const [showTagModal, setShowTagModal] = useState(false);
+  const [showExchangeRateModal, setShowExchangeRateModal] = useState(false);
+  const [showSettingsSection, setShowSettingsSection] = useState(false);
   const [accountToEdit, setAccountToEdit] = useState(null);
   const [newAccountName, setNewAccountName] = useState('');
   const [categoryToEdit, setCategoryToEdit] = useState(null);
@@ -94,6 +151,10 @@ export default function Records() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [timePeriod, selectedMonth, selectedDate, selectedBook, selectedCurrencyFilter]);
 
   const loadData = async () => {
     setLoading(true);
@@ -116,6 +177,34 @@ export default function Records() {
   const filterByBook = (recordsToFilter) => {
     if (!selectedBook) return recordsToFilter;
     return recordsToFilter.filter(record => record.book === selectedBook);
+  };
+
+  const applyListFilters = (recordsToFilter) => {
+    if (!recordsToFilter) return [];
+    return recordsToFilter.filter((record) => {
+      if (listFilters.date && !formatDate(record.date).includes(listFilters.date)) return false;
+      if (listFilters.book && record.book !== listFilters.book) return false;
+      if (listFilters.type !== 'all' && record.type !== listFilters.type) return false;
+      if (listFilters.category && !(record.category || '').includes(listFilters.category)) return false;
+      if (listFilters.subCategory && !(record.subCategory || '').includes(listFilters.subCategory)) return false;
+
+      const displayAmount = convertAmount(Math.abs(record.amount || 0), record.currency || DEFAULT_BASE_CURRENCY, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+      if (listFilters.amountMin && displayAmount < parseFloat(listFilters.amountMin)) return false;
+      if (listFilters.amountMax && displayAmount > parseFloat(listFilters.amountMax)) return false;
+
+      const baseAmount = convertAmount(Math.abs(record.amount || 0), record.currency || DEFAULT_BASE_CURRENCY, DEFAULT_BASE_CURRENCY, DEFAULT_EXCHANGE_RATES);
+      if (listFilters.cnvMin && baseAmount < parseFloat(listFilters.cnvMin)) return false;
+      if (listFilters.cnvMax && baseAmount > parseFloat(listFilters.cnvMax)) return false;
+
+      if (listFilters.tag) {
+        const tags = record.tags || [];
+        const tagStr = Array.isArray(tags) ? tags.join(',') : String(tags || '');
+        if (!tagStr.includes(listFilters.tag)) return false;
+      }
+      if (listFilters.note && !(record.note || '').includes(listFilters.note)) return false;
+
+      return true;
+    });
   };
 
   const getSubCategories = (primaryCategory) => {
@@ -195,7 +284,7 @@ export default function Records() {
       });
 
       setShowAddModal(false);
-      setNewRecord({ date: '', type: 'expense', category: '', subCategory: '', amount: '', account: '', book: '', note: '' });
+      setNewRecord({ date: '', type: 'expense', category: '', subCategory: '', amount: '', account: '', book: '', note: '', currency: baseCurrency });
       setUploadedImage(null);
       setOcrResult(null);
       loadData();
@@ -426,7 +515,9 @@ export default function Records() {
       if (d.getFullYear() === year && d.getMonth() === month) {
         const dateKey = formatDate(d);
         if (!totals[dateKey]) totals[dateKey] = { income: 0, expense: 0 };
-        const amount = Math.abs(record.amount || 0);
+        const rawAmount = Math.abs(record.amount || 0);
+        const fromCurrency = record.currency || DEFAULT_BASE_CURRENCY;
+        const amount = convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
         if (record.type === 'income') totals[dateKey].income += amount;
         else totals[dateKey].expense += amount;
       }
@@ -492,7 +583,9 @@ export default function Records() {
     let totalExpense = 0;
 
     filtered.forEach(record => {
-      const amount = Math.abs(record.amount || 0);
+      const rawAmount = Math.abs(record.amount || 0);
+      const fromCurrency = record.currency || DEFAULT_BASE_CURRENCY;
+      const amount = convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
       if (record.type === 'income') {
         totalIncome += amount;
         const category = record.category || '其他收入';
@@ -547,7 +640,10 @@ export default function Records() {
   }
 
   const { income, expense, totalIncome, totalExpense } = computeIncomeExpense();
-  const recordList = filterByBook(filterByTime(records)).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const recordList = applyListFilters(filterByBook(filterByTime(records))).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const totalCount = recordList.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const paginatedRecords = recordList.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const netIncome = totalIncome - totalExpense;
 
   return (
@@ -596,40 +692,58 @@ export default function Records() {
             background: 'linear-gradient(135deg, #EDE9FE 0%, #F5F3FF 100%)',
           }}
         >
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <select
-                  value={selectedBook || ''}
-                  onChange={(e) => setSelectedBook(e.target.value || null)}
-                  className="appearance-none bg-white dark:bg-slate-700 border border-primary-300 dark:border-primary-600 rounded-lg pl-3 pr-8 py-2 text-sm font-medium text-primary-600 dark:text-primary-300 cursor-pointer hover:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value="">全部账本</option>
-                  {books.map((book) => (
-                    <option key={book.id} value={book.name}>
-                      {book.name}
-                    </option>
-                  ))}
-                </select>
-                <BookOpen className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-primary-500 pointer-events-none" />
+          <div className="flex flex-col gap-4">
+            <h1 className="text-2xl font-bold text-gray-900">收支分析</h1>
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="relative">
+                  <select
+                    value={selectedBook || ''}
+                    onChange={(e) => setSelectedBook(e.target.value || null)}
+                    className="appearance-none bg-white dark:bg-slate-700 border border-primary-300 dark:border-primary-600 rounded-lg pl-3 pr-8 py-2 text-sm font-medium text-primary-600 dark:text-primary-300 cursor-pointer hover:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">全部账本</option>
+                    {books.map((book) => (
+                      <option key={book.id} value={book.name}>
+                        {book.name}
+                      </option>
+                    ))}
+                  </select>
+                  <BookOpen className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-primary-500 pointer-events-none" />
+                </div>
+                <div className="relative">
+                  <select
+                    value={selectedCurrencyFilter}
+                    onChange={(e) => setSelectedCurrencyFilter(e.target.value)}
+                    className="appearance-none bg-white dark:bg-slate-700 border border-primary-300 dark:border-primary-600 rounded-lg pl-3 pr-8 py-2 text-sm font-medium text-primary-600 dark:text-primary-300 cursor-pointer hover:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    {CURRENCIES.map((currency) => (
+                      <option key={currency.code} value={currency.code}>
+                        {currency.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-primary-500 pointer-events-none text-xs font-bold">
+                    {getCurrencySymbol(selectedCurrencyFilter)}
+                  </span>
+                </div>
               </div>
-              <h1 className="text-2xl font-bold text-gray-900">收支分析</h1>
-            </div>
-            <div className="flex items-center gap-3 shrink-0">
-              <button
-                onClick={() => { setNewRecord({ date: formatDate(new Date()), type: 'expense', category: '', subCategory: '', amount: '', account: account?.name || '', book: selectedBook || '', note: '' }); setShowAddModal(true); }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                新增
-              </button>
-              <button
-                onClick={loadData}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary-500 text-primary-500 text-sm font-medium hover:bg-primary-500 hover:text-white transition-colors"
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                刷新数据
-              </button>
+              <div className="flex items-center gap-3 shrink-0">
+                <button
+                  onClick={() => { setNewRecord({ date: formatDate(new Date()), type: 'expense', category: '', subCategory: '', amount: '', account: account?.name || '', book: selectedBook || '', note: '', currency: baseCurrency }); setShowAddModal(true); }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  新增
+                </button>
+                <button
+                  onClick={loadData}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary-500 text-primary-500 text-sm font-medium hover:bg-primary-500 hover:text-white transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                  刷新数据
+                </button>
+              </div>
             </div>
           </div>
         </section>
@@ -643,7 +757,7 @@ export default function Records() {
               </div>
             </div>
             <div className="text-3xl font-bold text-green-600 tabular-nums whitespace-nowrap">
-              {formatCurrency(totalIncome)}
+              {formatCurrency(totalIncome, selectedCurrencyFilter)}
             </div>
             <div className="mt-1 flex items-center gap-1 text-xs text-green-600">
               <ArrowUpRight className="w-3 h-3" />
@@ -659,7 +773,7 @@ export default function Records() {
               </div>
             </div>
             <div className="text-3xl font-bold text-red-500 tabular-nums whitespace-nowrap">
-              {formatCurrency(totalExpense)}
+              {formatCurrency(totalExpense, selectedCurrencyFilter)}
             </div>
             <div className="mt-1 flex items-center gap-1 text-xs text-red-500">
               <ArrowDownRight className="w-3 h-3" />
@@ -681,7 +795,7 @@ export default function Records() {
             <div className={`text-3xl font-bold tabular-nums whitespace-nowrap ${
               netIncome >= 0 ? 'text-green-600' : 'text-red-500'
             }`}>
-              {netIncome >= 0 ? '+' : ''}{formatCurrency(netIncome)}
+              {netIncome >= 0 ? '+' : ''}{formatCurrency(netIncome, selectedCurrencyFilter)}
             </div>
             <div className="mt-1 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
               <Calendar className="w-3 h-3" />
@@ -803,44 +917,234 @@ export default function Records() {
         </section>
 
         <section className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">收支记录</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">收支记录</h3>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setListFilters({
+                    date: '',
+                    book: '',
+                    type: 'all',
+                    category: '',
+                    subCategory: '',
+                    amountMin: '',
+                    amountMax: '',
+                    cnyMin: '',
+                    cnyMax: '',
+                    tag: '',
+                    note: '',
+                  });
+                  setCurrentPage(1);
+                }}
+                className="shrink-0 px-3 py-1.5 text-xs bg-primary-500 text-white rounded hover:bg-primary-600 transition-colors whitespace-nowrap"
+              >
+                重置筛选
+              </button>
+              <button
+                onClick={() => setShowColumnSettingsModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-slate-600 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                高级列表设置
+              </button>
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">日期</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">账本</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类型</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">分类</th>
-                  <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">金额</th>
+                  {visibleColumns.date && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">日期</th>}
+                  {visibleColumns.book && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">账本</th>}
+                  {visibleColumns.type && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类型</th>}
+                  {visibleColumns.category && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">一级分类</th>}
+                  {visibleColumns.subCategory && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">二级分类</th>}
+                  {visibleColumns.amount && <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">金额</th>}
+                  {visibleColumns.cnv && <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">折合人民币</th>}
+                  {visibleColumns.tag && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">标签</th>}
+                  {visibleColumns.note && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">备注</th>}
+                </tr>
+                <tr className="border-b border-gray-200 dark:border-slate-700">
+                  {visibleColumns.date && (
+                    <td className="py-2 px-3">
+                      <input
+                        type="text"
+                        placeholder="筛选日期"
+                        value={listFilters.date}
+                        onChange={(e) => handleFilterChange('date', e.target.value)}
+                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      />
+                    </td>
+                  )}
+                  {visibleColumns.book && (
+                    <td className="py-2 px-3">
+                      <select
+                        value={listFilters.book}
+                        onChange={(e) => handleFilterChange('book', e.target.value)}
+                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      >
+                        <option value="">全部</option>
+                        {books.map((book) => (
+                          <option key={book.id} value={book.name}>{book.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
+                  {visibleColumns.type && (
+                    <td className="py-2 px-3">
+                      <select
+                        value={listFilters.type}
+                        onChange={(e) => handleFilterChange('type', e.target.value)}
+                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      >
+                        <option value="all">全部</option>
+                        <option value="income">收入</option>
+                        <option value="expense">支出</option>
+                      </select>
+                    </td>
+                  )}
+                  {visibleColumns.category && (
+                    <td className="py-2 px-3">
+                      <input
+                        type="text"
+                        placeholder="筛选一级"
+                        value={listFilters.category}
+                        onChange={(e) => handleFilterChange('category', e.target.value)}
+                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      />
+                    </td>
+                  )}
+                  {visibleColumns.subCategory && (
+                    <td className="py-2 px-3">
+                      <input
+                        type="text"
+                        placeholder="筛选二级"
+                        value={listFilters.subCategory}
+                        onChange={(e) => handleFilterChange('subCategory', e.target.value)}
+                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      />
+                    </td>
+                  )}
+                  {visibleColumns.amount && (
+                    <td className="py-2 px-3">
+                      <div className="flex flex-col gap-1">
+                        <input
+                          type="number"
+                          placeholder="最小"
+                          value={listFilters.amountMin}
+                          onChange={(e) => handleFilterChange('amountMin', e.target.value)}
+                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                        />
+                        <input
+                          type="number"
+                          placeholder="最大"
+                          value={listFilters.amountMax}
+                          onChange={(e) => handleFilterChange('amountMax', e.target.value)}
+                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                        />
+                      </div>
+                    </td>
+                  )}
+                  {visibleColumns.cnv && (
+                    <td className="py-2 px-3">
+                      <div className="flex flex-col gap-1">
+                        <input
+                          type="number"
+                          placeholder="最小"
+                          value={listFilters.cnvMin}
+                          onChange={(e) => handleFilterChange('cnvMin', e.target.value)}
+                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                        />
+                        <input
+                          type="number"
+                          placeholder="最大"
+                          value={listFilters.cnvMax}
+                          onChange={(e) => handleFilterChange('cnvMax', e.target.value)}
+                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                        />
+                      </div>
+                    </td>
+                  )}
+                  {visibleColumns.tag && (
+                    <td className="py-2 px-3">
+                      <input
+                        type="text"
+                        placeholder="筛选标签"
+                        value={listFilters.tag}
+                        onChange={(e) => handleFilterChange('tag', e.target.value)}
+                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      />
+                    </td>
+                  )}
+                  {visibleColumns.note && (
+                    <td className="py-2 px-3">
+                      <input
+                        type="text"
+                        placeholder="筛选备注"
+                        value={listFilters.note}
+                        onChange={(e) => handleFilterChange('note', e.target.value)}
+                        className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      />
+                    </td>
+                  )}
                 </tr>
               </thead>
               <tbody>
-                {recordList.map((record) => (
+                {paginatedRecords.map((record) => (
                   <tr key={record.id} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30">
-                    <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                      {formatDate(record.date)}
-                    </td>
-                    <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                      {record.book || '-'}
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        record.type === 'income'
-                          ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-                          : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                    {visibleColumns.date && (
+                      <td className="py-2.5 px-3 text-gray-900 dark:text-white">
+                        {formatDate(record.date)}
+                      </td>
+                    )}
+                    {visibleColumns.book && (
+                      <td className="py-2.5 px-3 text-gray-900 dark:text-white">
+                        {record.book || '-'}
+                      </td>
+                    )}
+                    {visibleColumns.type && (
+                      <td className="py-2.5 px-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          record.type === 'income'
+                            ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+                            : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                        }`}>
+                          {record.type === 'income' ? '收入' : '支出'}
+                        </span>
+                      </td>
+                    )}
+                    {visibleColumns.category && (
+                      <td className="py-2.5 px-3 text-gray-900 dark:text-white">
+                        {record.category || '其他'}
+                      </td>
+                    )}
+                    {visibleColumns.subCategory && (
+                      <td className="py-2.5 px-3 text-gray-900 dark:text-white">
+                        {record.subCategory || '-'}
+                      </td>
+                    )}
+                    {visibleColumns.amount && (
+                      <td className={`text-right font-medium tabular-nums ${
+                        record.type === 'income' ? 'text-green-600' : 'text-red-500'
                       }`}>
-                        {record.type === 'income' ? '收入' : '支出'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                      {record.subCategory || record.category || '其他'}
-                    </td>
-                    <td className={`text-right font-medium tabular-nums ${
-                      record.type === 'income' ? 'text-green-600' : 'text-red-500'
-                    }`}>
-                      {record.type === 'income' ? '+' : '-'}{formatCurrency(Math.abs(record.amount || 0))}
-                    </td>
+                        {record.type === 'income' ? '+' : '-'}{formatCurrency(convertAmount(Math.abs(record.amount || 0), record.currency || DEFAULT_BASE_CURRENCY, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES), selectedCurrencyFilter)}
+                      </td>
+                    )}
+                    {visibleColumns.cnv && (
+                      <td className="text-right font-medium tabular-nums text-gray-700 dark:text-gray-300">
+                        {formatCurrency(convertAmount(Math.abs(record.amount || 0), record.currency || DEFAULT_BASE_CURRENCY, DEFAULT_BASE_CURRENCY, DEFAULT_EXCHANGE_RATES), DEFAULT_BASE_CURRENCY)}
+                      </td>
+                    )}
+                    {visibleColumns.tag && (
+                      <td className="py-2.5 px-3 text-gray-900 dark:text-white">
+                        {Array.isArray(record.tags) ? record.tags.join(', ') : (record.tags || '-')}
+                      </td>
+                    )}
+                    {visibleColumns.note && (
+                      <td className="py-2.5 px-3 text-gray-900 dark:text-white">
+                        {record.note || '-'}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -851,6 +1155,55 @@ export default function Records() {
               </div>
             )}
           </div>
+          {recordList.length > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                共 {totalCount} 条记录
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={pageSize}
+                  onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                  className="px-2 py-1.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white cursor-pointer"
+                >
+                  {[10, 20, 50, 100].map(size => (
+                    <option key={size} value={size}>{size} 条/页</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  上一页
+                </button>
+                <div className="flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300">
+                  <span>第</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalPages}
+                    value={currentPage}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val)) {
+                        setCurrentPage(Math.max(1, Math.min(totalPages, val)));
+                      }
+                    }}
+                    className="w-14 px-2 py-1.5 text-center text-sm border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                  />
+                  <span>/ {totalPages} 页</span>
+                </div>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          )}
         </section>
 
         {showAddModal && (
@@ -954,11 +1307,42 @@ export default function Records() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">金额</label>
-                  <input type="number" value={newRecord.amount} onChange={e => setNewRecord({ ...newRecord, amount: e.target.value })} placeholder="0.00" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 text-sm">{getCurrencySymbol(newRecord.currency || baseCurrency)}</span>
+                      <input type="number" value={newRecord.amount} onChange={e => setNewRecord({ ...newRecord, amount: e.target.value })} placeholder="0.00" className="w-full pl-8 pr-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                    </div>
+                    <select
+                      value={newRecord.currency || baseCurrency}
+                      onChange={e => setNewRecord({ ...newRecord, currency: e.target.value })}
+                      className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm"
+                    >
+                      {CURRENCIES.map((c) => (
+                        <option key={c.code} value={c.code}>{c.name} ({c.symbol})</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">备注</label>
                   <input type="text" value={newRecord.note} onChange={e => setNewRecord({ ...newRecord, note: e.target.value })} placeholder="可选" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                </div>
+                <div className="border border-gray-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                  <button
+                    onClick={() => setShowSettingsSection(!showSettingsSection)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    <span className="flex items-center gap-2"><Settings className="w-4 h-4" />设置</span>
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showSettingsSection ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showSettingsSection && (
+                    <div className="px-3 py-3 border-t border-gray-200 dark:border-slate-700 grid grid-cols-2 gap-2">
+                      <button onClick={() => setShowBookModal(true)} className="px-3 py-2 text-sm text-left rounded-lg bg-gray-50 dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-300">账本管理</button>
+                      <button onClick={() => setShowTagModal(true)} className="px-3 py-2 text-sm text-left rounded-lg bg-gray-50 dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-300">标签管理</button>
+                      <button onClick={() => setShowCategoryModal(true)} className="px-3 py-2 text-sm text-left rounded-lg bg-gray-50 dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-300">分类管理</button>
+                      <button onClick={() => setShowExchangeRateModal(true)} className="px-3 py-2 text-sm text-left rounded-lg bg-gray-50 dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-300">汇率设置</button>
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-3 pt-2">
                   <button onClick={() => setShowAddModal(false)} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
@@ -1084,6 +1468,48 @@ export default function Records() {
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showColumnSettingsModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">列表设置</h3>
+                <button onClick={() => setShowColumnSettingsModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                {[
+                  { key: 'date', label: '日期' },
+                  { key: 'book', label: '账本' },
+                  { key: 'type', label: '类型' },
+                  { key: 'category', label: '一级分类' },
+                  { key: 'subCategory', label: '二级分类' },
+                  { key: 'amount', label: '金额' },
+                  { key: 'cny', label: '折合人民币' },
+                  { key: 'tag', label: '标签' },
+                  { key: 'note', label: '备注' },
+                ].map(({ key, label }) => (
+                  <label key={key} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns[key]}
+                      onChange={(e) => setVisibleColumns(prev => ({ ...prev, [key]: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setShowColumnSettingsModal(false)}
+                  className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+                >
+                  关闭
+                </button>
               </div>
             </div>
           </div>

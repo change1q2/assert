@@ -16,7 +16,7 @@ const pool = mysql.createPool({
   dateStrings: true,
 });
 
-const schemaSql = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
+const schemaSql = fs.readFileSync(path.resolve(__dirname, "..", "schema.sql"), "utf8");
 const initDb = pool.query(schemaSql).then(async () => {
   await runMigrations(pool);
   console.log("MySQL schema initialized");

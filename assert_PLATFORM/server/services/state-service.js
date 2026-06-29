@@ -21,7 +21,7 @@ async function loadUserState(userId) {
   }));
   const records = (await sqlAll(pool, "SELECT * FROM records WHERE user_id = ? ORDER BY record_date DESC, sort_order DESC", [userId])).map((row) => ({
     id: numericIfPossible(row.id), type: row.type, category: row.category, sub: row.subcategory,
-    tag: row.tag, amount: row.amount, currency: row.currency, accountId: row.account_id,
+    tag: row.tag, bookId: row.book_id || '', amount: row.amount, currency: row.currency, accountId: row.account_id,
     date: row.record_date, recorder: row.recorder, note: row.note, createdAt: row.created_at,
   }));
   const budgets = (await sqlAll(pool, "SELECT * FROM budgets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
@@ -56,16 +56,29 @@ async function loadUserState(userId) {
     transactions: transactionsByAsset.get(String(row.id)) || [],
   }));
   const customRecords = { income: [], expense: [], transfer: [] };
-  (await sqlAll(pool, "SELECT record_type, name FROM custom_record_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
-    .forEach((row) => (customRecords[row.record_type] ||= []).push(row.name));
+  (await sqlAll(pool, "SELECT record_type, name, icon FROM custom_record_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
+    .forEach((row) => (customRecords[row.record_type] ||= []).push({ name: row.name, icon: row.icon || '' }));
   const tertiaryByScope = {};
   (await sqlAll(pool, "SELECT scope, name FROM finance_tertiary_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
     .forEach((row) => (tertiaryByScope[row.scope] ||= []).push(row.name));
-  const recordTags = { tagsByCategory: {}, lastByCategory: {} };
-  (await sqlAll(pool, "SELECT category, tag, is_last FROM record_tags WHERE user_id = ? ORDER BY sort_order", [userId])).forEach((row) => {
-    (recordTags.tagsByCategory[row.category] ||= []).push(row.tag);
-    if (row.is_last) recordTags.lastByCategory[row.category] = row.tag;
-  });
+  const books = (await sqlAll(pool, "SELECT * FROM books WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+    id: row.id, name: row.name, icon: row.icon, color: row.color, createdAt: row.created_at,
+  }));
+  const tags = (await sqlAll(pool, "SELECT * FROM tags WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+    id: row.id, name: row.name, color: row.color, createdAt: row.created_at,
+  }));
+  const recordTagList = (await sqlAll(pool, "SELECT record_id, tag_id FROM record_tags WHERE user_id = ?", [userId])).map((row) => ({
+    recordId: row.record_id, tagId: row.tag_id,
+  }));
+  const oldRecordTags = { tagsByCategory: {}, lastByCategory: {} };
+  try {
+    (await sqlAll(pool, "SELECT category, tag, is_last FROM record_tags_old WHERE user_id = ? ORDER BY sort_order", [userId])).forEach((row) => {
+      (oldRecordTags.tagsByCategory[row.category] ||= []).push(row.tag);
+      if (row.is_last) oldRecordTags.lastByCategory[row.category] = row.tag;
+    });
+  } catch (e) {
+    // record_tags_old 表可能不存在，忽略
+  }
   const recorders = (await sqlAll(pool, "SELECT name FROM recorders WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => row.name);
   const reminders = (await sqlAll(pool, "SELECT * FROM reminders WHERE user_id = ? ORDER BY reminder_date", [userId])).map((row) => ({
     id: row.id, date: row.reminder_date, title: row.title, type: row.type,
@@ -103,7 +116,10 @@ async function loadUserState(userId) {
     budgets,
     financeAssets,
     customCategories: { records: customRecords, finance: { tertiaryByScope } },
-    recordTags,
+    recordTags: oldRecordTags,
+    books,
+    tags,
+    recordTagList,
     recorders,
     reminders,
     debts: resolvedDebts,
@@ -129,7 +145,7 @@ async function saveUserState(conn, userId, state) {
   const tables = [
     "exchange_rates", "accounts", "asset_classes", "records", "budgets", "finance_asset_transactions", "finance_assets",
     "custom_record_categories", "finance_tertiary_categories", "record_tags", "recorders",
-    "reminders", "debt_payments", "debts", "debt_categories", "strategies", "user_settings",
+    "reminders", "debt_payments", "debts", "debt_categories", "strategies", "user_settings", "books", "tags",
   ];
   for (const table of tables) {
     await sqlRun(conn, `DELETE FROM ${table} WHERE user_id = ?`, [userId]);
@@ -159,10 +175,10 @@ async function saveUserState(conn, userId, state) {
 
   for (const [index, row] of (state.records || []).entries()) {
     await sqlRun(conn, `INSERT INTO records
-      (user_id, id, type, category, subcategory, tag, amount, currency, account_id, record_date, recorder, note, created_at, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, id, type, category, subcategory, tag, book_id, amount, currency, account_id, record_date, recorder, note, created_at, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, text(row.id), text(row.type), text(row.category), text(row.sub), text(row.tag),
-       number(row.amount), text(row.currency), text(row.accountId), text(row.date),
+       text(row.bookId || ''), number(row.amount), text(row.currency), text(row.accountId), text(row.date),
        text(row.recorder), text(row.note), text(row.createdAt), index]);
   }
 
@@ -193,10 +209,12 @@ async function saveUserState(conn, userId, state) {
   }
 
   let catOrder = 0;
-  for (const [type, names] of Object.entries(state.customCategories?.records || {})) {
-    for (const name of (names || [])) {
-      await sqlRun(conn, "INSERT INTO custom_record_categories (user_id, record_type, name, sort_order) VALUES (?, ?, ?, ?)",
-        [userId, type, text(name), catOrder++]);
+  for (const [type, items] of Object.entries(state.customCategories?.records || {})) {
+    for (const item of (items || [])) {
+      const name = typeof item === 'string' ? item : item.name;
+      const icon = typeof item === 'string' ? '' : (item.icon || '');
+      await sqlRun(conn, "INSERT INTO custom_record_categories (user_id, record_type, name, icon, sort_order) VALUES (?, ?, ?, ?, ?)",
+        [userId, type, text(name), text(icon), catOrder++]);
     }
   }
   let tertOrder = 0;
@@ -207,12 +225,21 @@ async function saveUserState(conn, userId, state) {
     }
   }
 
-  let tagOrder = 0;
-  for (const [category, tags] of Object.entries(state.recordTags?.tagsByCategory || {})) {
-    for (const tag of (tags || [])) {
-      await sqlRun(conn, "INSERT INTO record_tags (user_id, category, tag, is_last, sort_order) VALUES (?, ?, ?, ?, ?)",
-        [userId, category, text(tag), state.recordTags?.lastByCategory?.[category] === tag ? 1 : 0, tagOrder++]);
-    }
+  for (const [index, row] of (state.books || []).entries()) {
+    await sqlRun(conn, `INSERT INTO books (user_id, id, name, icon, color, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?)`,
+      [userId, text(row.id), text(row.name), text(row.icon || ''), text(row.color || ''), index]);
+  }
+
+  for (const [index, row] of (state.tags || []).entries()) {
+    await sqlRun(conn, `INSERT INTO tags (user_id, id, name, color, sort_order)
+      VALUES (?, ?, ?, ?, ?)`,
+      [userId, Number(row.id) || index + 1, text(row.name), text(row.color || ''), index]);
+  }
+
+  for (const row of (state.recordTagList || [])) {
+    await sqlRun(conn, "INSERT INTO record_tags (user_id, record_id, tag_id) VALUES (?, ?, ?)",
+      [userId, text(row.recordId), Number(row.tagId)]);
   }
   for (const [index, name] of (state.recorders || []).entries()) {
     await sqlRun(conn, "INSERT INTO recorders (user_id, name, sort_order) VALUES (?, ?, ?)", [userId, text(name), index]);

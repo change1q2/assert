@@ -5,11 +5,14 @@ import {
   TrendingUp,
   TrendingDown,
   RefreshCw,
-  LineChart,
-  PieChart,
   Activity,
   Calendar,
+  LineChart as LineChartIcon,
+  PieChart as PieChartIcon,
 } from 'lucide-react';
+import BarChart from '../components/charts/BarChart.jsx';
+import LineChart from '../components/charts/LineChart.jsx';
+import PieChart from '../components/charts/PieChart.jsx';
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
@@ -83,6 +86,14 @@ export default function Analysis() {
     const totalDebts = (debts || []).reduce((sum, d) => sum + (d.amount || d.balance || 0), 0);
     const netWorth = totalAssets - totalDebts;
 
+    const categoryData = [
+      { name: '股票', value: totalAssets * 0.35 },
+      { name: '基金', value: totalAssets * 0.25 },
+      { name: '存款', value: totalAssets * 0.2 },
+      { name: '债券', value: totalAssets * 0.1 },
+      { name: '其他', value: totalAssets * 0.1 },
+    ];
+
     return {
       totalAssets,
       totalCost,
@@ -92,6 +103,7 @@ export default function Analysis() {
       years,
       totalDebts,
       netWorth,
+      categoryData,
     };
   };
 
@@ -122,7 +134,7 @@ export default function Analysis() {
     );
   }
 
-  const { totalAssets, totalPnl, totalPnlRate, monthlyData, years, totalDebts, netWorth } = computeAnalysis();
+  const { totalAssets, totalPnl, totalPnlRate, monthlyData, years, totalDebts, netWorth, categoryData } = computeAnalysis();
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 sm:p-6">
@@ -154,7 +166,7 @@ export default function Analysis() {
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
             <div className="flex items-center gap-2 mb-2">
               <div className="bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-full p-2">
-                <PieChart className="w-5 h-5" />
+                <PieChartIcon className="w-5 h-5" />
               </div>
               <span className="text-sm text-gray-500 dark:text-gray-400">总资产</span>
             </div>
@@ -212,201 +224,33 @@ export default function Analysis() {
               <BarChart3 className="w-5 h-5 text-primary-500" />
               月度收支分析
             </h3>
-            <div className="mt-4">
-              <svg viewBox="0 0 300 180" className="w-full h-auto">
-                {(() => {
-                  const maxVal = Math.max(...monthlyData.map(d => Math.max(d.income, d.expense)), 1);
-                  const barWidth = 30;
-                  const gap = 15;
-                  const startX = 20;
-                  const chartBottom = 150;
-                  const chartTop = 20;
-                  const chartHeight = chartBottom - chartTop;
-
-                  return (
-                    <>
-                      {[0, 0.5, 1].map((ratio, idx) => {
-                        const y = chartBottom - chartHeight * ratio;
-                        return (
-                          <line
-                            key={idx}
-                            x1={startX}
-                            y1={y}
-                            x2={280}
-                            y2={y}
-                            stroke="#E5E7EB"
-                            strokeWidth="1"
-                            strokeDasharray="4,4"
-                          />
-                        );
-                      })}
-                      {monthlyData.map((d, i) => {
-                        const x = startX + i * (barWidth * 2 + gap);
-                        const incomeHeight = (d.income / maxVal) * chartHeight;
-                        const expenseHeight = (d.expense / maxVal) * chartHeight;
-                        return (
-                          <g key={d.month}>
-                            <rect
-                              x={x}
-                              y={chartBottom - incomeHeight}
-                              width={barWidth}
-                              height={incomeHeight}
-                              fill="#10B981"
-                              rx="3"
-                            />
-                            <rect
-                              x={x + barWidth}
-                              y={chartBottom - expenseHeight}
-                              width={barWidth}
-                              height={expenseHeight}
-                              fill="#EC4899"
-                              rx="3"
-                            />
-                            <text
-                              x={x + barWidth}
-                              y={chartBottom + 15}
-                              textAnchor="middle"
-                              fontSize="10"
-                              fill="#6B7280"
-                            >
-                              {d.month}
-                            </text>
-                          </g>
-                        );
-                      })}
-                    </>
-                  );
-                })()}
-              </svg>
-            </div>
-            <div className="flex justify-center gap-6 mt-4">
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded bg-green-500" />
-                <span className="text-gray-500 dark:text-gray-400">收入</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded bg-pink-500" />
-                <span className="text-gray-500 dark:text-gray-400">支出</span>
-              </div>
-            </div>
+            <BarChart data={monthlyData} />
           </div>
 
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
             <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-              <LineChart className="w-5 h-5 text-primary-500" />
+              <LineChartIcon className="w-5 h-5 text-primary-500" />
               资产变化趋势
             </h3>
-            <div className="mt-4">
-              <svg viewBox="0 0 300 180" className="w-full h-auto">
-                {(() => {
-                  const values = monthlyData.map(d => d.income);
-                  const maxVal = Math.max(...values, 1);
-                  const minVal = Math.min(...values) * 0.9;
-                  const range = maxVal - minVal;
-                  const points = values.map((v, i) => {
-                    const x = (i / (values.length - 1)) * 260 + 20;
-                    const y = 150 - ((v - minVal) / range) * 110;
-                    return `${x},${y}`;
-                  });
-                  const pathData = `M ${points.join(' L ')}`;
-                  const areaData = `M 20,150 L ${points.join(' L ')} L 280,150 Z`;
-
-                  return (
-                    <>
-                      <defs>
-                        <linearGradient id="analysisAreaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                          <stop offset="0%" stopColor="#8B5CF6" stopOpacity="0.3" />
-                          <stop offset="100%" stopColor="#8B5CF6" stopOpacity="0.05" />
-                        </linearGradient>
-                      </defs>
-                      <path d={areaData} fill="url(#analysisAreaGradient)" />
-                      <path d={pathData} fill="none" stroke="#8B5CF6" strokeWidth="2" />
-                      {values.map((v, i) => {
-                        const x = (i / (values.length - 1)) * 260 + 20;
-                        const y = 150 - ((v - minVal) / range) * 110;
-                        return <circle key={i} cx={x} cy={y} r="3" fill="#8B5CF6" />;
-                      })}
-                      {monthlyData.map((d, i) => {
-                        const x = (i / (monthlyData.length - 1)) * 260 + 20;
-                        return (
-                          <text key={i} x={x} y="168" textAnchor="middle" fontSize="9" fill="#9CA3AF">
-                            {d.month}
-                          </text>
-                        );
-                      })}
-                    </>
-                  );
-                })()}
-              </svg>
-            </div>
+            <LineChart data={years} />
           </div>
         </section>
 
-        <section className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-primary-500" />
-            年度收益分析
-          </h3>
-          <div className="mt-4">
-            <svg viewBox="0 0 600 200" className="w-full h-auto">
-              {(() => {
-                const maxVal = Math.max(...years.map((d) => d.value)) * 1.1;
-                const barWidth = 50;
-                const gap = 40;
-                const startX = 40;
-                const chartBottom = 170;
-                const chartTop = 20;
-                const chartHeight = chartBottom - chartTop;
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <PieChartIcon className="w-5 h-5 text-primary-500" />
+              资产分类占比
+            </h3>
+            <PieChart data={categoryData} />
+          </div>
 
-                return (
-                  <>
-                    {[0, 0.25, 0.5, 0.75, 1].map((ratio, idx) => {
-                      const y = chartBottom - chartHeight * ratio;
-                      return (
-                        <line
-                          key={idx}
-                          x1={startX}
-                          y1={y}
-                          x2={580}
-                          y2={y}
-                          stroke="#E5E7EB"
-                          strokeWidth="1"
-                          strokeDasharray="4,4"
-                        />
-                      );
-                    })}
-                    {years.map((d, i) => {
-                      const barHeight = (d.value / maxVal) * chartHeight;
-                      const x = startX + i * (barWidth + gap);
-                      const y = chartBottom - barHeight;
-                      return (
-                        <g key={d.year}>
-                          <rect x={x} y={y} width={barWidth} height={barHeight} fill="#8B5CF6" rx="4" />
-                          <text
-                            x={x + barWidth / 2}
-                            y={chartBottom + 18}
-                            textAnchor="middle"
-                            fontSize="11"
-                            fill="#6B7280"
-                          >
-                            {d.year}
-                          </text>
-                          <text
-                            x={x + barWidth / 2}
-                            y={y - 6}
-                            textAnchor="middle"
-                            fontSize="10"
-                            fill="#6B7280"
-                          >
-                            {(d.value / 10000).toFixed(0)}万
-                          </text>
-                        </g>
-                      );
-                    })}
-                  </>
-                );
-              })()}
-            </svg>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-primary-500" />
+              年度收益分析
+            </h3>
+            <LineChart data={years} />
           </div>
         </section>
       </div>

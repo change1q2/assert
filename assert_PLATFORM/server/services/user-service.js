@@ -6,12 +6,10 @@ import { loadUserState } from "./state-service.js";
 
 function defaultState(profile) {
   const baseClasses = [
-    ["cashClass", "现金类", ["活期", "货币基金"], "#539f8d"],
-    ["equity", "权益类", ["股票", "基金"], "#b9d765"],
-    ["debt", "债权类", ["债券", "定期"], "#f5a623"],
-    ["commodity", "商品类", ["黄金"], "#ffc72c"],
-    ["crypto", "加密类", ["BTC", "ETH"], "#ff7f50"],
-    ["incomeClass", "吃息类", ["红利股票", "债券基金", "股息"], "#4fb477"],
+    ["equity", "权益类", ["股票", "基金"], "#6366F1"],
+    ["commodity", "商品类", ["黄金", "原油"], "#F59E0B"],
+    ["debt", "债权类", ["债券", "定期"], "#10B981"],
+    ["cashClass", "现金类", ["活期", "货币基金"], "#06B6D4"],
   ];
   return {
     user: {
