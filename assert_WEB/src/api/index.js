@@ -1,12 +1,19 @@
+import { DEFAULT_EXCHANGE_RATES, CURRENCIES } from '../utils/currency.js'
+
 const API_BASE = '/api'
 
 async function request(url, options = {}) {
+  const token = localStorage.getItem('token')
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
   const response = await fetch(`${API_BASE}${url}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   })
 
   if (!response.ok) {
@@ -193,5 +200,33 @@ export async function saveBooks(books) {
     return response
   } catch {
     return { success: false, error: '保存账本失败' }
+  }
+}
+
+export async function fetchExchangeRates(baseCurrency = 'CNY') {
+  try {
+    const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${baseCurrency}`)
+    if (!response.ok) {
+      throw new Error(`API request failed: ${response.status}`)
+    }
+    const data = await response.json()
+
+    const supportedCodes = new Set(CURRENCIES.map(c => c.code))
+    const rates = {}
+    const baseToCny = data.rates['CNY'] || 1
+
+    for (const code of supportedCodes) {
+      if (code === 'CNY') {
+        rates[code] = 1
+      } else if (data.rates[code]) {
+        rates[code] = baseToCny / data.rates[code]
+      } else {
+        rates[code] = DEFAULT_EXCHANGE_RATES[code]
+      }
+    }
+
+    return rates
+  } catch {
+    return { ...DEFAULT_EXCHANGE_RATES }
   }
 }
