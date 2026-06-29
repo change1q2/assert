@@ -21,6 +21,7 @@ assert_PLATFORM/server/data/
 *.log
 .env
 *.db
+*.bak
 *.sqlite
 .codex-logs/
 .api-*.log

@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.resolve(__dirname, "..");
+const __dirname = path.resolve(path.dirname(__filename), "..");
 
 const publicRoot = path.resolve(__dirname, "..", "..", "assert_WEB");
 const releasesRoot = process.env.RELEASES_ROOT
@@ -25,7 +25,7 @@ const SMS_RESEND_SECONDS = 60;
 const allowedOrigins = new Set([
   "http://127.0.0.1:4173",
   "http://localhost:4173",
-  "http://119.28.189.98",
+  ...(process.env.APP_DOMAIN ? [`https://${process.env.APP_DOMAIN}`] : []),
   ...(process.env.EXTRA_ORIGINS ? process.env.EXTRA_ORIGINS.split(",") : []),
 ]);
 
@@ -47,7 +47,7 @@ const mimeTypes = {
   ".hap": "application/octet-stream",
 };
 
-const PREMIUM_API_URL = "http://8.220.240.126:8787/api/latest-lite";
+const PREMIUM_API_URL = process.env.PREMIUM_API_URL || "";
 
 // HK_IPO_SOURCE_FILE：优先使用环境变量，其次项目本地工具脚本，最后使用默认相对路径
 const HK_IPO_SOURCE_FILE = process.env.HK_IPO_SOURCE_FILE

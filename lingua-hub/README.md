@@ -1,4 +1,8 @@
-# React + TypeScript + Vite
+# Lingua Hub — 独立语言学习应用
+
+> ⚠️ 与 Assert 主项目无关 / Not part of Assert
+
+React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

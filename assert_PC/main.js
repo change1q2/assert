@@ -1,6 +1,8 @@
 const { app, BrowserWindow, Menu, shell } = require("electron");
 
-const APP_URL = process.env.ASSERT_APP_URL || "http://119.28.189.98/";
+// 可通过环境变量 ASSERT_APP_URL 覆盖（生产环境请设置为 HTTPS 域名）
+// Override via ASSERT_APP_URL env var (use HTTPS for production)
+const APP_URL = process.env.ASSERT_APP_URL || "http://localhost:4173";
 const APP_TITLE = "Wealth OS - 个人资产管理";
 
 function errorHtml(url, message) {

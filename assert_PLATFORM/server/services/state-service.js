@@ -76,7 +76,7 @@ async function loadUserState(userId) {
         .map((payment) => [payment.period, payment.status])
     );
     return {
-      id: numericIfPossible(row.id), category: row.category, type: row.type, name: row.name,
+      id: numericIfPossible(row.id), category: row.category, type: row.type, debtCategory: row.debt_category, name: row.name,
       creditorName: row.creditor_name, debtorName: row.debtor_name, principal: row.principal,
       annualRate: row.annual_rate, amount: row.amount, paidAmount: row.paid_amount,
       note: row.note, attachment: row.attachment, startDate: row.start_date, dueDate: row.due_date,
@@ -84,6 +84,9 @@ async function loadUserState(userId) {
     };
   });
   const resolvedDebts = await Promise.all(debts);
+  const debtCategories = (await sqlAll(pool, "SELECT * FROM debt_categories WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+    id: row.id, name: row.name, sortOrder: row.sort_order,
+  }));
   const strategies = (await sqlAll(pool, "SELECT * FROM strategies WHERE user_id = ? ORDER BY id", [userId])).map((row) => ({
     id: row.id, name: row.name, active: Boolean(row.active), target: row.target,
     allocation: maybeParseJson(row.allocation_json), debtLimit: row.debt_limit,
@@ -103,6 +106,7 @@ async function loadUserState(userId) {
     recorders,
     reminders,
     debts: resolvedDebts,
+    debtCategories,
     strategies,
     financeAssetDraft: settings ? maybeParseJson(settings.finance_asset_draft_json) : {},
     feeConfig: settings ? maybeParseJson(settings.fee_config_json) : undefined,
@@ -124,7 +128,7 @@ async function saveUserState(conn, userId, state) {
   const tables = [
     "exchange_rates", "accounts", "asset_classes", "records", "budgets", "finance_asset_transactions", "finance_assets",
     "custom_record_categories", "finance_tertiary_categories", "record_tags", "recorders",
-    "reminders", "debt_payments", "debts", "strategies", "user_settings",
+    "reminders", "debt_payments", "debts", "debt_categories", "strategies", "user_settings",
   ];
   for (const table of tables) {
     await sqlRun(conn, `DELETE FROM ${table} WHERE user_id = ?`, [userId]);
@@ -222,9 +226,9 @@ async function saveUserState(conn, userId, state) {
   for (const row of (state.debts || [])) {
     const debtId = text(row.id);
     await sqlRun(conn, `INSERT INTO debts
-      (user_id, id, category, type, name, creditor_name, debtor_name, principal, annual_rate, amount, paid_amount, note, attachment, start_date, due_date, repayment_method, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, debtId, text(row.category), text(row.type), text(row.name), text(row.creditorName),
+      (user_id, id, category, type, debt_category, name, creditor_name, debtor_name, principal, annual_rate, amount, paid_amount, note, attachment, start_date, due_date, repayment_method, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId, debtId, text(row.category), text(row.type), text(row.debtCategory || ''), text(row.name), text(row.creditorName),
        text(row.debtorName), number(row.principal), number(row.annualRate), number(row.amount),
        number(row.paidAmount), text(row.note), text(row.attachment), text(row.startDate),
        text(row.dueDate), text(row.repaymentMethod), debtOrder++]);
@@ -232,6 +236,11 @@ async function saveUserState(conn, userId, state) {
       await sqlRun(conn, "INSERT INTO debt_payments (user_id, debt_id, period, status) VALUES (?, ?, ?, ?)",
         [userId, debtId, Number(period), text(status)]);
     }
+  }
+
+  for (const [index, cat] of ((state.debtCategories || [])).entries()) {
+    await sqlRun(conn, "INSERT INTO debt_categories (user_id, id, name, sort_order) VALUES (?, ?, ?, ?)",
+      [userId, text(cat.id), text(cat.name), index]);
   }
 
   for (const row of (state.strategies || [])) {

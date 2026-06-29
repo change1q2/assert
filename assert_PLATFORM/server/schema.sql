@@ -221,6 +221,7 @@ CREATE TABLE IF NOT EXISTS debts (
   id VARCHAR(255) NOT NULL,
   category VARCHAR(100) NOT NULL,
   type VARCHAR(100) NOT NULL,
+  debt_category VARCHAR(255) NOT NULL DEFAULT '',
   name VARCHAR(255) NOT NULL DEFAULT '',
   creditor_name VARCHAR(255) NOT NULL DEFAULT '',
   debtor_name VARCHAR(255) NOT NULL DEFAULT '',
@@ -245,6 +246,15 @@ CREATE TABLE IF NOT EXISTS debt_payments (
   status VARCHAR(50) NOT NULL,
   PRIMARY KEY (user_id, debt_id, period),
   FOREIGN KEY (user_id, debt_id) REFERENCES debts(user_id, id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS debt_categories (
+  user_id INTEGER NOT NULL,
+  id VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS strategies (
