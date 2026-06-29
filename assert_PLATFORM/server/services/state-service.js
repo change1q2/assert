@@ -234,7 +234,7 @@ async function saveUserState(conn, userId, state) {
   for (const [index, row] of (state.tags || []).entries()) {
     await sqlRun(conn, `INSERT INTO tags (user_id, id, name, color, sort_order)
       VALUES (?, ?, ?, ?, ?)`,
-      [userId, Number(row.id) || index + 1, text(row.name), text(row.color || ''), index]);
+      [userId, text(row.id), text(row.name), text(row.color || ''), index]);
   }
 
   for (const row of (state.recordTagList || [])) {

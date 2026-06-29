@@ -1,0 +1,16 @@
+- [x] Checkpoint 1: 新增弹窗中无设置区域
+- [x] Checkpoint 2: 标签字段为下拉选择，支持管理
+- [x] Checkpoint 3: 筛选区域每个筛选前面有提示文字
+- [x] Checkpoint 4: 日期筛选使用下拉选择方式
+- [x] Checkpoint 5: 一级分类使用下拉筛选，数据从新增弹窗对应字段获取
+- [x] Checkpoint 6: 二级分类使用下拉筛选，数据从新增弹窗对应字段获取
+- [x] Checkpoint 7: 金额筛选折叠进高级筛选
+- [x] Checkpoint 8: 标签筛选折叠进高级筛选
+- [x] Checkpoint 9: 备注筛选折叠进高级筛选
+- [x] Checkpoint 10: 日期筛选区域有"全部"标签，默认选中
+- [x] Checkpoint 11: 统计卡片标题根据日期选择动态变化
+- [x] Checkpoint 12: 收入占比图表跟随日期筛选变化
+- [x] Checkpoint 13: 支出占比图表跟随日期筛选变化
+- [x] Checkpoint 14: 收支记录列表跟随日期筛选过滤
+- [x] Checkpoint 15: 前端构建成功
+- [x] Checkpoint 16: 整体功能测试通过

@@ -140,12 +140,14 @@ export async function createAsset(data) {
 export async function fetchState() {
   try {
     const response = await request('/state')
-    return response.data || {
+    return response.state || response.data || {
       debts: [],
       records: [],
       accounts: [],
       assetClasses: [],
       overviewGoals: {},
+      books: [],
+      tags: [],
     }
   } catch {
     return {
@@ -154,6 +156,8 @@ export async function fetchState() {
       accounts: [],
       assetClasses: [],
       overviewGoals: {},
+      books: [],
+      tags: [],
     }
   }
 }
@@ -162,7 +166,7 @@ export async function saveState(state) {
   try {
     const response = await request('/state', {
       method: 'PUT',
-      body: JSON.stringify(state),
+      body: JSON.stringify({ state }),
     })
     return response
   } catch {
