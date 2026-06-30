@@ -195,13 +195,54 @@ export default function Records() {
 
   const filterByBook = (recordsToFilter) => {
     if (!selectedBook) return recordsToFilter;
-    return recordsToFilter.filter(record => record.book === selectedBook);
+    return recordsToFilter.filter(record => {
+      const bookName = books.find(b => b.id === record.bookId)?.name || record.book || '';
+      return bookName === selectedBook;
+    });
+  };
+
+  const parseDateAsLocal = (dateStr) => {
+    const parts = dateStr.split('-');
+    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  };
+
+  const isDateInRange = (dateStr, range) => {
+    const recordDate = parseDateAsLocal(dateStr);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    switch (range) {
+      case 'today':
+        return recordDate.toDateString() === today.toDateString();
+      case 'yesterday':
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return recordDate.toDateString() === yesterday.toDateString();
+      case 'week':
+        const weekStart = new Date(today);
+        const dayOfWeek = today.getDay();
+        const startOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        weekStart.setDate(today.getDate() - startOffset);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = new Date(today);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        weekEnd.setHours(23, 59, 59, 999);
+        return recordDate >= weekStart && recordDate <= weekEnd;
+      case 'month':
+        return recordDate.getMonth() === today.getMonth() && recordDate.getFullYear() === today.getFullYear();
+      case 'lastMonth':
+        const lastMonth = new Date(today);
+        lastMonth.setMonth(lastMonth.getMonth() - 1);
+        return recordDate.getMonth() === lastMonth.getMonth() && recordDate.getFullYear() === lastMonth.getFullYear();
+      default:
+        return true;
+    }
   };
 
   const applyListFilters = (recordsToFilter) => {
     if (!recordsToFilter) return [];
     return recordsToFilter.filter((record) => {
-      if (listFilters.date && !formatDate(record.date).includes(listFilters.date)) return false;
+      if (listFilters.date && !isDateInRange(record.date, listFilters.date)) return false;
       if (listFilters.book && (books.find(b => b.id === record.bookId)?.name || record.book) !== listFilters.book) return false;
       if (listFilters.type !== 'all' && record.type !== listFilters.type) return false;
       if (listFilters.category && !(record.category || '').includes(listFilters.category)) return false;
@@ -540,7 +581,7 @@ export default function Records() {
     const year = calendarDate.getFullYear();
     const month = calendarDate.getMonth();
     const totals = {};
-    records.forEach(record => {
+    filterByBook(records).forEach(record => {
       const d = new Date(record.date);
       if (d.getFullYear() === year && d.getMonth() === month) {
         const dateKey = formatDate(d);
@@ -558,7 +599,7 @@ export default function Records() {
   const getMonthlyData = () => {
     const monthlyData = [];
     const months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
-    const filteredRecords = records.filter(r => new Date(r.date).getFullYear() === chartYear);
+    const filteredRecords = filterByBook(records).filter(r => new Date(r.date).getFullYear() === chartYear);
     
     months.forEach((month, idx) => {
       const monthRecords = filteredRecords.filter(r => new Date(r.date).getMonth() === idx);
@@ -584,12 +625,13 @@ export default function Records() {
 
   const getYearlyData = () => {
     const yearlyData = [];
-    const years = [...new Set(records.map(r => new Date(r.date).getFullYear()))];
+    const filteredRecords = filterByBook(records);
+    const years = [...new Set(filteredRecords.map(r => new Date(r.date).getFullYear()))];
     if (years.length === 0) years.push(new Date().getFullYear());
     years.sort((a, b) => a - b);
     
     years.forEach(year => {
-      const yearRecords = records.filter(r => new Date(r.date).getFullYear() === year);
+      const yearRecords = filteredRecords.filter(r => new Date(r.date).getFullYear() === year);
       const income = yearRecords
         .filter(r => r.type === 'income')
         .reduce((sum, r) => {
@@ -623,8 +665,8 @@ export default function Records() {
       displayMode = 'month';
     }
     
-    const filteredRecords = records.filter(r => {
-      const rDate = new Date(r.date);
+    const filteredRecords = filterByBook(records).filter(r => {
+      const rDate = parseDateAsLocal(r.date);
       return rDate >= start && rDate <= end;
     });
     
@@ -997,7 +1039,7 @@ export default function Records() {
   };
 
   const computeIncomeExpense = () => {
-    const filtered = filterByTime(records);
+    const filtered = filterByBook(filterByTime(records));
 
     const incomeMap = {};
     const expenseMap = {};
@@ -1034,6 +1076,67 @@ export default function Records() {
     return { income, expense, totalIncome, totalExpense };
   };
 
+  const computePreviousPeriod = () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    let prevStartDate, prevEndDate;
+
+    switch (timePeriod) {
+      case '全部':
+        return { prevIncome: 0, prevExpense: 0 };
+      case '日常':
+        const prevDay = new Date(now);
+        prevDay.setDate(prevDay.getDate() - 1);
+        prevStartDate = prevDay;
+        prevEndDate = prevDay;
+        break;
+      case '月统计':
+        let prevMonth = currentMonth - 1;
+        let prevYear = currentYear;
+        if (prevMonth < 0) {
+          prevMonth = 11;
+          prevYear -= 1;
+        }
+        prevStartDate = new Date(prevYear, prevMonth, 1);
+        prevEndDate = new Date(prevYear, prevMonth + 1, 0);
+        break;
+      case '年统计':
+        prevStartDate = new Date(currentYear - 1, 0, 1);
+        prevEndDate = new Date(currentYear - 1, 11, 31);
+        break;
+      case '自定义':
+        const start = new Date(customStartDate);
+        const end = new Date(customEndDate);
+        const diffMs = end.getTime() - start.getTime();
+        prevStartDate = new Date(start.getTime() - diffMs);
+        prevEndDate = new Date(end.getTime() - diffMs);
+        break;
+      default:
+        return { prevIncome: 0, prevExpense: 0 };
+    }
+
+    let prevIncome = 0;
+    let prevExpense = 0;
+
+    filterByBook(records).forEach(record => {
+      const recordDate = parseDateAsLocal(record.date);
+      if (recordDate >= prevStartDate && recordDate <= prevEndDate) {
+        const rawAmount = Math.abs(record.amount || 0);
+        const fromCurrency = record.currency || DEFAULT_BASE_CURRENCY;
+        const amount = convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+        if (record.type === 'income') {
+          prevIncome += amount;
+        } else if (record.type === 'expense') {
+          prevExpense += amount;
+        }
+      }
+    });
+
+    return { prevIncome, prevExpense };
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -1062,6 +1165,9 @@ export default function Records() {
   }
 
   const { income, expense, totalIncome, totalExpense } = computeIncomeExpense();
+  const { prevIncome, prevExpense } = computePreviousPeriod();
+  const incomeChange = prevIncome > 0 ? ((totalIncome - prevIncome) / prevIncome * 100).toFixed(1) : 0;
+  const expenseChange = prevExpense > 0 ? ((totalExpense - prevExpense) / prevExpense * 100).toFixed(1) : 0;
   const recordList = applyListFilters(filterByBook(filterByTime(records))).sort((a, b) => new Date(b.date) - new Date(a.date));
   const totalCount = recordList.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -1172,7 +1278,7 @@ export default function Records() {
             </div>
             <div className="mt-1 flex items-center gap-1 text-xs text-green-600">
               <ArrowUpRight className="w-3 h-3" />
-              <span>较上期 +12.5%</span>
+              <span>{prevIncome > 0 ? `较上期 ${incomeChange >= 0 ? '+' : ''}${incomeChange}%` : '上期无数据'}</span>
             </div>
           </div>
 
@@ -1188,7 +1294,7 @@ export default function Records() {
             </div>
             <div className="mt-1 flex items-center gap-1 text-xs text-red-500">
               <ArrowDownRight className="w-3 h-3" />
-              <span>较上期 +8.3%</span>
+              <span>{prevExpense > 0 ? `较上期 ${expenseChange >= 0 ? '+' : ''}${expenseChange}%` : '上期无数据'}</span>
             </div>
           </div>
 
