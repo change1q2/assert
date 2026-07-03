@@ -13,6 +13,7 @@ import {
   hkIpoRebuildDerivedPayload,
   exportHkIpoToExcel,
 } from "../services/hkipo-service.js";
+import { refreshHkIpoMarketInBackground, getHkIpoCache } from "../services/hkipo-fetcher.js";
 import { allowedOrigins, HK_IPO_DEFAULT_THRESHOLD } from "../config/index.js";
 
 async function handler(req, res, body, origin, pathname, url) {
@@ -113,18 +114,34 @@ async function handler(req, res, body, origin, pathname, url) {
 
   if (req.method === "GET" && pathname === "/api/tools/hk-ipo") {
     const saved = await loadHkIpoRulesConfig(user.id);
-    let payload = filterHkIpoPayload(buildHkIpoPayload(saved || {}), {
+    const forceRefresh = url.searchParams.get("refresh") === "1";
+    const useLiveData = url.searchParams.get("live") === "1";
+    
+    const cache = getHkIpoCache();
+    if (cache.payload && cache.expiresAt > Date.now() && !forceRefresh && !useLiveData) {
+      void refreshHkIpoMarketInBackground();
+    }
+    
+    const rawPayload = await buildHkIpoPayload(saved || {}, useLiveData || forceRefresh);
+    let payload = filterHkIpoPayload(rawPayload, {
       status: url.searchParams.get("status") || "all",
       query: url.searchParams.get("query") || "",
       startDate: url.searchParams.get("startDate") || "",
       endDate: url.searchParams.get("endDate") || "",
     });
-    if (url.searchParams.get("refresh") === "1") {
+    
+    if (forceRefresh) {
       payload = await enrichHkIpoSponsorsFromTradeGo(payload);
       payload = await enrichHkIpoBigVRowsFromNetwork(payload);
       payload = hkIpoRebuildDerivedPayload(payload);
     }
-    json(res, 200, payload, origin);
+    
+    json(res, 200, {
+      ...payload,
+      cached: !forceRefresh && !useLiveData && cache.payload && cache.expiresAt > Date.now(),
+      refreshing: forceRefresh,
+      expiresAt: cache.expiresAt,
+    }, origin);
     return;
   }
 }

@@ -20,6 +20,10 @@ import {
   hkIpoBigVSheetRows,
   exportHkIpoToExcel,
 } from "./hkipo-export.js";
+import {
+  fetchHkIpoMarket,
+  getHkIpoCache,
+} from "./hkipo-fetcher.js";
 
 const { hkIpoStatus, hkIpoScoreActualMultiple } = utils;
 
@@ -324,8 +328,28 @@ function hkIpoRebuildDerivedPayload(payload) {
   return { ...payload, rows, recommendations, scoreRows, stats: hkIpoStats(rows) };
 }
 
-function buildHkIpoPayload(rulesConfig = {}) {
-  const raw = loadHkIpoRawDataset();
+async function buildHkIpoPayload(rulesConfig = {}, useLiveData = false) {
+  let raw;
+  if (useLiveData) {
+    const liveData = await fetchHkIpoMarket();
+    if (liveData && liveData.rows.length > 0) {
+      raw = liveData;
+    } else {
+      raw = loadHkIpoRawDataset();
+    }
+  } else {
+    const cache = getHkIpoCache();
+    if (cache.payload && cache.expiresAt > Date.now()) {
+      raw = cache.payload;
+    } else {
+      const liveData = await fetchHkIpoMarket();
+      if (liveData && liveData.rows.length > 0) {
+        raw = liveData;
+      } else {
+        raw = loadHkIpoRawDataset();
+      }
+    }
+  }
   const rules = normalizeHkIpoRules(raw.ruleRows, Array.isArray(rulesConfig.rules) ? rulesConfig.rules : []);
   const threshold = Number(rulesConfig.threshold) || HK_IPO_DEFAULT_THRESHOLD;
   const tableRows = buildHkIpoTableRows(raw.rows);
@@ -442,7 +466,7 @@ function buildHkIpoPayload(rulesConfig = {}) {
     rules,
     threshold,
     fetchedAt: raw.fetchedAt,
-    source: "C:\\Users\\YZ-X-096\\Documents\\港股分析",
+    source: raw.source || "C:\\Users\\YZ-X-096\\Documents\\港股分析",
   };
 }
 

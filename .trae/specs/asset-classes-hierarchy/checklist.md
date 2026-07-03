@@ -1,0 +1,10 @@
+- [x] Checkpoint 1: 一级分类数据结构支持三级分类（children.children字段）
+- [x] Checkpoint 2: 一级分类的价值、盈亏等数据自动汇总所有二级分类
+- [x] Checkpoint 3: 二级分类的价值、盈亏等数据自动汇总所有三级分类
+- [x] Checkpoint 4: 一级分类卡片不再直接展示二级分类列表
+- [x] Checkpoint 5: 一级分类卡片可点击进入详情页
+- [x] Checkpoint 6: 详情页展示二级分类列表，支持展开显示三级分类
+- [x] Checkpoint 7: 支持添加/编辑/删除三级分类
+- [x] Checkpoint 8: 详情页有返回按钮可回到列表页
+- [x] Checkpoint 9: 新增/编辑表单支持三级分类输入
+- [x] Checkpoint 10: npm run build成功通过

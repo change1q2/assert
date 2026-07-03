@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { fetchState, saveState } from '../api';
 import {
   Wallet,
@@ -10,6 +10,9 @@ import {
   CreditCard,
   Building2,
   PiggyBank,
+  Filter,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 function formatCurrency(value) {
@@ -37,12 +40,17 @@ export default function Accounts() {
   const [formData, setFormData] = useState({
     name: '',
     category: '银行',
-    balance: '',
-    cost: '',
     liability: false,
   });
+  const [filters, setFilters] = useState({
+    name: '',
+    category: '',
+    type: '',
+  });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { accounts = [] } = stateData || {};
+  const { accounts = [], records = [], finance = {}, debts = [] } = stateData || {};
 
   useEffect(() => {
     loadData();
@@ -62,25 +70,76 @@ export default function Accounts() {
     }
   };
 
+  const calculateAccountBalance = useMemo(() => {
+    const balanceMap = {};
+    accounts.forEach(account => {
+      balanceMap[account.id] = 0;
+    });
+
+    records.forEach(record => {
+      const accountName = record.account || '';
+      const account = accounts.find(a => a.name === accountName);
+      if (account) {
+        balanceMap[account.id] = (balanceMap[account.id] || 0) + (record.amount || 0);
+      }
+    });
+
+    if (finance.accounts) {
+      Object.values(finance.accounts).forEach(finAccount => {
+        if (finAccount.account) {
+          const account = accounts.find(a => a.name === finAccount.account);
+          if (account) {
+            const currentValue = finAccount.currentValue || 0;
+            const cost = finAccount.totalCost || 0;
+            balanceMap[account.id] = (balanceMap[account.id] || 0) + currentValue - cost;
+          }
+        }
+      });
+    }
+
+    debts.forEach(debt => {
+      if (debt.account) {
+        const account = accounts.find(a => a.name === debt.account);
+        if (account) {
+          balanceMap[account.id] = (balanceMap[account.id] || 0) - (debt.balance || 0);
+        }
+      }
+    });
+
+    return balanceMap;
+  }, [accounts, records, finance, debts]);
+
   const computeStats = () => {
     const accountList = accounts || [];
     const assetAccounts = accountList.filter(a => !a.liability);
     const liabilityAccounts = accountList.filter(a => a.liability);
 
-    const totalAssets = assetAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
-    const totalLiabilities = liabilityAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
+    const totalAssets = assetAccounts.reduce((sum, a) => sum + (calculateAccountBalance[a.id] || 0), 0);
+    const totalLiabilities = liabilityAccounts.reduce((sum, a) => sum + (calculateAccountBalance[a.id] || 0), 0);
     const netWorth = totalAssets - totalLiabilities;
 
     return { totalAssets, totalLiabilities, netWorth, assetAccounts, liabilityAccounts };
   };
+
+  const filteredAccounts = useMemo(() => {
+    return accounts.filter(account => {
+      if (filters.name && !account.name.includes(filters.name)) return false;
+      if (filters.category && account.category !== filters.category) return false;
+      if (filters.type === 'asset' && account.liability) return false;
+      if (filters.type === 'liability' && !account.liability) return false;
+      return true;
+    });
+  }, [accounts, filters]);
+
+  const totalPages = Math.ceil(filteredAccounts.length / pageSize);
+  const paginatedAccounts = filteredAccounts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleAdd = () => {
     setEditingAccount(null);
     setFormData({
       name: '',
       category: '银行',
-      balance: '',
-      cost: '',
+      currency: 'CNY',
       liability: false,
     });
     setShowModal(true);
@@ -91,8 +150,7 @@ export default function Accounts() {
     setFormData({
       name: account.name,
       category: account.category || '银行',
-      balance: account.balance || '',
-      cost: account.cost || account.balance || '',
+      currency: account.currency || 'CNY',
       liability: account.liability || false,
     });
     setShowModal(true);
@@ -118,13 +176,11 @@ export default function Accounts() {
 
     try {
       let newAccounts = stateData.accounts || [];
-      const balance = Number(formData.balance) || 0;
-      const cost = Number(formData.cost) || balance;
 
       if (editingAccount) {
         newAccounts = newAccounts.map(a =>
           a.id === editingAccount.id
-            ? { ...a, ...formData, balance, cost }
+            ? { ...a, ...formData }
             : a
         );
       } else {
@@ -134,8 +190,6 @@ export default function Accounts() {
             id: Date.now().toString(),
             name: formData.name,
             category: formData.category,
-            balance,
-            cost,
             liability: formData.liability,
           },
         ];
@@ -269,6 +323,56 @@ export default function Accounts() {
 
         <section className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
           <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">账户列表</h3>
+          
+          <div className="flex flex-wrap gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-gray-500" />
+              <span className="text-xs text-gray-500">筛选：</span>
+            </div>
+            <div style={{ width: '140px' }}>
+              <input
+                type="text"
+                value={filters.name}
+                onChange={(e) => { setFilters({ ...filters, name: e.target.value }); setCurrentPage(1); }}
+                placeholder="账户名称"
+                className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+              />
+            </div>
+            <div style={{ width: '100px' }}>
+              <select
+                value={filters.category}
+                onChange={(e) => { setFilters({ ...filters, category: e.target.value }); setCurrentPage(1); }}
+                className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+              >
+                <option value="">全部分类</option>
+                <option value="银行">银行</option>
+                <option value="信用卡">信用卡</option>
+                <option value="储蓄">储蓄</option>
+                <option value="投资">投资</option>
+                <option value="其他">其他</option>
+              </select>
+            </div>
+            <div style={{ width: '100px' }}>
+              <select
+                value={filters.type}
+                onChange={(e) => { setFilters({ ...filters, type: e.target.value }); setCurrentPage(1); }}
+                className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+              >
+                <option value="">全部类型</option>
+                <option value="asset">资产</option>
+                <option value="liability">负债</option>
+              </select>
+            </div>
+            {(filters.name || filters.category || filters.type) && (
+              <button
+                onClick={() => { setFilters({ name: '', category: '', type: '' }); setCurrentPage(1); }}
+                className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                清除筛选
+              </button>
+            )}
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -277,13 +381,13 @@ export default function Accounts() {
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">分类</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类型</th>
                   <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">余额</th>
-                  <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">成本</th>
                   <th className="text-center py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {accounts.map((account) => {
+                {paginatedAccounts.map((account) => {
                   const Icon = getCategoryIcon(account.category);
+                  const balance = calculateAccountBalance[account.id] || 0;
                   return (
                     <tr key={account.id} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30">
                       <td className="py-3 px-3">
@@ -313,12 +417,9 @@ export default function Accounts() {
                         </span>
                       </td>
                       <td className={`py-3 px-3 text-right font-medium tabular-nums ${
-                        account.liability ? 'text-red-500' : 'text-gray-900 dark:text-white'
+                        balance < 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'
                       }`}>
-                        {formatCurrency(account.balance || 0)}
-                      </td>
-                      <td className="py-3 px-3 text-right text-gray-900 dark:text-white tabular-nums">
-                        {formatCurrency(account.cost || account.balance || 0)}
+                        {formatCurrency(balance)}
                       </td>
                       <td className="py-3 px-3">
                         <div className="flex items-center justify-center gap-1">
@@ -341,11 +442,45 @@ export default function Accounts() {
                 })}
               </tbody>
             </table>
-            {accounts.length === 0 && (
+            {filteredAccounts.length === 0 && (
               <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                 <p>暂无账户数据，点击右上角添加账户</p>
               </div>
             )}
+          </div>
+
+          <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              共 {filteredAccounts.length} 条记录，当前显示第 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredAccounts.length)} 条
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                className="px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+              >
+                <option value={20}>20条/页</option>
+                <option value={50}>50条/页</option>
+                <option value={100}>100条/页</option>
+              </select>
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-sm font-medium min-w-[60px] text-center">
+                {currentPage} / {totalPages || 1}
+              </span>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </section>
 
@@ -377,46 +512,37 @@ export default function Accounts() {
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    分类
-                  </label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  >
-                    <option value="银行">银行</option>
-                    <option value="信用卡">信用卡</option>
-                    <option value="储蓄">储蓄</option>
-                    <option value="投资">投资</option>
-                    <option value="其他">其他</option>
-                  </select>
-                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      余额 (¥)
+                      分类
                     </label>
-                    <input
-                      type="number"
-                      value={formData.balance}
-                      onChange={(e) => setFormData({ ...formData, balance: e.target.value })}
-                      placeholder="0.00"
+                    <select
+                      value={formData.category}
+                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
+                    >
+                      <option value="银行">银行</option>
+                      <option value="信用卡">信用卡</option>
+                      <option value="储蓄">储蓄</option>
+                      <option value="投资">投资</option>
+                      <option value="其他">其他</option>
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      成本 (¥)
+                      货币
                     </label>
-                    <input
-                      type="number"
-                      value={formData.cost}
-                      onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
-                      placeholder="0.00"
+                    <select
+                      value={formData.currency || 'CNY'}
+                      onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
+                    >
+                      <option value="CNY">人民币 (¥)</option>
+                      <option value="USD">美元 ($)</option>
+                      <option value="EUR">欧元 (€)</option>
+                      <option value="GBP">英镑 (£)</option>
+                    </select>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
