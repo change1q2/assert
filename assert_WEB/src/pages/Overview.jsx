@@ -911,7 +911,7 @@ export default function Overview() {
                         </defs>
                         <path d={areaData} fill="url(#areaGradient)" />
                         <path d={pathData} fill="none" stroke="#8B5CF6" strokeWidth="2" />
-                        {values.map((v, i) => {
+                        {values.length > 1 && range > 0 && values.map((v, i) => {
                           const x = (i / (values.length - 1)) * 280 + 10;
                           const y = 110 - ((v - minVal) / range) * 90;
                           return <circle key={i} cx={x} cy={y} r="3" fill="#8B5CF6" />;

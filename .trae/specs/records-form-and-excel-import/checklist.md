@@ -1,0 +1,12 @@
+- [x] Checkpoint 1: 新增收支记录表单字段顺序为：日期、收支类型、金额、类别、二级分类、所属账本、收支账户、备注、标签
+- [x] Checkpoint 2: 表单字段标签名称正确（类型→收支类型，一级分类→类别，账本→所属账本）
+- [x] Checkpoint 3: 列表表头字段名称正确
+- [x] Checkpoint 4: 列表显示顺序与表单一致
+- [x] Checkpoint 5: 筛选字段名称正确
+- [x] Checkpoint 6: 筛选字段顺序正确
+- [x] Checkpoint 7: Excel导入按钮显示正确
+- [x] Checkpoint 8: Excel导入功能正常工作
+- [x] Checkpoint 9: 导入数据验证错误提示正确
+- [x] Checkpoint 10: 模板下载按钮显示正确
+- [x] Checkpoint 11: 下载的模板包含正确表头
+- [x] Checkpoint 12: npm run build构建成功无错误

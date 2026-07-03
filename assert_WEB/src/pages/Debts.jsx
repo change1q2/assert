@@ -16,6 +16,7 @@ import {
   FileImage,
   Eye,
   Trash2,
+  HelpCircle,
 } from 'lucide-react';
 
 function formatCurrency(value) {
@@ -28,6 +29,17 @@ function formatCurrency(value) {
 
 function formatNumber(value, digits = 2) {
   return (value || 0).toFixed(digits);
+}
+
+function formatCurrencyShort(value) {
+  const num = parseFloat(value) || 0;
+  if (num >= 100000000) {
+    return `¥${(num / 100000000).toFixed(2)}亿`;
+  }
+  if (num >= 10000) {
+    return `¥${(num / 10000).toFixed(2)}万`;
+  }
+  return formatCurrency(num);
 }
 
 export default function Debts() {
@@ -50,6 +62,327 @@ export default function Debts() {
   const [editingCategory, setEditingCategory] = useState(null);
   const [categoryName, setCategoryName] = useState('');
   const [expandedCards, setExpandedCards] = useState({});
+  const [showRepaymentGuide, setShowRepaymentGuide] = useState(false);
+  const [pagination, setPagination] = useState({});
+  const [pageSizes, setPageSizes] = useState({});
+  
+  const DEFAULT_PAGE_SIZE = 20;
+  const PAGE_SIZE_OPTIONS = [20, 50, 100];
+  const [cardSizes, setCardSizes] = useState({});
+  const [resizingCard, setResizingCard] = useState(null);
+
+  const handleResizeStart = (e, cardId) => {
+    e.preventDefault();
+    setResizingCard(cardId);
+    document.addEventListener('mousemove', handleResize);
+    document.addEventListener('mouseup', handleResizeEnd);
+  };
+
+  const handleResize = (e) => {
+    if (!resizingCard) return;
+    const card = document.getElementById(`card-${resizingCard}`);
+    if (card) {
+      const newWidth = Math.max(300, Math.min(window.innerWidth - 40, e.clientX - card.getBoundingClientRect().left));
+      setCardSizes(prev => ({ ...prev, [resizingCard]: `${newWidth}px` }));
+    }
+  };
+
+  const handleResizeEnd = () => {
+    setResizingCard(null);
+    document.removeEventListener('mousemove', handleResize);
+    document.removeEventListener('mouseup', handleResizeEnd);
+  };
+
+  const renderDebtCard = (debt, color) => {
+    const colorClasses = {
+      red: {
+        bg: 'bg-red-500',
+        lightBg: 'bg-red-50',
+        text: 'text-red-600',
+        border: 'border-red-200',
+        badge: 'bg-red-100 text-red-700',
+      },
+      emerald: {
+        bg: 'bg-emerald-500',
+        lightBg: 'bg-emerald-50',
+        text: 'text-emerald-600',
+        border: 'border-emerald-200',
+        badge: 'bg-emerald-100 text-emerald-700',
+      },
+    };
+    const cls = colorClasses[color] || colorClasses.red;
+    
+    const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount);
+    const payments = debt.payments || {};
+
+    const cardWidth = cardSizes[debt.id] || '100%';
+    
+    return (
+      <div 
+        id={`card-${debt.id}`}
+        className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 overflow-hidden relative"
+        style={{ width: cardWidth, maxWidth: '100%' }}
+      >
+        <div 
+          className="absolute bottom-0 right-0 w-6 h-6 cursor-se-resize flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 bg-gray-100 dark:bg-slate-700 rounded-tl-lg rounded-br-lg"
+          onMouseDown={(e) => handleResizeStart(e, debt.id)}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M2 10L10 2M10 10V2H2" />
+          </svg>
+        </div>
+        <div className="p-5">
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold ${cls.bg}`}>
+                {(debt.creditor || debt.name || '债').charAt(0)}
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-white text-lg">{debt.creditor || debt.name || '未知'}</h3>
+                <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${cls.badge}`}>
+                  {debt.type || (debt.category === 'payable' ? '借入' : '借出')}
+                </span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className={`text-2xl font-bold tabular-nums ${cls.text}`}>{formatCurrency(debt.amount || 0)}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">总金额</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">本金</div>
+              <div className="font-semibold text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.principal || debt.amount || 0)}</div>
+            </div>
+            <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">利率</div>
+              <div className="font-semibold text-gray-900 dark:text-white tabular-nums">{debt.annualRate !== undefined ? `${debt.annualRate}%` : '-'}</div>
+            </div>
+            <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">利息</div>
+              <div className="font-semibold text-gray-900 dark:text-white tabular-nums">{formatCurrency(plan?.totalInterest || 0)}</div>
+            </div>
+            <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">已还</div>
+              <div className="font-semibold text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.paidAmount || 0)}</div>
+            </div>
+            <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">剩余</div>
+              <div className={`font-semibold tabular-nums ${(debt.amount - (debt.paidAmount || 0) > 0) ? cls.text : 'text-emerald-600'}`}>
+                {formatCurrency((debt.amount || 0) - (debt.paidAmount || 0))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-4">
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">债务人</div>
+              <div className="text-sm text-gray-900 dark:text-white">{debt.debtor || '-'}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">还款方式</div>
+              <div className="text-sm text-gray-900 dark:text-white">{plan?.methodLabel || '-'}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">状态</div>
+              <div className={`text-sm font-medium px-2 py-0.5 rounded-full ${
+                plan?.schedule?.some(item => payments[item.period] !== true && new Date(item.date) < new Date())
+                  ? 'bg-red-100 text-red-600'
+                  : 'bg-gray-100 text-gray-700 dark:bg-slate-700 dark:text-gray-300'
+              }`}>
+                {plan?.schedule?.some(item => payments[item.period] !== true && new Date(item.date) < new Date()) ? '逾期未还' : '正常'}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">罚息</div>
+              <div className="text-sm text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.penaltyInterest || 0)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">借入日期</div>
+              <div className="text-sm text-gray-900 dark:text-white">{formatDate(debt.startDate)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">还款日期</div>
+              <div className="text-sm text-gray-900 dark:text-white">{formatDate(debt.dueDate)}</div>
+            </div>
+          </div>
+
+          {debt.note && (
+            <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3 mb-4">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">备注</div>
+              <div className="text-sm text-gray-900 dark:text-white">{debt.note}</div>
+            </div>
+          )}
+
+          {plan?.schedule && plan.schedule.length > 0 && (
+            <div className="border-t border-gray-100 dark:border-slate-700 pt-4">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                <CreditCard className="w-4 h-4" />
+                还款计划 ({plan.periods} 期)
+              </h4>
+              
+              {(() => {
+                const currentPageSize = pageSizes[debt.id] || DEFAULT_PAGE_SIZE;
+                const totalPages = Math.ceil(plan.schedule.length / currentPageSize);
+                const currentPage = pagination[debt.id] || 1;
+                
+                const firstUnpaidIndex = plan.schedule.findIndex((item) => payments[item.period] !== true);
+                const defaultPage = firstUnpaidIndex >= 0 
+                  ? Math.ceil((firstUnpaidIndex + 1) / currentPageSize)
+                  : 1;
+                
+                const pageToShow = pagination[debt.id] || defaultPage;
+                const startIdx = (pageToShow - 1) * currentPageSize;
+                const endIdx = Math.min(startIdx + currentPageSize, plan.schedule.length);
+                const currentSchedule = plan.schedule.slice(startIdx, endIdx);
+                
+                const handlePageChange = (newPage) => {
+                  setPagination(prev => ({ ...prev, [debt.id]: newPage }));
+                };
+                
+                const handlePageSizeChange = (newSize) => {
+                  setPageSizes(prev => ({ ...prev, [debt.id]: newSize }));
+                  setPagination(prev => ({ ...prev, [debt.id]: 1 }));
+                };
+                
+                return (
+                  <>
+                    <div className="max-h-64 overflow-y-auto">
+                      <div className="overflow-x-auto min-w-full">
+                        <table className="min-w-full text-sm">
+                          <thead>
+                            <tr className="bg-gray-50 dark:bg-slate-700/50 sticky top-0">
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap">期数</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap">还款日期</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap">本金</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap">利息</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap">还款额</th>
+                              <th className="text-center py-2 px-3 text-gray-500 font-medium whitespace-nowrap">状态</th>
+                              <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap">罚息</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {currentSchedule.map((item, idx) => {
+                              const originalIdx = startIdx + idx;
+                              const isPaid = payments[item.period] === true;
+                              const isOverdue = !isPaid && new Date(item.date) < new Date();
+                              const periodPenalty = debt.periodPenalties?.[item.period] || 0;
+                              return (
+                                <tr key={originalIdx} className={`border-b border-gray-100 dark:border-slate-700/50 ${isPaid ? 'bg-green-50/50 dark:bg-green-900/20' : isOverdue ? 'bg-red-50/30 dark:bg-red-900/10' : ''}`}>
+                                  <td className="py-2 px-3 text-gray-900 dark:text-white font-medium">第 {item.period} 期</td>
+                                  <td className="py-2 px-3 text-gray-600 dark:text-gray-300">{formatDate(item.date)}</td>
+                                  <td className="py-2 px-3 text-left text-gray-900 dark:text-white tabular-nums">{formatCurrency(item.principal)}</td>
+                                  <td className="py-2 px-3 text-left text-gray-900 dark:text-white tabular-nums">{formatCurrency(item.interest)}</td>
+                                  <td className="py-2 px-3 text-left font-medium tabular-nums">{formatCurrency(item.total)}</td>
+                                  <td className="py-2 px-3 text-center">
+                                    <button
+                                      onClick={() => handlePaymentToggle(debt, item.period)}
+                                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                                        isPaid
+                                          ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                          : isOverdue
+                                            ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-slate-700 dark:text-gray-300 dark:hover:bg-slate-600'
+                                      }`}
+                                    >
+                                      {isPaid ? (
+                                        <>
+                                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                          </svg>
+                                          已还
+                                        </>
+                                      ) : isOverdue ? (
+                                        <>
+                                          <AlertTriangle className="w-3 h-3" />
+                                          已逾期
+                                        </>
+                                      ) : (
+                                        <>
+                                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                          </svg>
+                                          未还
+                                        </>
+                                      )}
+                                    </button>
+                                  </td>
+                                  <td className="py-2 px-3 text-left">
+                                    <input
+                                      type="number"
+                                      value={periodPenalty || ''}
+                                      onChange={(e) => handlePeriodPenaltyChange(debt, item.period, e.target.value)}
+                                      placeholder="0"
+                                      className="w-20 px-1.5 py-0.5 text-xs border border-gray-200 dark:border-slate-600 rounded dark:bg-slate-700 text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    
+                    {(totalPages > 1 || plan.schedule.length > DEFAULT_PAGE_SIZE) && (
+                      <div className="flex items-center justify-center gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-slate-700 flex-wrap">
+                        <button
+                          onClick={() => handlePageChange(Math.max(1, pageToShow - 1))}
+                          disabled={pageToShow === 1}
+                          className="px-3 py-1 text-sm border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-slate-700"
+                        >
+                          上一页
+                        </button>
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                          第 {pageToShow} / {totalPages} 页
+                        </span>
+                        <button
+                          onClick={() => handlePageChange(Math.min(totalPages, pageToShow + 1))}
+                          disabled={pageToShow === totalPages}
+                          className="px-3 py-1 text-sm border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-slate-700"
+                        >
+                          下一页
+                        </button>
+                        <div className="flex items-center gap-1 ml-2">
+                          <span className="text-sm text-gray-500">每页:</span>
+                          <select
+                            value={currentPageSize}
+                            onChange={(e) => handlePageSizeChange(parseInt(e.target.value))}
+                            className="px-2 py-1 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          >
+                            {PAGE_SIZE_OPTIONS.map((size) => (
+                              <option key={size} value={size}>{size}条</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
+            {debt.attachment && (
+              <button onClick={() => setPreviewImage(debt.attachment)} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 text-sm hover:bg-gray-50 dark:hover:bg-slate-700">
+                <Eye className="w-4 h-4" />
+                查看附件
+              </button>
+            )}
+            <button onClick={() => openEditModal(debt)} className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 text-sm hover:bg-gray-50 dark:hover:bg-slate-700">
+              编辑
+            </button>
+            <button onClick={() => handleDelete(debt)} className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-red-500 text-white text-sm hover:bg-red-600 transition-colors">
+              <Trash2 className="w-4 h-4" />
+              删除
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const renderCategoryCard = (cat, catDebts, totalAmount, cardKey, isExpanded, color) => {
     const colorClasses = {
@@ -88,43 +421,10 @@ export default function Debts() {
           </div>
         </div>
         {isExpanded && (
-          <div className="border-t border-gray-100 dark:border-slate-700">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 dark:bg-slate-700/50">
-                  <th className="text-left py-2.5 px-4 text-gray-500 font-medium">名称</th>
-                  <th className="text-right py-2.5 px-4 text-gray-500 font-medium">金额</th>
-                  <th className="text-right py-2.5 px-4 text-gray-500 font-medium">本金</th>
-                  <th className="text-left py-2.5 px-4 text-gray-500 font-medium">还款日期</th>
-                  <th className="text-center py-2.5 px-4 text-gray-500 font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {catDebts.map((debt, idx) => (
-                  <tr key={debt.id || idx} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30">
-                    <td className="py-2.5 px-4 text-gray-900 dark:text-white font-medium">{debt.creditor || debt.name || '未知'}</td>
-                    <td className={`py-2.5 px-4 text-right font-medium tabular-nums ${cls.text}`}>{formatCurrency(debt.amount || 0)}</td>
-                    <td className="py-2.5 px-4 text-right text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.principal || debt.amount || 0)}</td>
-                    <td className="py-2.5 px-4 text-gray-600 dark:text-gray-300">{formatDate(debt.dueDate)}</td>
-                    <td className="py-2.5 px-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        {debt.attachment && (
-                          <button onClick={() => setPreviewImage(debt.attachment)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded text-indigo-600">
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                        <button onClick={() => openEditModal(debt)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded text-gray-500">
-                          <EditIcon className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => handleDelete(debt)} className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-500">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="border-t border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/50 p-4 space-y-4">
+            {catDebts.map((debt) => (
+              <div key={debt.id}>{renderDebtCard(debt, color)}</div>
+            ))}
           </div>
         )}
       </div>
@@ -141,6 +441,7 @@ export default function Debts() {
     category: 'payable',
     type: '借入',
     debtCategory: 'cat_5',
+    account: '',
     creditor: '',
     debtor: '',
     principal: '',
@@ -152,6 +453,7 @@ export default function Debts() {
     paidAmount: '0',
     attachment: '',
     note: '',
+    investmentDays: '365',
   });
 
   const { debts = [] } = stateData || {};
@@ -165,7 +467,9 @@ export default function Debts() {
     setError(null);
     try {
       const data = await fetchState();
-      setStateData(data);
+      if (data && data.debts && data.debts.length > 0) {
+        setStateData(data);
+      }
     } catch (err) {
       console.error('Failed to load debts data:', err);
       setError('加载数据失败');
@@ -181,6 +485,7 @@ export default function Debts() {
         category: debt.category || 'payable',
         type: debt.type || '借入',
         debtCategory: debt.debtCategory || debtCategories[0]?.id || '',
+        account: debt.account || '',
         creditor: debt.creditor || debt.name || '',
         debtor: debt.debtor || '',
         principal: debt.principal !== undefined ? String(debt.principal) : '',
@@ -192,6 +497,9 @@ export default function Debts() {
         paidAmount: debt.paidAmount !== undefined ? String(debt.paidAmount) : '0',
         attachment: debt.attachment || '',
         note: debt.note || debt.remark || '',
+        status: debt.status || 'normal',
+        penaltyInterest: debt.penaltyInterest !== undefined ? String(debt.penaltyInterest) : '0',
+        investmentDays: debt.investmentDays !== undefined ? String(debt.investmentDays) : '365',
       });
       setEditingDebt(debt);
     } else {
@@ -199,6 +507,7 @@ export default function Debts() {
         category: 'payable',
         type: '借入',
         debtCategory: debtCategories[0]?.id || '',
+        account: '',
         creditor: '',
         debtor: '',
         principal: '',
@@ -210,6 +519,9 @@ export default function Debts() {
         paidAmount: '0',
         attachment: '',
         note: '',
+        status: 'normal',
+        penaltyInterest: '0',
+        investmentDays: '365',
       });
       setEditingDebt(null);
     }
@@ -222,6 +534,7 @@ export default function Debts() {
 
   const openEditModal = (debt) => {
     resetForm(debt);
+    setEditingDebt(debt);
     setShowAddModal(true);
   };
 
@@ -239,53 +552,192 @@ export default function Debts() {
     setForm((prev) => ({ ...prev, attachment: '' }));
   };
 
-  const remainingAmount = useMemo(() => {
-    const amt = parseFloat(form.amount) || 0;
-    const paid = parseFloat(form.paidAmount) || 0;
-    return Math.max(0, amt - paid);
-  }, [form.amount, form.paidAmount]);
+  const handlePaymentToggle = async (debt, period) => {
+    const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount);
+    const paymentItem = plan?.schedule?.find((s) => s.period === period);
+    if (!paymentItem) return;
 
-  const repaymentPlan = useMemo(() => {
-    const principal = parseFloat(form.principal) || 0;
-    const rate = parseFloat(form.annualRate) || 0;
-    const method = form.repaymentMethod;
-    if (!principal || !rate || !form.dueDate || !form.startDate) return null;
+    const newPayments = { ...(debt.payments || {}) };
+    const isPaid = newPayments[period] === true;
+    
+    if (isPaid) {
+      delete newPayments[period];
+    } else {
+      newPayments[period] = true;
+    }
 
-    const start = new Date(form.startDate);
-    const due = new Date(form.dueDate);
+    const paidPeriods = Object.keys(newPayments).filter((k) => newPayments[k] === true);
+    const newPaidAmount = paidPeriods.reduce((sum, p) => {
+      const item = plan.schedule.find((s) => s.period === parseInt(p));
+      return sum + (item?.total || 0);
+    }, 0);
+
+    const updatedDebt = { ...debt, payments: newPayments, paidAmount: newPaidAmount };
+
+    let newStateData;
+    setStateData((prev) => {
+      const debts = prev?.debts || [];
+      const newDebts = debts.map((d) => (d.id === debt.id ? updatedDebt : d));
+      newStateData = { ...prev, debts: newDebts };
+      return newStateData;
+    });
+
+    await saveState(newStateData);
+  };
+
+  const handlePeriodPenaltyChange = async (debt, period, value) => {
+    const penaltyValue = parseFloat(value) || 0;
+    const newPeriodPenalties = { ...(debt.periodPenalties || {}) };
+    
+    if (penaltyValue > 0) {
+      newPeriodPenalties[period] = penaltyValue;
+    } else {
+      delete newPeriodPenalties[period];
+    }
+
+    const totalPenalty = Object.values(newPeriodPenalties).reduce((sum, val) => sum + val, 0);
+    const updatedDebt = { ...debt, periodPenalties: newPeriodPenalties, penaltyInterest: totalPenalty };
+
+    let newStateData;
+    setStateData((prev) => {
+      const debts = prev?.debts || [];
+      const newDebts = debts.map((d) => (d.id === debt.id ? updatedDebt : d));
+      newStateData = { ...prev, debts: newDebts };
+      return newStateData;
+    });
+
+    await saveState(newStateData);
+  };
+
+  const handleStatusToggle = async (debt) => {
+    const newStatus = debt.status === 'overdue' ? 'normal' : 'overdue';
+    const updatedDebt = { ...debt, status: newStatus };
+
+    let newStateData;
+    setStateData((prev) => {
+      const debts = prev?.debts || [];
+      const newDebts = debts.map((d) => (d.id === debt.id ? updatedDebt : d));
+      newStateData = { ...prev, debts: newDebts };
+      return newStateData;
+    });
+
+    await saveState(newStateData);
+  };
+
+  const calculateRepayment = (principal, rate, method, startDate, dueDate, paidAmount = 0) => {
+    const p = parseFloat(principal) || 0;
+    const r = parseFloat(rate) || 0;
+    if (!p || !dueDate || !startDate) return null;
+
+    const start = new Date(startDate);
+    const due = new Date(dueDate);
     const months = Math.max(1, (due.getFullYear() - start.getFullYear()) * 12 + (due.getMonth() - start.getMonth()));
-    const monthlyRate = rate / 100 / 12;
+    const monthlyRate = r / 100 / 12;
 
     let totalAmount = 0;
     let totalInterest = 0;
     let eachAmount = 0;
+    const schedule = [];
 
     if (method === 'equalPrincipalInterest') {
-      // 等额本息
-      const x = Math.pow(1 + monthlyRate, months);
-      eachAmount = (principal * monthlyRate * x) / (x - 1);
-      totalAmount = eachAmount * months;
-      totalInterest = totalAmount - principal;
-    } else if (method === 'equalPrincipal') {
-      // 等额本金
-      const basePrincipal = principal / months;
-      totalInterest = 0;
-      for (let i = 0; i < months; i++) {
-        const remainPrincipal = principal - basePrincipal * i;
-        totalInterest += remainPrincipal * monthlyRate;
+      if (monthlyRate === 0) {
+        eachAmount = p / months;
+        totalAmount = p;
+        totalInterest = 0;
+        for (let i = 0; i < months; i++) {
+          const paymentDate = new Date(start);
+          paymentDate.setMonth(start.getMonth() + i + 1);
+          schedule.push({
+            period: i + 1,
+            date: paymentDate.toISOString().split('T')[0],
+            principal: eachAmount,
+            interest: 0,
+            total: eachAmount,
+          });
+        }
+      } else {
+        const x = Math.pow(1 + monthlyRate, months);
+        eachAmount = (p * monthlyRate * x) / (x - 1);
+        totalAmount = eachAmount * months;
+        totalInterest = totalAmount - p;
+        
+        let remainingPrincipal = p;
+        for (let i = 0; i < months; i++) {
+          const interest = remainingPrincipal * monthlyRate;
+          const principalPart = eachAmount - interest;
+          remainingPrincipal -= principalPart;
+          const paymentDate = new Date(start);
+          paymentDate.setMonth(start.getMonth() + i + 1);
+          schedule.push({
+            period: i + 1,
+            date: paymentDate.toISOString().split('T')[0],
+            principal: principalPart,
+            interest,
+            total: eachAmount,
+          });
+        }
       }
-      totalAmount = principal + totalInterest;
-      eachAmount = totalAmount / months; // 平均每期
+    } else if (method === 'equalPrincipal') {
+      const basePrincipal = p / months;
+      totalInterest = 0;
+      let remainingPrincipal = p;
+      
+      for (let i = 0; i < months; i++) {
+        const interest = remainingPrincipal * monthlyRate;
+        const totalPayment = basePrincipal + interest;
+        totalInterest += interest;
+        remainingPrincipal -= basePrincipal;
+        const paymentDate = new Date(start);
+        paymentDate.setMonth(start.getMonth() + i + 1);
+        schedule.push({
+          period: i + 1,
+          date: paymentDate.toISOString().split('T')[0],
+          principal: basePrincipal,
+          interest,
+          total: totalPayment,
+        });
+      }
+      totalAmount = p + totalInterest;
+      eachAmount = totalAmount / months;
     } else if (method === 'interestOnly') {
-      // 先息后本
-      totalInterest = principal * monthlyRate * months;
-      totalAmount = principal + totalInterest;
-      eachAmount = principal * monthlyRate;
+      totalInterest = p * monthlyRate * months;
+      totalAmount = p + totalInterest;
+      eachAmount = p * monthlyRate;
+      
+      for (let i = 0; i < months - 1; i++) {
+        const paymentDate = new Date(start);
+        paymentDate.setMonth(start.getMonth() + i + 1);
+        schedule.push({
+          period: i + 1,
+          date: paymentDate.toISOString().split('T')[0],
+          principal: 0,
+          interest: eachAmount,
+          total: eachAmount,
+        });
+      }
+      const lastPaymentDate = new Date(start);
+      lastPaymentDate.setMonth(start.getMonth() + months);
+      schedule.push({
+        period: months,
+        date: lastPaymentDate.toISOString().split('T')[0],
+        principal: p,
+        interest: eachAmount,
+        total: p + eachAmount,
+      });
     } else if (method === 'lumpSum') {
-      // 到期一次性
-      totalInterest = principal * monthlyRate * months;
-      totalAmount = principal + totalInterest;
+      totalInterest = p * monthlyRate * months;
+      totalAmount = p + totalInterest;
       eachAmount = totalAmount;
+      
+      const paymentDate = new Date(start);
+      paymentDate.setMonth(start.getMonth() + months);
+      schedule.push({
+        period: 1,
+        date: paymentDate.toISOString().split('T')[0],
+        principal: p,
+        interest: totalInterest,
+        total: totalAmount,
+      });
     }
 
     return {
@@ -294,22 +746,45 @@ export default function Debts() {
       totalAmount,
       totalInterest,
       eachAmount,
-      remainingAmount: totalAmount - (parseFloat(form.paidAmount) || 0),
+      remainingAmount: totalAmount - (parseFloat(paidAmount) || 0),
+      schedule,
     };
-  }, [form.principal, form.annualRate, form.repaymentMethod, form.startDate, form.dueDate, form.paidAmount]);
+  };
+
+  const getRepaymentPlan = () => {
+    return calculateRepayment(form.principal, form.annualRate, form.repaymentMethod, form.startDate, form.dueDate, form.paidAmount);
+  };
+
+  const handleFormChange = (field, value) => {
+    setForm((prev) => {
+      const newForm = { ...prev, [field]: value };
+      if (!totalAmountOverridden && (field === 'principal' || field === 'annualRate' || field === 'startDate' || field === 'dueDate' || field === 'repaymentMethod')) {
+        const plan = calculateRepayment(newForm.principal, newForm.annualRate, newForm.repaymentMethod, newForm.startDate, newForm.dueDate);
+        if (plan) {
+          newForm.amount = plan.totalAmount.toFixed(2);
+        }
+      }
+      return newForm;
+    });
+  };
 
   const handleSave = async () => {
     if (!form.creditor || !form.amount) return;
     setSaving(true);
     try {
+      const plan = getRepaymentPlan();
       const debtData = {
         ...form,
         principal: parseFloat(form.principal) || 0,
         annualRate: parseFloat(form.annualRate) || 0,
         amount: parseFloat(form.amount) || 0,
         paidAmount: parseFloat(form.paidAmount) || 0,
-        remainingAmount,
+        penaltyInterest: parseFloat(form.penaltyInterest) || 0,
+        remainingAmount: plan ? plan.remainingAmount : parseFloat(form.amount) - (parseFloat(form.paidAmount) || 0),
         id: editingDebt ? editingDebt.id : Date.now(),
+        name: form.creditor || '',
+        creditorName: form.creditor || '',
+        debtorName: form.debtor || '',
       };
 
       let updatedDebts;
@@ -488,7 +963,15 @@ export default function Debts() {
     const pTotal = payables.reduce((s, d) => s + (d.amount || 0), 0);
     const pPrincipal = payables.reduce((s, d) => s + (d.principal || d.amount || 0), 0);
     const pInterest = pTotal - pPrincipal;
-    const pRate = pPrincipal > 0 ? (pInterest / pPrincipal) * 100 : 0;
+    
+    const pAvgInvestmentDays = payables.length > 0 
+      ? payables.reduce((sum, d) => {
+          const days = parseFloat(d.investmentDays) || 
+            (d.startDate && d.dueDate ? Math.ceil((new Date(d.dueDate) - new Date(d.startDate)) / (1000 * 60 * 60 * 24)) : 365);
+          return sum + days;
+        }, 0) / payables.length 
+      : 365;
+    const pRate = pPrincipal > 0 ? (pInterest / pPrincipal) * (365 / pAvgInvestmentDays) * 100 : 0;
     const pDailyRate = pRate / 365;
     const pMonthlyRate = pRate / 12;
 
@@ -513,33 +996,68 @@ export default function Debts() {
     const totalDebtPrincipal = payables.reduce((s, d) => s + (d.principal || d.amount || 0), 0);
     const totalDebtInterest = payables.reduce((s, d) => s + Math.max(0, (d.amount || 0) - (d.principal || d.amount || 0)), 0);
 
-    // 本年待还
-    const yearDueDebts = payables.filter((d) => {
-      if (!d.dueDate) return false;
-      const dueDate = new Date(d.dueDate);
-      return dueDate >= yearStart && dueDate <= yearEnd;
-    });
-    const yearDuePrincipal = yearDueDebts.reduce((s, d) => s + (d.principal || d.amount || 0), 0);
-    const yearDueInterest = yearDueDebts.reduce((s, d) => s + Math.max(0, (d.amount || 0) - (d.principal || d.amount || 0)), 0);
+    // 本年待还和本月待还（根据还款计划计算）
+    let yearDuePrincipal = 0;
+    let yearDueInterest = 0;
+    let monthDuePrincipal = 0;
+    let monthDueInterest = 0;
 
-    // 本月待还
-    const monthDueDebts = payables.filter((d) => {
-      if (!d.dueDate) return false;
-      const dueDate = new Date(d.dueDate);
-      return dueDate >= currentMonthStart && dueDate <= currentMonthEnd;
+    payables.forEach((debt) => {
+      const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount);
+      if (plan?.schedule) {
+        const payments = debt.payments || {};
+        plan.schedule.forEach((period) => {
+          const periodDate = new Date(period.date);
+          const isPaid = payments[period.period] === true;
+          
+          if (!isPaid) {
+            if (periodDate >= yearStart && periodDate <= yearEnd) {
+              yearDuePrincipal += period.principal || 0;
+              yearDueInterest += period.interest || 0;
+            }
+            if (periodDate >= currentMonthStart && periodDate <= currentMonthEnd) {
+              monthDuePrincipal += period.principal || 0;
+              monthDueInterest += period.interest || 0;
+            }
+          }
+        });
+      }
     });
-    const monthDuePrincipal = monthDueDebts.reduce((s, d) => s + (d.principal || d.amount || 0), 0);
-    const monthDueInterest = monthDueDebts.reduce((s, d) => s + Math.max(0, (d.amount || 0) - (d.principal || d.amount || 0)), 0);
+
+    // 逾期未还金额和罚息计算（根据还款计划中的逾期期数）
+    let overdueAmount = 0;
+    let overdueDebtCount = 0;
+    payables.forEach((d) => {
+      const plan = calculateRepayment(d.principal, d.annualRate, d.repaymentMethod, d.startDate, d.dueDate, d.paidAmount);
+      const payments = d.payments || {};
+      if (plan?.schedule) {
+        const hasOverdue = plan.schedule.some(item => payments[item.period] !== true && new Date(item.date) < new Date());
+        if (hasOverdue) {
+          overdueDebtCount++;
+          plan.schedule.forEach(item => {
+            if (payments[item.period] !== true && new Date(item.date) < new Date()) {
+              overdueAmount += item.total;
+            }
+          });
+        }
+      }
+    });
+    const totalPenaltyInterest = payables.reduce((s, d) => s + (d.penaltyInterest || 0), 0);
+    const totalDebtInterestWithPenalty = totalDebtInterest + totalPenaltyInterest;
 
     return {
       payables, receivables, filtered,
-      pTotal, pPrincipal, pInterest, pRate, pDailyRate, pMonthlyRate, pAnnualRate: pRate, pDailyInterest: pPrincipal * pDailyRate / 100, pMonthlyInterest: pPrincipal * pMonthlyRate / 100, pAnnualInterest: pPrincipal * pRate / 100,
+      pTotal, pPrincipal, pInterest: pInterest + totalPenaltyInterest, pRate, pDailyRate, pMonthlyRate, pAnnualRate: pRate, pDailyInterest: pPrincipal * pDailyRate / 100, pMonthlyInterest: pPrincipal * pMonthlyRate / 100, pAnnualInterest: pPrincipal * pRate / 100,
       rTotal, rPrincipal, rInterest,
-      netTotal, netPrincipal, netInterest,
+      netTotal, netPrincipal, netInterest: netInterest + totalPenaltyInterest,
       // 3个新卡片数据
-      totalDebtPrincipal, totalDebtInterest,
+      totalDebtPrincipal, totalDebtInterest: totalDebtInterestWithPenalty,
       yearDuePrincipal, yearDueInterest,
       monthDuePrincipal, monthDueInterest,
+      // 逾期相关数据
+      overdueAmount,
+      overdueDebtCount,
+      totalPenaltyInterest,
     };
   };
 
@@ -686,7 +1204,6 @@ export default function Debts() {
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">债务模块</h1>
-              <p className="text-sm text-red-600 mt-0.5">V1.0.2</p>
             </div>
             <div className="text-center lg:text-right">
               <div className="text-4xl sm:text-5xl font-bold text-red-600 whitespace-nowrap tabular-nums tracking-tight">
@@ -718,10 +1235,10 @@ export default function Debts() {
 
         {/* Payable stats */}
         <section className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-          <StatCard label="应付/借入总额" value={formatCurrency(stats.pTotal)} sub={`${stats.payables.length} 笔待管理`} color="red" />
-          <StatCard label="应付/借入总本金" value={formatCurrency(stats.pPrincipal)} sub="本金合计" color="red" />
-          <StatCard label="应付/借入总利息" value={formatCurrency(stats.pInterest)} sub="利息合计" color="red" />
-          <StatCard label="总债务利率" value={`${formatNumber(stats.pRate)}%`} sub="总利息 / 总本金 * 100%" color="red" />
+          <StatCard label="应付/借入总额" value={formatCurrencyShort(stats.pTotal)} title={formatCurrency(stats.pTotal)} sub={`${stats.payables.length} 笔待管理`} color="red" />
+          <StatCard label="应付/借入总本金" value={formatCurrencyShort(stats.pPrincipal)} title={formatCurrency(stats.pPrincipal)} sub="本金合计" color="red" />
+          <StatCard label="应付/借入总利息" value={formatCurrencyShort(stats.pInterest)} title={formatCurrency(stats.pInterest)} sub="利息合计" color="red" />
+          <StatCard label="利息本金占比" value={`${formatNumber(stats.pRate)}%`} sub="利息/本金*100%" color="red" />
           <StatCard label="日利率" value={`${formatNumber(stats.pDailyRate, 4)}%`} sub={`日利息 ${formatCurrency(stats.pDailyInterest)}`} color="red" />
           <StatCard label="月利率" value={`${formatNumber(stats.pMonthlyRate)}%`} sub={`月利息 ${formatCurrency(stats.pMonthlyInterest)}`} color="red" />
           <StatCard label="年利率" value={`${formatNumber(stats.pAnnualRate)}%`} sub={`年利息 ${formatCurrency(stats.pAnnualInterest)}`} color="red" />
@@ -741,8 +1258,8 @@ export default function Debts() {
           <StatCard label="净利息" value={formatCurrency(Math.abs(stats.netInterest))} sub="应付/借入总利息 - 应收/借出总利息" color={stats.netInterest >= 0 ? 'green' : 'red'} signed={stats.netInterest >= 0 ? '+' : '-'} />
         </section>
 
-        {/* New 3 Stats Cards */}
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Stats Cards */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-2xl p-5 text-white shadow-lg">
             <div className="text-sm opacity-80 mb-1">总欠款</div>
             <div className="text-2xl font-bold tabular-nums">{formatCurrency(stats.totalDebtPrincipal + stats.totalDebtInterest)}</div>
@@ -765,6 +1282,20 @@ export default function Debts() {
             <div className="mt-2 text-xs opacity-80">
               <div>待还本金：{formatCurrency(stats.monthDuePrincipal)}</div>
               <div>待还利息：{formatCurrency(stats.monthDueInterest)}</div>
+            </div>
+          </div>
+          <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl p-5 text-white shadow-lg">
+            <div className="text-sm opacity-80 mb-1">逾期未还</div>
+            <div className="text-2xl font-bold tabular-nums">{formatCurrency(stats.overdueAmount)}</div>
+            <div className="mt-2 text-xs opacity-80">
+              <div>逾期债务：{stats.overdueDebtCount || 0} 笔</div>
+            </div>
+          </div>
+          <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-2xl p-5 text-white shadow-lg">
+            <div className="text-sm opacity-80 mb-1">罚息</div>
+            <div className="text-2xl font-bold tabular-nums">{formatCurrency(stats.totalPenaltyInterest)}</div>
+            <div className="mt-2 text-xs opacity-80">
+              <div>已计入总利息</div>
             </div>
           </div>
         </section>
@@ -890,16 +1421,27 @@ export default function Debts() {
                       )}
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      类别 <button type="button" onClick={() => setShowCategoryModal(true)} className="ml-1 text-xs text-indigo-600 hover:text-indigo-700">设置</button>
-                    </label>
-                    <select value={form.debtCategory} onChange={(e) => setForm({ ...form, debtCategory: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
-                      <option value="">请选择类别</option>
-                      {debtCategories.map((cat) => (
-                        <option key={cat.id} value={cat.id}>{cat.name}</option>
-                      ))}
-                    </select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        类别 <button type="button" onClick={() => setShowCategoryModal(true)} className="ml-1 text-xs text-indigo-600 hover:text-indigo-700">设置</button>
+                      </label>
+                      <select value={form.debtCategory} onChange={(e) => setForm({ ...form, debtCategory: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
+                        <option value="">请选择类别</option>
+                        {debtCategories.map((cat) => (
+                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">账户</label>
+                      <select value={form.account} onChange={(e) => setForm({ ...form, account: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
+                        <option value="">请选择账户</option>
+                        {(stateData?.accounts || []).map((acc) => (
+                          <option key={acc.id} value={acc.name}>{acc.name}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"><span className="text-red-500">*</span> 债权人 / 借款人</label>
@@ -911,21 +1453,16 @@ export default function Debts() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"><span className="text-red-500">*</span> 本金</label>
-                    <input type="number" value={form.principal} onChange={(e) => {
-                      setForm({ ...form, principal: e.target.value });
-                      if (!totalAmountOverridden && repaymentPlan) {
-                        setForm((prev) => ({ ...prev, principal: e.target.value, amount: repaymentPlan.totalAmount.toFixed(2) }));
-                      }
-                    }} placeholder="0.00" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                    <input type="number" value={form.principal} onChange={(e) => handleFormChange('principal', e.target.value)} placeholder="0.00" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">利息（年化%）</label>
-                    <input type="number" value={form.annualRate} onChange={(e) => {
-                      setForm({ ...form, annualRate: e.target.value });
-                      if (!totalAmountOverridden && repaymentPlan) {
-                        setForm((prev) => ({ ...prev, annualRate: e.target.value, amount: repaymentPlan.totalAmount.toFixed(2) }));
-                      }
-                    }} placeholder="0" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                    <input type="number" value={form.annualRate} onChange={(e) => handleFormChange('annualRate', e.target.value)} placeholder="0" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">投资天数</label>
+                    <input type="number" value={form.investmentDays} onChange={(e) => setForm({ ...form, investmentDays: e.target.value })} placeholder="365" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                    <p className="text-xs text-gray-400 mt-1">不填默认为365天</p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -941,29 +1478,35 @@ export default function Debts() {
                       placeholder="自动计算或手动输入"
                       className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
                     />
-                    {!totalAmountOverridden && repaymentPlan && (
-                      <p className="text-xs text-gray-400 mt-1">自动计算：{formatCurrency(repaymentPlan.totalAmount)}（本金 {formatCurrency(parseFloat(form.principal) || 0)} + 利息 {formatCurrency(repaymentPlan.totalInterest)}）</p>
+                    {!totalAmountOverridden && getRepaymentPlan() && (
+                      <p className="text-xs text-gray-400 mt-1">自动计算：{formatCurrency(getRepaymentPlan().totalAmount)}（本金 {formatCurrency(parseFloat(form.principal) || 0)} + 利息 {formatCurrency(getRepaymentPlan().totalInterest)}）</p>
                     )}
                     {totalAmountOverridden && (
                       <button onClick={() => {
                         setTotalAmountOverridden(false);
-                        if (repaymentPlan) {
-                          setForm((prev) => ({ ...prev, amount: repaymentPlan.totalAmount.toFixed(2) }));
+                        const plan = getRepaymentPlan();
+                        if (plan) {
+                          setForm((prev) => ({ ...prev, amount: plan.totalAmount.toFixed(2) }));
                         }
                       }} className="text-xs text-indigo-600 hover:text-indigo-700 mt-1">恢复自动计算</button>
                     )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"><span className="text-red-500">*</span> 借入日期</label>
-                    <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                    <input type="date" value={form.startDate} onChange={(e) => handleFormChange('startDate', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"><span className="text-red-500">*</span> 还款日期</label>
-                    <input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                    <input type="date" value={form.dueDate} onChange={(e) => handleFormChange('dueDate', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">还款方式</label>
-                    <select value={form.repaymentMethod} onChange={(e) => setForm({ ...form, repaymentMethod: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">还款方式</label>
+                      <button onClick={() => setShowRepaymentGuide(true)} className="text-blue-500 text-xs hover:text-blue-600 flex items-center gap-0.5">
+                        <HelpCircle size={12} /> 说明
+                      </button>
+                    </div>
+                    <select value={form.repaymentMethod} onChange={(e) => handleFormChange('repaymentMethod', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
                       <option value="equalPrincipalInterest">等额本息</option>
                       <option value="equalPrincipal">等额本金</option>
                       <option value="interestOnly">先息后本</option>
@@ -971,12 +1514,23 @@ export default function Debts() {
                     </select>
                   </div>
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">状态</label>
+                    <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
+                      <option value="normal">正常</option>
+                      <option value="overdue">逾期未还</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">罚息</label>
+                    <input type="number" value={form.penaltyInterest} onChange={(e) => setForm({ ...form, penaltyInterest: e.target.value })} placeholder="0" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  </div>
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">已还金额</label>
                     <input type="number" value={form.paidAmount} onChange={(e) => setForm({ ...form, paidAmount: e.target.value })} placeholder="0" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">剩余金额</label>
-                    <input type="text" readOnly value={formatCurrency(remainingAmount)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700/50 text-gray-600 dark:text-gray-300" />
+                    <input type="text" readOnly value={formatCurrency(getRepaymentPlan()?.remainingAmount || 0)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700/50 text-gray-600 dark:text-gray-300" />
                   </div>
                 </div>
 
@@ -1008,32 +1562,32 @@ export default function Debts() {
                 </div>
 
                 {/* Repayment plan preview */}
-                {repaymentPlan && (
+                {getRepaymentPlan() && (
                   <div className="bg-gray-50 dark:bg-slate-700/30 rounded-xl p-4 space-y-2">
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                       <div>
                         <div className="text-gray-500 dark:text-gray-400 text-xs">期数</div>
-                        <div className="font-medium text-gray-900 dark:text-white">{repaymentPlan.periods} 期</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{getRepaymentPlan().periods} 期</div>
                       </div>
                       <div>
                         <div className="text-gray-500 dark:text-gray-400 text-xs">还款方式</div>
-                        <div className="font-medium text-gray-900 dark:text-white">{repaymentPlan.methodLabel}</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{getRepaymentPlan().methodLabel}</div>
                       </div>
                       <div>
                         <div className="text-gray-500 dark:text-gray-400 text-xs">总金额</div>
-                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(repaymentPlan.totalAmount)}</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().totalAmount)}</div>
                       </div>
                       <div>
                         <div className="text-gray-500 dark:text-gray-400 text-xs">总利息</div>
-                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(repaymentPlan.totalInterest)}</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().totalInterest)}</div>
                       </div>
                       <div>
                         <div className="text-gray-500 dark:text-gray-400 text-xs">每期金额</div>
-                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(repaymentPlan.eachAmount)}</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().eachAmount)}</div>
                       </div>
                       <div>
                         <div className="text-gray-500 dark:text-gray-400 text-xs">剩余金额</div>
-                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(repaymentPlan.remainingAmount)}</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().remainingAmount)}</div>
                       </div>
                     </div>
                   </div>
@@ -1135,11 +1689,62 @@ export default function Debts() {
           </div>
         )}
       </div>
+
+      {showRepaymentGuide && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden">
+            <div className="flex items-center justify-between p-5 border-b border-gray-200 dark:border-slate-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">还款方式说明</h3>
+              <button onClick={() => setShowRepaymentGuide(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto max-h-[calc(80vh-80px)] space-y-4">
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4">
+                <h4 className="font-semibold text-blue-700 dark:text-blue-400 mb-2">等额本息</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
+                  <strong>计算方式：</strong>每月还款金额固定，前期利息占比高，本金占比低；后期本金占比高，利息占比低。
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  <strong>适合人群：</strong>收入稳定、希望每月还款金额固定的借款人，如上班族、房贷用户。
+                </p>
+              </div>
+              <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4">
+                <h4 className="font-semibold text-green-700 dark:text-green-400 mb-2">等额本金</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
+                  <strong>计算方式：</strong>每月偿还本金固定，利息逐月递减，总利息比等额本息少。
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  <strong>适合人群：</strong>前期还款能力强、希望节省利息支出的借款人，如高收入人群、计划提前还款者。
+                </p>
+              </div>
+              <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-4">
+                <h4 className="font-semibold text-orange-700 dark:text-orange-400 mb-2">先息后本</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
+                  <strong>计算方式：</strong>每期只还利息，到期一次性偿还全部本金。
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  <strong>适合人群：</strong>短期周转、现金流紧张但到期能一次性还款的借款人，如企业短期融资。
+                </p>
+              </div>
+              <div className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-4">
+                <h4 className="font-semibold text-purple-700 dark:text-purple-400 mb-2">到期一次性</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
+                  <strong>计算方式：</strong>到期时一次性偿还全部本金和利息。
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  <strong>适合人群：</strong>到期有大额资金入账的借款人，如投资回款、项目结算。
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function StatCard({ label, value, sub, color, signed }) {
+function StatCard({ label, value, sub, color, signed, title }) {
   const colorClasses = {
     red: 'text-red-600',
     green: 'text-emerald-600',
@@ -1147,7 +1752,10 @@ function StatCard({ label, value, sub, color, signed }) {
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
       <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">{label}</div>
-      <div className={`text-xl sm:text-2xl font-bold tabular-nums whitespace-nowrap ${colorClasses[color] || 'text-gray-900 dark:text-white'}`}>
+      <div 
+        className={`text-xl sm:text-2xl font-bold tabular-nums whitespace-nowrap ${colorClasses[color] || 'text-gray-900 dark:text-white'} cursor-help`}
+        title={title}
+      >
         {signed === '-' ? '-' : signed === '+' ? '+' : ''}{value}
       </div>
       <div className="text-xs text-gray-400 dark:text-gray-500 mt-1 truncate">{sub}</div>

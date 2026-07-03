@@ -48,15 +48,15 @@ function premiumReference(cell) {
 }
 
 function normalizePremiumRowNew(row) {
-  if (!row || row.length < 7) return null;
+  if (!row || row.length < 10) return null;
   
   const code = String(row[0] || "").trim();
   const direction = String(row[1] || "");
   const name = String(row[2] || "").trim();
   const applyLimit = parseFloat(String(row[3] || "0")) || 0;
   const t0Nav = parseFloat(String(row[4] || "0")) || 0;
-  const price = parseFloat(String(row[5] || "0")) || 0;
-  const premiumRate = parseFloat(String(row[6] || "0")) || 0;
+  const price = parseFloat(String(row[8] || "0")) || 0;
+  const premiumRate = parseFloat(String(row[9] || "0")) || 0;
   
   if (!code || !name || price === 0) return null;
   

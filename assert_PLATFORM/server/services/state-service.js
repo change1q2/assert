@@ -95,6 +95,10 @@ async function loadUserState(userId) {
       annualRate: row.annual_rate, amount: row.amount, paidAmount: row.paid_amount,
       note: row.note, attachment: row.attachment, startDate: row.start_date, dueDate: row.due_date,
       repaymentMethod: row.repayment_method, payments,
+      penaltyInterest: row.penalty_interest || 0,
+      status: row.status || 'normal',
+      investmentDays: row.investment_days || 365,
+      periodPenalties: maybeParseJson(row.period_penalties_json) || {},
     };
   });
   const resolvedDebts = await Promise.all(debts);
@@ -257,12 +261,14 @@ async function saveUserState(conn, userId, state) {
     const debtor = row.debtor || row.debtorName || '';
     const name = row.name || creditor || '';
     await sqlRun(conn, `INSERT INTO debts
-      (user_id, id, category, type, debt_category, name, creditor_name, debtor_name, principal, annual_rate, amount, paid_amount, note, attachment, start_date, due_date, repayment_method, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, id, category, type, debt_category, name, creditor_name, debtor_name, principal, annual_rate, amount, paid_amount, note, attachment, start_date, due_date, repayment_method, penalty_interest, status, investment_days, period_penalties_json, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, debtId, text(row.category), text(row.type), text(row.debtCategory || ''), text(name), text(creditor),
        text(debtor), number(row.principal), number(row.annualRate), number(row.amount),
        number(row.paidAmount), text(row.note), text(row.attachment), text(row.startDate),
-       text(row.dueDate), text(row.repaymentMethod), debtOrder++]);
+       text(row.dueDate), text(row.repaymentMethod), number(row.penaltyInterest || 0),
+       text(row.status || 'normal'), number(row.investmentDays || 365), JSON.stringify(row.periodPenalties || {}),
+       debtOrder++]);
     for (const [period, status] of Object.entries(row.payments || {})) {
       await sqlRun(conn, "INSERT INTO debt_payments (user_id, debt_id, period, status) VALUES (?, ?, ?, ?)",
         [userId, debtId, Number(period), text(status)]);

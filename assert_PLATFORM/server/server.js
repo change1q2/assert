@@ -7,6 +7,7 @@ import { handleCors } from "./middleware/cors.js";
 import { authenticatedUser, authenticatedAdmin } from "./auth/index.js";
 import { ensureDefaultAdmin } from "./services/user-service.js";
 import { refreshPremiumMarketInBackground } from "./services/premium-service.js";
+import { refreshHkIpoMarketInBackground } from "./services/hkipo-fetcher.js";
 
 import * as healthRoute from "./routes/health.js";
 import * as authRoute from "./routes/auth.js";
@@ -139,5 +140,11 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "0.0.0.0", async () => {
   logger.info(`Asset Platform API listening on 0.0.0.0:${PORT}`);
   void refreshPremiumMarketInBackground();
+  void refreshHkIpoMarketInBackground();
   try { await initDb; await ensureDefaultAdmin(); } catch (e) { logger.error("Admin init error", { error: e.message }); }
+  
+  setInterval(() => {
+    logger.info("HK IPO market scheduled refresh");
+    void refreshHkIpoMarketInBackground();
+  }, 3600_000);
 });

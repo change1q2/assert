@@ -1,0 +1,12 @@
+- [x] Checkpoint 1: 头像按钮在所有页面滚动时保持固定在右上角
+- [x] Checkpoint 2: 头像上传成功后，右上角按钮立即显示新头像
+- [x] Checkpoint 3: 无头像时显示默认图标或首字母
+- [x] Checkpoint 4: 刷新页面后头像保持显示
+- [x] Checkpoint 5: Tools页面加载数据时保留已有自定义工具配置
+- [x] Checkpoint 6: 后端返回空数据时使用默认数据展示
+- [x] Checkpoint 7: 后端返回部分数据时与本地数据合并
+- [x] Checkpoint 8: 所有页面的数据加载都遵循合并策略
+- [x] Checkpoint 9: 全局数据不会被清空
+- [x] Checkpoint 10: npm run build构建成功无错误
+- [x] Checkpoint 11: 头像按钮不被其他元素遮挡
+- [x] Checkpoint 12: 头像更新延迟不超过1秒

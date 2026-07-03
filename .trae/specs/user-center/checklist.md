@@ -1,0 +1,12 @@
+- [x] Checkpoint 1: 用户图标按钮显示在页面右上角
+- [x] Checkpoint 2: 点击图标按钮能进入个人中心页面
+- [x] Checkpoint 3: 个人中心页面显示用户头像（首字母）
+- [x] Checkpoint 4: 个人中心页面显示用户基本信息（姓名、手机号、邮箱）
+- [x] Checkpoint 5: 个人中心页面显示登录账号信息
+- [x] Checkpoint 6: 个人中心页面显示系统版本号
+- [x] Checkpoint 7: 使用默认账号登录后能正确显示用户信息
+- [x] Checkpoint 8: 头像上传功能正常（选择图片、预览、保存）
+- [x] Checkpoint 9: 个人信息编辑功能正常（编辑、保存）
+- [x] Checkpoint 10: 密码修改功能正常（旧密码验证、新密码设置）
+- [x] Checkpoint 11: 多语言切换功能正常（中文/英文）
+- [x] Checkpoint 12: 主题切换功能正常（浅色/深色）

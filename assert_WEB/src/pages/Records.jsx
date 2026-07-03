@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchState, saveState } from '../api';
+import * as XLSX from 'xlsx';
 import {
   TrendingUp,
   TrendingDown,
@@ -18,6 +19,8 @@ import {
   Upload,
   Image,
   SlidersHorizontal,
+  FileSpreadsheet,
+  Download,
 } from 'lucide-react';
 import { CURRENCIES, getCurrencySymbol, DEFAULT_BASE_CURRENCY, convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency.js';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -70,7 +73,7 @@ export default function Records() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [baseCurrency, setBaseCurrency] = useState(DEFAULT_BASE_CURRENCY);
   const [selectedCurrencyFilter, setSelectedCurrencyFilter] = useState(DEFAULT_BASE_CURRENCY);
-  const [newRecord, setNewRecord] = useState({ date: '', type: 'expense', category: '', subCategory: '', amount: '', book: '', note: '', tag: '', currency: DEFAULT_BASE_CURRENCY });
+  const [newRecord, setNewRecord] = useState({ date: '', type: 'expense', category: '', subCategory: '', amount: '', book: '', account: '', note: '', tag: '', currency: DEFAULT_BASE_CURRENCY });
   const [saving, setSaving] = useState(false);
   const [selectedBook, setSelectedBook] = useState(null);
   const [books, setBooks] = useState([]);
@@ -101,14 +104,14 @@ export default function Records() {
     }
     return {
       date: true,
-      book: true,
       type: true,
+      amount: true,
       category: true,
       subCategory: true,
-      amount: true,
-      cny: true,
-      tag: true,
+      book: true,
+      currency: true,
       note: true,
+      tag: true,
     };
   });
   const [showColumnSettingsModal, setShowColumnSettingsModal] = useState(false);
@@ -134,6 +137,14 @@ export default function Records() {
   const [subCategoryToEdit, setSubCategoryToEdit] = useState(null);
   const [newSubCategoryName, setNewSubCategoryName] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importError, setImportError] = useState('');
+  const [importSuccess, setImportSuccess] = useState('');
+  const [importPreview, setImportPreview] = useState([]);
+  const [importStep, setImportStep] = useState('upload');
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [fieldMapping, setFieldMapping] = useState({});
+  const [excelHeaders, setExcelHeaders] = useState([]);
 
   const [uploadedImage, setUploadedImage] = useState(null);
   const [ocrResult, setOcrResult] = useState(null);
@@ -181,10 +192,11 @@ export default function Records() {
     setError(null);
     try {
       const data = await fetchState();
-      setStateData(data);
-      setBooks(data.books || []);
-      setCategories(data.categories || defaultCategories);
-      setTags(data.tags || []);
+      const safeData = data || {};
+      setStateData(safeData);
+      setBooks(safeData.books || []);
+      setCategories(safeData.categories || defaultCategories);
+      setTags(safeData.tags || []);
     } catch (err) {
       console.error('Failed to load records data:', err);
       setError('加载数据失败');
@@ -267,9 +279,9 @@ export default function Records() {
     });
   };
 
-  const getSubCategories = (primaryCategory) => {
+  const getSubCategories = (primaryCategory, type = newRecord.type) => {
     if (!primaryCategory) return [];
-    const typeCategories = categories[newRecord.type] || {};
+    const typeCategories = categories[type] || {};
     return typeCategories[primaryCategory] || [];
   };
 
@@ -356,7 +368,7 @@ export default function Records() {
       });
 
       setShowAddModal(false);
-      setNewRecord({ date: '', type: 'expense', category: '', subCategory: '', amount: '', book: '', note: '', tag: '', currency: baseCurrency });
+      setNewRecord({ date: '', type: 'expense', category: '', subCategory: '', amount: '', book: '', account: '', note: '', tag: '', currency: baseCurrency });
       setUploadedImage(null);
       setOcrResult(null);
       loadData();
@@ -574,6 +586,129 @@ export default function Records() {
         amount: result.amount || prev.amount,
         date: result.date || prev.date,
       }));
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    const headers = ['日期', '收支类型', '金额', '类别', '二级分类', '所属账本', '收支账户', '备注', '标签'];
+    const ws = XLSX.utils.aoa_to_sheet([headers]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '收支记录');
+    XLSX.writeFile(wb, '收支记录模板.xlsx');
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setImportError('');
+    setImportSuccess('');
+    setImportStep('loading');
+    setUploadProgress(0);
+
+    const interval = setInterval(() => {
+      setUploadProgress(prev => {
+        if (prev >= 90) return 90;
+        return prev + Math.random() * 10;
+      });
+    }, 200);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      clearInterval(interval);
+      setUploadProgress(100);
+      
+      setTimeout(() => {
+        try {
+          const data = new Uint8Array(event.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+          if (jsonData.length === 0) {
+            setImportError('文件中没有数据');
+            setImportStep('upload');
+            return;
+          }
+
+          const headers = Object.keys(jsonData[0]);
+          setExcelHeaders(headers);
+
+          const systemFields = ['日期', '收支类型', '金额', '类别', '二级分类', '所属账本', '收支账户', '备注', '标签'];
+          const initialMapping = {};
+          systemFields.forEach(field => {
+            if (headers.includes(field)) {
+              initialMapping[field] = field;
+            } else {
+              initialMapping[field] = '';
+            }
+          });
+          setFieldMapping(initialMapping);
+          setImportPreview(jsonData);
+          setImportStep('mapping');
+        } catch (err) {
+          console.error('Excel parse error:', err);
+          setImportError('解析文件失败，请确保文件格式正确');
+          setImportStep('upload');
+        }
+      }, 300);
+    };
+    reader.onerror = () => {
+      setImportError('文件读取失败，请重试');
+    };
+    reader.readAsArrayBuffer(file);
+    
+    e.target.value = '';
+  };
+
+  const handleImport = async () => {
+    const validRecords = importPreview.filter(r => r.isValid);
+    
+    if (validRecords.length === 0) {
+      setImportError('没有有效的记录可导入');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const newRecords = validRecords.map(row => {
+        const amount = parseFloat(row['金额']);
+        const finalAmount = row['收支类型'] === '收入' ? Math.abs(amount) : -Math.abs(amount);
+        
+        const bookId = books.find(b => b.name === row['所属账本'])?.id || '';
+        const currencyCode = CURRENCIES.find(c => c.name === row['收支账户'])?.code || DEFAULT_BASE_CURRENCY;
+
+        return {
+          id: Date.now() + Math.random(),
+          date: row['日期'],
+          type: row['收支类型'] === '收入' ? 'income' : 'expense',
+          amount: finalAmount,
+          category: row['类别'],
+          sub: row['二级分类'] || '',
+          bookId,
+          book: row['所属账本'] || '',
+          currency: currencyCode,
+          note: row['备注'] || '',
+          tag: row['标签'] || '',
+        };
+      });
+
+      const updatedRecords = [...records, ...newRecords];
+      await saveState({
+        ...stateData,
+        records: updatedRecords,
+      });
+
+      setShowImportModal(false);
+      setImportPreview([]);
+      setImportSuccess(`成功导入 ${validRecords.length} 条记录`);
+      loadData();
+    } catch (err) {
+      console.error('Failed to import records:', err);
+      setImportError('导入失败，请重试');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -1441,11 +1576,25 @@ export default function Records() {
             <h3 className="text-base font-semibold text-gray-900 dark:text-white">收支记录</h3>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => { setNewRecord({ date: formatDate(new Date()), type: 'expense', category: '', subCategory: '', amount: '', book: selectedBook || '', note: '', tag: '', currency: baseCurrency }); setShowAddModal(true); }}
+                onClick={() => { setNewRecord({ date: formatDate(new Date()), type: 'expense', category: '', subCategory: '', amount: '', book: selectedBook || '', account: '', note: '', tag: '', currency: baseCurrency }); setShowAddModal(true); }}
                 className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 新增
+              </button>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-green-500 text-white text-sm font-medium hover:bg-green-600 transition-colors"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                导入
+              </button>
+              <button
+                onClick={handleDownloadTemplate}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-gray-300 dark:border-slate-600 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                下载模板
               </button>
               <button
                 onClick={() => {
@@ -1461,6 +1610,7 @@ export default function Records() {
                     cnyMax: '',
                     tag: '',
                     note: '',
+                    currency: '',
                   });
                   setCurrentPage(1);
                 }}
@@ -1496,24 +1646,9 @@ export default function Records() {
                   </select>
                 </div>
               )}
-              {visibleColumns.book && (
-                <div className="py-2 px-3" style={{ width: '140px', flexShrink: 0 }}>
-                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">账本：</label>
-                  <select
-                    value={listFilters.book}
-                    onChange={(e) => handleFilterChange('book', e.target.value)}
-                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                  >
-                    <option value="">全部</option>
-                    {books.map((book) => (
-                      <option key={book.id} value={book.name}>{book.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
               {visibleColumns.type && (
                 <div className="py-2 px-3" style={{ width: '120px', flexShrink: 0 }}>
-                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">类型：</label>
+                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">收支类型：</label>
                   <select
                     value={listFilters.type}
                     onChange={(e) => handleFilterChange('type', e.target.value)}
@@ -1527,7 +1662,7 @@ export default function Records() {
               )}
               {visibleColumns.category && (
                 <div className="py-2 px-3" style={{ width: '140px', flexShrink: 0 }}>
-                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">一级分类：</label>
+                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">类别：</label>
                   <select
                     value={listFilters.category}
                     onChange={(e) => { handleFilterChange('category', e.target.value); handleFilterChange('subCategory', ''); }}
@@ -1547,10 +1682,47 @@ export default function Records() {
                     value={listFilters.subCategory}
                     onChange={(e) => handleFilterChange('subCategory', e.target.value)}
                     className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                    disabled={!listFilters.category}
                   >
                     <option value="">全部</option>
-                    {listFilters.category ? getSubCategories(listFilters.category) : [...new Set([...Object.values(categories.income || {}), ...Object.values(categories.expense || {})].flat())].map((subCat) => (
-                      <option key={subCat} value={subCat}>{subCat}</option>
+                    {listFilters.category ? (
+                      getSubCategories(listFilters.category, listFilters.type === 'all' ? 'expense' : listFilters.type).map((subCat) => (
+                        <option key={subCat} value={subCat}>{subCat}</option>
+                      ))
+                    ) : (
+                      [...new Set([...Object.values(categories.income || {}), ...Object.values(categories.expense || {})].flat())].map((subCat) => (
+                        <option key={subCat} value={subCat}>{subCat}</option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              )}
+              {visibleColumns.book && (
+                <div className="py-2 px-3" style={{ width: '140px', flexShrink: 0 }}>
+                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">所属账本：</label>
+                  <select
+                    value={listFilters.book}
+                    onChange={(e) => handleFilterChange('book', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">全部</option>
+                    {books.map((book) => (
+                      <option key={book.id} value={book.name}>{book.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {visibleColumns.currency && (
+                <div className="py-2 px-3" style={{ width: '140px', flexShrink: 0 }}>
+                  <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">收支账户：</label>
+                  <select
+                    value={listFilters.currency}
+                    onChange={(e) => handleFilterChange('currency', e.target.value)}
+                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                  >
+                    <option value="">全部</option>
+                    {CURRENCIES.map((c) => (
+                      <option key={c.code} value={c.code}>{c.name}</option>
                     ))}
                   </select>
                 </div>
@@ -1560,14 +1732,14 @@ export default function Records() {
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
                   {visibleColumns.date && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">日期</th>}
-                  {visibleColumns.book && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">账本</th>}
-                  {visibleColumns.type && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类型</th>}
-                  {visibleColumns.category && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">一级分类</th>}
-                  {visibleColumns.subCategory && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">二级分类</th>}
+                  {visibleColumns.type && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">收支类型</th>}
                   {visibleColumns.amount && <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">金额</th>}
-                  {visibleColumns.cnv && <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">折合人民币</th>}
-                  {visibleColumns.tag && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">标签</th>}
+                  {visibleColumns.category && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类别</th>}
+                  {visibleColumns.subCategory && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">二级分类</th>}
+                  {visibleColumns.book && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">所属账本</th>}
+                  {visibleColumns.currency && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">收支账户</th>}
                   {visibleColumns.note && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">备注</th>}
+                  {visibleColumns.tag && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">标签</th>}
                 </tr>
               </thead>
               <tbody>
@@ -1576,11 +1748,6 @@ export default function Records() {
                     {visibleColumns.date && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
                         {formatDate(record.date)}
-                      </td>
-                    )}
-                    {visibleColumns.book && (
-                      <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                        {books.find(b => b.id === record.bookId)?.name || (record.book || '-')}
                       </td>
                     )}
                     {visibleColumns.type && (
@@ -1594,6 +1761,13 @@ export default function Records() {
                         </span>
                       </td>
                     )}
+                    {visibleColumns.amount && (
+                      <td className={`text-right font-medium tabular-nums ${
+                        record.type === 'income' ? 'text-green-600' : 'text-red-500'
+                      }`}>
+                        {record.type === 'income' ? '+' : '-'}{formatCurrency(convertAmount(Math.abs(record.amount || 0), record.currency || DEFAULT_BASE_CURRENCY, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES), selectedCurrencyFilter)}
+                      </td>
+                    )}
                     {visibleColumns.category && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
                         {record.category || '其他'}
@@ -1604,26 +1778,24 @@ export default function Records() {
                         {record.sub || '-'}
                       </td>
                     )}
-                    {visibleColumns.amount && (
-                      <td className={`text-right font-medium tabular-nums ${
-                        record.type === 'income' ? 'text-green-600' : 'text-red-500'
-                      }`}>
-                        {record.type === 'income' ? '+' : '-'}{formatCurrency(convertAmount(Math.abs(record.amount || 0), record.currency || DEFAULT_BASE_CURRENCY, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES), selectedCurrencyFilter)}
-                      </td>
-                    )}
-                    {visibleColumns.cnv && (
-                      <td className="text-right font-medium tabular-nums text-gray-700 dark:text-gray-300">
-                        {formatCurrency(convertAmount(Math.abs(record.amount || 0), record.currency || DEFAULT_BASE_CURRENCY, DEFAULT_BASE_CURRENCY, DEFAULT_EXCHANGE_RATES), DEFAULT_BASE_CURRENCY)}
-                      </td>
-                    )}
-                    {visibleColumns.tag && (
+                    {visibleColumns.book && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                        {Array.isArray(record.tag) ? record.tag.join(', ') : (record.tag || '-')}
+                        {books.find(b => b.id === record.bookId)?.name || (record.book || '-')}
+                      </td>
+                    )}
+                    {visibleColumns.currency && (
+                      <td className="py-2.5 px-3 text-gray-900 dark:text-white">
+                        {CURRENCIES.find(c => c.code === (record.currency || DEFAULT_BASE_CURRENCY))?.name || (record.currency || '-')}
                       </td>
                     )}
                     {visibleColumns.note && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
                         {record.note || '-'}
+                      </td>
+                    )}
+                    {visibleColumns.tag && (
+                      <td className="py-2.5 px-3 text-gray-900 dark:text-white">
+                        {Array.isArray(record.tag) ? record.tag.join(', ') : (record.tag || '-')}
                       </td>
                     )}
                   </tr>
@@ -1730,37 +1902,28 @@ export default function Records() {
                   <input type="date" value={newRecord.date} onChange={e => setNewRecord({ ...newRecord, date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">类型</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">收支类型</label>
                   <div className="flex gap-2">
                     <button onClick={() => setNewRecord({ ...newRecord, type: 'expense', category: '', subCategory: '' })} className={`flex-1 py-2 rounded-lg font-medium ${newRecord.type === 'expense' ? 'bg-red-500 text-white' : 'bg-gray-100 dark:bg-slate-700'}`}>支出</button>
                     <button onClick={() => setNewRecord({ ...newRecord, type: 'income', category: '', subCategory: '' })} className={`flex-1 py-2 rounded-lg font-medium ${newRecord.type === 'income' ? 'bg-green-500 text-white' : 'bg-gray-100 dark:bg-slate-700'}`}>收入</button>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">账本</label>
-                  <div className="flex gap-2">
-                    <select
-                      value={newRecord.book}
-                      onChange={e => setNewRecord({ ...newRecord, book: e.target.value })}
-                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                    >
-                      <option value="">请选择账本</option>
-                      {books.map((book) => (
-                        <option key={book.id || book.name} value={book.name}>{book.name}</option>
-                      ))}
-                    </select>
-                    <button onClick={() => setShowBookModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">金额</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 text-sm">{getCurrencySymbol(newRecord.currency || baseCurrency)}</span>
+                    <input type="number" value={newRecord.amount} onChange={e => setNewRecord({ ...newRecord, amount: e.target.value })} placeholder="0.00" className="w-full pl-8 pr-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">一级分类</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">类别</label>
                   <div className="flex gap-2">
                     <select
                       value={newRecord.category}
                       onChange={e => setNewRecord({ ...newRecord, category: e.target.value, subCategory: '' })}
                       className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
                     >
-                      <option value="">请选择一级分类</option>
+                      <option value="">请选择类别</option>
                       {Object.keys(categories[newRecord.type] || {}).map((cat) => (
                         <option key={cat} value={cat}>{cat}</option>
                       ))}
@@ -1788,16 +1951,41 @@ export default function Records() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">金额</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">所属账本</label>
                   <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 text-sm">{getCurrencySymbol(newRecord.currency || baseCurrency)}</span>
-                      <input type="number" value={newRecord.amount} onChange={e => setNewRecord({ ...newRecord, amount: e.target.value })} placeholder="0.00" className="w-full pl-8 pr-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                    </div>
+                    <select
+                      value={newRecord.book}
+                      onChange={e => setNewRecord({ ...newRecord, book: e.target.value })}
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                    >
+                      <option value="">请选择账本</option>
+                      {books.map((book) => (
+                        <option key={book.id || book.name} value={book.name}>{book.name}</option>
+                      ))}
+                    </select>
+                    <button onClick={() => setShowBookModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">收支账户</label>
+                    <select
+                      value={newRecord.account || ''}
+                      onChange={e => setNewRecord({ ...newRecord, account: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                    >
+                      <option value="">请选择账户</option>
+                      {(stateData?.accounts || []).map((acc) => (
+                        <option key={acc.id} value={acc.name}>{acc.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">货币</label>
                     <select
                       value={newRecord.currency || baseCurrency}
                       onChange={e => setNewRecord({ ...newRecord, currency: e.target.value })}
-                      className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
                     >
                       {CURRENCIES.map((c) => (
                         <option key={c.code} value={c.code}>{c.name} ({c.symbol})</option>
@@ -1924,14 +2112,14 @@ export default function Records() {
               <div className="space-y-3">
                 {[
                   { key: 'date', label: '日期' },
-                  { key: 'book', label: '账本' },
-                  { key: 'type', label: '类型' },
-                  { key: 'category', label: '一级分类' },
-                  { key: 'subCategory', label: '二级分类' },
+                  { key: 'type', label: '收支类型' },
                   { key: 'amount', label: '金额' },
-                  { key: 'cny', label: '折合人民币' },
-                  { key: 'tag', label: '标签' },
+                  { key: 'category', label: '类别' },
+                  { key: 'subCategory', label: '二级分类' },
+                  { key: 'book', label: '所属账本' },
+                  { key: 'currency', label: '收支账户' },
                   { key: 'note', label: '备注' },
+                  { key: 'tag', label: '标签' },
                 ].map(({ key, label }) => (
                   <label key={key} className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -2058,6 +2246,194 @@ export default function Records() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {showImportModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">导入收支记录</h3>
+                <button onClick={() => { setShowImportModal(false); setImportPreview([]); setImportStep('upload'); }} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-4">
+                {importStep === 'upload' && (
+                  <>
+                    <div className="border-2 border-dashed border-gray-300 dark:border-slate-600 rounded-lg p-4 text-center hover:border-green-500 transition-colors">
+                      <label className="cursor-pointer">
+                        <div className="flex flex-col items-center gap-2 py-4">
+                          <Upload className="w-8 h-8 text-gray-400" />
+                          <span className="text-sm text-gray-500">点击上传Excel文件</span>
+                          <span className="text-xs text-gray-400">支持 .xlsx, .xls 格式</span>
+                        </div>
+                        <input type="file" accept=".xlsx,.xls" onChange={handleFileUpload} className="hidden" />
+                      </label>
+                    </div>
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg text-sm text-blue-700 dark:text-blue-400">
+                      <p className="font-medium mb-1">导入说明：</p>
+                      <ul className="text-xs space-y-1">
+                        <li>• 请先下载模板，按照模板格式填写数据</li>
+                        <li>• 日期格式：YYYY-MM-DD（如：2026-06-30）</li>
+                        <li>• 收支类型：收入或支出</li>
+                        <li>• 金额：数字格式</li>
+                        <li>• 类别和二级分类：需与系统中已有的分类一致</li>
+                        <li>• 所属账本：需与系统中已有的账本一致</li>
+                        <li>• 收支账户：如：人民币、美元等</li>
+                      </ul>
+                    </div>
+                  </>
+                )}
+                {importStep === 'loading' && (
+                  <div className="flex flex-col items-center justify-center py-8">
+                    <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">正在解析文件...</div>
+                    <div className="w-full max-w-xs">
+                      <div className="h-2 bg-gray-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {importStep === 'mapping' && (
+                  <>
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg text-sm text-blue-700 dark:text-blue-400">
+                      <p className="font-medium mb-2">字段映射：请将Excel字段与系统字段对应</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        {['日期', '收支类型', '金额', '类别', '二级分类', '所属账本', '收支账户', '备注', '标签'].map(field => (
+                          <div key={field} className="flex items-center gap-2">
+                            <span className="text-xs text-gray-600 dark:text-gray-400 w-16">{field}:</span>
+                            <select
+                              value={fieldMapping[field] || ''}
+                              onChange={(e) => setFieldMapping(prev => ({ ...prev, [field]: e.target.value }))}
+                              className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                            >
+                              <option value="">请选择</option>
+                              {excelHeaders.map(header => (
+                                <option key={header} value={header}>{header}</option>
+                              ))}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+                {importStep === 'preview' && (
+                  <>
+                    {importError && (
+                      <div className="p-3 bg-red-50 dark:bg-red-900/30 rounded-lg text-sm text-red-700 dark:text-red-400">
+                        {importError}
+                      </div>
+                    )}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-200 dark:border-slate-700">
+                            <th className="text-left py-2 px-2 text-gray-500 font-medium">行号</th>
+                            <th className="text-left py-2 px-2 text-gray-500 font-medium">日期</th>
+                            <th className="text-left py-2 px-2 text-gray-500 font-medium">收支类型</th>
+                            <th className="text-right py-2 px-2 text-gray-500 font-medium">金额</th>
+                            <th className="text-left py-2 px-2 text-gray-500 font-medium">类别</th>
+                            <th className="text-left py-2 px-2 text-gray-500 font-medium">二级分类</th>
+                            <th className="text-left py-2 px-2 text-gray-500 font-medium">所属账本</th>
+                            <th className="text-left py-2 px-2 text-gray-500 font-medium">收支账户</th>
+                            <th className="text-left py-2 px-2 text-gray-500 font-medium">状态</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.map((row, idx) => (
+                            <tr key={idx} className={`border-b border-gray-100 dark:border-slate-700/50 ${row.isValid ? '' : 'bg-red-50 dark:bg-red-900/20'}`}>
+                              <td className="py-2 px-2 text-gray-500">{row.rowNum}</td>
+                              <td className="py-2 px-2 text-gray-900 dark:text-white">{row['日期'] || '-'}</td>
+                              <td className="py-2 px-2 text-gray-900 dark:text-white">{row['收支类型'] || '-'}</td>
+                              <td className="py-2 px-2 text-right text-gray-900 dark:text-white">{row['金额'] || '-'}</td>
+                              <td className="py-2 px-2 text-gray-900 dark:text-white">{row['类别'] || '-'}</td>
+                              <td className="py-2 px-2 text-gray-900 dark:text-white">{row['二级分类'] || '-'}</td>
+                              <td className="py-2 px-2 text-gray-900 dark:text-white">{row['所属账本'] || '-'}</td>
+                              <td className="py-2 px-2 text-gray-900 dark:text-white">{row['收支账户'] || '-'}</td>
+                              <td className="py-2 px-2">
+                                {row.isValid ? (
+                                  <span className="text-green-600 dark:text-green-400">✓ 有效</span>
+                                ) : (
+                                  <span className="text-red-600 dark:text-red-400">{row.errors.join(', ')}</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                      共 {importPreview.length} 条记录，其中 {importPreview.filter(r => r.isValid).length} 条有效，{importPreview.filter(r => !r.isValid).length} 条无效
+                    </div>
+                  </>
+                )}
+                <div className="flex gap-3 pt-2">
+                  <button onClick={() => { setShowImportModal(false); setImportPreview([]); setImportStep('upload'); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                  {importStep === 'mapping' && (
+                    <button onClick={() => {
+                      const formatDateValue = (val) => {
+                        if (val === null || val === undefined || val === '') return '';
+                        if (typeof val === 'number') {
+                          const d = XLSX.SSF.parse_date_code(val);
+                          if (d) {
+                            const yyyy = d.y;
+                            const mm = String(d.m).padStart(2, '0');
+                            const dd = String(d.d).padStart(2, '0');
+                            return `${yyyy}-${mm}-${dd}`;
+                          }
+                        }
+                        if (val instanceof Date) {
+                          const yyyy = val.getFullYear();
+                          const mm = String(val.getMonth() + 1).padStart(2, '0');
+                          const dd = String(val.getDate()).padStart(2, '0');
+                          return `${yyyy}-${mm}-${dd}`;
+                        }
+                        return String(val);
+                      };
+                      const mappedData = importPreview.map((row, idx) => {
+                        const errors = [];
+                        const dateVal = formatDateValue(row[fieldMapping['日期']]);
+                        const typeVal = String(row[fieldMapping['收支类型']] || '').trim();
+                        const amountVal = parseFloat(row[fieldMapping['金额']]);
+                        const categoryVal = String(row[fieldMapping['类别']] || '').trim();
+                        
+                        if (!dateVal) errors.push('日期为空');
+                        if (!typeVal) errors.push('收支类型为空');
+                        if (isNaN(amountVal)) errors.push('金额无效');
+                        if (!categoryVal) errors.push('类别为空');
+                        
+                        return {
+                          '日期': dateVal,
+                          '收支类型': typeVal,
+                          '金额': isNaN(amountVal) ? row[fieldMapping['金额']] : amountVal,
+                          '类别': categoryVal,
+                          '二级分类': String(row[fieldMapping['二级分类']] || '').trim(),
+                          '所属账本': String(row[fieldMapping['所属账本']] || '').trim(),
+                          '收支账户': String(row[fieldMapping['收支账户']] || '').trim(),
+                          '备注': String(row[fieldMapping['备注']] || '').trim(),
+                          '标签': String(row[fieldMapping['标签']] || '').trim(),
+                          rowNum: idx + 2,
+                          errors,
+                          isValid: errors.length === 0,
+                        };
+                      });
+                      setImportPreview(mappedData);
+                      setImportStep('preview');
+                    }} className="flex-1 py-2.5 rounded-lg bg-blue-500 text-white hover:bg-blue-600">下一步</button>
+                  )}
+                  {importStep === 'preview' && (
+                    <button onClick={handleImport} disabled={saving || importPreview.filter(r => r.isValid).length === 0} className="flex-1 py-2.5 rounded-lg bg-green-500 text-white hover:bg-green-600 disabled:opacity-50">{saving ? '导入中...' : '确认导入'}</button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {importSuccess && (
+          <div className="fixed top-4 right-4 z-50 p-4 bg-green-500 text-white rounded-lg shadow-lg animate-pulse">
+            {importSuccess}
           </div>
         )}
       </div>

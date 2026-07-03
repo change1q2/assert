@@ -140,6 +140,17 @@ export async function createAsset(data) {
 export async function fetchState() {
   try {
     const response = await request('/state')
+    if (response.message && response.message.includes('登录')) {
+      return {
+        debts: [],
+        records: [],
+        accounts: [],
+        assetClasses: [],
+        overviewGoals: {},
+        books: [],
+        tags: [],
+      }
+    }
     return response.state || response.data || {
       debts: [],
       records: [],
@@ -204,6 +215,71 @@ export async function saveBooks(books) {
     return response
   } catch {
     return { success: false, error: '保存账本失败' }
+  }
+}
+
+export async function fetchPremium(force = false) {
+  try {
+    const url = force ? '/tools/premium?refresh=1' : '/tools/premium'
+    const response = await request(url)
+    return response
+  } catch {
+    return {
+      rows: [],
+      fetchedAt: new Date().toISOString(),
+      source: '本地缓存',
+      sourceCount: 0,
+    }
+  }
+}
+
+export async function fetchHkIpo(params = {}) {
+  try {
+    const query = new URLSearchParams(params).toString()
+    const url = `/tools/hk-ipo${query ? '?' + query : ''}`
+    const response = await request(url)
+    return response
+  } catch {
+    return {
+      rows: [],
+      recommendations: [],
+      bigVRows: [],
+      scoreRows: [],
+      rules: [],
+      validationRows: [],
+      dataSources: [],
+      stats: null,
+      fetchedAt: '',
+      source: '',
+      threshold: 6,
+    }
+  }
+}
+
+export async function saveHkIpoRules(data) {
+  try {
+    const response = await request('/tools/hk-ipo/rules', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+    return response
+  } catch {
+    return { ok: false, error: '保存失败' }
+  }
+}
+
+export async function exportHkIpo(params = {}) {
+  try {
+    const token = localStorage.getItem('token')
+    const query = new URLSearchParams(params).toString()
+    const url = `/api/tools/hk-ipo/export${query ? '?' + query : ''}`
+    const response = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!response.ok) throw new Error('导出失败')
+    return response.blob()
+  } catch {
+    throw new Error('导出失败')
   }
 }
 
