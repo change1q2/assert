@@ -11,17 +11,21 @@ import {
   TrendingDown,
   ChevronUp,
   ChevronDown,
+  ChevronLeft,
   Eye,
   EyeOff,
   Wallet,
   Briefcase,
   ArrowUpRight,
   ArrowDownRight,
+  ArrowLeft,
   Target,
   Search,
   PieChart as PieChartIcon,
   BarChart3,
   Activity,
+  Lock,
+  Globe,
 } from 'lucide-react';
 import {
   PieChart,
@@ -39,12 +43,13 @@ import {
   Legend,
 } from 'recharts';
 
-function formatCurrency(value) {
-  return new Intl.NumberFormat('zh-CN', {
+function formatCurrency(value, currency = 'CNY') {
+  const options = {
     style: 'currency',
-    currency: 'CNY',
+    currency,
     minimumFractionDigits: 0,
-  }).format(value);
+  };
+  return new Intl.NumberFormat(currency === 'CNY' ? 'zh-CN' : 'en-US', options).format(value);
 }
 
 function formatPercentage(value) {
@@ -69,6 +74,19 @@ const PRESET_COLORS = [
   '#14B8A6',
 ];
 
+const CATEGORY_L1_OPTIONS = ['权益类', '固收类', '现金类', '另类投资', '商品'];
+const CATEGORY_COLORS = {
+  '权益类': '#6366F1',
+  '固收类': '#10B981',
+  '现金类': '#06B6D4',
+  '另类投资': '#8B5CF6',
+  '商品': '#F59E0B',
+};
+const ASSET_TYPE_OPTIONS = ['股票', '基金', '债券', '期货', '期权', '外汇', '数字货币', '银行理财', '保险', '房产', '其他'];
+const DOMESTIC_MARKET = '国内市场';
+const OVERSEAS_MARKET = '海外市场';
+const EXCHANGE_RATE = 7.2;
+
 function createDefaultClass({ name, color }) {
   return {
     id: `default-${name}`,
@@ -86,77 +104,236 @@ function createDefaultClass({ name, color }) {
   };
 }
 
-function computeChildStats(child) {
-  const grandChildren = child.children || [];
-  const grandChildValue = grandChildren.reduce((sum, gc) => sum + (gc.value || 0), 0);
-  const grandChildOpeningValue = grandChildren.reduce((sum, gc) => sum + (gc.openingValue || 0), 0);
-  
-  const childValue = grandChildValue > 0 ? grandChildValue : (child.value || 0);
-  const childOpeningValue = grandChildOpeningValue > 0 ? grandChildOpeningValue : (child.openingValue || 0);
-  const childPnl = childValue - childOpeningValue;
-  const childPnlRate = childOpeningValue > 0 ? (childPnl / childOpeningValue) * 100 : 0;
-  
-  return {
-    ...child,
-    computedValue: childValue,
-    computedOpeningValue: childOpeningValue,
-    computedPnl: childPnl,
-    computedPnlRate: childPnlRate,
-  };
+function normalizeMarket(market) {
+  if (!market) return DOMESTIC_MARKET;
+  if (market === DOMESTIC_MARKET || market === '国内市场') return DOMESTIC_MARKET;
+  return OVERSEAS_MARKET;
 }
 
-function computeStatsForClasses(assetClasses) {
-  const classes = (assetClasses || []).map((cls) => {
-    const childrenWithStats = (cls.children || []).map(computeChildStats);
-    
-    const childValue = childrenWithStats.reduce((sum, c) => sum + c.computedValue, 0);
-    const childOpeningValue = childrenWithStats.reduce((sum, c) => sum + c.computedOpeningValue, 0);
-    const childIncome = childrenWithStats.reduce((sum, c) => sum + (c.income || 0), 0);
-    const childExpense = childrenWithStats.reduce((sum, c) => sum + (c.expense || 0), 0);
-    
-    const computedValue = childValue > 0 ? childValue : (cls.value || 0);
-    const computedOpeningValue = childOpeningValue > 0 ? childOpeningValue : (cls.openingValue || 0);
-    const computedIncome = childIncome > 0 ? childIncome : (cls.income || 0);
-    const computedExpense = childExpense > 0 ? childExpense : (cls.expense || 0);
-    
-    const pnl = computedValue - computedOpeningValue;
-    const pnlRate = computedOpeningValue > 0 ? (pnl / computedOpeningValue) * 100 : 0;
-    
+function aggregateClassesFromFinance(financeAccounts, existingClasses) {
+  const accounts = financeAccounts || [];
+  const existing = existingClasses || [];
+
+  const existingMap = {};
+  existing.forEach((cls) => {
+    existingMap[cls.name] = cls;
+  });
+
+  const categoryMap = {};
+  const childrenMap = {};
+
+  accounts.forEach((account) => {
+    const categoryL1 = account.categoryL1 || account.category || '其他';
+    const assetType = account.assetType || account.category || '其他';
+    const market = normalizeMarket(account.market);
+    const value = parseFloat(account.currentValue || account.balance || 0);
+    const cost = parseFloat(account.cost || 0);
+
+    if (!categoryMap[categoryL1]) {
+      categoryMap[categoryL1] = { value: 0, cost: 0, income: 0, expense: 0 };
+    }
+    categoryMap[categoryL1].value += value;
+    categoryMap[categoryL1].cost += cost;
+
+    const childKey = `${assetType}__${market}`;
+    if (!childrenMap[categoryL1]) {
+      childrenMap[categoryL1] = {};
+    }
+    if (!childrenMap[categoryL1][childKey]) {
+      childrenMap[categoryL1][childKey] = {
+        name: assetType,
+        market,
+        value: 0,
+        cost: 0,
+        openingValue: 0,
+        isAutoSync: true,
+      };
+    }
+    childrenMap[categoryL1][childKey].value += value;
+    childrenMap[categoryL1][childKey].cost += cost;
+    childrenMap[categoryL1][childKey].openingValue += cost;
+  });
+
+  const result = [];
+  Object.keys(categoryMap).forEach((name) => {
+    const existing = existingMap[name];
+    const data = categoryMap[name];
+    const autoChildren = childrenMap[name]
+      ? Object.values(childrenMap[name]).sort((a, b) => b.value - a.value)
+      : [];
+
+    const existingChildren = existing?.children || [];
+    const customChildren = existingChildren
+      .filter((c) => !c.isAutoSync)
+      .map((c) => ({
+        ...c,
+        market: c.market || '',
+        isAutoSync: false,
+      }));
+
+    const autoTotal = autoChildren.reduce((sum, c) => sum + (c.value || 0), 0);
+    const customTotal = customChildren.reduce((sum, c) => sum + (c.value || 0), 0);
+    const combinedValue = data.value + customTotal;
+    const combinedOpening = data.cost + customChildren.reduce((sum, c) => sum + (c.openingValue || 0), 0);
+
+    result.push({
+      id: existing?.id || `finance-${name}`,
+      name,
+      children: [...autoChildren, ...customChildren],
+      visible: existing?.visible !== false,
+      value: combinedValue,
+      openingValue: combinedOpening,
+      targetValue: existing?.targetValue || 0,
+      income: existing?.income || 0,
+      expense: existing?.expense || 0,
+      laborIncome: existing?.laborIncome || 0,
+      color: existing?.color || CATEGORY_COLORS[name] || PRESET_COLORS[result.length % PRESET_COLORS.length],
+      expectedReturn: existing?.expectedReturn || 0,
+    });
+  });
+
+  const financeCategoryNames = new Set(Object.keys(categoryMap));
+  existing.forEach((cls) => {
+    if (!financeCategoryNames.has(cls.name)) {
+      const customChildren = (cls.children || []).map((c) => ({
+        ...c,
+        market: c.market || '',
+        isAutoSync: false,
+      }));
+      result.push({
+        ...cls,
+        children: customChildren,
+      });
+    }
+  });
+
+  return result;
+}
+
+function computeDomesticOverseasPie(financeAccounts) {
+  const accounts = financeAccounts || [];
+  let domestic = 0;
+  let overseas = 0;
+
+  accounts.forEach((account) => {
+    const value = parseFloat(account.currentValue || account.balance || 0);
+    const market = normalizeMarket(account.market);
+    if (market === DOMESTIC_MARKET) {
+      domestic += value;
+    } else {
+      overseas += value;
+    }
+  });
+
+  return [
+    { name: DOMESTIC_MARKET, value: domestic, color: '#3B82F6' },
+    { name: OVERSEAS_MARKET, value: overseas, color: '#F97316' },
+  ];
+}
+
+function computeAssetTypeBreakdown(financeAccounts, categoryName) {
+  const accounts = financeAccounts || [];
+  const typeMap = {};
+
+  accounts.forEach((account) => {
+    const categoryL1 = account.categoryL1 || account.category || '';
+    if (categoryL1 !== categoryName) return;
+
+    const assetType = account.assetType || account.category || '其他';
+    const value = parseFloat(account.currentValue || account.balance || 0);
+
+    if (!typeMap[assetType]) {
+      typeMap[assetType] = 0;
+    }
+    typeMap[assetType] += value;
+  });
+
+  const total = Object.values(typeMap).reduce((sum, v) => sum + v, 0);
+
+  return Object.entries(typeMap)
+    .map(([name, value], index) => ({
+      name,
+      value,
+      percent: total > 0 ? (value / total) * 100 : 0,
+      color: PRESET_COLORS[index % PRESET_COLORS.length],
+    }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function computeStatsForClasses(assetClasses, stateData) {
+  const financeAccounts = stateData?.accounts || [];
+  const hasFinanceData = financeAccounts.length > 0;
+
+  let classes;
+  let domesticOverseasData = [];
+  let financeAccountsRef = financeAccounts;
+
+  if (hasFinanceData) {
+    classes = aggregateClassesFromFinance(financeAccounts, assetClasses);
+    domesticOverseasData = computeDomesticOverseasPie(financeAccounts);
+  } else {
+    classes = (assetClasses || []).map((cls) => ({ ...cls }));
+    domesticOverseasData = [];
+    financeAccountsRef = [];
+  }
+
+  const classesWithPnl = classes.map((cls) => {
+    const pnl = (cls.value || 0) - (cls.openingValue || 0);
+    const pnlRate =
+      (cls.openingValue || 0) > 0 ? (pnl / cls.openingValue) * 100 : 0;
     return {
       ...cls,
-      children: childrenWithStats,
-      computedValue,
-      computedOpeningValue,
-      computedIncome,
-      computedExpense,
       pnl,
       pnlRate,
     };
   });
 
-  const totalValue = classes.reduce((sum, c) => sum + c.computedValue, 0);
-  const totalCost = classes.reduce((sum, c) => sum + c.computedOpeningValue, 0);
+  const totalValue = classesWithPnl.reduce((sum, c) => sum + (c.value || 0), 0);
+  const totalCost = classesWithPnl.reduce((sum, c) => sum + (c.openingValue || 0), 0);
   const totalPnl = totalValue - totalCost;
   const totalPnlRate = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
-  const totalIncome = classes.reduce((sum, c) => sum + c.computedIncome, 0);
-  const totalExpense = classes.reduce((sum, c) => sum + c.computedExpense, 0);
+  const totalIncome = classesWithPnl.reduce((sum, c) => sum + (c.income || 0), 0);
+  const totalExpense = classesWithPnl.reduce((sum, c) => sum + (c.expense || 0), 0);
 
   const avgExpectedReturn =
     totalValue > 0
-      ? classes.reduce(
-          (sum, c) => sum + (c.expectedReturn || 0) * c.computedValue,
+      ? classesWithPnl.reduce(
+          (sum, c) => sum + (c.expectedReturn || 0) * (c.value || 0),
           0
         ) / totalValue
       : 0;
 
-  const enrichedClasses = classes.map((cls) => ({
+  const enrichedClasses = classesWithPnl.map((cls) => ({
     ...cls,
-    percent: totalValue > 0 ? (cls.computedValue / totalValue) * 100 : 0,
+    percent: totalValue > 0 ? ((cls.value || 0) / totalValue) * 100 : 0,
     targetProgress:
       (cls.targetValue || 0) > 0
-        ? (cls.computedValue / cls.targetValue) * 100
+        ? ((cls.value || 0) / cls.targetValue) * 100
         : 0,
   }));
+
+  const assetTypeBreakdownMap = {};
+  enrichedClasses.forEach((cls) => {
+    const children = cls.children || [];
+    const typeMap = {};
+    children.forEach((child) => {
+      const name = child.name || '其他';
+      const value = parseFloat(child.value || 0);
+      if (!typeMap[name]) {
+        typeMap[name] = 0;
+      }
+      typeMap[name] += value;
+    });
+    const classTotal = Object.values(typeMap).reduce((sum, v) => sum + v, 0);
+    assetTypeBreakdownMap[cls.name] = Object.entries(typeMap)
+      .map(([name, value], index) => ({
+        name,
+        value,
+        percent: classTotal > 0 ? (value / classTotal) * 100 : 0,
+        color: PRESET_COLORS[index % PRESET_COLORS.length],
+      }))
+      .sort((a, b) => b.value - a.value);
+  });
 
   return {
     classes: enrichedClasses,
@@ -167,6 +344,9 @@ function computeStatsForClasses(assetClasses) {
     totalIncome,
     totalExpense,
     avgExpectedReturn,
+    domesticOverseasData,
+    financeAccounts: financeAccountsRef,
+    assetTypeBreakdownMap,
   };
 }
 
@@ -205,7 +385,7 @@ const CustomChartTooltip = ({ active, payload, label }) => {
   return null;
 };
 
-export default function AssetClasses() {
+export default function AssetClasses({ onCategorySelect }) {
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -213,8 +393,6 @@ export default function AssetClasses() {
   const [editingClass, setEditingClass] = useState(null);
   const [filterName, setFilterName] = useState('');
   const [showHidden, setShowHidden] = useState(false);
-  const [selectedClassId, setSelectedClassId] = useState(null);
-  const [expandedChildIds, setExpandedChildIds] = useState(new Set());
   const [formData, setFormData] = useState({
     name: '',
     children: [],
@@ -227,6 +405,16 @@ export default function AssetClasses() {
     color: '#6366F1',
     visible: true,
   });
+  const [showAddChildModal, setShowAddChildModal] = useState(false);
+  const [addingChildForClassId, setAddingChildForClassId] = useState(null);
+  const [newChildForm, setNewChildForm] = useState({
+    market: DOMESTIC_MARKET,
+    assetType: ASSET_TYPE_OPTIONS[0],
+    value: 0,
+    openingValue: 0,
+  });
+  const [selectedClass, setSelectedClass] = useState(null);
+  const [selectedCurrency, setSelectedCurrency] = useState('CNY');
 
   const { assetClasses = [] } = stateData || {};
 
@@ -234,25 +422,12 @@ export default function AssetClasses() {
     loadData();
   }, []);
 
-  const normalizeChildStructure = (children) => {
-    if (!Array.isArray(children)) return [];
-    return children.map((child) => ({
-      ...child,
-      children: Array.isArray(child.children) ? child.children : [],
-    }));
-  };
-
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await fetchState();
       let currentClasses = data.assetClasses || [];
-
-      currentClasses = currentClasses.map((cls) => ({
-        ...cls,
-        children: normalizeChildStructure(cls.children),
-      }));
 
       const existingNames = new Set(currentClasses.map((c) => c.name));
       const missingDefaults = DEFAULT_CLASSES.filter(
@@ -273,7 +448,7 @@ export default function AssetClasses() {
           setStateData(data);
         }
       } else {
-        setStateData({ ...data, assetClasses: currentClasses });
+        setStateData(data);
       }
     } catch (err) {
       console.error('Failed to load asset classes data:', err);
@@ -283,20 +458,20 @@ export default function AssetClasses() {
     }
   };
 
+  const visibleClasses = useMemo(() => {
+    return assetClasses.filter((cls) => showHidden || cls.visible !== false);
+  }, [assetClasses, showHidden]);
+
   const filteredClasses = useMemo(() => {
-    return assetClasses.filter((cls) => {
-      const matchName =
-        !filterName ||
-        cls.name.toLowerCase().includes(filterName.toLowerCase());
-      const matchVisible = showHidden || cls.visible !== false;
-      return matchName && matchVisible;
+    return visibleClasses.filter((cls) => {
+      return !filterName || cls.name.toLowerCase().includes(filterName.toLowerCase());
     });
-  }, [assetClasses, filterName, showHidden]);
+  }, [visibleClasses, filterName]);
 
   const stats = useMemo(() => {
     if (loading || error) return null;
-    return computeStatsForClasses(filteredClasses);
-  }, [filteredClasses, loading, error]);
+    return computeStatsForClasses(visibleClasses, stateData);
+  }, [visibleClasses, loading, error, stateData]);
 
   const {
     classes = [],
@@ -307,16 +482,117 @@ export default function AssetClasses() {
     totalIncome = 0,
     totalExpense = 0,
     avgExpectedReturn = 0,
+    domesticOverseasData = [],
+    financeAccounts = [],
+    assetTypeBreakdownMap = {},
   } = stats || {};
+
+  const hasFinanceData = financeAccounts.length > 0;
 
   const chartData = classes.filter((c) => c.visible !== false);
 
   const visibleChartData = chartData.length > 0;
 
+  const drilldownData = useMemo(() => {
+    if (!selectedClass) return [];
+    return assetTypeBreakdownMap[selectedClass] || [];
+  }, [selectedClass, assetTypeBreakdownMap]);
+
+  const hasDrilldownData = drilldownData.length > 0 && drilldownData.some((d) => d.value > 0);
+
+  const selectedClassInfo = useMemo(() => {
+    if (!selectedClass) return null;
+    return classes.find((c) => c.name === selectedClass) || null;
+  }, [selectedClass, classes]);
+
+  useEffect(() => {
+    if (selectedClass && classes.length > 0) {
+      const exists = classes.some((c) => c.name === selectedClass);
+      if (!exists) {
+        setSelectedClass(null);
+      }
+    }
+  }, [classes, selectedClass]);
+
+  const hasDomesticOverseasData = domesticOverseasData.length > 0 && domesticOverseasData.some((d) => d.value > 0);
+
+  const detailData = useMemo(() => {
+    if (!selectedClassInfo) {
+      return { detailPieData: [], detailBarData: [], detailDomesticOverseasData: [] };
+    }
+
+    const children = selectedClassInfo.children || [];
+
+    const typeMap = {};
+    const marketMap = { [DOMESTIC_MARKET]: 0, [OVERSEAS_MARKET]: 0 };
+
+    children.forEach((child) => {
+      const name = child.name || '其他';
+      const market = normalizeMarket(child.market);
+      let value = parseFloat(child.value || 0);
+
+      if (selectedCurrency === 'USD') {
+        value = market === OVERSEAS_MARKET ? value / EXCHANGE_RATE : value;
+      }
+
+      if (!typeMap[name]) {
+        typeMap[name] = 0;
+      }
+      typeMap[name] += value;
+      marketMap[market] += value;
+    });
+
+    const totalTypeValue = Object.values(typeMap).reduce((sum, v) => sum + v, 0);
+    const totalMarketValue = marketMap[DOMESTIC_MARKET] + marketMap[OVERSEAS_MARKET];
+
+    const detailPieData = Object.entries(typeMap)
+      .map(([name, value], index) => ({
+        name,
+        value,
+        percent: totalTypeValue > 0 ? (value / totalTypeValue) * 100 : 0,
+        color: PRESET_COLORS[index % PRESET_COLORS.length],
+      }))
+      .sort((a, b) => b.value - a.value);
+
+    const detailBarData = Object.entries(typeMap)
+      .map(([name, value], index) => ({
+        name,
+        value,
+        color: PRESET_COLORS[index % PRESET_COLORS.length],
+      }))
+      .sort((a, b) => b.value - a.value);
+
+    const detailDomesticOverseasData = [
+      {
+        name: DOMESTIC_MARKET,
+        value: marketMap[DOMESTIC_MARKET],
+        percent: totalMarketValue > 0 ? (marketMap[DOMESTIC_MARKET] / totalMarketValue) * 100 : 0,
+        color: '#3B82F6',
+      },
+      {
+        name: OVERSEAS_MARKET,
+        value: marketMap[OVERSEAS_MARKET],
+        percent: totalMarketValue > 0 ? (marketMap[OVERSEAS_MARKET] / totalMarketValue) * 100 : 0,
+        color: '#F97316',
+      },
+    ];
+
+    return { detailPieData, detailBarData, detailDomesticOverseasData };
+  }, [selectedClassInfo, selectedCurrency]);
+
+  const { detailPieData = [], detailBarData = [], detailDomesticOverseasData = [] } = detailData;
+
+  const displayClasses = useMemo(() => {
+    if (!filterName.trim()) return classes;
+    const q = filterName.toLowerCase();
+    return classes.filter((cls) => cls.name.toLowerCase().includes(q));
+  }, [classes, filterName]);
+
   const handleAdd = () => {
+    const defaultName = CATEGORY_L1_OPTIONS[0];
     setEditingClass(null);
     setFormData({
-      name: '',
+      name: defaultName,
       children: [],
       value: 0,
       openingValue: 0,
@@ -324,7 +600,7 @@ export default function AssetClasses() {
       expectedReturn: 0,
       income: 0,
       expense: 0,
-      color: '#6366F1',
+      color: CATEGORY_COLORS[defaultName] || '#6366F1',
       visible: true,
     });
     setShowModal(true);
@@ -338,6 +614,15 @@ export default function AssetClasses() {
       value: prev.value === 0 ? autoValue : prev.value,
       openingValue: prev.openingValue === 0 ? autoOpening : prev.openingValue,
     }));
+  };
+
+  const handleCategoryNameChange = (name) => {
+    setFormData((prev) => ({
+      ...prev,
+      name,
+      color: CATEGORY_COLORS[name] || prev.color,
+    }));
+    tryAutoFill(name);
   };
 
   const autoFillFromFinanceAssets = (name) => {
@@ -439,36 +724,20 @@ export default function AssetClasses() {
     }
   };
 
-  const toggleExpandChild = (childId) => {
-    setExpandedChildIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(childId)) {
-        next.delete(childId);
-      } else {
-        next.add(childId);
-      }
-      return next;
-    });
-  };
-
-  const isChildExpanded = (childId) => expandedChildIds.has(childId);
-
-  const handleClassClick = (clsId) => {
-    setSelectedClassId(clsId);
-  };
-
-  const handleBackToList = () => {
-    setSelectedClassId(null);
-    setExpandedChildIds(new Set());
-  };
-
-  const addChildToClass = async (clsId, childName) => {
-    if (!childName.trim()) return;
+  const addChildToClass = async (clsId, childInput) => {
+    if (!childInput) return;
+    let childObj;
+    if (typeof childInput === 'string') {
+      if (!childInput.trim()) return;
+      childObj = { name: childInput.trim(), value: 0, openingValue: 0, market: '', isAutoSync: false };
+    } else {
+      childObj = { ...childInput, isAutoSync: childInput.isAutoSync || false };
+    }
     const arr = stateData.assetClasses || [];
     const newClasses = arr.map((c) => {
       if (c.id === clsId) {
         const children = Array.isArray(c.children) ? [...c.children] : [];
-        children.push({ name: childName.trim(), value: 0, openingValue: 0 });
+        children.push(childObj);
         return { ...c, children };
       }
       return c;
@@ -480,12 +749,108 @@ export default function AssetClasses() {
     }
   };
 
+  const openAddChildModal = (clsId) => {
+    setAddingChildForClassId(clsId);
+    setNewChildForm({
+      market: DOMESTIC_MARKET,
+      assetType: ASSET_TYPE_OPTIONS[0],
+      value: 0,
+      openingValue: 0,
+    });
+    setShowAddChildModal(true);
+  };
+
+  const closeAddChildModal = () => {
+    setShowAddChildModal(false);
+    setAddingChildForClassId(null);
+    setNewChildForm({
+      market: DOMESTIC_MARKET,
+      assetType: ASSET_TYPE_OPTIONS[0],
+      value: 0,
+      openingValue: 0,
+    });
+  };
+
+  const getFinanceChildData = (className, market, assetType) => {
+    const accounts = stateData?.accounts || [];
+    let value = 0;
+    let openingValue = 0;
+    let found = false;
+    accounts.forEach((account) => {
+      const categoryL1 = account.categoryL1 || account.category || '';
+      const accAssetType = account.assetType || account.category || '';
+      const accMarket = normalizeMarket(account.market);
+      if (categoryL1 === className && accAssetType === assetType && accMarket === market) {
+        value += parseFloat(account.currentValue || account.balance || 0);
+        openingValue += parseFloat(account.cost || 0);
+        found = true;
+      }
+    });
+    return { value, openingValue, found };
+  };
+
+  const hasDuplicateCustomChild = (clsId, market, assetType) => {
+    const arr = stateData.assetClasses || [];
+    const cls = arr.find((c) => c.id === clsId);
+    if (!cls) return false;
+    const children = cls.children || [];
+    return children.some((c) => !c.isAutoSync && c.market === market && c.name === assetType);
+  };
+
+  const hasAutoSyncChild = (clsId, market, assetType) => {
+    if (!hasFinanceData) return false;
+    const cls = classes.find((c) => c.id === clsId);
+    if (!cls) return false;
+    const children = cls.children || [];
+    return children.some((c) => c.isAutoSync && c.market === market && c.name === assetType);
+  };
+
+  const handleAddChildConfirm = async () => {
+    if (!addingChildForClassId) return;
+    const { market, assetType, value, openingValue } = newChildForm;
+
+    if (hasAutoSyncChild(addingChildForClassId, market, assetType)) {
+      alert('该市场+资产类型已存在自动同步项，无需重复添加');
+      return;
+    }
+    if (hasDuplicateCustomChild(addingChildForClassId, market, assetType)) {
+      alert('该市场+资产类型的自定义项已存在');
+      return;
+    }
+
+    const cls = (stateData.assetClasses || []).find((c) => c.id === addingChildForClassId);
+    const className = cls?.name || '';
+
+    let finalValue = Number(value) || 0;
+    let finalOpeningValue = Number(openingValue) || 0;
+
+    if (hasFinanceData) {
+      const financeData = getFinanceChildData(className, market, assetType);
+      if (financeData.found) {
+        finalValue = financeData.value;
+        finalOpeningValue = financeData.openingValue;
+      }
+    }
+
+    await addChildToClass(addingChildForClassId, {
+      name: assetType,
+      market,
+      value: finalValue,
+      openingValue: finalOpeningValue,
+      isAutoSync: false,
+    });
+
+    closeAddChildModal();
+  };
+
   const updateChildInClass = async (clsId, childIdx, updates) => {
     const arr = stateData.assetClasses || [];
     const newClasses = arr.map((c) => {
       if (c.id === clsId) {
         const children = Array.isArray(c.children) ? [...c.children] : [];
-        children[childIdx] = { ...children[childIdx], ...updates };
+        if (childIdx >= 0 && childIdx < children.length) {
+          children[childIdx] = { ...children[childIdx], ...updates };
+        }
         return { ...c, children };
       }
       return c;
@@ -503,7 +868,9 @@ export default function AssetClasses() {
     const newClasses = arr.map((c) => {
       if (c.id === clsId) {
         const children = Array.isArray(c.children) ? [...c.children] : [];
-        children.splice(childIdx, 1);
+        if (childIdx >= 0 && childIdx < children.length) {
+          children.splice(childIdx, 1);
+        }
         return { ...c, children };
       }
       return c;
@@ -548,7 +915,7 @@ export default function AssetClasses() {
         );
       } else {
         if (newClasses.find((c) => c.name === formData.name)) {
-          alert('该分类名称已存在');
+          alert('该分类已存在');
           return;
         }
         newClasses = [
@@ -587,7 +954,7 @@ export default function AssetClasses() {
   const addChild = () => {
     setFormData((prev) => ({
       ...prev,
-      children: [...prev.children, { name: '', children: [] }],
+      children: [...prev.children, ''],
     }));
   };
 
@@ -598,42 +965,10 @@ export default function AssetClasses() {
     }));
   };
 
-  const updateChild = (idx, field, val) => {
+  const updateChild = (idx, val) => {
     setFormData((prev) => {
       const next = [...prev.children];
-      next[idx] = { ...next[idx], [field]: val };
-      return { ...prev, children: next };
-    });
-  };
-
-  const addGrandChild = (childIdx) => {
-    setFormData((prev) => {
-      const next = [...prev.children];
-      next[childIdx] = {
-        ...next[childIdx],
-        children: [...(next[childIdx]?.children || []), { name: '', value: 0, openingValue: 0 }],
-      };
-      return { ...prev, children: next };
-    });
-  };
-
-  const removeGrandChild = (childIdx, grandChildIdx) => {
-    setFormData((prev) => {
-      const next = [...prev.children];
-      next[childIdx] = {
-        ...next[childIdx],
-        children: (next[childIdx]?.children || []).filter((_, i) => i !== grandChildIdx),
-      };
-      return { ...prev, children: next };
-    });
-  };
-
-  const updateGrandChild = (childIdx, grandChildIdx, field, val) => {
-    setFormData((prev) => {
-      const next = [...prev.children];
-      const grandChildren = [...(next[childIdx]?.children || [])];
-      grandChildren[grandChildIdx] = { ...grandChildren[grandChildIdx], [field]: val };
-      next[childIdx] = { ...next[childIdx], children: grandChildren };
+      next[idx] = val;
       return { ...prev, children: next };
     });
   };
@@ -735,16 +1070,66 @@ export default function AssetClasses() {
             </section>
 
             {/* Charts */}
-            <section>
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* Pie Chart */}
-                <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
+            <section className="space-y-4">
+              {/* Pie Charts Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Asset Classification Pie Chart */}
+                <div className={`bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border transition-all duration-300 ${
+                  selectedClass
+                    ? 'border-primary-400 dark:border-primary-500 shadow-md shadow-primary-100 dark:shadow-primary-900/20'
+                    : 'border-gray-100 dark:border-slate-700'
+                }`}>
                   <div className="flex items-center gap-2 mb-3">
+                    {selectedClass && (
+                      <button
+                        onClick={() => setSelectedClass(null)}
+                        className="text-sm text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/30 px-2 py-1 rounded-md transition-colors mr-1 active:scale-95"
+                      >
+                        ← 返回
+                      </button>
+                    )}
                     <PieChartIcon className="w-4 h-4 text-primary-500" />
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">资产分类占比</h3>
+                    <h3 className={`text-sm font-semibold transition-colors ${
+                      selectedClass
+                        ? 'text-primary-600 dark:text-primary-400'
+                        : 'text-gray-900 dark:text-white'
+                    }`}>
+                      {selectedClass ? `${selectedClass} · 资产类型分布` : '资产分类占比'}
+                    </h3>
                   </div>
                   <div className="h-64 relative">
-                    {visibleChartData ? (
+                    {selectedClass ? (
+                      hasDrilldownData ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={drilldownData}
+                              dataKey="value"
+                              nameKey="name"
+                              innerRadius="40%"
+                              outerRadius="70%"
+                              paddingAngle={2}
+                            >
+                              {drilldownData.map((entry, index) => (
+                                <Cell key={`cell-dd-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <ReTooltip content={<CustomPieTooltip />} />
+                            <Legend
+                              layout="vertical"
+                              align="right"
+                              verticalAlign="middle"
+                              iconType="circle"
+                              wrapperStyle={{ fontSize: '12px' }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
+                          该分类暂无明细数据
+                        </div>
+                      )
+                    ) : visibleChartData ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie
@@ -754,12 +1139,27 @@ export default function AssetClasses() {
                             innerRadius="40%"
                             outerRadius="70%"
                             paddingAngle={2}
+                            style={{ cursor: 'pointer' }}
                           >
                             {chartData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color || '#6366F1'} />
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={entry.color || '#6366F1'}
+                                onClick={() => setSelectedClass(entry.name)}
+                                style={{ cursor: 'pointer', transition: 'opacity 0.2s' }}
+                                onMouseEnter={(e) => { e.target.style.opacity = '0.8'; }}
+                                onMouseLeave={(e) => { e.target.style.opacity = '1'; }}
+                              />
                             ))}
                           </Pie>
                           <ReTooltip content={<CustomPieTooltip />} />
+                          <Legend
+                            layout="vertical"
+                            align="right"
+                            verticalAlign="middle"
+                            iconType="circle"
+                            wrapperStyle={{ fontSize: '12px' }}
+                          />
                         </PieChart>
                       </ResponsiveContainer>
                     ) : (
@@ -767,7 +1167,66 @@ export default function AssetClasses() {
                         暂无数据
                       </div>
                     )}
-                    {visibleChartData && (
+                    {(selectedClass ? hasDrilldownData : visibleChartData) && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="text-center">
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {selectedClass ? selectedClass : '总资产'}
+                          </div>
+                          <div className="text-sm font-bold text-gray-900 dark:text-white">
+                            {selectedClass
+                              ? formatCurrency(selectedClassInfo?.value || 0)
+                              : formatCurrency(totalValue)}
+                          </div>
+                          <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                            {selectedClass
+                              ? `${drilldownData.length} 种类型`
+                              : `${chartData.length} 个分类`}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Domestic/Overseas Pie Chart */}
+                <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Globe className="w-4 h-4 text-primary-500" />
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">海内外资产占比</h3>
+                  </div>
+                  <div className="h-64 relative">
+                    {hasDomesticOverseasData ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={domesticOverseasData}
+                            dataKey="value"
+                            nameKey="name"
+                            innerRadius="40%"
+                            outerRadius="70%"
+                            paddingAngle={2}
+                          >
+                            {domesticOverseasData.map((entry, index) => (
+                              <Cell key={`cell-do-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <ReTooltip content={<CustomPieTooltip />} />
+                          <Legend
+                            layout="vertical"
+                            align="right"
+                            verticalAlign="middle"
+                            iconType="circle"
+                            wrapperStyle={{ fontSize: '12px' }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
+                        暂无数据
+                      </div>
+                    )}
+                    {hasDomesticOverseasData && (
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <div className="text-center">
                           <div className="text-xs text-gray-500 dark:text-gray-400">总资产</div>
@@ -779,7 +1238,10 @@ export default function AssetClasses() {
                     )}
                   </div>
                 </div>
+              </div>
 
+              {/* Analysis Charts Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Line Chart */}
                 <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
                   <div className="flex items-center gap-2 mb-3">
@@ -939,22 +1401,22 @@ export default function AssetClasses() {
             {/* Class Cards Grid */}
             <section>
               <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">分类列表</h3>
-              {classes.length === 0 ? (
+              {displayClasses.length === 0 ? (
                 <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 shadow-soft border border-gray-100 dark:border-slate-700 text-center text-gray-500 dark:text-gray-400 text-sm">
                   暂无符合条件的资产分类数据
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {classes.map((cls) => {
+                  {displayClasses.map((cls) => {
                     const isPositive = cls.pnl >= 0;
                     const isHidden = cls.visible === false;
                     return (
                       <div
                         key={cls.id}
-                        onClick={() => handleClassClick(cls.id)}
-                        className={`bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 transition-all hover:-translate-y-0.5 hover:shadow-md cursor-pointer ${
-                          isHidden ? 'opacity-50' : ''
-                        }`}
+                        onClick={() => onCategorySelect?.(cls.name)}
+                        className={`bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border transition-all hover:-translate-y-0.5 hover:shadow-md cursor-pointer ${
+                          'border-gray-100 dark:border-slate-700'
+                        } ${isHidden ? 'opacity-50' : ''}`}
                       >
                         <div className="flex items-start justify-between mb-4">
                           <div className="flex items-center gap-2">
@@ -962,39 +1424,39 @@ export default function AssetClasses() {
                               className="w-3 h-3 rounded-full shrink-0"
                               style={{ backgroundColor: cls.color || '#6366F1' }}
                             />
-                            <span className="font-semibold text-gray-900 dark:text-white text-sm">{cls.name}</span>
+                            <span className="font-semibold text-gray-900 dark:text-white text-sm truncate max-w-[120px]" title={cls.name}>{cls.name}</span>
                           </div>
-                          <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-0.5">
                             <button
-                              onClick={() => handleMoveUp(cls.id)}
+                              onClick={(e) => { e.stopPropagation(); handleMoveUp(cls.id); }}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
                               title="前移"
                             >
                               <ChevronUp className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => handleMoveDown(cls.id)}
+                              onClick={(e) => { e.stopPropagation(); handleMoveDown(cls.id); }}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
                               title="后移"
                             >
                               <ChevronDown className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => handleEdit(cls)}
+                              onClick={(e) => { e.stopPropagation(); handleEdit(cls); }}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
                               title="编辑"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => handleToggleVisible(cls)}
+                              onClick={(e) => { e.stopPropagation(); handleToggleVisible(cls); }}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
                               title={isHidden ? '显示' : '隐藏'}
                             >
                               {isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                             </button>
                             <button
-                              onClick={() => handleDelete(cls.id)}
+                              onClick={(e) => { e.stopPropagation(); handleDelete(cls.id); }}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
                               title="删除"
                             >
@@ -1004,7 +1466,11 @@ export default function AssetClasses() {
                         </div>
 
                         <div className="text-2xl font-bold text-gray-900 dark:text-white tabular-nums mb-1">
-                          {formatCurrency(cls.computedValue || 0)}
+                          {(() => {
+                            const childrenValue = (cls.children || []).reduce((sum, c) => sum + (c.value || 0), 0);
+                            const displayValue = (cls.value || 0) > 0 ? cls.value : childrenValue;
+                            return formatCurrency(displayValue);
+                          })()}
                         </div>
 
                         <div className={`text-sm font-medium mb-3 ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
@@ -1013,7 +1479,7 @@ export default function AssetClasses() {
 
                         <div className="mb-3">
                           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                            <span>占比 {cls.percent.toFixed(2)}%</span>
+                            <span>占比 {(cls.percent || 0).toFixed(2)}%</span>
                           </div>
                           <div className="w-full h-2 bg-gray-200 dark:bg-slate-700 rounded-full overflow-hidden">
                             <div
@@ -1032,17 +1498,17 @@ export default function AssetClasses() {
                             <span className="text-gray-900 dark:text-white font-medium">
                               {formatCurrency(cls.targetValue || 0)}
                               {cls.targetValue > 0 && (
-                                <span className="ml-1 text-gray-500">({cls.targetProgress.toFixed(0)}%)</span>
+                                <span className="ml-1 text-gray-500">({(cls.targetProgress || 0).toFixed(0)}%)</span>
                               )}
                             </span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span>年度收益</span>
-                            <span className="text-green-600 font-medium">{formatCurrency(cls.computedIncome || 0)}</span>
+                            <span className="text-green-600 font-medium">{formatCurrency(cls.income || 0)}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span>年度支出</span>
-                            <span className="text-red-500 font-medium">{formatCurrency(cls.computedExpense || 0)}</span>
+                            <span className="text-red-500 font-medium">{formatCurrency(cls.expense || 0)}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span>期望收益率</span>
@@ -1051,312 +1517,12 @@ export default function AssetClasses() {
                             </span>
                           </div>
                         </div>
-
-                        {(cls.children || []).length > 0 && (
-                          <div className="mt-3 pt-3 border-t border-gray-100 dark:border-slate-700">
-                            <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                              <span>含 {cls.children.length} 个二级分类</span>
-                              <span className="text-primary-500">点击查看详情 →</span>
-                            </div>
-                          </div>
-                        )}
                       </div>
                     );
                   })}
                 </div>
               )}
             </section>
-
-            {selectedClassId && (
-              <section>
-                {(() => {
-                  const selectedClass = classes.find((c) => c.id === selectedClassId) || 
-                                       (stateData?.assetClasses || []).find((c) => c.id === selectedClassId);
-                  if (!selectedClass) return null;
-                  const isPositive = selectedClass.pnl >= 0;
-                  
-                  const addThirdLevel = async (childIdx, name) => {
-                    if (!name.trim()) return;
-                    const arr = stateData.assetClasses || [];
-                    const newClasses = arr.map((c) => {
-                      if (c.id === selectedClassId) {
-                        const children = Array.isArray(c.children) ? [...c.children] : [];
-                        const child = children[childIdx];
-                        if (child) {
-                          const grandChildren = Array.isArray(child.children) ? [...child.children] : [];
-                          grandChildren.push({ name: name.trim(), value: 0, openingValue: 0 });
-                          children[childIdx] = { ...child, children: grandChildren };
-                        }
-                        return { ...c, children };
-                      }
-                      return c;
-                    });
-                    const newState = { ...stateData, assetClasses: newClasses };
-                    const result = await saveState(newState);
-                    if (result.success !== false) {
-                      setStateData(newState);
-                    }
-                  };
-
-                  const updateThirdLevel = async (childIdx, grandChildIdx, updates) => {
-                    const arr = stateData.assetClasses || [];
-                    const newClasses = arr.map((c) => {
-                      if (c.id === selectedClassId) {
-                        const children = Array.isArray(c.children) ? [...c.children] : [];
-                        const child = children[childIdx];
-                        if (child) {
-                          const grandChildren = Array.isArray(child.children) ? [...child.children] : [];
-                          grandChildren[grandChildIdx] = { ...grandChildren[grandChildIdx], ...updates };
-                          children[childIdx] = { ...child, children: grandChildren };
-                        }
-                        return { ...c, children };
-                      }
-                      return c;
-                    });
-                    const newState = { ...stateData, assetClasses: newClasses };
-                    const result = await saveState(newState);
-                    if (result.success !== false) {
-                      setStateData(newState);
-                    }
-                  };
-
-                  const removeThirdLevel = async (childIdx, grandChildIdx) => {
-                    if (!confirm('确定要删除该三级分类吗？')) return;
-                    const arr = stateData.assetClasses || [];
-                    const newClasses = arr.map((c) => {
-                      if (c.id === selectedClassId) {
-                        const children = Array.isArray(c.children) ? [...c.children] : [];
-                        const child = children[childIdx];
-                        if (child) {
-                          const grandChildren = Array.isArray(child.children) ? [...child.children] : [];
-                          grandChildren.splice(grandChildIdx, 1);
-                          children[childIdx] = { ...child, children: grandChildren };
-                        }
-                        return { ...c, children };
-                      }
-                      return c;
-                    });
-                    const newState = { ...stateData, assetClasses: newClasses };
-                    const result = await saveState(newState);
-                    if (result.success !== false) {
-                      setStateData(newState);
-                    }
-                  };
-
-                  return (
-                    <>
-                      <div className="flex items-center gap-3 mb-4">
-                        <button
-                          onClick={handleBackToList}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                          返回分类列表
-                        </button>
-                        <button
-                          onClick={() => handleEdit(selectedClass)}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                          编辑分类
-                        </button>
-                      </div>
-
-                      <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div
-                            className="w-4 h-4 rounded-full"
-                            style={{ backgroundColor: selectedClass.color || '#6366F1' }}
-                          />
-                          <h2 className="text-xl font-bold text-gray-900 dark:text-white">{selectedClass.name}</h2>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4">
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">当前价值</div>
-                            <div className="text-xl font-bold text-gray-900 dark:text-white tabular-nums">
-                              {formatCurrency(selectedClass.computedValue || selectedClass.value || 0)}
-                            </div>
-                          </div>
-                          <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4">
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">期初价值</div>
-                            <div className="text-xl font-bold text-gray-900 dark:text-white tabular-nums">
-                              {formatCurrency(selectedClass.computedOpeningValue || selectedClass.openingValue || 0)}
-                            </div>
-                          </div>
-                          <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4">
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">盈亏</div>
-                            <div className={`text-xl font-bold tabular-nums ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
-                              {isPositive ? '+' : ''}{formatCurrency(selectedClass.pnl || 0)}
-                            </div>
-                          </div>
-                          <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4">
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">盈亏比例</div>
-                            <div className={`text-xl font-bold ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
-                              {formatPercentage(selectedClass.pnlRate || 0)}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">二级分类列表</h3>
-                      {!selectedClass.children || selectedClass.children.length === 0 ? (
-                        <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 shadow-soft border border-gray-100 dark:border-slate-700 text-center text-gray-500 dark:text-gray-400 text-sm">
-                          暂无二级分类，点击上方"编辑分类"按钮添加
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                          {selectedClass.children.map((child, childIdx) => {
-                            const childIsPositive = (child.computedPnl || 0) >= 0;
-                            const childKey = `${selectedClassId}-${childIdx}`;
-                            const isChildExpandedVal = isChildExpanded(childKey);
-                            
-                            return (
-                              <div key={childIdx} className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 overflow-hidden">
-                                <div className="flex items-start justify-between mb-4">
-                                  <div className="flex items-center gap-2">
-                                    <div
-                                      className="w-3 h-3 rounded-full"
-                                      style={{ backgroundColor: selectedClass.color || '#6366F1' }}
-                                    />
-                                    <span className="font-semibold text-gray-900 dark:text-white text-sm">{child.name}</span>
-                                  </div>
-                                  <div className="flex items-center gap-1">
-                                    <button
-                                      onClick={() => {
-                                        const newName = prompt('修改二级分类名称：', child.name);
-                                        if (newName && newName !== child.name) {
-                                          updateChildInClass(selectedClassId, childIdx, { name: newName.trim() });
-                                        }
-                                      }}
-                                      className="p-1.5 rounded-lg text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
-                                      title="编辑"
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      onClick={() => removeChildFromClass(selectedClassId, childIdx)}
-                                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
-                                      title="删除"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      onClick={() => toggleExpandChild(childKey)}
-                                      className="p-1.5 rounded-lg text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
-                                      title={isChildExpandedVal ? '收起' : '展开'}
-                                    >
-                                      {isChildExpandedVal ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                                    </button>
-                                  </div>
-                                </div>
-
-                                <div className="text-xl font-bold text-gray-900 dark:text-white tabular-nums mb-1">
-                                  {formatCurrency(child.computedValue || child.value || 0)}
-                                </div>
-
-                                <div className={`text-sm font-medium mb-3 ${childIsPositive ? 'text-green-600' : 'text-red-500'}`}>
-                                  {childIsPositive ? '+' : ''}{formatCurrency(child.computedPnl || (child.value || 0) - (child.openingValue || 0))}（{formatPercentage(child.computedPnlRate || 0)}）
-                                </div>
-
-                                <div className="space-y-1.5 text-xs text-gray-600 dark:text-gray-300">
-                                  <div className="flex items-center justify-between">
-                                    <span>期初价值</span>
-                                    <span className="text-gray-900 dark:text-white font-medium">
-                                      {formatCurrency(child.computedOpeningValue || child.openingValue || 0)}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <span>三级分类数</span>
-                                    <span className="text-gray-900 dark:text-white font-medium">
-                                      {(child.children || []).length} 个
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {isChildExpandedVal && (
-                                  <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-600 max-h-48 overflow-y-auto bg-gray-50 dark:bg-slate-700/50 rounded-lg">
-                                    <div className="px-3 pb-2">
-                                      <div className="flex items-center justify-between mb-2">
-                                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">三级分类</span>
-                                        <button
-                                          onClick={() => {
-                                            const name = prompt('请输入三级分类名称：');
-                                            if (name) addThirdLevel(childIdx, name);
-                                          }}
-                                          className="text-xs text-primary-500 hover:text-primary-600 font-medium"
-                                        >
-                                          + 添加
-                                        </button>
-                                      </div>
-                                      {!child.children || child.children.length === 0 ? (
-                                        <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">
-                                          暂无三级分类，点击上方按钮添加
-                                        </p>
-                                      ) : (
-                                        <div className="space-y-2">
-                                          {child.children.map((grandChild, grandChildIdx) => {
-                                            const grandChildPnl = (grandChild.value || 0) - (grandChild.openingValue || 0);
-                                            const grandChildPnlRate = (grandChild.openingValue || 0) > 0
-                                              ? (grandChildPnl / grandChild.openingValue) * 100 : 0;
-                                            return (
-                                              <div key={grandChildIdx} className="bg-white dark:bg-slate-700 rounded-lg px-3 py-2">
-                                                <div className="flex items-start justify-between">
-                                                  <div className="flex-1 min-w-0">
-                                                    <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                                                      {grandChild.name}
-                                                    </div>
-                                                    <div className={`text-xs ${grandChildPnl >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                                                      {grandChildPnl >= 0 ? '+' : ''}{formatCurrency(grandChildPnl)}（{formatPercentage(grandChildPnlRate)}）
-                                                    </div>
-                                                  </div>
-                                                  <div className="text-right ml-3">
-                                                    <div className="text-sm font-medium text-gray-900 dark:text-white tabular-nums">
-                                                      {formatCurrency(grandChild.value || 0)}
-                                                    </div>
-                                                    <div className="text-xs text-gray-500">
-                                                      期初 {formatCurrency(grandChild.openingValue || 0)}
-                                                    </div>
-                                                  </div>
-                                                  <div className="flex items-center gap-1 ml-2">
-                                                    <button
-                                                      onClick={() => {
-                                                        const newName = prompt('修改三级分类名称：', grandChild.name);
-                                                        if (newName && newName !== grandChild.name) {
-                                                          updateThirdLevel(childIdx, grandChildIdx, { name: newName.trim() });
-                                                        }
-                                                      }}
-                                                      className="p-1 rounded text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30"
-                                                      title="编辑"
-                                                    >
-                                                      <Edit2 className="w-3.5 h-3.5" />
-                                                    </button>
-                                                    <button
-                                                      onClick={() => removeThirdLevel(childIdx, grandChildIdx)}
-                                                      className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30"
-                                                      title="删除"
-                                                    >
-                                                      <Trash2 className="w-3.5 h-3.5" />
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </section>
-            )}
 
             {/* Modal */}
             {showModal && (
@@ -1367,94 +1533,54 @@ export default function AssetClasses() {
                       {editingClass ? '编辑分类' : '添加分类'}
                     </h3>
                     <button
-                      onClick={() => setShowModal(false)}
-                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                      onClick={() => {
+                        setShowModal(false);
+                        setEditingClass(null);
+                      }}
+                      className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
                     >
                       <X className="w-5 h-5" />
                     </button>
                   </div>
-
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         分类名称 <span className="text-red-500">*</span>
                       </label>
-                      <input
-                        type="text"
+                      <select
                         value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        onBlur={(e) => tryAutoFill(e.target.value)}
-                        placeholder="请输入分类名称"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      />
+                        onChange={(e) => handleCategoryNameChange(e.target.value)}
+                        disabled={!!editingClass}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {CATEGORY_L1_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         二级分类
                       </label>
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         {formData.children.map((child, idx) => (
-                          <div key={idx} className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-3">
-                            <div className="flex items-center gap-2 mb-3">
-                              <input
-                                type="text"
-                                value={child.name || ''}
-                                onChange={(e) => updateChild(idx, 'name', e.target.value)}
-                                placeholder="二级分类名称"
-                                className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                              />
-                              <button
-                                onClick={() => removeChild(idx)}
-                                className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                            <div className="ml-2">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">三级分类</span>
-                                <button
-                                  onClick={() => addGrandChild(idx)}
-                                  className="text-xs text-primary-500 hover:text-primary-600 font-medium"
-                                >
-                                  + 添加
-                                </button>
-                              </div>
-                              <div className="space-y-2">
-                                {(child.children || []).map((grandChild, grandChildIdx) => (
-                                  <div key={grandChildIdx} className="flex items-center gap-2">
-                                    <input
-                                      type="text"
-                                      value={grandChild.name || ''}
-                                      onChange={(e) => updateGrandChild(idx, grandChildIdx, 'name', e.target.value)}
-                                      placeholder="三级分类名称"
-                                      className="flex-1 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-xs focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    />
-                                    <input
-                                      type="number"
-                                      value={grandChild.value || ''}
-                                      onChange={(e) => updateGrandChild(idx, grandChildIdx, 'value', e.target.value)}
-                                      placeholder="价值"
-                                      className="w-24 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-xs focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    />
-                                    <input
-                                      type="number"
-                                      value={grandChild.openingValue || ''}
-                                      onChange={(e) => updateGrandChild(idx, grandChildIdx, 'openingValue', e.target.value)}
-                                      placeholder="期初"
-                                      className="w-24 px-2 py-1.5 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-xs focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    />
-                                    <button
-                                      onClick={() => removeGrandChild(idx, grandChildIdx)}
-                                      className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
+                          <div key={idx} className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={child}
+                              onChange={(e) => updateChild(idx, e.target.value)}
+                              placeholder="二级分类名称"
+                              className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                            <button
+                              onClick={() => removeChild(idx)}
+                              className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         ))}
                         <button
@@ -1588,7 +1714,10 @@ export default function AssetClasses() {
 
                   <div className="flex justify-end gap-3 mt-6">
                     <button
-                      onClick={() => setShowModal(false)}
+                      onClick={() => {
+                        setShowModal(false);
+                        setEditingClass(null);
+                      }}
                       className="px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
                     >
                       取消
@@ -1599,6 +1728,118 @@ export default function AssetClasses() {
                       className="px-4 py-2 rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       保存
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Add Child Modal */}
+            {showAddChildModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                      添加资产类型
+                    </h3>
+                    <button
+                      onClick={closeAddChildModal}
+                      className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        市场
+                      </label>
+                      <select
+                        value={newChildForm.market}
+                        onChange={(e) => setNewChildForm({ ...newChildForm, market: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      >
+                        <option value={DOMESTIC_MARKET}>国内市场</option>
+                        <option value={OVERSEAS_MARKET}>海外市场</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        资产类型
+                      </label>
+                      <select
+                        value={newChildForm.assetType}
+                        onChange={(e) => setNewChildForm({ ...newChildForm, assetType: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      >
+                        {ASSET_TYPE_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {hasFinanceData && (() => {
+                      const cls = (stateData.assetClasses || []).find((c) => c.id === addingChildForClassId);
+                      const className = cls?.name || '';
+                      const financeData = getFinanceChildData(className, newChildForm.market, newChildForm.assetType);
+                      return (
+                        <p className={`text-xs ${financeData.found ? 'text-green-600' : 'text-gray-500'}`}>
+                          {financeData.found
+                            ? '已从理财模块自动同步数据'
+                            : '暂无理财数据，将作为自定义项添加'}
+                        </p>
+                      );
+                    })()}
+
+                    {!hasFinanceData && (
+                      <>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                              当前价值
+                            </label>
+                            <input
+                              type="number"
+                              value={newChildForm.value}
+                              onChange={(e) => setNewChildForm({ ...newChildForm, value: e.target.value })}
+                              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                              期初价值
+                            </label>
+                            <input
+                              type="number"
+                              value={newChildForm.openingValue}
+                              onChange={(e) => setNewChildForm({ ...newChildForm, openingValue: e.target.value })}
+                              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          暂无理财数据，将作为自定义项添加
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-3 mt-6">
+                    <button
+                      onClick={closeAddChildModal}
+                      className="px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={handleAddChildConfirm}
+                      className="px-4 py-2 rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+                    >
+                      确定
                     </button>
                   </div>
                 </div>
