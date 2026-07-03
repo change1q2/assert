@@ -18,6 +18,7 @@ import Records from './pages/Records.jsx';
 import Finance from './pages/Finance.jsx';
 import Debts from './pages/Debts.jsx';
 import AssetClasses from './pages/AssetClasses.jsx';
+import CategoryDetail from './pages/CategoryDetail.jsx';
 import Analysis from './pages/Analysis.jsx';
 import Tools from './pages/Tools.jsx';
 import Strategies from './pages/Strategies.jsx';
@@ -40,6 +41,7 @@ const menuItems = [
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('overview');
   const [loggedIn, setLoggedIn] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -57,9 +59,21 @@ export default function App() {
     localStorage.removeItem('state');
     setLoggedIn(false);
     setActiveMenu('overview');
+    setSelectedCategory(null);
+  };
+
+  const handleCategorySelect = (categoryName) => {
+    setSelectedCategory(categoryName);
+  };
+
+  const handleBackFromDetail = () => {
+    setSelectedCategory(null);
   };
 
   const renderContent = () => {
+    if (selectedCategory) {
+      return <CategoryDetail categoryName={selectedCategory} onBack={handleBackFromDetail} />;
+    }
     switch (activeMenu) {
       case 'overview':
         return <Overview />;
@@ -70,7 +84,7 @@ export default function App() {
       case 'debts':
         return <Debts />;
       case 'classes':
-        return <AssetClasses />;
+        return <AssetClasses onCategorySelect={handleCategorySelect} />;
       case 'analysis':
         return <Analysis />;
       case 'tools':
@@ -121,9 +135,12 @@ export default function App() {
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveMenu(item.id)}
+                onClick={() => {
+                  setActiveMenu(item.id);
+                  setSelectedCategory(null);
+                }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
-                  activeMenu === item.id
+                  activeMenu === item.id && !selectedCategory
                     ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700/50'
                 }`}
