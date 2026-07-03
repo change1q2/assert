@@ -1165,38 +1165,42 @@ export default function Analysis() {
               </div>
             </div>
             <div className="w-full h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <Sankey
-                  data={{
-                    nodes: [
-                      { name: '收入', color: '#10B981' },
-                      ...currentCategoryData.income.slice(0, 3).map(cat => ({ name: cat.name, color: cat.color })),
-                      ...currentCategoryData.expense.slice(0, 3).map(cat => ({ name: cat.name, color: cat.color })),
-                      { name: '支出', color: '#EF4444' },
-                    ],
-                    links: [
-                      ...currentCategoryData.income.slice(0, 3).map((cat, idx) => ({
-                        source: 0,
-                        target: idx + 1,
-                        value: cat.value,
-                        color: cat.color,
-                      })),
-                      ...currentCategoryData.expense.slice(0, 3).map((cat, idx) => ({
-                        source: idx + 4,
-                        target: 7,
-                        value: cat.value,
-                        color: cat.color,
-                      })),
-                    ],
-                  }}
-                  layout="horizontal"
-                  nodeWidth={12}
-                  nodeGap={8}
-                  nodeLabel={{ fontSize: 10 }}
-                >
-                  <Tooltip formatter={(value) => [formatCurrency(value), '']} />
-                </Sankey>
-              </ResponsiveContainer>
+              {(currentCategoryData.income.length > 0 || currentCategoryData.expense.length > 0) ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <Sankey
+                    data={{
+                      nodes: [
+                        { name: '收入', color: '#10B981' },
+                        ...currentCategoryData.income.slice(0, 3).map(cat => ({ name: cat.name, color: cat.color })),
+                        ...currentCategoryData.expense.slice(0, 3).map(cat => ({ name: cat.name, color: cat.color })),
+                        { name: '支出', color: '#EF4444' },
+                      ],
+                      links: [
+                        ...currentCategoryData.income.slice(0, 3).map((cat, idx) => ({
+                          source: 0,
+                          target: idx + 1,
+                          value: cat.value,
+                          color: cat.color,
+                        })),
+                        ...currentCategoryData.expense.slice(0, 3).map((cat, idx) => ({
+                          source: idx + 1 + currentCategoryData.income.slice(0, 3).length,
+                          target: 1 + currentCategoryData.income.slice(0, 3).length + currentCategoryData.expense.slice(0, 3).length,
+                          value: cat.value,
+                          color: cat.color,
+                        })),
+                      ],
+                    }}
+                    layout="horizontal"
+                    nodeWidth={12}
+                    nodeGap={8}
+                    nodeLabel={{ fontSize: 10 }}
+                  >
+                    <Tooltip formatter={(value) => [formatCurrency(value), '']} />
+                  </Sankey>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">暂无收支数据</div>
+              )}
             </div>
           </div>
 
