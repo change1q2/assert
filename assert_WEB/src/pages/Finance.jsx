@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { fetchState, createAccount } from '../api';
+import { fetchState, createAccount, fetchBooks, saveBooks } from '../api';
 import {
   TrendingUp,
   TrendingDown,
@@ -18,6 +18,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
+  Settings,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 
 // ── 工具函数 ──
@@ -316,6 +319,17 @@ export default function Finance() {
   const [error, setError] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
 
+  // 账本和标签管理状态
+  const [books, setBooks] = useState([]);
+  const [tags, setTags] = useState([]);
+  const [showBookModal, setShowBookModal] = useState(false);
+  const [showTagModal, setShowTagModal] = useState(false);
+  const [bookToEdit, setBookToEdit] = useState(null);
+  const [tagToEdit, setTagToEdit] = useState(null);
+  const [newBookName, setNewBookName] = useState('');
+  const [newTagName, setNewTagName] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+
   // 新增弹窗表单状态
   const [newAccount, setNewAccount] = useState({
     market: '国内市场',
@@ -339,6 +353,7 @@ export default function Finance() {
     dailyPnl: '',
     dailyPnlRate: '',
     currentValue: '',
+    tags: '',
   });
   const [saving, setSaving] = useState(false);
   const [uploadedImage, setUploadedImage] = useState(null);
@@ -352,6 +367,7 @@ export default function Finance() {
 
   useEffect(() => {
     loadData();
+    loadBooksAndTags();
   }, []);
 
   const loadData = async () => {
@@ -365,6 +381,23 @@ export default function Finance() {
       setError('加载数据失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBooksAndTags = async () => {
+    try {
+      const booksData = await fetchBooks();
+      setBooks(booksData || []);
+      // 从账本中提取所有唯一的标签
+      const allTags = new Set();
+      booksData?.forEach(book => {
+        if (book.tags && Array.isArray(book.tags)) {
+          book.tags.forEach(tag => allTags.add(tag));
+        }
+      });
+      setTags(Array.from(allTags).sort());
+    } catch (err) {
+      console.error('Failed to load books and tags:', err);
     }
   };
 
@@ -420,9 +453,100 @@ export default function Finance() {
       dailyPnl: '',
       dailyPnlRate: '',
       currentValue: '',
+      tags: '',
     });
     setUploadedImage(null);
     setOcrResult(null);
+  };
+
+  // ─ 账本管理 ──
+  const handleSaveBooks = async () => {
+    try {
+      await saveBooks(books);
+      loadBooksAndTags();
+    } catch (err) {
+      console.error('Failed to save books:', err);
+    }
+  };
+
+  const handleAddBook = () => {
+    if (!newBookName.trim()) return;
+    const newBook = {
+      id: Date.now().toString(),
+      name: newBookName.trim(),
+      tags: [],
+    };
+    setBooks([...books, newBook]);
+    setNewBookName('');
+    handleSaveBooks();
+  };
+
+  const handleEditBook = (book) => {
+    setBookToEdit(book);
+  };
+
+  const handleSaveBookEdit = () => {
+    if (!bookToEdit || !bookToEdit.name.trim()) return;
+    setBooks(books.map(b => b.id === bookToEdit.id ? bookToEdit : b));
+    setBookToEdit(null);
+    handleSaveBooks();
+  };
+
+  const handleDeleteBook = async (bookId) => {
+    setBooks(books.filter(b => b.id !== bookId));
+    setDeleteConfirm(null);
+    handleSaveBooks();
+  };
+
+  // ── 标签管理 ──
+  const handleAddTag = () => {
+    if (!newTagName.trim()) return;
+    if (tags.includes(newTagName.trim())) return;
+    const newTags = [...tags, newTagName.trim()].sort();
+    setTags(newTags);
+    setNewTagName('');
+    // 更新所有账本的标签列表
+    setBooks(books.map(book => ({
+      ...book,
+      tags: Array.from(new Set([...(book.tags || []), newTagName.trim()])),
+    })));
+    handleSaveBooks();
+  };
+
+  const handleEditTag = (tagName) => {
+    setTagToEdit(tagName);
+  };
+
+  const handleSaveTagEdit = () => {
+    if (!tagToEdit || !newTagName.trim()) return;
+    if (tags.includes(newTagName.trim()) && newTagName.trim() !== tagToEdit) return;
+    
+    const newTags = tags.map(t => t === tagToEdit ? newTagName.trim() : t).sort();
+    setTags(newTags);
+    
+    // 更新所有账本中的标签引用
+    setBooks(books.map(book => ({
+      ...book,
+      tags: (book.tags || []).map(t => t === tagToEdit ? newTagName.trim() : t),
+    })));
+    
+    setTagToEdit(null);
+    setNewTagName('');
+    handleSaveBooks();
+  };
+
+  const handleDeleteTag = async (tagName) => {
+    const newTags = tags.filter(t => t !== tagName);
+    setTags(newTags);
+    
+    // 从所有账本中移除该标签
+    setBooks(books.map(book => ({
+      ...book,
+      tags: (book.tags || []).filter(t => t !== tagName),
+    })));
+    
+    setDeleteConfirm(null);
+    handleSaveBooks();
   };
 
   // ── OCR 图文识别 ──
@@ -863,13 +987,18 @@ export default function Finance() {
                   </FormField>
 
                   <FormField label="所属账户">
-                    <select value={newAccount.account} onChange={e => setNewAccount({ ...newAccount, account: e.target.value })}
-                      className={FORM_SELECT}>
-                      <option value="">选择或新建账户</option>
-                      {[...new Set(accounts.map(a => a.account || a.name).filter(Boolean))].map(name =>
-                        <option key={name} value={name}>{name}</option>
-                      )}
-                    </select>
+                    <div className="flex gap-2">
+                      <select value={newAccount.account} onChange={e => setNewAccount({ ...newAccount, account: e.target.value })}
+                        className={`${FORM_SELECT} flex-1`}>
+                        <option value="">选择或新建账户</option>
+                        {[...new Set(accounts.map(a => a.account || a.name).filter(Boolean))].map(name =>
+                          <option key={name} value={name}>{name}</option>
+                        )}
+                      </select>
+                      <button onClick={() => setShowBookModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    </div>
                   </FormField>
 
                   {/* Row 3: 资产分类 | 二级 */}
@@ -1017,6 +1146,26 @@ export default function Finance() {
                       )}
                     </FormField>
                   </div>
+
+                  {/* Row 12: 标签 — 全宽 */}
+                  <div className="sm:col-span-2">
+                    <FormField label="标签" fullWidth>
+                      <div className="flex gap-2">
+                        <select 
+                          value={newAccount.tags || ''} 
+                          onChange={e => setNewAccount({ ...newAccount, tags: e.target.value })}
+                          className={`${FORM_SELECT} flex-1`}>
+                          <option value="">请选择标签</option>
+                          {tags.map(tag => (
+                            <option key={tag} value={tag}>{tag}</option>
+                          ))}
+                        </select>
+                        <button onClick={() => setShowTagModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
+                          <Settings className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </FormField>
+                  </div>
                 </div>
 
                 {/* 操作按钮 */}
@@ -1029,6 +1178,100 @@ export default function Finance() {
                     className="flex-1 py-2.5 rounded-xl bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-50 font-semibold transition-colors shadow-md shadow-indigo-200">
                     {saving ? '保存中...' : '保存'}
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ 账本管理弹窗 ══ */}
+        {showBookModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">账本管理</h3>
+                <button onClick={() => setShowBookModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <input type="text" value={newBookName} onChange={e => setNewBookName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddBook()} placeholder="输入账本名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <button onClick={handleAddBook} className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"><Plus className="w-4 h-4" /></button>
+                </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {books.length > 0 ? (
+                    books.map((book) => (
+                      <div key={book.id} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                        {bookToEdit?.id === book.id ? (
+                          <>
+                            <input type="text" value={bookToEdit.name} onChange={e => setBookToEdit({ ...bookToEdit, name: e.target.value })} className="flex-1 px-2 py-1 border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-600 dark:text-white" autoFocus />
+                            <button onClick={handleSaveBookEdit} className="p-1 text-green-600 hover:bg-green-100 rounded"><Edit2 className="w-4 h-4" /></button>
+                            <button onClick={() => setBookToEdit(null)} className="p-1 text-gray-500 hover:bg-gray-200 rounded"><X className="w-4 h-4" /></button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="flex-1 text-gray-700 dark:text-gray-300">{book.name}</span>
+                            <button onClick={() => handleEditBook(book)} className="p-1 text-blue-600 hover:bg-blue-100 rounded"><Edit2 className="w-4 h-4" /></button>
+                            {deleteConfirm === `book-${book.id}` ? (
+                              <button onClick={() => handleDeleteBook(book.id)} className="p-1 text-red-600 hover:bg-red-100 rounded">确认</button>
+                            ) : (
+                              <button onClick={() => setDeleteConfirm(`book-${book.id}`)} className="p-1 text-red-500 hover:bg-red-100 rounded"><Trash2 className="w-4 h-4" /></button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-gray-400 text-sm">暂无账本</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══ 标签管理弹窗 ═══ */}
+        {showTagModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">标签管理</h3>
+                <button onClick={() => setShowTagModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <input type="text" value={newTagName} onChange={e => setNewTagName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddTag()} placeholder="输入标签名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <button onClick={handleAddTag} className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"><Plus className="w-4 h-4" /></button>
+                </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {tags.length > 0 ? (
+                    tags.map((tag) => (
+                      <div key={tag} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                        {tagToEdit === tag ? (
+                          <>
+                            <input type="text" value={newTagName || tag} onChange={e => setNewTagName(e.target.value)} className="flex-1 px-2 py-1 border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-600 dark:text-white" autoFocus />
+                            <button onClick={handleSaveTagEdit} className="p-1 text-green-600 hover:bg-green-100 rounded"><Edit2 className="w-4 h-4" /></button>
+                            <button onClick={() => { setTagToEdit(null); setNewTagName(''); }} className="p-1 text-gray-500 hover:bg-gray-200 rounded"><X className="w-4 h-4" /></button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="flex-1 text-gray-700 dark:text-gray-300">{tag}</span>
+                            <button onClick={() => { setTagToEdit(tag); setNewTagName(tag); }} className="p-1 text-blue-600 hover:bg-blue-100 rounded"><Edit2 className="w-4 h-4" /></button>
+                            {deleteConfirm === `tag-${tag}` ? (
+                              <button onClick={() => handleDeleteTag(tag)} className="p-1 text-red-600 hover:bg-red-100 rounded">确认</button>
+                            ) : (
+                              <button onClick={() => setDeleteConfirm(`tag-${tag}`)} className="p-1 text-red-500 hover:bg-red-100 rounded"><Trash2 className="w-4 h-4" /></button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-gray-400 text-sm">暂无标签</div>
+                  )}
                 </div>
               </div>
             </div>
