@@ -33,7 +33,7 @@ function formatDateInputValue(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-export default function Analysis() {
+export default function Analysis({ onNavigate }) {
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -54,8 +54,12 @@ export default function Analysis() {
   const [yearTagFilter, setYearTagFilter] = useState('all');
   const [yearShowAmount, setYearShowAmount] = useState(false);
   const [yearChartType, setYearChartType] = useState('all');
+  const [yearFilterMode, setYearFilterMode] = useState('year');
+  const [yearPieType, setYearPieType] = useState('expense');
   const [yearSummary, setYearSummary] = useState('');
   const [isEditingYearSummary, setIsEditingYearSummary] = useState(false);
+  const [dailyChartType, setDailyChartType] = useState('expense');
+  const [pieLabelFontSize, setPieLabelFontSize] = useState(12);
 
   const { records = [], accounts = [], debts = [], tags = [] } = stateData || {};
 
@@ -131,6 +135,7 @@ export default function Analysis() {
       }
 
       if (timeMode === 'year') {
+        if (yearFilterMode === 'all') return true;
         return recordYear === selectedYear;
       }
 
@@ -143,7 +148,7 @@ export default function Analysis() {
 
       return true;
     });
-  }, [timeMode, selectedYear, selectedMonth, startDate, endDate]);
+  }, [timeMode, selectedYear, selectedMonth, startDate, endDate, yearFilterMode]);
 
   const getAmount = (record) => {
     const rawAmount = Math.abs(record.amount || 0);
@@ -713,6 +718,110 @@ export default function Analysis() {
     };
   }, [timeMode, selectedYear, records, accounts, filterRecordsByTime, selectedCurrency, yearCategoryView]);
 
+  const dayStats = useMemo(() => {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    
+    const todayRecords = records.filter(r => r.date === todayStr);
+    
+    let todayIncome = 0;
+    let todayExpense = 0;
+    
+    todayRecords.forEach(record => {
+      const amount = getAmount(record);
+      if (record.type === 'income') {
+        todayIncome += amount;
+      } else if (record.type === 'expense') {
+        todayExpense += amount;
+      }
+    });
+    
+    return {
+      todayExpense,
+      todayIncome,
+      todayBalance: todayIncome - todayExpense,
+    };
+  }, [records]);
+
+  const weekStats = useMemo(() => {
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    
+    const weekDays = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + i);
+      weekDays.push({
+        date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+        day: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][i],
+        expense: 0,
+        income: 0,
+      });
+    }
+    
+    records.forEach(record => {
+      const recordDate = parseDateAsLocal(record.date);
+      const amount = getAmount(record);
+      
+      const dayIndex = weekDays.findIndex(d => d.date === record.date);
+      if (dayIndex >= 0) {
+        if (record.type === 'income') {
+          weekDays[dayIndex].income += amount;
+        } else if (record.type === 'expense') {
+          weekDays[dayIndex].expense += amount;
+        }
+      }
+    });
+    
+    const totalExpense = weekDays.reduce((sum, d) => sum + d.expense, 0);
+    const totalIncome = weekDays.reduce((sum, d) => sum + d.income, 0);
+    
+    return {
+      days: weekDays,
+      totalExpense,
+      totalIncome,
+      avgExpense: weekDays.filter(d => d.expense > 0).length > 0 ? totalExpense / weekDays.filter(d => d.expense > 0).length : 0,
+      avgIncome: weekDays.filter(d => d.income > 0).length > 0 ? totalIncome / weekDays.filter(d => d.income > 0).length : 0,
+    };
+  }, [records]);
+
+  const dailyTagStats = useMemo(() => {
+    const tagAgg = {};
+    records.forEach(record => {
+      const amount = getAmount(record);
+      (record.tags || []).forEach(tag => {
+        if (!tagAgg[tag]) tagAgg[tag] = { income: 0, expense: 0, count: 0 };
+        if (record.type === 'income') {
+          tagAgg[tag].income += amount;
+        } else if (record.type === 'expense') {
+          tagAgg[tag].expense += amount;
+        }
+        tagAgg[tag].count += 1;
+      });
+    });
+    
+    return Object.entries(tagAgg).map(([name, data], idx) => ({
+      name,
+      income: data.income,
+      expense: data.expense,
+      count: data.count,
+      color: TAG_COLORS[idx % TAG_COLORS.length],
+    })).sort((a, b) => (b.expense + b.income) - (a.expense + a.income));
+  }, [records]);
+
+  const dailyBudgetData = useMemo(() => {
+    return [
+      { name: '休闲娱乐', budget: 500, spent: 300, color: '#EC4899' },
+      { name: '食品餐饮', budget: 600, spent: 450, color: '#F59E0B' },
+      { name: '恋爱消费', budget: 500, spent: 200, color: '#06B6D4' },
+      { name: '健康医疗', budget: 500, spent: 100, color: '#10B981' },
+      { name: '出行交通', budget: 300, spent: 250, color: '#6366F1' },
+      { name: '男方个人', budget: 500, spent: 150, color: '#F97316' },
+    ];
+  }, []);
+
   const loadYearSummary = useCallback(() => {
     const key = `yearly_summary_${selectedYear}`;
     const saved = localStorage.getItem(key);
@@ -935,6 +1044,17 @@ export default function Analysis() {
                     </button>
                   ))}
                 </div>
+                <select 
+                  value={pieLabelFontSize} 
+                  onChange={(e) => setPieLabelFontSize(parseInt(e.target.value))}
+                  className="px-2 py-1 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-xs font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value={8}>8px</option>
+                  <option value={10}>10px</option>
+                  <option value={12}>12px</option>
+                  <option value={14}>14px</option>
+                  <option value={16}>16px</option>
+                </select>
               </div>
             </div>
             <div className="w-full h-[320px]">
@@ -949,7 +1069,12 @@ export default function Analysis() {
                       outerRadius={100}
                       paddingAngle={2}
                       dataKey="value"
-                      label={null}
+                      label={({ name, payload, x, y, textAnchor }) => (
+                        <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={pieLabelFontSize}>
+                          {name} {payload.percent?.toFixed(1) || 0}%
+                        </text>
+                      )}
+                      labelLine={false}
                     >
                       {cCategory.expense.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
@@ -960,7 +1085,7 @@ export default function Analysis() {
                       {cCategory.expense[0]?.name || '支出'}
                     </text>
                     <text x="50%" y="60%" textAnchor="middle" className="text-sm font-bold fill-gray-900 dark:fill-white">
-                      {cCategory.expense[0] ? `${(cCategory.expense[0].value / cTotalExpense * 100).toFixed(1)}%` : '0%'}
+                      {cCategory.expense[0] && cExpense > 0 ? `${(cCategory.expense[0].value / cExpense * 100).toFixed(1)}%` : '0%'}
                     </text>
                   </PieChart>
                 </ResponsiveContainer>
@@ -1061,6 +1186,181 @@ export default function Analysis() {
                 <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">暂无标签数据</div>
               )}
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDailyAnalysis = () => {
+    return (
+      <div data-testid="daily-analysis">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-gradient-to-br from-red-500 to-orange-500 rounded-2xl p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-red-100 text-sm">本日支出</div>
+                <div className="text-2xl font-bold mt-1">{formatCurrency(dayStats.todayExpense)}</div>
+              </div>
+              <div className="flex items-center gap-1 text-sm">
+                <Wallet className="w-4 h-4" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gradient-to-br from-green-500 to-emerald-500 rounded-2xl p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-green-100 text-sm">本日收入</div>
+                <div className="text-2xl font-bold mt-1">{formatCurrency(dayStats.todayIncome)}</div>
+              </div>
+              <div className="flex items-center gap-1 text-sm">
+                <CreditCard className="w-4 h-4" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gradient-to-br from-blue-500 to-indigo-500 rounded-2xl p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-blue-100 text-sm">本日结余</div>
+                <div className={`text-2xl font-bold mt-1 ${dayStats.todayBalance >= 0 ? 'text-green-200' : 'text-red-200'}`}>
+                  {formatCurrency(dayStats.todayBalance)}
+                </div>
+              </div>
+              <div className={`flex items-center gap-1 text-sm ${dayStats.todayBalance >= 0 ? 'text-green-200' : 'text-red-200'}`}>
+                {dayStats.todayBalance >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">本周统计</h3>
+            <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
+              <button
+                onClick={() => setDailyChartType('expense')}
+                className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  dailyChartType === 'expense'
+                    ? 'bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400'
+                    : 'text-gray-600 dark:text-gray-400'
+                }`}
+              >
+                支出
+              </button>
+              <button
+                onClick={() => setDailyChartType('income')}
+                className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  dailyChartType === 'income'
+                    ? 'bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400'
+                    : 'text-gray-600 dark:text-gray-400'
+                }`}
+              >
+                收入
+              </button>
+            </div>
+          </div>
+          <div className="w-full h-[250px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={weekStats.days} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" className="dark:stroke-slate-700" />
+                <XAxis dataKey="day" className="dark:text-gray-400" tick={{ fontSize: 11 }} />
+                <YAxis className="dark:text-gray-400" tick={{ fontSize: 10 }} tickFormatter={(value) => formatCurrency(value)} />
+                <Tooltip formatter={(value) => [formatCurrency(value), dailyChartType === 'expense' ? '支出' : '收入']} />
+                <Bar 
+                  dataKey={dailyChartType} 
+                  name={dailyChartType === 'expense' ? '支出' : '收入'} 
+                  fill={dailyChartType === 'expense' ? '#EF4444' : '#10B981'} 
+                  radius={[4, 4, 0, 0]}
+                  label={{ position: 'top', formatter: (value) => value > 0 ? formatCurrency(value) : '', fontSize: 10 }}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="flex justify-between mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">总{dailyChartType === 'expense' ? '支出' : '收入'}</div>
+              <div className={`text-lg font-bold ${dailyChartType === 'expense' ? 'text-red-500' : 'text-green-500'}`}>
+                {formatCurrency(dailyChartType === 'expense' ? weekStats.totalExpense : weekStats.totalIncome)}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">日均{dailyChartType === 'expense' ? '支出' : '收入'}</div>
+              <div className={`text-lg font-bold ${dailyChartType === 'expense' ? 'text-red-500' : 'text-green-500'}`}>
+                {formatCurrency(dailyChartType === 'expense' ? weekStats.avgExpense : weekStats.avgIncome)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">预算占比</h3>
+            <button 
+              onClick={() => onNavigate && onNavigate('budget')}
+              className="text-xs text-blue-500 hover:text-blue-600"
+            >
+              查看详情
+            </button>
+          </div>
+          <div className="w-full h-[250px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie 
+                  data={dailyBudgetData} 
+                  cx="50%" 
+                  cy="50%" 
+                  innerRadius={60} 
+                  outerRadius={100} 
+                  paddingAngle={2} 
+                  dataKey="spent"
+                  label={({ name, percent, x, y, textAnchor }) => (
+                        <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={pieLabelFontSize}>
+                          {name} {(percent * 100).toFixed(1)}%
+                        </text>
+                      )}
+                  labelLine={true}
+                >
+                  {dailyBudgetData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value, name, props) => [`已用: ${formatCurrency(value)}`, `预算: ${formatCurrency(props.payload.budget)}`]} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">标签数据(近一月)</h3>
+            <button 
+              onClick={() => onNavigate && onNavigate('records')}
+              className="text-xs text-blue-500 hover:text-blue-600"
+            >
+              查看全部
+            </button>
+          </div>
+          <div className="space-y-3">
+            {dailyTagStats.map((tag, index) => (
+              <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-700/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: tag.color }} />
+                  <div>
+                    <span className="font-medium text-gray-900 dark:text-white">{tag.name}</span>
+                    <div className="text-xs text-gray-400">{tag.count}笔</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm text-red-500">支: {formatCurrency(-tag.expense)}</div>
+                  <div className="text-sm text-green-500">收: {formatCurrency(tag.income)}</div>
+                </div>
+              </div>
+            ))}
+            {dailyTagStats.length === 0 && (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">暂无标签数据</div>
+            )}
           </div>
         </div>
       </div>
@@ -1210,51 +1510,19 @@ export default function Analysis() {
                 <Legend />
                 {yearChartType === 'all' && (
                   <>
-                    <Bar dataKey="expense" name="支出" fill="#EF4444" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="income" name="收入" fill="#10B981" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="balance" name="结余" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="expense" name="支出" fill="#EF4444" radius={[4, 4, 0, 0]} label={{ position: 'top', fontSize: 10, fill: '#EF4444', formatter: (v) => formatCurrency(v) }} />
+                    <Bar dataKey="income" name="收入" fill="#10B981" radius={[4, 4, 0, 0]} label={{ position: 'top', fontSize: 10, fill: '#10B981', formatter: (v) => formatCurrency(v) }} />
+                    <Bar dataKey="balance" name="结余" fill="#3B82F6" radius={[4, 4, 0, 0]} label={{ position: 'top', fontSize: 10, fill: '#3B82F6', formatter: (v) => formatCurrency(v) }} />
                   </>
                 )}
                 {yearChartType !== 'all' && (
                   <Bar dataKey="value" name={yearChartType === 'expense' ? '支出' : yearChartType === 'income' ? '收入' : '结余'} 
                        fill={yearChartType === 'expense' ? '#EF4444' : yearChartType === 'income' ? '#10B981' : '#3B82F6'} 
-                       radius={[4, 4, 0, 0]} />
+                       radius={[4, 4, 0, 0]}
+                       label={{ position: 'top', fontSize: 10, fill: yearChartType === 'expense' ? '#EF4444' : yearChartType === 'income' ? '#10B981' : '#3B82F6', formatter: (v) => formatCurrency(v) }} />
                 )}
               </BarChart>
             </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">收支热力日历</h3>
-          <div className="space-y-4">
-            {yHeatmap.map((monthData, mIdx) => (
-              <div key={mIdx} className="flex items-start gap-3">
-                <div className="w-10 text-xs font-medium text-gray-500 dark:text-gray-400 flex-shrink-0 pt-1">
-                  {monthData.label}
-                </div>
-                <div className="flex-1 grid grid-cols-7 md:grid-cols-14 lg:grid-cols-31 gap-1">
-                  {monthData.days.map((day, dIdx) => (
-                    <div
-                      key={dIdx}
-                      className={`aspect-square rounded-sm ${getHeatmapColor(day.total, maxHeatmapValue)} cursor-pointer transition-transform hover:scale-110`}
-                      title={`${day.date}\n支出: ${formatCurrency(day.expense)}\n收入: ${formatCurrency(day.income)}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="flex items-center justify-end gap-2 mt-4 text-xs text-gray-500 dark:text-gray-400">
-            <span>少</span>
-            <div className="flex gap-1">
-              <div className="w-3 h-3 rounded-sm bg-gray-100 dark:bg-slate-700" />
-              <div className="w-3 h-3 rounded-sm bg-blue-100 dark:bg-blue-900/30" />
-              <div className="w-3 h-3 rounded-sm bg-blue-200 dark:bg-blue-800/50" />
-              <div className="w-3 h-3 rounded-sm bg-blue-400 dark:bg-blue-600" />
-              <div className="w-3 h-3 rounded-sm bg-blue-600 dark:bg-blue-500" />
-            </div>
-            <span>多</span>
           </div>
         </div>
 
@@ -1340,17 +1608,14 @@ export default function Analysis() {
 
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">支出占比</h3>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">{yearPieType === 'expense' ? '支出占比' : '收入占比'}</h3>
               <div className="flex items-center gap-3">
-                <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={yearShowAmount}
-                    onChange={(e) => setYearShowAmount(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded border-gray-300 text-blue-500 focus:ring-blue-500"
-                  />
-                  <span>显示收支金额</span>
-                </label>
+                <button
+                  onClick={() => setYearPieType(yearPieType === 'expense' ? 'income' : 'expense')}
+                  className="px-3 py-1 text-xs rounded-lg border border-gray-300 dark:border-slate-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  切换到{yearPieType === 'expense' ? '收入' : '支出'}
+                </button>
                 <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
                   {[
                     { value: 'level1', label: '一级分类' },
@@ -1372,47 +1637,43 @@ export default function Analysis() {
               </div>
             </div>
             <div className="w-full h-[320px]">
-              {yCategory.expense.length > 0 ? (
+              {(yearPieType === 'expense' ? yCategory.expense : yCategory.income).length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={yCategory.expense}
+                      data={yearPieType === 'expense' ? yCategory.expense : yCategory.income}
                       cx="50%"
                       cy="50%"
                       innerRadius={60}
-                      outerRadius={100}
+                      outerRadius={90}
                       paddingAngle={2}
                       dataKey="value"
-                      label={({ name, value, percent }) => yearShowAmount
-                        ? `${name} ${formatCurrency(value)}`
-                        : `${name} ${percent.toFixed(1)}%`}
-                      labelLine={false}
+                      label={({ name, value, percent, x, y, textAnchor }) => (
+                        <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={pieLabelFontSize}>
+                          {name} {percent.toFixed(1)}%
+                        </text>
+                      )}
+                      labelLine={{ length: 10, strokeWidth: 1 }}
                     >
-                      {yCategory.expense.map((entry, index) => (
+                      {(yearPieType === 'expense' ? yCategory.expense : yCategory.income).map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value, name) => [formatCurrency(value), name]} />
-                    <text x="50%" y="45%" textAnchor="middle" className="text-xs font-medium fill-gray-700 dark:fill-gray-300">
-                      {yCategory.expense[0]?.name || '支出'}
-                    </text>
-                    <text x="50%" y="60%" textAnchor="middle" className="text-sm font-bold fill-gray-900 dark:fill-white">
-                      {yCategory.expense[0] ? `${yCategory.expense[0].percent.toFixed(1)}%` : '0%'}
-                    </text>
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">暂无支出数据</div>
+                <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">暂无{yearPieType === 'expense' ? '支出' : '收入'}数据</div>
               )}
             </div>
           </div>
         </div>
 
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">支出数据列表</h3>
+          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{yearPieType === 'expense' ? '支出' : '收入'}数据列表</h3>
           <div className="space-y-3">
-            {yCategory.expense.map((cat, index) => (
+            {(yearPieType === 'expense' ? yCategory.expense : yCategory.income).map((cat, index) => (
               <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-700/50">
                 <div className="flex items-center gap-3">
                   <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
@@ -1422,12 +1683,12 @@ export default function Analysis() {
                   <span className="text-xs text-gray-500 dark:text-gray-400">笔数 {cat.count || 0}</span>
                   <span className="text-xs text-gray-500 dark:text-gray-400">{cat.percent.toFixed(1)}%</span>
                   <span className="text-xs text-gray-400 dark:text-gray-500">{formatPercentage(cat.yoy)}</span>
-                  <span className="font-semibold text-red-500">{formatCurrency(cat.value)}</span>
+                  <span className={`font-semibold ${yearPieType === 'income' ? 'text-green-500' : 'text-red-500'}`}>{formatCurrency(cat.value)}</span>
                 </div>
               </div>
             ))}
-            {yCategory.expense.length === 0 && (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">暂无支出数据</div>
+            {(yearPieType === 'expense' ? yCategory.expense : yCategory.income).length === 0 && (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">暂无{yearPieType === 'expense' ? '支出' : '收入'}数据</div>
             )}
           </div>
         </div>
@@ -1484,23 +1745,17 @@ export default function Analysis() {
                       cx="50%"
                       cy="50%"
                       innerRadius={60}
-                      outerRadius={100}
+                      outerRadius={90}
                       paddingAngle={2}
                       dataKey="value"
                       label={({ name, percent }) => `${name} ${percent.toFixed(1)}%`}
-                      labelLine={false}
+                      labelLine={{ length: 10, strokeWidth: 1 }}
                     >
                       {filteredTagData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value, name) => [formatCurrency(value), name]} />
-                    <text x="50%" y="45%" textAnchor="middle" className="text-xs font-medium fill-gray-700 dark:fill-gray-300">
-                      {filteredTagData[0]?.name || '标签'}
-                    </text>
-                    <text x="50%" y="60%" textAnchor="middle" className="text-sm font-bold fill-gray-900 dark:fill-white">
-                      {filteredTagData[0] ? `${filteredTagData[0].percent.toFixed(1)}%` : '0%'}
-                    </text>
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>
@@ -1664,17 +1919,42 @@ export default function Analysis() {
               ))}
             </div>
 
-            {(timeMode === 'month' || timeMode === 'year') && (
-              <>
+            {timeMode === 'month' && (
+              <select 
+                value={selectedYear} 
+                onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                className="px-3 py-2 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map(year => (
+                  <option key={year} value={year}>{year}年</option>
+                ))}
+              </select>
+            )}
+
+            {timeMode === 'year' && (
+              <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
+                <button
+                  onClick={() => setYearFilterMode('all')}
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    yearFilterMode === 'all'
+                      ? 'bg-white dark:bg-slate-600 text-blue-600 dark:text-blue-400'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  所有
+                </button>
                 <select 
                   value={selectedYear} 
-                  onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                  className="px-3 py-2 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => { setSelectedYear(parseInt(e.target.value)); setYearFilterMode('year'); }}
+                  disabled={yearFilterMode === 'all'}
+                  className="px-3 py-1 bg-transparent border-none rounded-md text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                 >
                   {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map(year => (
                     <option key={year} value={year}>{year}年</option>
                   ))}
                 </select>
+              </div>
+            )}
 
                 {timeMode === 'month' && (
                   <div className="flex items-center gap-2">
@@ -1725,45 +2005,6 @@ export default function Analysis() {
                   </div>
                 )}
 
-                {timeMode === 'year' && (
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => setSelectedYear(selectedYear - 1)}
-                      className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-                    >
-                      <ChevronLeft className="w-4 h-4 text-gray-500" />
-                    </button>
-                    <div className="flex gap-1">
-                      {[
-                        { label: '今年', year: currentSystemYear },
-                        { label: '去年', year: currentSystemYear - 1 },
-                        { label: '2024', year: 2024 },
-                        { label: '2023', year: 2023 },
-                      ].map((btn) => (
-                        <button
-                          key={btn.label}
-                          onClick={() => setSelectedYear(btn.year)}
-                          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                            selectedYear === btn.year
-                              ? 'bg-blue-500 text-white'
-                              : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-slate-600'
-                          }`}
-                        >
-                          {btn.label}
-                        </button>
-                      ))}
-                    </div>
-                    <button 
-                      onClick={() => setSelectedYear(selectedYear + 1)}
-                      className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-                    >
-                      <ChevronRight className="w-4 h-4 text-gray-500" />
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-
             {timeMode === 'custom' && (
               <div className="flex items-center gap-2">
                 <input 
@@ -1794,7 +2035,7 @@ export default function Analysis() {
           </div>
         </div>
 
-        {timeMode === 'custom' ? renderCustomAnalysis() : timeMode === 'year' ? renderYearAnalysis() : (
+        {timeMode === 'custom' ? renderCustomAnalysis() : timeMode === 'year' ? renderYearAnalysis() : timeMode === 'day' ? renderDailyAnalysis() : (
         <div data-testid="default-analysis">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-gradient-to-br from-red-500 to-orange-500 rounded-2xl p-5 text-white">
@@ -2057,10 +2298,15 @@ export default function Analysis() {
                       innerRadius={50} 
                       outerRadius={80} 
                       paddingAngle={2} 
-                      dataKey="value" 
-                      label={null}
-                    >
-                      {tagData.map((entry, index) => (
+                      dataKey="value"
+                    label={({ name, payload, x, y, textAnchor }) => (
+                        <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={pieLabelFontSize}>
+                          {name} {payload.percent?.toFixed(1) || 0}%
+                        </text>
+                      )}
+                    labelLine={false}
+                  >
+                    {tagData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>

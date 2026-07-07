@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "web": "npx http-server . -p 4173 -c-1",
+    "web": "npx http-server dist -p 4173 -c-1",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"

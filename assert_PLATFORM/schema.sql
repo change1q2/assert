@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS records (
   tag VARCHAR(255) NOT NULL DEFAULT '',
   amount DOUBLE NOT NULL,
   currency VARCHAR(10) NOT NULL,
-  account_id VARCHAR(255) NOT NULL,
+  account_id VARCHAR(255) NOT NULL DEFAULT '',
   record_date VARCHAR(20) NOT NULL,
   recorder VARCHAR(255) NOT NULL DEFAULT '',
   note TEXT NOT NULL,

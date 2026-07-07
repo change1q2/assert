@@ -140,6 +140,12 @@ export async function createAsset(data) {
 export async function fetchState() {
   try {
     const response = await request('/state')
+    if (response.error && response.error.includes('未授权')) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('state')
+      window.location.reload()
+      return {}
+    }
     if (response.message && response.message.includes('登录')) {
       return {
         debts: [],
@@ -174,15 +180,12 @@ export async function fetchState() {
 }
 
 export async function saveState(state) {
-  try {
-    const response = await request('/state', {
-      method: 'PUT',
-      body: JSON.stringify({ state }),
-    })
-    return response
-  } catch {
-    return { success: false, error: '保存状态失败' }
-  }
+  const response = await request('/state', {
+    method: 'PUT',
+    body: JSON.stringify({ state }),
+  })
+  if (response && response.ok) return response
+  throw new Error(response?.error || '保存状态失败')
 }
 
 export async function fetchBooks() {
