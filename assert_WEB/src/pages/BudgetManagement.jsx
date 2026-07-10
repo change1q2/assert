@@ -81,8 +81,41 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
     return records.filter(r => r.date.startsWith(monthStr));
   }, [records]);
 
-  const totalBudget = useMemo(() => budgets.reduce((sum, b) => sum + b.amount, 0), [budgets]);
-  const totalUsed = useMemo(() => budgets.reduce((sum, b) => sum + b.used, 0), [budgets]);
+  const carryOverMap = useMemo(() => {
+    const now = new Date();
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthStr = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, '0')}`;
+    
+    const lastMonthRecords = records.filter(r => r.date.startsWith(lastMonthStr) && r.type === 'expense');
+    const result = {};
+    
+    budgets.forEach(b => {
+      const category = b.category || b.name;
+      const categoryRecords = lastMonthRecords.filter(r => {
+        return r.category === category || r.subCategory === b.subCategory || r.category === b.name;
+      });
+      const actualSpent = categoryRecords.reduce((sum, r) => sum + Math.abs(r.amount), 0);
+      const overspent = actualSpent - b.amount;
+      if (overspent > 0) {
+        result[b.id] = overspent;
+      }
+    });
+    
+    return result;
+  }, [records, budgets]);
+
+  const totalBudget = useMemo(() => budgets.reduce((sum, b) => sum + b.amount - (carryOverMap[b.id] || 0), 0), [budgets, carryOverMap]);
+  const totalUsed = useMemo(() => {
+    return budgets.reduce((sum, b) => {
+      const category = b.category || b.name;
+      const used = monthRecords
+        .filter(r => r.type === 'expense' && (
+          r.category === category || r.subCategory === b.subCategory || r.category === b.name
+        ))
+        .reduce((s, r) => s + Math.abs(r.amount), 0);
+      return sum + used;
+    }, 0);
+  }, [budgets, monthRecords]);
   const totalRemaining = useMemo(() => totalBudget - totalUsed, [totalBudget, totalUsed]);
   
   const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
@@ -99,7 +132,7 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
       const dayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const dayExpense = monthRecords
         .filter(r => r.date === dayStr && r.type === 'expense')
-        .reduce((sum, r) => sum + r.amount, 0);
+        .reduce((sum, r) => sum + Math.abs(r.amount), 0);
       cumulativeUsed += dayExpense;
       data.push({
         day: `${day}日`,
@@ -134,12 +167,13 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
     saveBudgets(newBudgets);
   };
 
-  const handleAddCategory = () => {
+  const handleAddCategory = async () => {
     if (!newCategory || !newCategoryBudget.trim()) {
       return;
     }
     
     const budgetName = newSubCategory ? `${newCategory} - ${newSubCategory}` : newCategory;
+    
     const newBudget = {
       id: `b${Date.now()}`,
       name: budgetName,
@@ -193,7 +227,7 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
           <div className="grid grid-cols-3 gap-4">
             <div>
               <div className="text-blue-100 text-xs">预算支出</div>
-              <div className="text-sm font-semibold">{totalUsed.toLocaleString()}</div>
+            <div className="text-sm font-semibold">{Math.abs(totalUsed).toLocaleString()}</div>
             </div>
             <div>
               <div className="text-blue-100 text-xs">日均预算</div>
@@ -201,7 +235,7 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
             </div>
             <div>
               <div className="text-blue-100 text-xs">日均支出</div>
-              <div className="text-sm font-semibold">{dailyExpense.toFixed(0)}</div>
+            <div className="text-sm font-semibold">{Math.abs(dailyExpense).toFixed(0)}</div>
             </div>
           </div>
           <div className="mt-4 pt-4 border-t border-blue-400/30">
@@ -220,8 +254,8 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="day" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip 
-                  formatter={(value) => [`${value.toLocaleString()}`, '']}
+                <Tooltip
+                  formatter={(value, name) => [`${value.toLocaleString()}`, name]}
                   contentStyle={{
                     backgroundColor: '#fff',
                     border: '1px solid #e5e7eb',
@@ -262,8 +296,17 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
 
           <div className="mt-4 space-y-3">
             {budgets.map((budget, index) => {
-              const percent = budget.amount > 0 ? (budget.used / budget.amount) * 100 : 0;
-              const isOverBudget = percent > 100;
+              const carryOver = carryOverMap[budget.id] || 0;
+              const effectiveAmount = budget.amount - carryOver;
+              const category = budget.category || budget.name;
+              const used = monthRecords
+                .filter(r => r.type === 'expense' && (
+                  r.category === category || r.subCategory === budget.subCategory || r.category === budget.name
+                ))
+                .reduce((s, r) => s + Math.abs(r.amount), 0);
+              const remaining = effectiveAmount - used;
+              const percent = effectiveAmount > 0 ? (used / effectiveAmount) * 100 : (used > 0 ? 100 : 0);
+              const isOverBudget = remaining < 0;
               
               return (
                 <div key={budget.id} className="p-4 rounded-xl bg-gray-50 dark:bg-slate-700/50">
@@ -319,7 +362,7 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
                   </div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-gray-500 dark:text-gray-400">
-                      {budget.used.toLocaleString()} / {budget.amount.toLocaleString()}
+                      {remaining.toLocaleString()} / {effectiveAmount.toLocaleString()}
                     </span>
                     <span className={`text-sm font-medium ${isOverBudget ? 'text-red-500' : 'text-gray-600 dark:text-gray-300'}`}>
                       {percent.toFixed(0)}%
@@ -327,12 +370,12 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
                   </div>
                   <div className="w-full bg-gray-200 dark:bg-slate-600 rounded-full h-2">
                     <div 
-                      className={`h-2 rounded-full transition-all duration-300 ${isOverBudget ? 'bg-red-500' : 'bg-blue-500'}`}
+                      className={`h-2 rounded-full transition-all duration-300 ${isOverBudget ? 'bg-red-500' : percent >= 80 ? 'bg-orange-500' : 'bg-blue-500'}`}
                       style={{ width: `${Math.min(percent, 100)}%` }}
                     />
                   </div>
                   <div className="mt-2 text-xs text-gray-400">
-                    支出: {budget.used.toLocaleString()}
+                    支出 {used.toLocaleString()}
                   </div>
                 </div>
               );

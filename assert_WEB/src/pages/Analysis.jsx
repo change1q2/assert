@@ -60,8 +60,9 @@ export default function Analysis({ onNavigate }) {
   const [isEditingYearSummary, setIsEditingYearSummary] = useState(false);
   const [dailyChartType, setDailyChartType] = useState('expense');
   const [pieLabelFontSize, setPieLabelFontSize] = useState(12);
+  const [expandedBudgetCategory, setExpandedBudgetCategory] = useState(null);
 
-  const { records = [], accounts = [], debts = [], tags = [] } = stateData || {};
+  const { records = [], accounts = [], debts = [], tags = [], budgets = [] } = stateData || {};
 
   useEffect(() => {
     loadData();
@@ -812,15 +813,37 @@ export default function Analysis({ onNavigate }) {
   }, [records]);
 
   const dailyBudgetData = useMemo(() => {
-    return [
-      { name: '休闲娱乐', budget: 500, spent: 300, color: '#EC4899' },
-      { name: '食品餐饮', budget: 600, spent: 450, color: '#F59E0B' },
-      { name: '恋爱消费', budget: 500, spent: 200, color: '#06B6D4' },
-      { name: '健康医疗', budget: 500, spent: 100, color: '#10B981' },
-      { name: '出行交通', budget: 300, spent: 250, color: '#6366F1' },
-      { name: '男方个人', budget: 500, spent: 150, color: '#F97316' },
-    ];
-  }, []);
+    const map = {};
+    budgets.forEach(b => {
+      const cat = b.category || b.name || '其他';
+      if (!map[cat]) {
+        map[cat] = { name: cat, budget: 0, spent: 0 };
+      }
+      map[cat].budget += b.amount || 0;
+      map[cat].spent += b.used || 0;
+    });
+    return Object.values(map).map((item, idx) => ({
+      ...item,
+      color: CATEGORY_COLORS[idx % CATEGORY_COLORS.length],
+    }));
+  }, [budgets]);
+
+  const budgetCategoryData = useMemo(() => {
+    const map = {};
+    budgets.forEach(b => {
+      const cat = b.category || b.name || '其他';
+      if (!map[cat]) {
+        map[cat] = { category: cat, amount: 0, used: 0, items: [] };
+      }
+      map[cat].amount += b.amount || 0;
+      map[cat].used += b.used || 0;
+      map[cat].items.push(b);
+    });
+    return Object.values(map).map((item, idx) => ({
+      ...item,
+      color: CATEGORY_COLORS[idx % CATEGORY_COLORS.length],
+    }));
+  }, [budgets]);
 
   const loadYearSummary = useCallback(() => {
     const key = `yearly_summary_${selectedYear}`;
@@ -1329,6 +1352,90 @@ export default function Analysis({ onNavigate }) {
                 <Tooltip formatter={(value, name, props) => [`已用: ${formatCurrency(value)}`, `预算: ${formatCurrency(props.payload.budget)}`]} />
               </PieChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">预算执行</h3>
+            <button
+              onClick={() => onNavigate && onNavigate('budget')}
+              className="text-xs text-blue-500 hover:text-blue-600"
+            >
+              管理预算
+            </button>
+          </div>
+          <div className="space-y-3">
+            {budgetCategoryData.length === 0 && (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">暂无预算数据</div>
+            )}
+            {budgetCategoryData.map((item) => {
+              const ratio = item.amount > 0 ? (item.used / item.amount) * 100 : 0;
+              const progressColor = ratio > 100 ? 'bg-red-500' : ratio >= 80 ? 'bg-orange-500' : 'bg-blue-500';
+              const isExpanded = expandedBudgetCategory === item.category;
+              return (
+                <div key={item.category}>
+                  <div
+                    onClick={() => setExpandedBudgetCategory(isExpanded ? null : item.category)}
+                    className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-700/50 cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-medium flex-shrink-0"
+                        style={{ backgroundColor: item.color }}
+                      >
+                        {item.category.charAt(0)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-900 dark:text-white text-sm truncate">{item.category}</div>
+                        <div className="w-32 sm:w-40 mt-1">
+                          <div className="w-full h-1.5 bg-gray-200 dark:bg-slate-600 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${progressColor}`}
+                              style={{ width: `${Math.min(ratio, 100)}%` }}
+                            />
+                          </div>
+                          <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                            {formatCurrency(item.used)} / {formatCurrency(item.amount)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <span className="text-sm text-gray-600 dark:text-gray-300">支出: {formatCurrency(item.used)}</span>
+                      {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                    </div>
+                  </div>
+                  {isExpanded && (
+                    <div className="mt-2 ml-11 space-y-2">
+                      {item.items.map((sub, idx) => {
+                        const subRatio = sub.amount > 0 ? ((sub.used || 0) / sub.amount) * 100 : 0;
+                        const subProgressColor = subRatio > 100 ? 'bg-red-500' : subRatio >= 80 ? 'bg-orange-500' : 'bg-blue-500';
+                        const subName = sub.subCategory || sub.name || '其他';
+                        return (
+                          <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-gray-100 dark:bg-slate-600/50">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className="text-xs text-gray-600 dark:text-gray-300 truncate">{subName}</span>
+                              <div className="w-20 sm:w-24">
+                                <div className="w-full h-1 bg-gray-200 dark:bg-slate-500 rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${subProgressColor}`}
+                                    style={{ width: `${Math.min(subRatio, 100)}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+                              {formatCurrency(sub.used || 0)} / {formatCurrency(sub.amount || 0)}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 

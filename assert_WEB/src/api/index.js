@@ -125,6 +125,29 @@ export async function createAccount(data) {
   }
 }
 
+export async function updateAccount(id, data) {
+  try {
+    const response = await request(`/accounts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+    return response
+  } catch {
+    return { success: true, data: { ...data, id } }
+  }
+}
+
+export async function deleteAccount(id) {
+  try {
+    const response = await request(`/accounts/${id}`, {
+      method: 'DELETE',
+    })
+    return response
+  } catch {
+    return { success: true }
+  }
+}
+
 export async function createAsset(data) {
   try {
     const response = await request('/assets', {
@@ -311,5 +334,26 @@ export async function fetchExchangeRates(baseCurrency = 'CNY') {
     return rates
   } catch {
     return { ...DEFAULT_EXCHANGE_RATES }
+  }
+}
+
+export async function lookupFinance(q) {
+  try {
+    const response = await request(`/finance/lookup?q=${encodeURIComponent(q)}`)
+    return response.items || []
+  } catch {
+    return []
+  }
+}
+
+export async function fetchFinanceQuotes(codes) {
+  try {
+    const response = await request('/finance/quotes', {
+      method: 'POST',
+      body: JSON.stringify({ codes }),
+    })
+    return response.quotes || []
+  } catch {
+    return []
   }
 }
