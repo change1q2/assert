@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { fetchState, saveState } from '../api';
 import * as XLSX from 'xlsx';
 import {
@@ -21,9 +21,10 @@ import {
   SlidersHorizontal,
   FileSpreadsheet,
   Download,
+  Wallet,
 } from 'lucide-react';
 import { CURRENCIES, getCurrencySymbol, DEFAULT_BASE_CURRENCY, convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency.js';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 function formatCurrency(value, currencyCode) {
   const symbol = getCurrencySymbol(currencyCode);
@@ -60,7 +61,7 @@ const defaultCategories = {
   },
 };
 
-export default function Records() {
+export default function Records({ onNavigate }) {
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -75,6 +76,16 @@ export default function Records() {
   const [selectedCurrencyFilter, setSelectedCurrencyFilter] = useState(DEFAULT_BASE_CURRENCY);
   const [newRecord, setNewRecord] = useState({ date: '', type: 'expense', category: '', subCategory: '', amount: '', book: '', account: '', note: '', tag: '', currency: DEFAULT_BASE_CURRENCY });
   const [saving, setSaving] = useState(false);
+  const importInProgress = useRef(false);
+  const [isBatchEditMode, setIsBatchEditMode] = useState(false);
+  const [selectedRecordIds, setSelectedRecordIds] = useState(new Set());
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingRecord, setEditingRecord] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [recordToDelete, setRecordToDelete] = useState(null);
+  const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
+  const [showBatchEditField, setShowBatchEditField] = useState(null);
+  const [batchEditValue, setBatchEditValue] = useState('');
   const [selectedBook, setSelectedBook] = useState(null);
   const [books, setBooks] = useState([]);
   const [categories, setCategories] = useState(defaultCategories);
@@ -150,8 +161,10 @@ export default function Records() {
   const [ocrResult, setOcrResult] = useState(null);
   const [customStartDate, setCustomStartDate] = useState(formatDate(new Date(new Date().setMonth(new Date().getMonth() - 1))));
   const [customEndDate, setCustomEndDate] = useState(formatDate(new Date()));
+  const [incomePieView, setIncomePieView] = useState('category');
+  const [expensePieView, setExpensePieView] = useState('category');
 
-  const { records = [] } = stateData || {};
+  const { records = [], budgets = [] } = stateData || {};
 
   useEffect(() => {
     loadData();
@@ -343,6 +356,112 @@ export default function Records() {
     });
   };
 
+  const handleDeleteRecord = async () => {
+    if (!recordToDelete) return;
+    try {
+      const updatedRecords = records.filter(r => r.id !== recordToDelete.id);
+      await saveState({ ...stateData, records: updatedRecords });
+      setShowDeleteConfirm(false);
+      setRecordToDelete(null);
+      loadData();
+    } catch (err) {
+      console.error('Failed to delete record:', err);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedRecordIds.size === 0) return;
+    try {
+      const updatedRecords = records.filter(r => !selectedRecordIds.has(r.id));
+      await saveState({ ...stateData, records: updatedRecords });
+      setShowBatchDeleteConfirm(false);
+      setIsBatchEditMode(false);
+      setSelectedRecordIds(new Set());
+      loadData();
+    } catch (err) {
+      console.error('Failed to batch delete:', err);
+    }
+  };
+
+  const handleEditRecord = (record) => {
+    const bookName = books.find(b => b.id === record.bookId)?.name || record.book || '';
+    setEditingRecord({
+      ...record,
+      book: bookName,
+      sub: record.sub || record.subCategory || '',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingRecord) return;
+    setSaving(true);
+    try {
+      const updatedRecords = records.map(r => {
+        if (r.id === editingRecord.id) {
+          return {
+            ...editingRecord,
+            bookId: books.find(b => b.name === editingRecord.book)?.id || r.bookId,
+            amount: editingRecord.type === 'expense' ? -Math.abs(parseFloat(editingRecord.amount)) : Math.abs(parseFloat(editingRecord.amount)),
+          };
+        }
+        return r;
+      });
+      await saveState({ ...stateData, records: updatedRecords, categories, books, tags });
+      setShowEditModal(false);
+      setEditingRecord(null);
+      loadData();
+    } catch (err) {
+      console.error('Failed to save edit:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleBatchEdit = async (field, value) => {
+    if (selectedRecordIds.size === 0) return;
+    setSaving(true);
+    try {
+      const updatedRecords = records.map(r => {
+        if (selectedRecordIds.has(r.id)) {
+          const updated = { ...r };
+          if (field === 'date') updated.date = value;
+          if (field === 'category') updated.category = value;
+          if (field === 'sub') updated.sub = value;
+          if (field === 'book') {
+            updated.book = value;
+            updated.bookId = books.find(b => b.name === value)?.id || '';
+          }
+          if (field === 'tag') updated.tag = value;
+          if (field === 'note') updated.note = value;
+          if (field === 'amount') {
+            const amt = parseFloat(value);
+            if (!isNaN(amt)) {
+              const absAmt = Math.abs(amt);
+              updated.amount = updated.type === 'income' ? absAmt : -absAmt;
+            }
+          }
+          if (field === 'type') {
+            updated.type = value;
+            updated.amount = value === 'income' ? Math.abs(updated.amount) : -Math.abs(updated.amount);
+          }
+          return updated;
+        }
+        return r;
+      });
+      await saveState({ ...stateData, records: updatedRecords, categories, books, tags });
+      setShowBatchEditField(null);
+      setBatchEditValue('');
+      setIsBatchEditMode(false);
+      setSelectedRecordIds(new Set());
+      loadData();
+    } catch (err) {
+      console.error('Failed to batch edit:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleAddRecord = async () => {
     if (!newRecord.date || !newRecord.amount) return;
     setSaving(true);
@@ -355,7 +474,7 @@ export default function Records() {
         bookId: books.find(b => b.name === newRecord.book)?.id || '',
         sub: newRecord.subCategory || '',
         tag: newRecord.tag || '',
-        id: Date.now(),
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       };
       delete newRecordData.book;
       delete newRecordData.subCategory;
@@ -663,24 +782,71 @@ export default function Records() {
   };
 
   const handleImport = async () => {
+    if (importInProgress.current) return;
     const validRecords = importPreview.filter(r => r.isValid);
-    
+
     if (validRecords.length === 0) {
       setImportError('没有有效的记录可导入');
       return;
     }
 
+    importInProgress.current = true;
     setSaving(true);
     try {
-      const newRecords = validRecords.map(row => {
+      const now = new Date().toISOString();
+      
+      let updatedCategories = { ...categories };
+      let updatedBooks = [...books];
+      let updatedTags = [...tags];
+
+      for (const row of validRecords) {
+        const type = row['收支类型'] === '收入' ? 'income' : 'expense';
+        const category = row['类别'];
+        const subCategory = row['二级分类'];
+        const bookName = row['所属账本'];
+        const tagName = row['标签'];
+
+        if (category && !updatedCategories[type]) {
+          updatedCategories[type] = {};
+        }
+
+        if (category && !updatedCategories[type][category]) {
+          updatedCategories[type][category] = [];
+        }
+
+        if (subCategory && category && updatedCategories[type][category] && !updatedCategories[type][category].includes(subCategory)) {
+          updatedCategories[type][category] = [...updatedCategories[type][category], subCategory];
+        }
+
+        if (bookName && !updatedBooks.find(b => b.name === bookName)) {
+          updatedBooks.push({
+            id: Date.now() + Math.random(),
+            name: bookName,
+            icon: '',
+            color: '#6366F1',
+            createdAt: now,
+          });
+        }
+
+        if (tagName && !updatedTags.find(t => t.name === tagName)) {
+          updatedTags.push({
+            id: Date.now() + Math.random(),
+            name: tagName,
+            color: '#8B5CF6',
+            createdAt: now,
+          });
+        }
+      }
+
+      const newRecords = validRecords.map((row, idx) => {
         const amount = parseFloat(row['金额']);
         const finalAmount = row['收支类型'] === '收入' ? Math.abs(amount) : -Math.abs(amount);
-        
-        const bookId = books.find(b => b.name === row['所属账本'])?.id || '';
+
+        const bookId = updatedBooks.find(b => b.name === row['所属账本'])?.id || '';
         const currencyCode = CURRENCIES.find(c => c.name === row['收支账户'])?.code || DEFAULT_BASE_CURRENCY;
 
         return {
-          id: Date.now() + Math.random(),
+          id: `${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
           date: row['日期'],
           type: row['收支类型'] === '收入' ? 'income' : 'expense',
           amount: finalAmount,
@@ -689,25 +855,39 @@ export default function Records() {
           bookId,
           book: row['所属账本'] || '',
           currency: currencyCode,
+          accountId: '',
+          recorder: '',
           note: row['备注'] || '',
           tag: row['标签'] || '',
+          createdAt: now,
         };
       });
 
       const updatedRecords = [...records, ...newRecords];
-      await saveState({
+      const result = await saveState({
         ...stateData,
         records: updatedRecords,
+        categories: updatedCategories,
+        books: updatedBooks,
+        tags: updatedTags,
       });
 
+      if (!result || !result.ok) {
+        throw new Error(result?.error || '保存失败');
+      }
+
+      setCategories(updatedCategories);
+      setBooks(updatedBooks);
+      setTags(updatedTags);
       setShowImportModal(false);
       setImportPreview([]);
       setImportSuccess(`成功导入 ${validRecords.length} 条记录`);
       loadData();
     } catch (err) {
       console.error('Failed to import records:', err);
-      setImportError('导入失败，请重试');
+      setImportError('导入失败：' + (err.message || '请重试'));
     } finally {
+      importInProgress.current = false;
       setSaving(false);
     }
   };
@@ -1211,6 +1391,164 @@ export default function Records() {
     return { income, expense, totalIncome, totalExpense };
   };
 
+  const INCOME_CATEGORY_COLORS = [
+    '#8B5CF6', '#10B981', '#F59E0B', '#06B6D4', '#EC4899', '#14B8A6',
+    '#F97316', '#6366F1', '#84CC16', '#0EA5E9', '#D946EF', '#22C55E',
+    '#FBBF24', '#06B6D4', '#EC4899', '#8B5CF6', '#10B981', '#F59E0B',
+    '#6366F1', '#14B8A6'
+  ];
+  const EXPENSE_CATEGORY_COLORS = [
+    '#EC4899', '#8B5CF6', '#F59E0B', '#06B6D4', '#10B981', '#F97316',
+    '#6366F1', '#14B8A6', '#84CC16', '#0EA5E9', '#D946EF', '#22C55E',
+    '#FBBF24', '#F43F5E', '#A855F7', '#06B6D4', '#EC4899', '#8B5CF6',
+    '#10B981', '#F97316'
+  ];
+
+  const computePieChartData = () => {
+    const filtered = filterByBook(filterByTime(records));
+
+    const incomeCategoryMap = {};
+    const expenseCategoryMap = {};
+    const incomeDetailMap = {};
+    const expenseDetailMap = {};
+    let totalIncome = 0;
+    let totalExpense = 0;
+
+    const incomeCategoryOrder = Object.keys(categories.income || {});
+    const expenseCategoryOrder = Object.keys(categories.expense || {});
+
+    const findParentCategory = (subCat, type) => {
+      const typeCategories = categories[type] || {};
+      for (const [parent, subs] of Object.entries(typeCategories)) {
+        if (subs.includes(subCat)) return parent;
+      }
+      return null;
+    };
+
+    filtered.forEach(record => {
+      const rawAmount = Math.abs(record.amount || 0);
+      const fromCurrency = record.currency || DEFAULT_BASE_CURRENCY;
+      const amount = convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
+
+      if (record.type === 'income') {
+        totalIncome += amount;
+        const category = record.category || '其他收入';
+        incomeCategoryMap[category] = (incomeCategoryMap[category] || 0) + amount;
+
+        const subCategory = record.sub || record.subCategory || '';
+        let detailName;
+        let parentCategory;
+        if (subCategory) {
+          detailName = subCategory;
+          parentCategory = findParentCategory(subCategory, 'income') || category;
+        } else {
+          detailName = category + '-其他';
+          parentCategory = category;
+        }
+        if (!incomeDetailMap[detailName]) {
+          incomeDetailMap[detailName] = { value: 0, parentCategory };
+        }
+        incomeDetailMap[detailName].value += amount;
+      } else if (record.type === 'expense') {
+        totalExpense += amount;
+        const category = record.category || '其他支出';
+        expenseCategoryMap[category] = (expenseCategoryMap[category] || 0) + amount;
+
+        const subCategory = record.sub || record.subCategory || '';
+        let detailName;
+        let parentCategory;
+        if (subCategory) {
+          detailName = subCategory;
+          parentCategory = findParentCategory(subCategory, 'expense') || category;
+        } else {
+          detailName = category + '-其他';
+          parentCategory = category;
+        }
+        if (!expenseDetailMap[detailName]) {
+          expenseDetailMap[detailName] = { value: 0, parentCategory };
+        }
+        expenseDetailMap[detailName].value += amount;
+      }
+    });
+
+    const incomeCategoryData = Object.entries(incomeCategoryMap)
+      .map(([category, amount], index) => ({
+        category,
+        amount,
+        percent: totalIncome > 0 ? (amount / totalIncome) * 100 : 0,
+        color: INCOME_CATEGORY_COLORS[index % INCOME_CATEGORY_COLORS.length],
+      }))
+      .sort((a, b) => {
+        const idxA = incomeCategoryOrder.indexOf(a.category);
+        const idxB = incomeCategoryOrder.indexOf(b.category);
+        if (idxA === -1 && idxB === -1) return b.amount - a.amount;
+        if (idxA === -1) return 1;
+        if (idxB === -1) return -1;
+        return idxA - idxB;
+      });
+
+    const expenseCategoryData = Object.entries(expenseCategoryMap)
+      .map(([category, amount], index) => ({
+        category,
+        amount,
+        percent: totalExpense > 0 ? (amount / totalExpense) * 100 : 0,
+        color: EXPENSE_CATEGORY_COLORS[index % EXPENSE_CATEGORY_COLORS.length],
+      }))
+      .sort((a, b) => {
+        const idxA = expenseCategoryOrder.indexOf(a.category);
+        const idxB = expenseCategoryOrder.indexOf(b.category);
+        if (idxA === -1 && idxB === -1) return b.amount - a.amount;
+        if (idxA === -1) return 1;
+        if (idxB === -1) return -1;
+        return idxA - idxB;
+      });
+
+    const incomeDetailData = Object.entries(incomeDetailMap)
+      .map(([name, data], index) => ({
+        name,
+        value: data.value,
+        percent: totalIncome > 0 ? (data.value / totalIncome) * 100 : 0,
+        color: INCOME_CATEGORY_COLORS[index % INCOME_CATEGORY_COLORS.length],
+        parentCategory: data.parentCategory,
+      }))
+      .sort((a, b) => {
+        const parentIdxA = incomeCategoryOrder.indexOf(a.parentCategory);
+        const parentIdxB = incomeCategoryOrder.indexOf(b.parentCategory);
+        if (parentIdxA !== parentIdxB) {
+          if (parentIdxA === -1) return 1;
+          if (parentIdxB === -1) return -1;
+          return parentIdxA - parentIdxB;
+        }
+        return b.value - a.value;
+      });
+
+    const expenseDetailData = Object.entries(expenseDetailMap)
+      .map(([name, data], index) => ({
+        name,
+        value: data.value,
+        percent: totalExpense > 0 ? (data.value / totalExpense) * 100 : 0,
+        color: EXPENSE_CATEGORY_COLORS[index % EXPENSE_CATEGORY_COLORS.length],
+        parentCategory: data.parentCategory,
+      }))
+      .sort((a, b) => {
+        const parentIdxA = expenseCategoryOrder.indexOf(a.parentCategory);
+        const parentIdxB = expenseCategoryOrder.indexOf(b.parentCategory);
+        if (parentIdxA !== parentIdxB) {
+          if (parentIdxA === -1) return 1;
+          if (parentIdxB === -1) return -1;
+          return parentIdxA - parentIdxB;
+        }
+        return b.value - a.value;
+      });
+
+    return {
+      incomeCategoryData,
+      expenseCategoryData,
+      incomeDetailData,
+      expenseDetailData,
+    };
+  };
+
   const computePreviousPeriod = () => {
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -1300,6 +1638,7 @@ export default function Records() {
   }
 
   const { income, expense, totalIncome, totalExpense } = computeIncomeExpense();
+  const { incomeCategoryData, expenseCategoryData, incomeDetailData, expenseDetailData } = computePieChartData();
   const { prevIncome, prevExpense } = computePreviousPeriod();
   const incomeChange = prevIncome > 0 ? ((totalIncome - prevIncome) / prevIncome * 100).toFixed(1) : 0;
   const expenseChange = prevExpense > 0 ? ((totalExpense - prevExpense) / prevExpense * 100).toFixed(1) : 0;
@@ -1396,7 +1735,7 @@ export default function Records() {
 
 
 
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {(() => {
             const labels = getStatLabels();
             return (
@@ -1454,6 +1793,41 @@ export default function Records() {
               <span>收入 - 支出</span>
             </div>
           </div>
+
+          <div 
+            onClick={() => onNavigate && onNavigate('budget')}
+            className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 cursor-pointer hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-gray-500 dark:text-gray-400">本月预算</span>
+              <div className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full p-2">
+                <Wallet className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="text-3xl font-bold text-blue-600 tabular-nums whitespace-nowrap">
+              {formatCurrency(budgets.reduce((sum, b) => sum + b.amount, 0), selectedCurrencyFilter)}
+            </div>
+            <div className="mt-1 flex items-center justify-between text-xs">
+              <span className="text-gray-500 dark:text-gray-400">
+                已用 {formatCurrency(budgets.reduce((sum, b) => sum + b.used, 0), selectedCurrencyFilter)}
+              </span>
+              <span className="text-blue-500">
+                剩余 {formatCurrency(budgets.reduce((sum, b) => sum + (b.amount - b.used), 0), selectedCurrencyFilter)}
+              </span>
+            </div>
+            <div className="mt-2 w-full bg-gray-100 dark:bg-slate-700 rounded-full h-2">
+              <div 
+                className="bg-blue-500 h-2 rounded-full transition-all"
+                style={{ 
+                  width: `${Math.min(
+                    (budgets.reduce((sum, b) => sum + b.used, 0) / 
+                    (budgets.reduce((sum, b) => sum + b.amount, 0) || 1)) * 100, 
+                    100
+                  )}%` 
+                }}
+              />
+            </div>
+          </div>
               </>
             );
           })()}
@@ -1461,112 +1835,164 @@ export default function Records() {
 
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">收入占比</h3>
-            <div className="mt-3 flex justify-center">
-              <div className="w-full max-w-[240px]">
-                <svg viewBox="0 0 100 100" className="w-full h-auto">
-                  {(() => {
-                    const colors = ['#8B5CF6', '#10B981', '#F59E0B', '#06B6D4'];
-                    let cumulativePercent = 0;
-                    if (income.length === 0) {
-                      return null;
-                    }
-                    return income.map((item, idx) => {
-                      const startPercent = cumulativePercent;
-                      cumulativePercent += item.percent;
-                      const endPercent = cumulativePercent;
-                      const largeArcFlag = item.percent > 50 ? 1 : 0;
-                      const startAngle = (startPercent / 100) * 2 * Math.PI - Math.PI / 2;
-                      const endAngle = (endPercent / 100) * 2 * Math.PI - Math.PI / 2;
-                      const x1 = 50 + 40 * Math.cos(startAngle);
-                      const y1 = 50 + 40 * Math.sin(startAngle);
-                      const x2 = 50 + 40 * Math.cos(endAngle);
-                      const y2 = 50 + 40 * Math.sin(endAngle);
-                      return (
-                        <path
-                          key={idx}
-                          d={`M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArcFlag} 1 ${x2} ${y2} Z`}
-                          fill={colors[idx % colors.length]}
-                        />
-                      );
-                    });
-                  })()}
-                </svg>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">收入占比</h3>
+              <div className="flex bg-gray-100 dark:bg-slate-700 rounded-full p-0.5">
+                <button
+                  onClick={() => setIncomePieView('category')}
+                  className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                    incomePieView === 'category'
+                      ? 'bg-primary-500 text-white'
+                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  一级分类
+                </button>
+                <button
+                  onClick={() => setIncomePieView('detail')}
+                  className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                    incomePieView === 'detail'
+                      ? 'bg-primary-500 text-white'
+                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  全部
+                </button>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {income.map((item, idx) => (
-                <div key={item.category} className="flex items-center gap-2 text-xs">
-                  <div
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: ['#8B5CF6', '#10B981', '#F59E0B', '#06B6D4'][idx % 4] }}
-                  />
-                  <span className="text-gray-500 dark:text-gray-400">{item.category}</span>
-                  <span className="ml-auto text-gray-700 dark:text-gray-300 tabular-nums font-medium">
-                    {item.percent.toFixed(1)}%
-                  </span>
-                </div>
-              ))}
-              {income.length === 0 && (
-                <div className="col-span-2 text-center text-sm text-gray-400 py-4">
-                  暂无收入数据
-                </div>
-              )}
+            <div className="h-[380px]">
+              {(() => {
+                const data = incomePieView === 'category'
+                  ? incomeCategoryData.map(item => ({ name: item.category, value: item.amount, percent: item.percent, color: item.color }))
+                  : incomeDetailData;
+
+                if (data.length === 0) {
+                  return (
+                    <div className="h-full flex items-center justify-center text-sm text-gray-400">
+                      暂无收入数据
+                    </div>
+                  );
+                }
+
+                const symbol = getCurrencySymbol(selectedCurrencyFilter);
+                const labelFontSize = data.length <= 5 ? 12 : data.length <= 10 ? 11 : data.length <= 15 ? 10 : data.length <= 20 ? 9 : 8;
+
+                return (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={data}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={45}
+                        outerRadius={80}
+                        paddingAngle={1}
+                        dataKey="value"
+                        labelLine={{ length: 10, strokeWidth: 1 }}
+                        label={({ name, payload, x, y, textAnchor }) => (
+                          <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={labelFontSize} fontWeight={500}>
+                            {name} {payload.percent.toFixed(1)}%
+                          </text>
+                        )}
+                      >
+                        {data.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value) => [`${symbol}${value.toLocaleString()}`, '金额']}
+                        contentStyle={{
+                          backgroundColor: '#fff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                );
+              })()}
             </div>
           </div>
 
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">支出占比</h3>
-            <div className="mt-3 flex justify-center">
-              <div className="w-full max-w-[240px]">
-                <svg viewBox="0 0 100 100" className="w-full h-auto">
-                  {(() => {
-                    const colors = ['#EC4899', '#8B5CF6', '#F59E0B', '#06B6D4', '#10B981'];
-                    let cumulativePercent = 0;
-                    if (expense.length === 0) {
-                      return null;
-                    }
-                    return expense.map((item, idx) => {
-                      const startPercent = cumulativePercent;
-                      cumulativePercent += item.percent;
-                      const endPercent = cumulativePercent;
-                      const largeArcFlag = item.percent > 50 ? 1 : 0;
-                      const startAngle = (startPercent / 100) * 2 * Math.PI - Math.PI / 2;
-                      const endAngle = (endPercent / 100) * 2 * Math.PI - Math.PI / 2;
-                      const x1 = 50 + 40 * Math.cos(startAngle);
-                      const y1 = 50 + 40 * Math.sin(startAngle);
-                      const x2 = 50 + 40 * Math.cos(endAngle);
-                      const y2 = 50 + 40 * Math.sin(endAngle);
-                      return (
-                        <path
-                          key={idx}
-                          d={`M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArcFlag} 1 ${x2} ${y2} Z`}
-                          fill={colors[idx % colors.length]}
-                        />
-                      );
-                    });
-                  })()}
-                </svg>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">支出占比</h3>
+              <div className="flex bg-gray-100 dark:bg-slate-700 rounded-full p-0.5">
+                <button
+                  onClick={() => setExpensePieView('category')}
+                  className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                    expensePieView === 'category'
+                      ? 'bg-primary-500 text-white'
+                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  一级分类
+                </button>
+                <button
+                  onClick={() => setExpensePieView('detail')}
+                  className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                    expensePieView === 'detail'
+                      ? 'bg-primary-500 text-white'
+                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  全部
+                </button>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {expense.map((item, idx) => (
-                <div key={item.category} className="flex items-center gap-2 text-xs">
-                  <div
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: ['#EC4899', '#8B5CF6', '#F59E0B', '#06B6D4', '#10B981'][idx % 5] }}
-                  />
-                  <span className="text-gray-500 dark:text-gray-400">{item.category}</span>
-                  <span className="ml-auto text-gray-700 dark:text-gray-300 tabular-nums font-medium">
-                    {item.percent.toFixed(1)}%
-                  </span>
-                </div>
-              ))}
-              {expense.length === 0 && (
-                <div className="col-span-2 text-center text-sm text-gray-400 py-4">
-                  暂无支出数据
-                </div>
-              )}
+            <div className="h-[380px]">
+              {(() => {
+                const data = expensePieView === 'category'
+                  ? expenseCategoryData.map(item => ({ name: item.category, value: item.amount, percent: item.percent, color: item.color }))
+                  : expenseDetailData;
+
+                if (data.length === 0) {
+                  return (
+                    <div className="h-full flex items-center justify-center text-sm text-gray-400">
+                      暂无支出数据
+                    </div>
+                  );
+                }
+
+                const symbol = getCurrencySymbol(selectedCurrencyFilter);
+                const labelFontSize = data.length <= 5 ? 12 : data.length <= 10 ? 11 : data.length <= 15 ? 10 : data.length <= 20 ? 9 : 8;
+
+                return (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={data}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={45}
+                        outerRadius={80}
+                        paddingAngle={1}
+                        dataKey="value"
+                        labelLine={{ length: 10, strokeWidth: 1 }}
+                        label={({ name, payload, x, y, textAnchor }) => (
+                          <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={labelFontSize} fontWeight={500}>
+                            {name} {payload.percent.toFixed(1)}%
+                          </text>
+                        )}
+                      >
+                        {data.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value) => [`${symbol}${value.toLocaleString()}`, '金额']}
+                        contentStyle={{
+                          backgroundColor: '#fff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                );
+              })()}
             </div>
           </div>
         </section>
@@ -1581,6 +2007,23 @@ export default function Records() {
               >
                 <Plus className="w-4 h-4" />
                 新增
+              </button>
+              <button
+                onClick={() => {
+                  if (isBatchEditMode) {
+                    setIsBatchEditMode(false);
+                    setSelectedRecordIds(new Set());
+                  } else {
+                    setIsBatchEditMode(true);
+                  }
+                }}
+                className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  isBatchEditMode
+                    ? 'border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700'
+                    : 'bg-blue-500 text-white hover:bg-blue-600'
+                }`}
+              >
+                {isBatchEditMode ? '取消' : '编辑'}
               </button>
               <button
                 onClick={() => setShowImportModal(true)}
@@ -1728,9 +2171,60 @@ export default function Records() {
                 </div>
               )}
             </div>
+            {isBatchEditMode && (
+              <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg flex items-center justify-between">
+                <div className="text-sm text-gray-700 dark:text-gray-300">
+                  已选择 <span className="font-semibold text-blue-600 dark:text-blue-400">{selectedRecordIds.size}</span> 条记录
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">批量修改：</span>
+                  {['date', 'type', 'amount', 'category', 'sub', 'book', 'tag', 'note'].map(field => {
+                    const fieldNames = { date: '日期', type: '收支类型', amount: '金额', category: '类别', sub: '二级分类', book: '账本', tag: '标签', note: '备注' };
+                    return (
+                      <button
+                        key={field}
+                        onClick={() => { setShowBatchEditField(field); setBatchEditValue(''); }}
+                        disabled={selectedRecordIds.size === 0}
+                        className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                      >
+                        {fieldNames[field]}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => setShowBatchDeleteConfirm(true)}
+                    disabled={selectedRecordIds.size === 0}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-50 transition-colors"
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+            )}
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
+                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap w-12">序号</th>
+                  {isBatchEditMode && (
+                    <th className="text-center py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap w-10">
+                      <input
+                        type="checkbox"
+                        checked={paginatedRecords.length > 0 && paginatedRecords.every(r => selectedRecordIds.has(r.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            const newSet = new Set(selectedRecordIds);
+                            paginatedRecords.forEach(r => newSet.add(r.id));
+                            setSelectedRecordIds(newSet);
+                          } else {
+                            const newSet = new Set(selectedRecordIds);
+                            paginatedRecords.forEach(r => newSet.delete(r.id));
+                            setSelectedRecordIds(newSet);
+                          }
+                        }}
+                        className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                    </th>
+                  )}
                   {visibleColumns.date && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">日期</th>}
                   {visibleColumns.type && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">收支类型</th>}
                   {visibleColumns.amount && <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">金额</th>}
@@ -1740,11 +2234,33 @@ export default function Records() {
                   {visibleColumns.currency && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">收支账户</th>}
                   {visibleColumns.note && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">备注</th>}
                   {visibleColumns.tag && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">标签</th>}
+                  <th className="text-center py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {paginatedRecords.map((record) => (
+                {paginatedRecords.map((record, index) => (
                   <tr key={record.id} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30">
+                    <td className="py-2.5 px-3 text-gray-500 text-sm">
+                      {(currentPage - 1) * pageSize + index + 1}
+                    </td>
+                    {isBatchEditMode && (
+                      <td className="text-center py-2.5 px-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedRecordIds.has(record.id)}
+                          onChange={(e) => {
+                            const newSet = new Set(selectedRecordIds);
+                            if (e.target.checked) {
+                              newSet.add(record.id);
+                            } else {
+                              newSet.delete(record.id);
+                            }
+                            setSelectedRecordIds(newSet);
+                          }}
+                          className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                      </td>
+                    )}
                     {visibleColumns.date && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
                         {formatDate(record.date)}
@@ -1798,6 +2314,24 @@ export default function Records() {
                         {Array.isArray(record.tag) ? record.tag.join(', ') : (record.tag || '-')}
                       </td>
                     )}
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => handleEditRecord(record)}
+                          className="p-1 text-blue-500 hover:bg-blue-100 rounded transition-colors"
+                          title="编辑"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => { setRecordToDelete(record); setShowDeleteConfirm(true); }}
+                          className="p-1 text-red-500 hover:bg-red-100 rounded transition-colors"
+                          title="删除"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2391,26 +2925,33 @@ export default function Records() {
                         }
                         return String(val);
                       };
+                      const todayStr = (() => {
+                        const now = new Date();
+                        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                      })();
                       const mappedData = importPreview.map((row, idx) => {
                         const errors = [];
-                        const dateVal = formatDateValue(row[fieldMapping['日期']]);
-                        const typeVal = String(row[fieldMapping['收支类型']] || '').trim();
+                        let dateVal = formatDateValue(row[fieldMapping['日期']]);
+                        let typeVal = String(row[fieldMapping['收支类型']] || '').trim();
                         const amountVal = parseFloat(row[fieldMapping['金额']]);
-                        const categoryVal = String(row[fieldMapping['类别']] || '').trim();
-                        
-                        if (!dateVal) errors.push('日期为空');
-                        if (!typeVal) errors.push('收支类型为空');
+                        let categoryVal = String(row[fieldMapping['类别']] || '').trim();
+
+                        // 自动补全缺失字段
+                        if (!dateVal) dateVal = todayStr;
+                        if (!typeVal) typeVal = !isNaN(amountVal) && amountVal >= 0 ? '收入' : '支出';
+                        if (!categoryVal) categoryVal = typeVal === '收入' ? '其他收入' : '其他支出';
+
+                        // 只有金额无效才是硬性错误
                         if (isNaN(amountVal)) errors.push('金额无效');
-                        if (!categoryVal) errors.push('类别为空');
-                        
+
                         return {
                           '日期': dateVal,
                           '收支类型': typeVal,
                           '金额': isNaN(amountVal) ? row[fieldMapping['金额']] : amountVal,
                           '类别': categoryVal,
-                          '二级分类': String(row[fieldMapping['二级分类']] || '').trim(),
+                          '二级分类': String(row[fieldMapping['二级分类']] || '').trim() || '其他',
                           '所属账本': String(row[fieldMapping['所属账本']] || '').trim(),
-                          '收支账户': String(row[fieldMapping['收支账户']] || '').trim(),
+                          '收支账户': String(row[fieldMapping['收支账户']] || '').trim() || '人民币',
                           '备注': String(row[fieldMapping['备注']] || '').trim(),
                           '标签': String(row[fieldMapping['标签']] || '').trim(),
                           rowNum: idx + 2,
@@ -2434,6 +2975,167 @@ export default function Records() {
         {importSuccess && (
           <div className="fixed top-4 right-4 z-50 p-4 bg-green-500 text-white rounded-lg shadow-lg animate-pulse">
             {importSuccess}
+          </div>
+        )}
+
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">确认删除</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                确定要删除这条记录吗？此操作不可撤销。
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => { setShowDeleteConfirm(false); setRecordToDelete(null); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                <button onClick={handleDeleteRecord} className="flex-1 py-2.5 rounded-lg bg-red-500 text-white hover:bg-red-600">删除</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showEditModal && editingRecord && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">编辑收支记录</h3>
+                <button onClick={() => { setShowEditModal(false); setEditingRecord(null); }} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日期</label>
+                  <input type="date" value={editingRecord.date || ''} onChange={(e) => setEditingRecord({ ...editingRecord, date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">收支类型</label>
+                  <select value={editingRecord.type || 'expense'} onChange={(e) => setEditingRecord({ ...editingRecord, type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                    <option value="expense">支出</option>
+                    <option value="income">收入</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">金额</label>
+                  <input type="number" value={Math.abs(editingRecord.amount || 0)} onChange={(e) => setEditingRecord({ ...editingRecord, amount: parseFloat(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">类别</label>
+                  <select value={editingRecord.category || ''} onChange={(e) => setEditingRecord({ ...editingRecord, category: e.target.value, sub: '' })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                    <option value="">请选择</option>
+                    {Object.keys(categories[editingRecord.type] || {}).map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">二级分类</label>
+                  <select value={editingRecord.sub || ''} onChange={(e) => setEditingRecord({ ...editingRecord, sub: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                    <option value="">请选择</option>
+                    {(categories[editingRecord.type]?.[editingRecord.category] || []).map(sub => (
+                      <option key={sub} value={sub}>{sub}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">所属账本</label>
+                  <select value={editingRecord.book || ''} onChange={(e) => setEditingRecord({ ...editingRecord, book: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                    <option value="">请选择</option>
+                    {books.map(book => (
+                      <option key={book.id} value={book.name}>{book.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">标签</label>
+                  <select value={editingRecord.tag || ''} onChange={(e) => setEditingRecord({ ...editingRecord, tag: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                    <option value="">请选择</option>
+                    {tags.map(tag => (
+                      <option key={tag.id} value={tag.name}>{tag.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">备注</label>
+                  <input type="text" value={editingRecord.note || ''} onChange={(e) => setEditingRecord({ ...editingRecord, note: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                </div>
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button onClick={() => { setShowEditModal(false); setEditingRecord(null); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                <button onClick={handleSaveEdit} disabled={saving || !editingRecord.date || !editingRecord.amount || !editingRecord.category} className="flex-1 py-2.5 rounded-lg bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-50">{saving ? '保存中...' : '保存'}</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showBatchEditField && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                批量修改{({ date: '日期', type: '收支类型', amount: '金额', category: '类别', sub: '二级分类', book: '账本', tag: '标签', note: '备注' })[showBatchEditField]}
+              </h3>
+              <div className="mb-6">
+                {showBatchEditField === 'date' && (
+                  <input type="date" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                )}
+                {showBatchEditField === 'category' && (
+                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                    <option value="">请选择类别</option>
+                    {Object.keys(categories['expense'] || {}).concat(Object.keys(categories['income'] || {})).filter((v, i, a) => a.indexOf(v) === i).map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                )}
+                {showBatchEditField === 'sub' && (
+                  <input type="text" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} placeholder="请输入二级分类" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                )}
+                {showBatchEditField === 'book' && (
+                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                    <option value="">请选择账本</option>
+                    {books.map(book => (
+                      <option key={book.id} value={book.name}>{book.name}</option>
+                    ))}
+                  </select>
+                )}
+                {showBatchEditField === 'tag' && (
+                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                    <option value="">请选择标签</option>
+                    {tags.map(tag => (
+                      <option key={tag.id} value={tag.name}>{tag.name}</option>
+                    ))}
+                  </select>
+                )}
+                {showBatchEditField === 'type' && (
+                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                    <option value="">请选择类型</option>
+                    <option value="income">收入</option>
+                    <option value="expense">支出</option>
+                  </select>
+                )}
+                {showBatchEditField === 'amount' && (
+                  <input type="number" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} placeholder="请输入金额" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                )}
+                {showBatchEditField === 'note' && (
+                  <input type="text" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} placeholder="请输入备注" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => { setShowBatchEditField(null); setBatchEditValue(''); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                <button onClick={() => handleBatchEdit(showBatchEditField, batchEditValue)} disabled={!batchEditValue} className="flex-1 py-2.5 rounded-lg bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-50">确认</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showBatchDeleteConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">确认批量删除</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                确定要删除选中的 <span className="font-semibold text-red-500">{selectedRecordIds.size}</span> 条记录吗？此操作不可恢复。
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowBatchDeleteConfirm(false)} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                <button onClick={handleBatchDelete} className="flex-1 py-2.5 rounded-lg bg-red-500 text-white hover:bg-red-600">删除</button>
+              </div>
+            </div>
           </div>
         )}
       </div>

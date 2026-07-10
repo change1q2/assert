@@ -28,6 +28,7 @@ import Downloads from './pages/Downloads.jsx';
 import UserProfile from './pages/UserProfile.jsx';
 import PremiumCheck from './pages/PremiumCheck.jsx';
 import HkIpo from './pages/HkIpo.jsx';
+import BudgetManagement from './pages/BudgetManagement.jsx';
 
 const menuItems = [
   { id: 'overview', label: '资产总览', icon: LayoutDashboard },
@@ -44,30 +45,45 @@ const menuItems = [
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('overview');
-  const [loggedIn, setLoggedIn] = useState(true);
+  const [loggedIn, setLoggedIn] = useState(false);
   const [userAvatar, setUserAvatar] = useState('');
   const [userName, setUserName] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
 
   useEffect(() => {
-    const loadUserInfo = () => {
-      const savedState = localStorage.getItem('state');
-      if (savedState) {
-        try {
-          const state = JSON.parse(savedState);
-          if (state.user) {
-            setUserAvatar(state.user.avatar || '');
-            setUserName(state.user.name || '');
+    const checkAuth = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setLoggedIn(false);
+        return;
+      }
+      try {
+        const response = await fetch('/api/auth/me', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.user) {
+            setLoggedIn(true);
+            setUserAvatar(data.user.avatar || '');
+            setUserName(data.user.name || '');
+            return;
           }
-        } catch (e) {
-          console.error('Failed to parse state');
         }
+        localStorage.removeItem('token');
+        localStorage.removeItem('state');
+        setLoggedIn(false);
+      } catch (e) {
+        console.error('Auth check failed:', e);
+        localStorage.removeItem('token');
+        localStorage.removeItem('state');
+        setLoggedIn(false);
       }
     };
 
-    loadUserInfo();
-    window.addEventListener('storage', loadUserInfo);
-    return () => window.removeEventListener('storage', loadUserInfo);
+    checkAuth();
+    window.addEventListener('storage', checkAuth);
+    return () => window.removeEventListener('storage', checkAuth);
   }, []);
 
   const handleLogin = () => {
@@ -116,7 +132,7 @@ export default function App() {
       case 'overview':
         return <Overview />;
       case 'records':
-        return <Records />;
+        return <Records onNavigate={setActiveMenu} />;
       case 'finance':
         return <Finance />;
       case 'debts':
@@ -124,7 +140,7 @@ export default function App() {
       case 'classes':
         return <AssetClasses onCategorySelect={handleCategorySelect} />;
       case 'analysis':
-        return <Analysis />;
+        return <Analysis onNavigate={setActiveMenu} />;
       case 'tools':
         return <Tools onNavigate={setActiveMenu} />;
       case 'strategies':
@@ -139,6 +155,8 @@ export default function App() {
         return <PremiumCheck />;
       case 'hk-ipo':
         return <HkIpo />;
+      case 'budget':
+        return <BudgetManagement onBack={() => setActiveMenu('records')} />;
       default:
         return (
           <div className="flex items-center justify-center min-h-[400px]">

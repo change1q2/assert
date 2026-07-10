@@ -1109,6 +1109,8 @@ export default function AssetClasses({ onCategorySelect }) {
                               innerRadius="40%"
                               outerRadius="70%"
                               paddingAngle={2}
+                              label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
+                              labelLine={false}
                             >
                               {drilldownData.map((entry, index) => (
                                 <Cell key={`cell-dd-${index}`} fill={entry.color} />
@@ -1139,6 +1141,8 @@ export default function AssetClasses({ onCategorySelect }) {
                             innerRadius="40%"
                             outerRadius="70%"
                             paddingAngle={2}
+                            label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
+                            labelLine={false}
                             style={{ cursor: 'pointer' }}
                           >
                             {chartData.map((entry, index) => (
@@ -1206,6 +1210,8 @@ export default function AssetClasses({ onCategorySelect }) {
                             innerRadius="40%"
                             outerRadius="70%"
                             paddingAngle={2}
+                            label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
+                            labelLine={false}
                           >
                             {domesticOverseasData.map((entry, index) => (
                               <Cell key={`cell-do-${index}`} fill={entry.color} />

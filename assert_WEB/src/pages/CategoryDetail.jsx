@@ -664,6 +664,8 @@ export default function CategoryDetail({ categoryName, onBack }) {
                       innerRadius="40%"
                       outerRadius="70%"
                       paddingAngle={2}
+                      label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
+                      labelLine={false}
                     >
                       {pieData.map((entry, index) => (
                         <Cell key={`pie-${index}`} fill={entry.color} />
@@ -722,6 +724,8 @@ export default function CategoryDetail({ categoryName, onBack }) {
                     innerRadius="40%"
                     outerRadius="70%"
                     paddingAngle={2}
+                    label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
+                    labelLine={false}
                   >
                     {domesticOverseasData.map((entry, index) => (
                       <Cell key={`do-${index}`} fill={entry.color} />

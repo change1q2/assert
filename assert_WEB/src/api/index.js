@@ -125,6 +125,29 @@ export async function createAccount(data) {
   }
 }
 
+export async function updateAccount(id, data) {
+  try {
+    const response = await request(`/accounts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+    return response
+  } catch {
+    return { success: true, data: { ...data, id } }
+  }
+}
+
+export async function deleteAccount(id) {
+  try {
+    const response = await request(`/accounts/${id}`, {
+      method: 'DELETE',
+    })
+    return response
+  } catch {
+    return { success: true }
+  }
+}
+
 export async function createAsset(data) {
   try {
     const response = await request('/assets', {
@@ -140,6 +163,12 @@ export async function createAsset(data) {
 export async function fetchState() {
   try {
     const response = await request('/state')
+    if (response.error && response.error.includes('未授权')) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('state')
+      window.location.reload()
+      return {}
+    }
     if (response.message && response.message.includes('登录')) {
       return {
         debts: [],
@@ -174,15 +203,12 @@ export async function fetchState() {
 }
 
 export async function saveState(state) {
-  try {
-    const response = await request('/state', {
-      method: 'PUT',
-      body: JSON.stringify({ state }),
-    })
-    return response
-  } catch {
-    return { success: false, error: '保存状态失败' }
-  }
+  const response = await request('/state', {
+    method: 'PUT',
+    body: JSON.stringify({ state }),
+  })
+  if (response && response.ok) return response
+  throw new Error(response?.error || '保存状态失败')
 }
 
 export async function fetchBooks() {
@@ -308,5 +334,26 @@ export async function fetchExchangeRates(baseCurrency = 'CNY') {
     return rates
   } catch {
     return { ...DEFAULT_EXCHANGE_RATES }
+  }
+}
+
+export async function lookupFinance(q) {
+  try {
+    const response = await request(`/finance/lookup?q=${encodeURIComponent(q)}`)
+    return response.items || []
+  } catch {
+    return []
+  }
+}
+
+export async function fetchFinanceQuotes(codes) {
+  try {
+    const response = await request('/finance/quotes', {
+      method: 'POST',
+      body: JSON.stringify({ codes }),
+    })
+    return response.quotes || []
+  } catch {
+    return []
   }
 }
