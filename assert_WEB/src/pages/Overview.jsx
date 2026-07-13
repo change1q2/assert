@@ -318,7 +318,7 @@ export default function Overview() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <div className="w-10 h-10 border-4 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-500 dark:text-gray-400">加载中...</p>
         </div>
       </div>
@@ -329,7 +329,7 @@ export default function Overview() {
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 sm:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
         {/* 时间筛选栏 */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 sm:px-7 shadow-soft border border-gray-100 dark:border-slate-700">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 sm:px-7 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-1">
               {['日常', '月统计', '年统计', '自定义'].map((tab) => (
@@ -338,7 +338,7 @@ export default function Overview() {
                   onClick={() => setTimePeriod(tab)}
                   className={`px-4 py-1.5 rounded-full text-sm transition-all ${
                     timePeriod === tab
-                      ? 'bg-primary-500 text-white font-medium'
+                      ? 'bg-blue-600 text-white font-medium'
                       : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
                   }`}
                 >
@@ -347,14 +347,14 @@ export default function Overview() {
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-primary-500 mr-1">2026年</span>
+              <span className="text-sm font-semibold text-blue-600 mr-1">2026年</span>
               {['本月', '上月', '4月', '3月', '2月', '1月'].map((month, idx) => (
                 <button
                   key={month}
                   onClick={() => setSelectedMonth(month)}
                   className={`px-3 py-1 rounded-full text-xs transition-all ${
                     selectedMonth === month
-                      ? 'bg-primary-500 text-white font-medium'
+                      ? 'bg-blue-600 text-white font-medium'
                       : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
                   }`}
                 >
@@ -367,17 +367,17 @@ export default function Overview() {
 
         {/* Hero Bar */}
         <section
-          className="rounded-2xl p-6 sm:p-7"
+          className="rounded-xl p-6 sm:p-7"
           style={{
-            background: 'linear-gradient(135deg, #EDE9FE 0%, #F5F3FF 100%)',
+            background: 'linear-gradient(135deg, #DBEAFE 0%, #EFF6FF 100%)',
           }}
         >
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">资产总览</h1>
+              <h1 className="text-2xl font-bold font-mono tracking-tight text-gray-900">资产总览</h1>
             </div>
             <div className="text-center lg:text-right">
-              <div className="text-4xl sm:text-5xl font-bold text-gray-900 whitespace-nowrap tabular-nums tracking-tight">
+              <div className="text-4xl sm:text-5xl font-bold font-mono text-gray-900 whitespace-nowrap tabular-nums tracking-tight">
                 {formatCurrency(totalValue)}
               </div>
               <div className="mt-1 flex items-center justify-center lg:justify-end gap-1 text-sm text-green-600">
@@ -388,7 +388,7 @@ export default function Overview() {
             <div className="flex items-center gap-3 shrink-0">
               <button
                 onClick={handleRefresh}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary-500 text-primary-500 text-sm font-medium hover:bg-primary-500 hover:text-white transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
               >
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                 刷新数据
@@ -398,91 +398,91 @@ export default function Overview() {
         </section>
 
         {/* 进度目标 */}
-        <section className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">进度目标</h2>
+            <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">进度目标</h2>
             <button
               onClick={handleEditGoals}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs text-gray-500 dark:text-gray-400 hover:text-primary-500 transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 transition-colors"
             >
               <Settings className="w-3 h-3" />
               编辑
             </button>
           </div>
-          <div className="flex flex-wrap items-center gap-4 p-3 mb-4 rounded-lg" style={{ background: '#EDE9FE' }}>
-            <span className="text-sm text-primary-600">
+          <div className="flex flex-wrap items-center gap-4 p-3 mb-4 rounded-lg" style={{ background: '#EFF6FF' }}>
+            <span className="text-sm text-blue-600">
               今年收益额 <strong className="font-semibold">¥{goals.yearlyProfit.toLocaleString()}</strong>
             </span>
             <span className="text-gray-300">|</span>
-            <span className="text-sm text-primary-600">
+            <span className="text-sm text-blue-600">
               今年收益率 <strong className="font-semibold">{goals.yearlyProfitRate.toFixed(1)}%</strong>
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-            <div className="rounded-lg p-4" style={{ background: '#EDE9FE' }}>
+            <div className="rounded-lg p-4" style={{ background: '#EFF6FF' }}>
               <div className="text-xs text-gray-500 mb-1">终极目标</div>
-              <div className="text-sm font-semibold text-gray-900 mb-2 tabular-nums">
+              <div className="text-sm font-semibold font-mono text-gray-900 mb-2 tabular-nums">
                 {formatCurrency(goals.currentNetWorth)} / {formatCurrency(goals.ultimateGoal)}
               </div>
               <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-primary-500 transition-all duration-700"
+                  className="h-full rounded-full bg-blue-600 transition-all duration-700"
                   style={{ width: `${goals.ultimateProgress}%` }}
                 />
               </div>
-              <div className="text-right text-xs mt-1 text-gray-400">{goals.ultimateProgress.toFixed(1)}%</div>
+              <div className="text-right text-xs mt-1 font-mono text-gray-400">{goals.ultimateProgress.toFixed(1)}%</div>
             </div>
-            <div className="rounded-lg p-4" style={{ background: '#EDE9FE' }}>
+            <div className="rounded-lg p-4" style={{ background: '#EFF6FF' }}>
               <div className="text-xs text-gray-500 mb-1">本年目标</div>
-              <div className="text-sm font-semibold text-gray-900 mb-2 tabular-nums">
+              <div className="text-sm font-semibold font-mono text-gray-900 mb-2 tabular-nums">
                 {formatCurrency(goals.yearlyProfit)} / {formatCurrency(goals.yearlyGoal)}
               </div>
               <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-primary-500 transition-all duration-700"
+                  className="h-full rounded-full bg-blue-600 transition-all duration-700"
                   style={{ width: `${goals.yearlyProgress}%` }}
                 />
               </div>
-              <div className="text-right text-xs mt-1 text-gray-400">{goals.yearlyProgress.toFixed(1)}%</div>
+              <div className="text-right text-xs mt-1 font-mono text-gray-400">{goals.yearlyProgress.toFixed(1)}%</div>
             </div>
-            <div className="rounded-lg p-4" style={{ background: '#EDE9FE' }}>
+            <div className="rounded-lg p-4" style={{ background: '#EFF6FF' }}>
               <div className="text-xs text-gray-500 mb-1">目标年化收益率</div>
-              <div className="text-sm font-semibold text-gray-900 mb-2 tabular-nums">
+              <div className="text-sm font-semibold font-mono text-gray-900 mb-2 tabular-nums">
                 {goals.yearlyProfitRate.toFixed(1)}% / {goals.targetAnnualReturn}%
               </div>
               <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-primary-500 transition-all duration-700"
+                  className="h-full rounded-full bg-blue-600 transition-all duration-700"
                   style={{ width: `${goals.returnProgress}%` }}
                 />
               </div>
-              <div className="text-right text-xs mt-1 text-gray-400">{goals.returnProgress.toFixed(1)}%</div>
+              <div className="text-right text-xs mt-1 font-mono text-gray-400">{goals.returnProgress.toFixed(1)}%</div>
             </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">年份</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">期初资产</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">目标收益额</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">实际收益额</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">实际收益率</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">完成率</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">状态</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">年份</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">期初资产</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">目标收益额</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">实际收益额</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">实际收益率</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">完成率</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">状态</th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30">
+                <tr className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors duration-150">
                   <td className="py-2.5 px-3 text-gray-900 dark:text-white">2026</td>
-                  <td className="py-2.5 px-3 tabular-nums text-gray-900 dark:text-white">¥0</td>
-                  <td className="py-2.5 px-3 tabular-nums text-gray-900 dark:text-white">¥0</td>
-                  <td className="py-2.5 px-3 tabular-nums text-gray-900 dark:text-white">¥0</td>
-                  <td className="py-2.5 px-3 text-green-600 tabular-nums">0.00%</td>
+                  <td className="py-2.5 px-3 font-mono tabular-nums text-gray-900 dark:text-white">¥0</td>
+                  <td className="py-2.5 px-3 font-mono tabular-nums text-gray-900 dark:text-white">¥0</td>
+                  <td className="py-2.5 px-3 font-mono tabular-nums text-gray-900 dark:text-white">¥0</td>
+                  <td className="py-2.5 px-3 font-mono text-green-600 tabular-nums">0.00%</td>
                   <td className="py-2.5 px-3">
                     <div className="flex items-center gap-2">
                       <div className="w-14 h-2 rounded-full bg-gray-200 dark:bg-slate-700 overflow-hidden">
-                        <div className="h-full rounded-full bg-primary-500" style={{ width: '0%' }} />
+                        <div className="h-full rounded-full bg-blue-600" style={{ width: '0%' }} />
                       </div>
                       <span className="text-xs text-gray-400">0.0%</span>
                     </div>
@@ -501,19 +501,19 @@ export default function Overview() {
         {/* 核心指标三列 */}
         <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* 总资产 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
             <div
               className="flex items-center justify-between cursor-pointer select-none"
               onClick={() => toggleSection('assets')}
             >
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">总资产</h2>
+              <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">总资产</h2>
               {expandedSections.assets ? (
                 <ChevronUp className="w-4 h-4 text-gray-400 transition-transform" />
               ) : (
                 <ChevronDown className="w-4 h-4 text-gray-400 transition-transform" />
               )}
             </div>
-            <div className="mt-2 text-3xl font-bold text-gray-900 dark:text-white tabular-nums whitespace-nowrap">
+            <div className="mt-2 text-3xl font-bold font-mono text-gray-900 dark:text-white tabular-nums whitespace-nowrap">
               {formatCurrency(totalValue)}
             </div>
             <div className="flex flex-wrap gap-2 mt-3">
@@ -522,8 +522,8 @@ export default function Overview() {
                   key={stat.category}
                   className="px-2.5 py-1 rounded-full text-xs font-medium"
                   style={{
-                    background: idx < 3 ? '#EDE9FE' : '#F3F4F6',
-                    color: idx < 3 ? '#7C3AED' : '#6B7280',
+                    background: idx < 3 ? '#EFF6FF' : '#F3F4F6',
+                    color: idx < 3 ? '#2563EB' : '#6B7280',
                   }}
                 >
                   {stat.category} {formatCurrency(stat.value)}
@@ -536,7 +536,7 @@ export default function Overview() {
                   <div key={stat.category}>
                     <div className="flex justify-between items-center py-1.5 text-sm">
                       <span className="text-gray-600 dark:text-gray-400">{stat.category}</span>
-                      <span className="font-medium text-gray-900 dark:text-white tabular-nums">
+                      <span className="font-medium font-mono text-gray-900 dark:text-white tabular-nums">
                         {formatCurrency(stat.value)}
                       </span>
                     </div>
@@ -544,7 +544,7 @@ export default function Overview() {
                       {categoryGroups[stat.category].slice(0, 3).map((asset) => (
                         <div key={asset.id} className="flex justify-between py-1 text-xs text-gray-500 dark:text-gray-400">
                           <span>{asset.name}</span>
-                          <span className="tabular-nums">{formatCurrency(asset.rmbValue)}</span>
+                          <span className="font-mono tabular-nums">{formatCurrency(asset.rmbValue)}</span>
                         </div>
                       ))}
                     </div>
@@ -555,12 +555,12 @@ export default function Overview() {
           </div>
 
           {/* 总负债 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
             <div
               className="flex items-center justify-between cursor-pointer select-none"
               onClick={() => toggleSection('liabilities')}
             >
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">总负债</h2>
+              <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">总负债</h2>
               {expandedSections.liabilities ? (
                 <ChevronUp className="w-4 h-4 text-gray-400 transition-transform" />
               ) : (
@@ -572,7 +572,7 @@ export default function Overview() {
                 30天待还 {formatCurrency(liabilities.dueIn30Days)}
               </span>
             </div>
-            <div className="mt-2 text-3xl font-bold text-red-500 tabular-nums whitespace-nowrap">
+            <div className="mt-2 text-3xl font-bold font-mono text-red-500 tabular-nums whitespace-nowrap">
               {formatCurrency(liabilities.total)}
             </div>
             <div className="flex flex-wrap gap-2 mt-3">
@@ -590,7 +590,7 @@ export default function Overview() {
                 {liabilities.items.map((item) => (
                   <div key={item.name} className="flex justify-between items-center py-1.5 text-sm">
                     <span className="text-gray-600 dark:text-gray-400">{item.name}</span>
-                    <span className="font-medium text-gray-900 dark:text-white tabular-nums">
+                    <span className="font-medium font-mono text-gray-900 dark:text-white tabular-nums">
                       {formatCurrency(item.amount)}
                       {item.dueIn30Days && (
                         <span className="ml-2 text-xs text-red-500">
@@ -608,12 +608,12 @@ export default function Overview() {
           </div>
 
           {/* 流动性指标 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">流动性指标</h2>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+            <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">流动性指标</h2>
             <div className="mt-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-500 dark:text-gray-400">应急月数</span>
-                <span className="text-lg font-semibold text-green-600 tabular-nums">
+                <span className="text-lg font-semibold font-mono text-green-600 tabular-nums">
                   {liquidity.emergencyMonths.toFixed(1)}个月
                 </span>
               </div>
@@ -630,7 +630,7 @@ export default function Overview() {
             <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-500 dark:text-gray-400">自由现金流</span>
-                <span className={`text-lg font-semibold tabular-nums ${liquidity.freeCashFlow >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                <span className={`text-lg font-semibold font-mono tabular-nums ${liquidity.freeCashFlow >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                   {liquidity.freeCashFlow >= 0 ? '+' : ''}{formatCurrency(liquidity.freeCashFlow)}
                 </span>
               </div>
@@ -648,26 +648,26 @@ export default function Overview() {
         {/* 收益与盈亏 + 资产配置 */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* 收益与盈亏 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">收益与盈亏</h2>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+            <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">收益与盈亏</h2>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-gray-500 dark:text-gray-400">当年收益率</span>
             </div>
-            <div className="mt-1 text-3xl font-bold text-green-600 tabular-nums whitespace-nowrap">
+            <div className="mt-1 text-3xl font-bold font-mono text-green-600 tabular-nums whitespace-nowrap">
               +{totalPnlRate.toFixed(1)}%
             </div>
 
             <div className="mt-4 space-y-1.5">
               <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                 <span>市值</span>
-                <span className="tabular-nums">{formatCurrency(totalValue)}</span>
+                <span className="font-mono tabular-nums">{formatCurrency(totalValue)}</span>
               </div>
               <div className="h-2.5 rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden">
-                <div className="h-full rounded-full bg-primary-500" style={{ width: '100%' }} />
+                <div className="h-full rounded-full bg-blue-600" style={{ width: '100%' }} />
               </div>
               <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                 <span>投入</span>
-                <span className="tabular-nums">{formatCurrency(totalCost)}</span>
+                <span className="font-mono tabular-nums">{formatCurrency(totalCost)}</span>
               </div>
               <div className="h-2.5 rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden">
                 <div
@@ -689,7 +689,7 @@ export default function Overview() {
                       className="flex justify-between items-center py-1.5 text-sm border-b border-gray-100 dark:border-slate-700/50 last:border-0"
                     >
                       <span className="text-gray-900 dark:text-white">{stat.category}</span>
-                      <span className={`tabular-nums font-medium ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
+                      <span className={`font-mono tabular-nums font-medium ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
                         {isPositive ? '+' : ''}
                         {formatCurrency(stat.pnl)} ({isPositive ? '+' : ''}
                         {pnlRate.toFixed(1)}%)
@@ -702,8 +702,8 @@ export default function Overview() {
           </div>
 
           {/* 资产配置 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">资产配置</h2>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+            <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">资产配置</h2>
             <div className="mt-4">
               <img
                 src="https://mdn.alipayobjects.com/one_clip/afts/img/iEmqSZyyxSQAAAAARkAAAAgAoEACAQFr/original"
@@ -744,13 +744,13 @@ export default function Overview() {
         <section className="space-y-4">
           {/* 收入/支出占比 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">收入占比</h3>
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+              <h3 className="text-base font-semibold font-mono text-gray-900 dark:text-white">收入占比</h3>
               <div className="mt-3 flex justify-center">
                 <div className="w-full max-w-[240px]">
                   <svg viewBox="0 0 100 100" className="w-full h-auto">
                     {(() => {
-                      const colors = ['#8B5CF6', '#10B981', '#F59E0B', '#06B6D4'];
+                      const colors = ['#3B82F6', '#10B981', '#F59E0B', '#06B6D4'];
                       let cumulativePercent = 0;
                       return incomeExpense.income.map((item, idx) => {
                         const startPercent = cumulativePercent;
@@ -780,10 +780,10 @@ export default function Overview() {
                   <div key={item.category} className="flex items-center gap-2 text-xs">
                     <div
                       className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: ['#8B5CF6', '#10B981', '#F59E0B', '#06B6D4'][idx] }}
+                      style={{ backgroundColor: ['#3B82F6', '#10B981', '#F59E0B', '#06B6D4'][idx] }}
                     />
                     <span className="text-gray-500 dark:text-gray-400">{item.category}</span>
-                    <span className="ml-auto text-gray-700 dark:text-gray-300 tabular-nums font-medium">
+                    <span className="ml-auto text-gray-700 dark:text-gray-300 font-mono tabular-nums font-medium">
                       {item.percent}%
                     </span>
                   </div>
@@ -791,13 +791,13 @@ export default function Overview() {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">支出占比</h3>
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+              <h3 className="text-base font-semibold font-mono text-gray-900 dark:text-white">支出占比</h3>
               <div className="mt-3 flex justify-center">
                 <div className="w-full max-w-[240px]">
                   <svg viewBox="0 0 100 100" className="w-full h-auto">
                     {(() => {
-                      const colors = ['#EC4899', '#8B5CF6', '#F59E0B', '#06B6D4', '#10B981'];
+                      const colors = ['#EC4899', '#3B82F6', '#F59E0B', '#06B6D4', '#10B981'];
                       let cumulativePercent = 0;
                       return incomeExpense.expense.map((item, idx) => {
                         const startPercent = cumulativePercent;
@@ -827,10 +827,10 @@ export default function Overview() {
                   <div key={item.category} className="flex items-center gap-2 text-xs">
                     <div
                       className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: ['#EC4899', '#8B5CF6', '#F59E0B', '#06B6D4', '#10B981'][idx] }}
+                      style={{ backgroundColor: ['#EC4899', '#3B82F6', '#F59E0B', '#06B6D4', '#10B981'][idx] }}
                     />
                     <span className="text-gray-500 dark:text-gray-400">{item.category}</span>
-                    <span className="ml-auto text-gray-700 dark:text-gray-300 tabular-nums font-medium">
+                    <span className="ml-auto text-gray-700 dark:text-gray-300 font-mono tabular-nums font-medium">
                       {item.percent}%
                     </span>
                   </div>
@@ -841,8 +841,8 @@ export default function Overview() {
 
           {/* 品类盈亏排行 + 资产增长趋势 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">品类盈亏排行</h3>
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+              <h3 className="text-base font-semibold font-mono text-gray-900 dark:text-white">品类盈亏排行</h3>
               <div className="mt-3 space-y-3">
                 {categoryStats.map((stat, idx) => {
                   const isPositive = stat.pnl >= 0;
@@ -852,7 +852,7 @@ export default function Overview() {
                     <div key={stat.category}>
                       <div className="flex items-center justify-between text-sm mb-1">
                         <span className="text-gray-900 dark:text-white">{stat.category}</span>
-                        <span className={`tabular-nums font-medium ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
+                        <span className={`font-mono tabular-nums font-medium ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
                           {isPositive ? '+' : ''}
                           {formatCurrency(stat.pnl)}
                         </span>
@@ -869,8 +869,8 @@ export default function Overview() {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">资产增长趋势</h3>
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+              <h3 className="text-base font-semibold font-mono text-gray-900 dark:text-white">资产增长趋势</h3>
               <div className="mt-3">
                 <svg viewBox="0 0 300 120" className="w-full h-auto">
                   {(() => {
@@ -905,16 +905,16 @@ export default function Overview() {
                       <>
                         <defs>
                           <linearGradient id="areaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" stopColor="#8B5CF6" stopOpacity="0.3" />
-                            <stop offset="100%" stopColor="#8B5CF6" stopOpacity="0.05" />
+                            <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.3" />
+                            <stop offset="100%" stopColor="#3B82F6" stopOpacity="0.05" />
                           </linearGradient>
                         </defs>
                         <path d={areaData} fill="url(#areaGradient)" />
-                        <path d={pathData} fill="none" stroke="#8B5CF6" strokeWidth="2" />
+                        <path d={pathData} fill="none" stroke="#3B82F6" strokeWidth="2" />
                         {values.length > 1 && range > 0 && values.map((v, i) => {
                           const x = (i / (values.length - 1)) * 280 + 10;
                           const y = 110 - ((v - minVal) / range) * 90;
-                          return <circle key={i} cx={x} cy={y} r="3" fill="#8B5CF6" />;
+                          return <circle key={i} cx={x} cy={y} r="3" fill="#3B82F6" />;
                         })}
                         {growthData.map((d, i) => {
                           const x = (i / (growthData.length - 1)) * 280 + 10;
@@ -933,8 +933,8 @@ export default function Overview() {
           </div>
 
           {/* 年均资产变化 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">年均资产变化</h3>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+            <h3 className="text-base font-semibold font-mono text-gray-900 dark:text-white">年均资产变化</h3>
             <div className="mt-3">
               <svg viewBox="0 0 600 200" className="w-full h-auto">
                 {(() => {
@@ -977,7 +977,7 @@ export default function Overview() {
                         const y = chartBottom - barHeight;
                         return (
                           <g key={d.year}>
-                            <rect x={x} y={y} width={barWidth} height={barHeight} fill="#8B5CF6" rx="4" />
+                            <rect x={x} y={y} width={barWidth} height={barHeight} fill="#3B82F6" rx="4" />
                             <text
                               x={x + barWidth / 2}
                               y={chartBottom + 18}
@@ -1008,25 +1008,25 @@ export default function Overview() {
         </section>
 
         {/* 数据来源说明 */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-3">数据来源与计算公式</h3>
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+          <h3 className="text-base font-semibold font-mono text-gray-900 dark:text-white mb-3">数据来源与计算公式</h3>
           <div className="space-y-3 text-sm text-gray-600 dark:text-gray-400">
             <div className="flex items-start gap-2">
-              <div className="w-1.5 h-1.5 rounded-full bg-primary-500 mt-1.5 flex-shrink-0" />
+              <div className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-1.5 flex-shrink-0" />
               <div>
                 <span className="font-medium text-gray-900 dark:text-white">总资产：</span>
                 所有持仓资产的市值之和，数据源为资产列表中各资产的 rmbValue 字段
               </div>
             </div>
             <div className="flex items-start gap-2">
-              <div className="w-1.5 h-1.5 rounded-full bg-primary-500 mt-1.5 flex-shrink-0" />
+              <div className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-1.5 flex-shrink-0" />
               <div>
                 <span className="font-medium text-gray-900 dark:text-white">总盈亏：</span>
                 总资产 - 总成本，公式 = Σ(rmbValue) - Σ(costValue)
               </div>
             </div>
             <div className="flex items-start gap-2">
-              <div className="w-1.5 h-1.5 rounded-full bg-primary-500 mt-1.5 flex-shrink-0" />
+              <div className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-1.5 flex-shrink-0" />
               <div>
                 <span className="font-medium text-gray-900 dark:text-white">收益率：</span>
                 总盈亏 / 总成本 × 100%，公式 = (Σ(rmbValue) - Σ(costValue)) / Σ(costValue) × 100%
@@ -1045,8 +1045,8 @@ export default function Overview() {
         {/* 编辑目标弹窗 */}
         {showEditGoalsModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-xl">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">编辑进度目标</h3>
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md shadow-xl">
+              <h3 className="text-lg font-semibold font-mono text-gray-900 dark:text-white mb-4">编辑进度目标</h3>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -1056,7 +1056,7 @@ export default function Overview() {
                     type="number"
                     value={editGoalsForm.yearlyGoal}
                     onChange={(e) => setEditGoalsForm({ ...editGoalsForm, yearlyGoal: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
                 <div>
@@ -1067,7 +1067,7 @@ export default function Overview() {
                     type="number"
                     value={editGoalsForm.targetAnnualReturn}
                     onChange={(e) => setEditGoalsForm({ ...editGoalsForm, targetAnnualReturn: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
                 <div>
@@ -1078,21 +1078,21 @@ export default function Overview() {
                     type="number"
                     value={editGoalsForm.ultimateGoal}
                     onChange={(e) => setEditGoalsForm({ ...editGoalsForm, ultimateGoal: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
               </div>
               <div className="flex justify-end gap-3 mt-6">
                 <button
                   onClick={() => setShowEditGoalsModal(false)}
-                  className="px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+                  className="px-4 py-2 rounded-lg border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
                 >
                   取消
                 </button>
                 <button
                   onClick={handleSaveGoals}
                   disabled={savingGoals}
-                  className="px-4 py-2 rounded-lg bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-50 transition-colors"
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
                   {savingGoals ? '保存中...' : '保存'}
                 </button>

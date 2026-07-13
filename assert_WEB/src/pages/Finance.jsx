@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes } from '../api';
+import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav } from '../api';
 import {
   TrendingUp,
   TrendingDown,
@@ -89,8 +89,8 @@ function FormField({ label, required, markRequired, children, fullWidth }) {
 }
 
 // ── 共享表单样式 ──
-const FORM_INPUT = 'w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors';
-const FORM_SELECT = 'w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors appearance-none cursor-pointer';
+const FORM_INPUT = 'w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200';
+const FORM_SELECT = 'w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer';
 
 // ── 账户卡片子组件 ──
 function AccountCard({ name, totalValue, totalCost, totalPnl, totalPnlRate, totalDailyPnl, totalDailyPnlRate, count }) {
@@ -100,7 +100,7 @@ function AccountCard({ name, totalValue, totalCost, totalPnl, totalPnlRate, tota
     <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 hover:shadow-md transition-shadow">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full p-1.5">
+          <div className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full p-1.5">
             <Wallet className="w-4 h-4" />
           </div>
           <span className="font-semibold text-gray-900 dark:text-white text-sm">{name}</span>
@@ -153,11 +153,49 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
   const [uploadedImages, setUploadedImages] = useState([]);
   const [showAddRecord, setShowAddRecord] = useState(false);
   const [tradeRecords, setTradeRecords] = useState(() => {
-    if (data.transactions && Array.isArray(data.transactions)) {
+    if (data.transactions && Array.isArray(data.transactions) && data.transactions.length > 0) {
       return data.transactions.map(t => ({ ...t, id: t.id || Date.now() + Math.random() }));
+    }
+    const shares = parseFloat(data.shares) || 0;
+    const costPrice = parseFloat(data.costPrice) || 0;
+    if (shares > 0 && costPrice > 0) {
+      return [{
+        id: Date.now(),
+        type: '买入',
+        date: data.priceDate || new Date().toISOString().split('T')[0],
+        time: '',
+        quantity: shares,
+        price: costPrice,
+        amount: shares * costPrice,
+        fee: 0,
+      }];
     }
     return [];
   });
+
+  useEffect(() => {
+    if (data && data.transactions && Array.isArray(data.transactions) && data.transactions.length > 0) {
+      setTradeRecords(data.transactions.map(t => ({ ...t, id: t.id || Date.now() + Math.random() })));
+    } else {
+      const shares = parseFloat(data.shares) || 0;
+      const costPrice = parseFloat(data.costPrice) || 0;
+      if (shares > 0 && costPrice > 0) {
+        const simulatedRecord = [{
+          id: Date.now(),
+          type: '买入',
+          date: data.priceDate || new Date().toISOString().split('T')[0],
+          time: '',
+          quantity: shares,
+          price: costPrice,
+          amount: shares * costPrice,
+          fee: 0,
+        }];
+        setTradeRecords(simulatedRecord);
+      } else {
+        setTradeRecords([]);
+      }
+    }
+  }, [data]);
 
   const saveTradeRecords = async (records) => {
     if (!saveState || !stateData) return;
@@ -178,9 +216,15 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
     }
   };
 
+  const getNowDateTimeLocal = () => {
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  };
+
   const [newRecord, setNewRecord] = useState({
     type: '买入',
-    date: new Date().toISOString().split('T')[0],
+    date: getNowDateTimeLocal(),
     time: '09:30',
     price: '',
     quantity: '',
@@ -253,6 +297,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
     let sellTotalQty = 0;
     let totalFee = 0;
     let dividendTotal = 0;
+    let totalAmount = 0;
+    let totalQty = 0;
 
     tradeRecords.forEach(record => {
       const amount = parseFloat(record.amount) || 0;
@@ -271,13 +317,25 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
       if (!isNaN(fee)) {
         totalFee += fee;
       }
+      if (record.type === '买入' || record.type === '建仓') {
+        totalAmount += amount;
+        totalQty += qty;
+      }
     });
 
     const avgBuyCost = buyTotalQty > 0 ? buyTotalAmount / buyTotalQty : 0;
     const avgSellCost = sellTotalQty > 0 ? sellTotalAmount / sellTotalQty : 0;
 
-    return { buyTotalAmount, sellTotalAmount, buyTotalQty, sellTotalQty, avgBuyCost, avgSellCost, totalFee, dividendTotal };
-  }, [tradeRecords]);
+    const isBondFund = data.categoryL1 === '债权类' && data.categoryL3 === '场外';
+    const expectedAsset = isBondFund 
+      ? totalAmount - totalFee
+      : buyTotalAmount - sellTotalAmount - totalFee;
+    const expectedQuantity = isBondFund
+      ? totalQty
+      : buyTotalQty - sellTotalQty;
+
+    return { buyTotalAmount, sellTotalAmount, buyTotalQty, sellTotalQty, avgBuyCost, avgSellCost, totalFee, dividendTotal, expectedAsset, expectedQuantity, totalAmount, totalQty, isBondFund };
+  }, [tradeRecords, data]);
 
   const isFloatPos = floatPnl >= 0;
   const isDayPos = dailyPnl >= 0;
@@ -336,7 +394,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
     });
     setNewRecord({
       type: '买入',
-      date: new Date().toISOString().split('T')[0],
+      date: getNowDateTimeLocal(),
       time: '09:30',
       price: '',
       quantity: '',
@@ -352,17 +410,17 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
       <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl border border-gray-200 dark:border-slate-700">
         <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700">
           <div className="flex items-center gap-3">
-            <div className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full p-2">
+            <div className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full p-2">
               <Eye className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-gray-900 dark:text-white text-lg">{data.name}</h3>
+              <h3 className="font-bold font-mono tracking-tight text-gray-900 dark:text-white text-lg">{data.name}</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400">代码: {data.code || '-'}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+            className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors duration-200"
           >
             <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -505,6 +563,127 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
                   <p className="text-sm font-semibold text-red-500">{formatNum(tradeStats.avgSellCost)}</p>
                 </div>
               </div>
+
+              <div className={`${Math.abs(tradeStats.expectedAsset - costPrice * quantity) < 0.01 && Math.abs(tradeStats.expectedQuantity - quantity) < 0.01 ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700'} rounded-xl p-3 mb-4 border`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className={`w-2 h-2 rounded-full ${Math.abs(tradeStats.expectedAsset - costPrice * quantity) < 0.01 && Math.abs(tradeStats.expectedQuantity - quantity) < 0.01 ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">交易记录校验</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ml-auto ${Math.abs(tradeStats.expectedAsset - costPrice * quantity) < 0.01 && Math.abs(tradeStats.expectedQuantity - quantity) < 0.01 ? 'bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-800 text-red-700 dark:text-red-400'}`}>
+                    {Math.abs(tradeStats.expectedAsset - costPrice * quantity) < 0.01 && Math.abs(tradeStats.expectedQuantity - quantity) < 0.01 ? '校验通过' : '校验不通过'}
+                  </span>
+                </div>
+                <div className="space-y-2 text-xs">
+                  {tradeStats.isBondFund ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">确认金额之和</span>
+                        <span className="text-gray-900 dark:text-white">{formatCurrency(tradeStats.totalAmount)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">手续费</span>
+                        <span className="text-gray-900 dark:text-white">{formatCurrency(tradeStats.totalFee)}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-gray-200 dark:border-slate-600">
+                        <span className="text-gray-500 dark:text-gray-400">资产校验 (确认金额-手续费)</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-gray-900 dark:text-white">{formatCurrency(tradeStats.expectedAsset)}</span>
+                          <span className="text-gray-500 dark:text-gray-400">VS</span>
+                          <span className="text-blue-600 dark:text-blue-400 font-medium">{formatCurrency(costPrice * quantity)}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">确认份额之和</span>
+                        <span className="text-gray-900 dark:text-white">{tradeStats.totalQty.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-gray-200 dark:border-slate-600">
+                        <span className="text-gray-500 dark:text-gray-400">份额校验 (确认份额之和)</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-gray-900 dark:text-white">{tradeStats.expectedQuantity.toFixed(2)}</span>
+                          <span className="text-gray-500 dark:text-gray-400">VS</span>
+                          <span className="text-blue-600 dark:text-blue-400 font-medium">{quantity.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">买入总金额</span>
+                        <span className="text-gray-900 dark:text-white">{formatCurrency(tradeStats.buyTotalAmount)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">卖出总金额</span>
+                        <span className="text-gray-900 dark:text-white">{formatCurrency(tradeStats.sellTotalAmount)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">手续费</span>
+                        <span className="text-gray-900 dark:text-white">{formatCurrency(tradeStats.totalFee)}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-gray-200 dark:border-slate-600">
+                        <span className="text-gray-500 dark:text-gray-400">资产校验 (买入-卖出-手续费)</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-gray-900 dark:text-white">{formatCurrency(tradeStats.expectedAsset)}</span>
+                          <span className="text-gray-500 dark:text-gray-400">VS</span>
+                          <span className="text-blue-600 dark:text-blue-400 font-medium">{formatCurrency(costPrice * quantity)}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">买入总份额</span>
+                        <span className="text-gray-900 dark:text-white">{tradeStats.buyTotalQty.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500 dark:text-gray-400">卖出总份额</span>
+                        <span className="text-gray-900 dark:text-white">{tradeStats.sellTotalQty.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-gray-200 dark:border-slate-600">
+                        <span className="text-gray-500 dark:text-gray-400">份额校验 (买入份额-卖出份额)</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-gray-900 dark:text-white">{tradeStats.expectedQuantity.toFixed(2)}</span>
+                          <span className="text-gray-500 dark:text-gray-400">VS</span>
+                          <span className="text-blue-600 dark:text-blue-400 font-medium">{quantity.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {tradeStats.isBondFund && (Math.abs(tradeStats.expectedAsset - costPrice * quantity) >= 0.01 || Math.abs(tradeStats.expectedQuantity - quantity) >= 0.01) && (
+                <div className="mb-4">
+                  <button
+                    onClick={async () => {
+                      if (!saveState || !stateData) return;
+                      try {
+                        const newCostPrice = tradeStats.totalQty > 0 ? (tradeStats.totalAmount - tradeStats.totalFee) / tradeStats.totalQty : costPrice;
+                        const newQuantity = tradeStats.totalQty;
+                        const currentFinanceAssets = stateData?.financeAssets || [];
+                        const updatedFinanceAssets = currentFinanceAssets.map(item => {
+                          if (String(item.id) === String(data.id)) {
+                            return {
+                              ...item,
+                              costPrice: newCostPrice,
+                              shares: newQuantity,
+                              availableShares: newQuantity,
+                            };
+                          }
+                          return item;
+                        });
+                        await saveState({
+                          ...stateData,
+                          financeAssets: updatedFinanceAssets,
+                        });
+                        alert('数据同步成功！');
+                      } catch (err) {
+                        console.error('Failed to sync data:', err);
+                        alert('同步失败：' + (err.message || '未知错误'));
+                      }
+                    }}
+                    className="w-full py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    同步最新数据
+                  </button>
+                </div>
+              )}
+
             </>
           )}
 
@@ -525,7 +704,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
                 </select>
                 <button
                   onClick={() => setShowAddRecord(!showAddRecord)}
-                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1"
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 flex items-center gap-1"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   新增记录
@@ -551,80 +730,178 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
 
             {showAddRecord && (
               <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3 mb-3">
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <label className="text-gray-500 dark:text-gray-400 block mb-0.5">类型</label>
-                    <select
-                      value={newRecord.type}
-                      onChange={e => setNewRecord(prev => ({ ...prev, type: e.target.value }))}
-                      className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                    >
-                      <option value="建仓">建仓</option>
-                      <option value="买入">买入</option>
-                      <option value="卖出">卖出</option>
-                      <option value="分红">分红</option>
-                    </select>
+                {data.categoryL2 === 'A股' && data.categoryL3 === '场内' && (data.assetType === '股票' || data.assetType === '基金') ? (
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">类型</label>
+                      <select
+                        value={newRecord.type}
+                        onChange={e => setNewRecord(prev => ({ ...prev, type: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                      >
+                        <option value="买入">买入</option>
+                        <option value="卖出">卖出</option>
+                        <option value="分红">分红</option>
+                        <option value="建仓">建仓</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">日期时间</label>
+                      <input
+                        type="datetime-local"
+                        step="1"
+                        value={newRecord.date}
+                        onChange={e => setNewRecord(prev => ({ ...prev, date: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">价格</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={newRecord.price}
+                        onChange={e => {
+                          const price = parseFloat(e.target.value) || 0;
+                          const quantity = parseFloat(newRecord.quantity) || 0;
+                          setNewRecord(prev => ({
+                            ...prev,
+                            price: e.target.value,
+                            amount: (price * quantity).toFixed(2)
+                          }));
+                        }}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                        placeholder="购买价"
+                      />
+                    </div>
+                    <div>
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">金额</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={newRecord.amount}
+                          onChange={e => {
+                            const amount = parseFloat(e.target.value) || 0;
+                            const price = parseFloat(newRecord.price) || 0;
+                            const quantity = price > 0 ? (amount / price).toFixed(3) : '';
+                            setNewRecord(prev => ({
+                              ...prev,
+                              amount: e.target.value,
+                              quantity
+                            }));
+                          }}
+                          className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                          placeholder="价格*数量"
+                        />
+                      </div>
+                    <div>
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">数量</label>
+                      <input
+                        type="number"
+                        step="0.001"
+                        value={newRecord.quantity}
+                        onChange={e => {
+                          const quantity = parseFloat(e.target.value) || 0;
+                          const price = parseFloat(newRecord.price) || 0;
+                          setNewRecord(prev => ({
+                            ...prev,
+                            quantity: e.target.value,
+                            amount: (price * quantity).toFixed(2)
+                          }));
+                        }}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                        placeholder="数量"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">费用</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={newRecord.fee}
+                        onChange={e => setNewRecord(prev => ({ ...prev, fee: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                        placeholder="费用"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-gray-500 dark:text-gray-400 block mb-0.5">日期</label>
-                    <input
-                      type="date"
-                      value={newRecord.date}
-                      onChange={e => setNewRecord(prev => ({ ...prev, date: e.target.value }))}
-                      className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                    />
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">类型</label>
+                      <select
+                        value={newRecord.type}
+                        onChange={e => setNewRecord(prev => ({ ...prev, type: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                      >
+                        <option value="建仓">建仓</option>
+                        <option value="买入">买入</option>
+                        <option value="卖出">卖出</option>
+                        <option value="分红">分红</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">日期时间</label>
+                      <input
+                        type="datetime-local"
+                        step="1"
+                        value={newRecord.date}
+                        onChange={e => setNewRecord(prev => ({ ...prev, date: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">确认金额</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={newRecord.amount}
+                        onChange={e => setNewRecord(prev => ({ ...prev, amount: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                        placeholder="确认金额"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">确认份额</label>
+                      <input
+                        type="number"
+                        step="0.001"
+                        value={newRecord.quantity}
+                        onChange={e => setNewRecord(prev => ({ ...prev, quantity: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                        placeholder="确认份额"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">确认净值</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={newRecord.price}
+                        onChange={e => setNewRecord(prev => ({ ...prev, price: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                        placeholder="确认净值"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-gray-500 dark:text-gray-400 block mb-0.5">手续费</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={newRecord.fee}
+                        onChange={e => setNewRecord(prev => ({ ...prev, fee: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                        placeholder="手续费"
+                      />
+                    </div>
                   </div>
-                  <div className="col-span-2">
-                    <label className="text-gray-500 dark:text-gray-400 block mb-0.5">确认金额</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={newRecord.amount}
-                      onChange={e => setNewRecord(prev => ({ ...prev, amount: e.target.value }))}
-                      className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                      placeholder="确认金额"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-gray-500 dark:text-gray-400 block mb-0.5">确认份额</label>
-                    <input
-                      type="number"
-                      step="0.001"
-                      value={newRecord.quantity}
-                      onChange={e => setNewRecord(prev => ({ ...prev, quantity: e.target.value }))}
-                      className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                      placeholder="确认份额"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-gray-500 dark:text-gray-400 block mb-0.5">确认净值</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={newRecord.price}
-                      onChange={e => setNewRecord(prev => ({ ...prev, price: e.target.value }))}
-                      className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                      placeholder="确认净值"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="text-gray-500 dark:text-gray-400 block mb-0.5">手续费</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={newRecord.fee}
-                      onChange={e => setNewRecord(prev => ({ ...prev, fee: e.target.value }))}
-                      className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                      placeholder="手续费"
-                    />
-                  </div>
-                </div>
+                )}
                 <div className="flex gap-2 mt-2">
                   <button
                     onClick={handleAddRecord}
-                    className="flex-1 px-3 py-1.5 text-xs bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"
+                    className="flex-1 px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                   >
-                    保存
+                    确认
                   </button>
                   <button
                     onClick={() => setShowAddRecord(false)}
@@ -657,62 +934,119 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
                     <span className={`font-medium ${record.type === '建仓' ? 'text-blue-600' : record.type === '买入' ? 'text-green-600' : record.type === '卖出' ? 'text-red-500' : 'text-blue-600'}`}>
                       {record.type}
                     </span>
-                    <span className="text-gray-500 dark:text-gray-400 text-xs">{record.date}</span>
+                    <span className="text-gray-500 dark:text-gray-400 text-xs">{record.date?.replace('T', ' ')}</span>
                   </div>
-                  <div className="grid grid-cols-5 gap-2 text-xs">
-                    <div className="col-span-2">
-                      <span className="text-gray-500 dark:text-gray-400">确认金额</span>
-                      <p className={`${record.amount >= 0 ? 'text-green-600' : 'text-red-500'}`}>{record.amount >= 0 ? '+' : ''}{record.amount}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 dark:text-gray-400">确认份额</span>
-                      <p className="text-gray-900 dark:text-white">{record.quantity}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 dark:text-gray-400">确认净值</span>
-                      <p className="text-gray-900 dark:text-white">{record.price}</p>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-gray-500 dark:text-gray-400">手续费</span>
-                      <div className="flex items-center gap-1 justify-end flex-1">
-                        <span className="text-gray-900 dark:text-white">{record.fee}</span>
-                        <button
-                          onClick={() => {
-                            setNewRecord({
-                              type: record.type,
-                              date: record.date,
-                              time: record.time,
-                              price: record.price === '-' ? '' : String(record.price),
-                              quantity: String(record.quantity),
-                              amount: String(record.amount),
-                              fee: record.fee === '-' ? '' : String(record.fee),
-                            });
-                            setShowAddRecord(true);
-                            setTradeRecords(prev => {
+                  {data.categoryL2 === 'A股' && data.categoryL3 === '场内' && (data.assetType === '股票' || data.assetType === '基金') ? (
+                    <div className="grid grid-cols-4 gap-2 text-xs">
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">价格</span>
+                        <p className="text-gray-900 dark:text-white font-mono">{record.price}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">金额</span>
+                        <p className={`font-mono ${record.amount >= 0 ? 'text-green-600' : 'text-red-500'}`}>{record.amount >= 0 ? '+' : ''}{record.amount}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">数量</span>
+                        <p className="text-gray-900 dark:text-white font-mono">{record.quantity}</p>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-gray-500 dark:text-gray-400">费用</span>
+                        <div className="flex items-center gap-1 justify-end flex-1">
+                          <span className="text-gray-900 dark:text-white font-mono">{record.fee}</span>
+                          <button
+                            onClick={() => {
+                              setNewRecord({
+                                type: record.type,
+                                date: record.date,
+                                time: record.time,
+                                price: record.price === '-' ? '' : String(record.price),
+                                quantity: String(record.quantity),
+                                amount: String(record.amount),
+                                fee: record.fee === '-' ? '' : String(record.fee),
+                              });
+                              setShowAddRecord(true);
+                              setTradeRecords(prev => {
+                                const newRecords = prev.filter(r => r.id !== record.id);
+                                saveTradeRecords(newRecords);
+                                return newRecords;
+                              });
+                            }}
+                            className="p-1.5 text-blue-600 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+                            title="修改"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setTradeRecords(prev => {
                               const newRecords = prev.filter(r => r.id !== record.id);
                               saveTradeRecords(newRecords);
                               return newRecords;
-                            });
-                          }}
-                          className="p-1.5 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded transition-colors"
-                          title="修改"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setTradeRecords(prev => {
-                            const newRecords = prev.filter(r => r.id !== record.id);
-                            saveTradeRecords(newRecords);
-                            return newRecords;
-                          })}
-                          className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                          title="删除"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                            })}
+                            className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="grid grid-cols-5 gap-2 text-xs">
+                      <div className="col-span-2">
+                        <span className="text-gray-500 dark:text-gray-400">确认金额</span>
+                        <p className={`font-mono ${record.amount >= 0 ? 'text-green-600' : 'text-red-500'}`}>{record.amount >= 0 ? '+' : ''}{record.amount}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">确认份额</span>
+                        <p className="text-gray-900 dark:text-white font-mono">{record.quantity}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">确认净值</span>
+                        <p className="text-gray-900 dark:text-white font-mono">{record.price}</p>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-gray-500 dark:text-gray-400">手续费</span>
+                        <div className="flex items-center gap-1 justify-end flex-1">
+                          <span className="text-gray-900 dark:text-white font-mono">{record.fee}</span>
+                          <button
+                            onClick={() => {
+                              setNewRecord({
+                                type: record.type,
+                                date: record.date,
+                                time: record.time,
+                                price: record.price === '-' ? '' : String(record.price),
+                                quantity: String(record.quantity),
+                                amount: String(record.amount),
+                                fee: record.fee === '-' ? '' : String(record.fee),
+                              });
+                              setShowAddRecord(true);
+                              setTradeRecords(prev => {
+                                const newRecords = prev.filter(r => r.id !== record.id);
+                                saveTradeRecords(newRecords);
+                                return newRecords;
+                              });
+                            }}
+                            className="p-1.5 text-blue-600 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+                            title="修改"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setTradeRecords(prev => {
+                              const newRecords = prev.filter(r => r.id !== record.id);
+                              saveTradeRecords(newRecords);
+                              return newRecords;
+                            })}
+                            className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -746,10 +1080,10 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl border border-gray-200 dark:border-slate-700">
             <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700">
-              <h3 className="font-bold text-gray-900 dark:text-white text-lg">定投设置</h3>
+              <h3 className="font-bold font-mono tracking-tight text-gray-900 dark:text-white text-lg">定投设置</h3>
               <button
                 onClick={() => setShowDcaModal(false)}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors duration-200"
               >
                 <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -860,10 +1194,10 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md max-h-[80vh] overflow-hidden shadow-2xl border border-gray-200 dark:border-slate-700">
             <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700">
-              <h3 className="font-bold text-gray-900 dark:text-white text-lg">识别结果校验</h3>
+              <h3 className="font-bold font-mono tracking-tight text-gray-900 dark:text-white text-lg">识别结果校验</h3>
               <button
                 onClick={() => setShowRecognizeModal(false)}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors duration-200"
               >
                 <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -875,15 +1209,32 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
               <div className="space-y-3">
                 {recognizedRecords.map((record, idx) => (
                   <div key={record.id} className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center justify-between mb-2">
                       <span className="text-xs text-gray-500 dark:text-gray-400">记录 {idx + 1}</span>
-                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${record.type === '建仓' ? 'bg-blue-100 text-blue-600' : record.type === '买入' ? 'bg-green-100 text-green-600' : record.type === '卖出' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
-                        {record.type}
-                      </span>
+                      <button
+                        onClick={() => setRecognizedRecords(prev => prev.filter(r => r.id !== record.id))}
+                        className="p-1 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                        title="删除此条"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                     </div>
-                    <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2 text-xs">
                       <div>
-                        <label className="text-gray-500 dark:text-gray-400 block">日期</label>
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">类型</label>
+                        <select
+                          value={record.type}
+                          onChange={e => setRecognizedRecords(prev => prev.map(r => r.id === record.id ? { ...r, type: e.target.value } : r))}
+                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                        >
+                          <option value="买入">买入</option>
+                          <option value="卖出">卖出</option>
+                          <option value="分红">分红</option>
+                          <option value="建仓">建仓</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">日期</label>
                         <input
                           type="date"
                           value={record.date}
@@ -891,29 +1242,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
                           className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
                         />
                       </div>
-                      <div className="col-span-3"></div>
-                      <div className="col-span-2">
-                        <label className="text-gray-500 dark:text-gray-400 block">确认金额</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={record.amount}
-                          onChange={e => setRecognizedRecords(prev => prev.map(r => r.id === record.id ? { ...r, amount: e.target.value } : r))}
-                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                        />
-                      </div>
                       <div>
-                        <label className="text-gray-500 dark:text-gray-400 block">确认份额</label>
-                        <input
-                          type="number"
-                          step="0.001"
-                          value={record.quantity}
-                          onChange={e => setRecognizedRecords(prev => prev.map(r => r.id === record.id ? { ...r, quantity: e.target.value } : r))}
-                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-gray-500 dark:text-gray-400 block">确认净值</label>
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">价格</label>
                         <input
                           type="number"
                           step="0.0001"
@@ -922,8 +1252,33 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
                           className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
                         />
                       </div>
-                      <div className="col-span-3">
-                        <label className="text-gray-500 dark:text-gray-400 block">手续费</label>
+                      <div>
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">数量</label>
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={record.quantity}
+                          onChange={e => setRecognizedRecords(prev => prev.map(r => r.id === record.id ? { ...r, quantity: e.target.value } : r))}
+                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">金额</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={record.amount}
+                          onChange={e => {
+                            const amount = parseFloat(e.target.value) || 0;
+                            const price = parseFloat(record.price) || 0;
+                            const quantity = price > 0 ? (amount / price).toFixed(3) : '';
+                            setRecognizedRecords(prev => prev.map(r => r.id === record.id ? { ...r, amount: e.target.value, quantity } : r));
+                          }}
+                          className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">费用</label>
                         <input
                           type="number"
                           step="0.01"
@@ -931,15 +1286,6 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
                           onChange={e => setRecognizedRecords(prev => prev.map(r => r.id === record.id ? { ...r, fee: e.target.value } : r))}
                           className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
                         />
-                      </div>
-                      <div className="flex items-center justify-end">
-                        <button
-                          onClick={() => setRecognizedRecords(prev => prev.filter(r => r.id !== record.id))}
-                          className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                          title="删除此条"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
                       </div>
                     </div>
                   </div>
@@ -951,7 +1297,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
                 onClick={() => setRecognizedRecords(prev => [...prev, {
                   id: Date.now() + Math.random(),
                   type: '买入',
-                  date: new Date().toISOString().split('T')[0],
+                  date: getNowDateTimeLocal(),
                   time: '09:30',
                   price: '',
                   quantity: '',
@@ -989,7 +1335,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData }) 
                     setShowRecognizeModal(false);
                     setRecordPage(1);
                   }}
-                  className="flex-1 px-4 py-2 text-sm bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"
+                  className="flex-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   确认导入 ({recognizedRecords.length}条)
                 </button>
@@ -1008,7 +1354,7 @@ function HoldingsSummaryCard({ summary }) {
   return (
     <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 mb-4">
       <div className="flex items-center gap-2 mb-3">
-        <div className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full p-1.5">
+        <div className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full p-1.5">
           <PieChart className="w-4 h-4" />
         </div>
         <span className="font-semibold text-gray-900 dark:text-white text-sm">筛选汇总</span>
@@ -1121,7 +1467,7 @@ function Pagination({ page, totalPages, totalCount, onPageChange, pageSize, onPa
 const DEFAULT_COLUMNS = [
   { key: 'market', label: '市场', visible: true, align: 'left' },
   { key: 'currency', label: '货币', visible: true, align: 'left' },
-  { key: 'assetType', label: '资产类型', visible: false, align: 'left' },
+  { key: 'assetType', label: '资产类型', visible: true, align: 'left' },
   { key: 'name', label: '资产名称', visible: true, align: 'left' },
   { key: 'code', label: '代码', visible: true, align: 'left' },
   { key: 'categoryL1', label: '一级分类', visible: false, align: 'left' },
@@ -1393,7 +1739,7 @@ function CategoryTable({
         const ratio = parseFloat(val);
         return <span className="text-gray-600 dark:text-gray-400">{isNaN(ratio) ? '—' : `${ratio.toFixed(2)}%`}</span>;
       case 'account':
-        return <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">{val || '-'}</span>;
+        return <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">{val || '-'}</span>;
       case 'tags':
         return val && Array.isArray(val) ? val.join(', ') : '-';
       default:
@@ -1536,7 +1882,7 @@ function CategoryTable({
             <select
               value={filterAccount}
               onChange={e => { setFilterAccount(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部账户</option>
               {uniqueAccounts.map(a => <option key={a} value={a}>{a}</option>)}
@@ -1548,7 +1894,7 @@ function CategoryTable({
             <select
               value={filterMarket}
               onChange={e => { setFilterMarket(e.target.value); setFilterCurrency(''); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部市场</option>
               {marketGroups.map(g => (
@@ -1566,7 +1912,7 @@ function CategoryTable({
             <select
               value={filterCategoryL1}
               onChange={e => { setFilterCategoryL1(e.target.value); setFilterCategoryL2(''); setFilterCategoryL3(''); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部一级分类</option>
               {assetClassOptions.map(c => <option key={c} value={c}>{c}</option>)}
@@ -1578,7 +1924,7 @@ function CategoryTable({
             <select
               value={filterCategoryL2}
               onChange={e => { setFilterCategoryL2(e.target.value); setFilterCategoryL3(''); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部二级分类</option>
               {allCategoryL2Options.map(c => <option key={c} value={c}>{c}</option>)}
@@ -1590,7 +1936,7 @@ function CategoryTable({
             <select
               value={filterCategoryL3}
               onChange={e => { setFilterCategoryL3(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部三级分类</option>
               {['场内', '场外', ...categoryL3CustomOptions].map(c => <option key={c} value={c}>{c}</option>)}
@@ -1602,7 +1948,7 @@ function CategoryTable({
             <select
               value={filterCategoryL4}
               onChange={e => { setFilterCategoryL4(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部四级分类</option>
               {[...new Set(Object.values(categoryL4Options).flat())].map(c => <option key={c} value={c}>{c}</option>)}
@@ -1614,7 +1960,7 @@ function CategoryTable({
             <select
               value={filterPositionGroup}
               onChange={e => { setFilterPositionGroup(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部持仓分组</option>
               {positionGroupOptions.map(g => <option key={g} value={g}>{g}</option>)}
@@ -1626,7 +1972,7 @@ function CategoryTable({
             <select
               value={filterPositionType}
               onChange={e => { setFilterPositionType(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部持仓分类</option>
               {positionTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
@@ -1638,7 +1984,7 @@ function CategoryTable({
             <select
               value={filterAccount}
               onChange={e => { setFilterAccount(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部账户</option>
               {uniqueAccounts.map(a => <option key={a} value={a}>{a}</option>)}
@@ -1650,7 +1996,7 @@ function CategoryTable({
             <select
               value={filterCurrency}
               onChange={e => { setFilterCurrency(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部货币</option>
               {getFilteredCurrencies(filterMarket).map(c => <option key={c} value={c}>{c}</option>)}
@@ -1662,7 +2008,7 @@ function CategoryTable({
             <select
               value={filterAssetType}
               onChange={e => { setFilterAssetType(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部资产类型</option>
               {assetTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
@@ -1674,7 +2020,7 @@ function CategoryTable({
             <select
               value={filterTag}
               onChange={e => { setFilterTag(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
+              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 appearance-none cursor-pointer"
             >
               <option value="">全部标签</option>
               {uniqueTags.map(t => <option key={t} value={t}>{t}</option>)}
@@ -1687,7 +2033,7 @@ function CategoryTable({
               onClick={() => setShowFilterSettings(!showFilterSettings)}
               className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs border rounded-lg transition-colors ${
                 showFilterSettings
-                  ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400'
+                  ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
                   : 'border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
               }`}
             >
@@ -1712,7 +2058,7 @@ function CategoryTable({
                         type="checkbox"
                         checked={f.visible}
                         onChange={() => toggleFilter(f.key)}
-                        className="w-3.5 h-3.5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+                        className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-blue-600"
                       />
                     </label>
                   ))}
@@ -1727,7 +2073,7 @@ function CategoryTable({
               onClick={() => setShowColumnSettings(!showColumnSettings)}
               className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs border rounded-lg transition-colors ${
                 showColumnSettings
-                  ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400'
+                  ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
                   : 'border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
               }`}
             >
@@ -1745,7 +2091,7 @@ function CategoryTable({
                   <div className="flex items-center gap-1">
                     <button
                       onClick={resetColumns}
-                      className="px-2 py-0.5 text-xs text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded transition-colors"
+                      className="px-2 py-0.5 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
                     >
                       默认
                     </button>
@@ -1767,7 +2113,7 @@ function CategoryTable({
                         type="checkbox"
                         checked={col.visible}
                         onChange={() => toggleColumn(col.key)}
-                        className="w-3.5 h-3.5 rounded border-gray-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500"
+                        className="w-3.5 h-3.5 rounded border-gray-300 dark:border-slate-600 text-blue-600 focus:ring-blue-600"
                       />
                       <span className="flex-1 text-xs text-gray-700 dark:text-gray-300 truncate">
                         {col.label}
@@ -1803,17 +2149,17 @@ function CategoryTable({
               value={filterText}
               onChange={e => { setFilterText(e.target.value); setPage(1); }}
               placeholder="搜索名称/代码/类型..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+              className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
             />
           </div>
 
           {/* 批量编辑按钮 */}
           <button
             onClick={() => { setShowBatchEdit(!showBatchEdit); setSelectedIds(new Set()); }}
-            className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-xl font-medium transition-all ${
+            className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-xl font-medium transition-all duration-200 ${
               showBatchEdit
-                ? 'bg-indigo-500 text-white hover:bg-indigo-600'
-                : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
+                ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
+                : 'border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800'
             }`}
           >
             <Edit2 className="w-3.5 h-3.5" /> 批量编辑
@@ -1832,7 +2178,7 @@ function CategoryTable({
           {/* 新增按钮 */}
           {onAdd && (
             <button onClick={onAdd}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-xl bg-indigo-500 text-white font-medium hover:bg-indigo-600 active:scale-[0.97] transition-all">
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm active:scale-[0.97] transition-all duration-200">
               <Plus className="w-3.5 h-3.5" /> 新增
             </button>
           )}
@@ -1841,9 +2187,9 @@ function CategoryTable({
 
       {/* 表格 */}
       <div className="overflow-x-auto px-4">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs border border-gray-200/60 dark:border-slate-800 rounded-xl overflow-hidden">
           <thead>
-            <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500">
+            <tr className="bg-gray-50 dark:bg-slate-800/50 border-b border-gray-200 dark:border-slate-700 text-gray-500 dark:text-gray-400">
               {showBatchEdit && (
                 <th className="py-2 px-1.5 font-medium text-center w-10">
                   <input
@@ -1856,28 +2202,28 @@ function CategoryTable({
                         setSelectedIds(new Set());
                       }
                     }}
-                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-600"
                   />
                 </th>
               )}
               {visibleColumns.map(col => (
                 <th
                   key={col.key}
-                  className={`py-2 px-1.5 font-medium whitespace-nowrap ${
+                  className={`py-2 px-1.5 font-medium text-xs uppercase tracking-wider whitespace-nowrap ${
                     col.align === 'right' ? 'text-right' : 'text-left'
                   } ${col.bold ? 'font-semibold text-gray-700 dark:text-gray-300' : ''} ${
-                    col.indigo ? 'text-indigo-600 dark:text-indigo-400' : ''
+                    col.indigo ? 'text-blue-600 dark:text-blue-400' : ''
                   }`}
                 >
                   {col.label}
                 </th>
               ))}
-              <th className="py-2 px-1.5 font-medium whitespace-nowrap text-center">操作</th>
+              <th className="py-2 px-1.5 font-medium text-xs uppercase tracking-wider whitespace-nowrap text-center">操作</th>
             </tr>
           </thead>
           <tbody>
             {paged.map((h, i) => (
-              <tr key={h.id || i} className="border-b border-gray-50 dark:border-slate-700/30 hover:bg-gray-50/80 dark:hover:bg-slate-700/20">
+              <tr key={h.id || i} className="border-b border-gray-100 dark:border-slate-700/30 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors duration-150">
                 {showBatchEdit && (
                   <td className="py-2 px-1.5 text-center">
                     <div className="flex items-center justify-center gap-1">
@@ -1890,7 +2236,7 @@ function CategoryTable({
                           else newSet.delete(h.id);
                           setSelectedIds(newSet);
                         }}
-                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-600"
                       />
                       <span className="text-xs text-gray-400">{(safePage - 1) * pageSize + i + 1}</span>
                     </div>
@@ -1900,11 +2246,11 @@ function CategoryTable({
                   <td
                     key={col.key}
                     className={`py-2 px-1.5 ${
-                      col.align === 'right' ? 'text-right tabular-nums' : ''
+                      col.align === 'right' ? 'text-right tabular-nums font-mono' : ''
                     } ${col.bold ? 'font-semibold' : ''} ${
                       col.pnl ? pnlClass(h[col.key]) : ''
-                    } ${col.indigo ? 'text-indigo-600 dark:text-indigo-400' : ''} ${
-                      col.key === 'currentValue' ? 'text-gray-900 dark:text-white' : ''
+                    } ${col.indigo ? 'text-blue-600 dark:text-blue-400' : ''} ${
+                      col.key === 'currentValue' ? 'text-gray-900 dark:text-white font-mono' : ''
                     }`}
                   >
                     {col.key === 'currentValue'
@@ -1923,7 +2269,7 @@ function CategoryTable({
                     </button>
                     <button
                       onClick={() => onDetail && onDetail(h)}
-                      className="px-1.5 py-0.5 text-xs rounded text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                      className="px-1.5 py-0.5 text-xs rounded text-blue-600 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
                       title="详情"
                     >
                       明细
@@ -2030,7 +2376,7 @@ function CategoryTable({
 //  主组件
 // ═══════════════════════════════════════════
 
-export default function Finance() {
+export default function Finance({ onAssetPenetration }) {
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -2231,6 +2577,26 @@ export default function Finance() {
           map[q.code] = q;
         }
       });
+
+      const fundCodes = financeAssetsData
+        .filter(a => a.code && (a.tertiaryCategory === '场外' || a.categoryL3 === '场外'))
+        .map(a => a.code);
+      for (const code of fundCodes) {
+        const fundNav = await fetchFundNav(code);
+        if (fundNav && fundNav.unitNav !== null) {
+          map[code] = {
+            ...map[code],
+            code,
+            price: fundNav.unitNav,
+            prevClose: fundNav.prevNav,
+            priceDate: fundNav.navDate,
+            prevDate: fundNav.prevNavDate,
+            changePct: fundNav.changePct !== null ? parseFloat(fundNav.changePct) : null,
+            fundNavData: fundNav,
+          };
+        }
+      }
+
       setQuotesMap(map);
     } catch (err) {
       console.error('Failed to load quotes:', err);
@@ -2258,6 +2624,22 @@ export default function Finance() {
 
   const handleSaveAccount = async () => {
     if (!newAccount.name || !newAccount.code || !newAccount.cost || !newAccount.quantity) return;
+    if (!newAccount.categoryL2) {
+      alert('请选择二级分类');
+      return;
+    }
+    if (!newAccount.categoryL3) {
+      alert('请选择三级分类');
+      return;
+    }
+    if (!newAccount.positionGroup) {
+      alert('请选择持仓分组');
+      return;
+    }
+    if (!newAccount.account) {
+      alert('请选择所属账户');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -2841,6 +3223,7 @@ export default function Finance() {
     const financeAccounts = (financeAssets || []).map(a => {
       const _price = parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0;
       const _prevClose = parseFloat(quotesMap[a.code]?.prevClose) || parseFloat(a.prevPrice) || 0;
+      const _priceDate = quotesMap[a.code]?.priceDate || a.priceDate || '';
       const _priceChange = _price > _prevClose ? 'up' : _price < _prevClose ? 'down' : 'unchanged';
       const _cost = parseFloat(a.costPrice || a.cost) || 0;
       const _qty = parseFloat(a.shares || a.quantity) || 0;
@@ -2863,8 +3246,8 @@ export default function Finance() {
         cost: a.costPrice || a.cost || 0,
         quantity: a.shares || a.quantity || 0,
         currentPrice: _price,
-        prevPrice: parseFloat(a.prevPrice) || _prevClose || 0,
-        priceDate: a.priceDate || '',
+        prevPrice: _prevClose || parseFloat(a.prevPrice) || 0,
+        priceDate: _priceDate,
         prevClose: _prevClose,
         priceChange: _priceChange,
         avgBuyPrice: a.avgBuyPrice || 0,
@@ -2999,7 +3382,7 @@ export default function Finance() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-500 dark:text-gray-400">加载中...</p>
         </div>
       </div>
@@ -3010,7 +3393,7 @@ export default function Finance() {
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
           <p className="text-red-500 mb-4">{error}</p>
-          <button onClick={loadData} className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors">
+          <button onClick={loadData} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
             重试
           </button>
         </div>
@@ -3029,7 +3412,7 @@ export default function Finance() {
   //  渲染
   // ══════════════════════════════════════
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-indigo-50/30 dark:from-slate-900 dark:to-slate-900 p-4 sm:p-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50/30 dark:from-slate-900 dark:to-slate-900 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-5">
 
         {/* ═══ 顶栏：标题 + 总值 + 操作按钮 ═══ */}
@@ -3037,8 +3420,8 @@ export default function Finance() {
           style={{ background: 'linear-gradient(135deg, #EEEDFF 0%, #F5F3FF 40%, #FEF3E2 100%)' }}>
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">💎 理财模块</h1>
-              <p className="text-sm text-gray-500 mt-0.5">持仓管理 · 账户总览 · 实时盈亏</p>
+              <h1 className="text-2xl font-bold font-mono tracking-tight text-gray-900">💎 理财模块</h1>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">持仓管理 · 账户总览 · 实时盈亏</p>
             </div>
             <div className="text-center lg:text-right">
               <div className="text-4xl sm:text-5xl font-black text-gray-900 whitespace-nowrap tabular-nums tracking-tight">
@@ -3059,8 +3442,12 @@ export default function Finance() {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              <button onClick={onAssetPenetration}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-800 active:scale-[0.97] transition-all duration-200">
+                场内穿透
+              </button>
               <button onClick={loadData}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-indigo-300 text-indigo-600 text-sm font-medium hover:bg-indigo-50 active:scale-[0.97] transition-all">
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-800 active:scale-[0.97] transition-all duration-200">
                 <RefreshCw className={`w-4 h-4 ${loading || quotesLoading ? 'animate-spin' : ''}`} /> 刷新
               </button>
             </div>
@@ -3097,7 +3484,7 @@ export default function Finance() {
         <section className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-5 shadow-soft border border-gray-100/80 dark:border-slate-700/50">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <Wallet className="w-5 h-5 text-indigo-500" />
+              <Wallet className="w-5 h-5 text-blue-600" />
               <h2 className="text-base font-bold text-gray-900 dark:text-white">📒 账户本</h2>
               <span className="text-xs text-gray-400 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
                 共 {computed.accountBook.length} 个账户
@@ -3143,7 +3530,7 @@ export default function Finance() {
         {/* ═══ 持仓明细 ═══ */}
         <section className="space-y-5">
           <div className="flex items-center gap-2">
-            <Briefcase className="w-5 h-5 text-indigo-500" />
+            <Briefcase className="w-5 h-5 text-blue-600" />
             <h2 className="text-base font-bold text-gray-900 dark:text-white">📊 持仓明细</h2>
             <span className="text-xs text-gray-400 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
               共 {computed.financeAccounts.length} 项
@@ -3199,18 +3586,18 @@ export default function Finance() {
            ══════════════════════════════════════ */}
         {showAddModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto border border-gray-200/60 dark:border-slate-700">
               {/* Header */}
               <div className="flex items-center justify-between p-5 border-b border-gray-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{editMode ? '编辑持仓资产' : '新增持仓资产'}</h3>
-                <button onClick={() => setShowAddModal(false)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                <h3 className="text-lg font-semibold font-mono tracking-tight text-gray-900 dark:text-white">{editMode ? '编辑持仓资产' : '新增持仓资产'}</h3>
+                <button onClick={() => setShowAddModal(false)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors duration-200">
                   <X className="w-5 h-5 text-gray-500" />
                 </button>
               </div>
 
               <div className="p-5 space-y-5">
                 {/* OCR 区域 */}
-                <div className="border-2 border-dashed border-gray-300 dark:border-slate-600 rounded-xl p-4 text-center hover:border-indigo-400 transition-colors">
+                <div className="border-2 border-dashed border-gray-300 dark:border-slate-600 rounded-xl p-4 text-center hover:border-blue-400 transition-colors">
                   {uploadedImage ? (
                     <div className="relative">
                       <img src={uploadedImage} alt="预览" className="max-h-40 mx-auto rounded-lg object-contain" />
@@ -3231,7 +3618,7 @@ export default function Finance() {
                   )}
                   {uploadedImage && !ocrResult && (
                     <button onClick={handleOCR}
-                      className="mt-3 inline-flex items-center gap-1.5 px-5 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 text-sm font-medium transition-colors">
+                      className="mt-3 inline-flex items-center gap-1.5 px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors">
                       <Camera className="w-4 h-4" /> 识别图片
                     </button>
                   )}
@@ -3281,7 +3668,8 @@ export default function Finance() {
                         value={newAccount.currency}
                         onChange={e => setNewAccount({ ...newAccount, currency: e.target.value.toUpperCase() })}
                         placeholder="CNY / CNH / USD / 自定义..."
-                        className={`${FORM_INPUT} pr-8 font-mono`}
+                        disabled={!newAccount.market}
+                        className={`${FORM_INPUT} pr-8 font-mono ${!newAccount.market ? 'opacity-50 cursor-not-allowed' : ''}`}
                       />
                       <datalist id="currency-suggestions">
                         {CURRENCY_SUGGESTIONS.map(c => <option key={c} value={c} />)}
@@ -3289,8 +3677,27 @@ export default function Finance() {
                     </div>
                   </FormField>
 
-                  {/* Row 2: 资产分类 | 二级分类 */}
-                  <FormField label="资产分类" required>
+                  {/* Row 2: 资产类型 | 所属账户（同步账户本） */}
+                  <FormField label="资产类型" required>
+                    <select value={newAccount.assetType} onChange={e => setNewAccount({ ...newAccount, assetType: e.target.value, categoryL2: '', categoryL3: '' })}
+                      disabled={!newAccount.currency}
+                      className={`${FORM_SELECT} ${!newAccount.currency ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                      {ASSET_TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </FormField>
+
+                  <FormField label="所属账户" required>
+                    <select value={newAccount.account} onChange={e => setNewAccount({ ...newAccount, account: e.target.value })}
+                      className={FORM_SELECT}>
+                      <option value="">请选择账户</option>
+                      {accounts.map(acc =>
+                        <option key={acc.id || acc.name} value={acc.name}>{acc.name}</option>
+                      )}
+                    </select>
+                  </FormField>
+
+                  {/* Row 3: 资产分类一级 | 二级分类 */}
+                  <FormField label="资产分类一级" required>
                     <select value={newAccount.categoryL1} onChange={e => {
                       setNewAccount({ ...newAccount, categoryL1: e.target.value, categoryL2: '', categoryL3: '' });
                     }}
@@ -3300,7 +3707,7 @@ export default function Finance() {
                     </select>
                   </FormField>
 
-                  <FormField label="资产分类二级">
+                  <FormField label="资产分类二级" required>
                     <select value={newAccount.categoryL2} onChange={e => {
                       setNewAccount({ ...newAccount, categoryL2: e.target.value, categoryL3: '' });
                     }}
@@ -3310,8 +3717,8 @@ export default function Finance() {
                     </select>
                   </FormField>
 
-                  {/* Row 3: 三级分类 | 四级分类 */}
-                  <FormField label="资产三级分类">
+                  {/* Row 4: 三级分类 | 四级分类 */}
+                  <FormField label="资产三级分类" required>
                     <select value={newAccount.categoryL3} onChange={e => setNewAccount({ ...newAccount, categoryL3: e.target.value })}
                       className={FORM_SELECT}>
                       <option value="">请选择</option>
@@ -3334,25 +3741,7 @@ export default function Finance() {
                     </div>
                   </FormField>
 
-                  {/* Row 4: 资产类型 | 所属账户（同步账户本） */}
-                  <FormField label="资产类型" required>
-                    <select value={newAccount.assetType} onChange={e => setNewAccount({ ...newAccount, assetType: e.target.value, categoryL2: '', categoryL3: '' })}
-                      className={FORM_SELECT}>
-                      {ASSET_TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </FormField>
-
-                  <FormField label="所属账户">
-                    <select value={newAccount.account} onChange={e => setNewAccount({ ...newAccount, account: e.target.value })}
-                      className={FORM_SELECT}>
-                      <option value="">请选择账户</option>
-                      {accounts.map(acc =>
-                        <option key={acc.id || acc.name} value={acc.name}>{acc.name}</option>
-                      )}
-                    </select>
-                  </FormField>
-
-                  <FormField label="持仓分组">
+                  <FormField label="持仓分组" required>
                     <div className="flex gap-2">
                       <select value={newAccount.positionGroup} onChange={e => setNewAccount({ ...newAccount, positionGroup: e.target.value })}
                         className={`${FORM_SELECT} flex-1`}>
@@ -3390,7 +3779,7 @@ export default function Finance() {
                         }}
                         onFocus={() => newAccount.name && handleCodeSearch(newAccount.name)}
                         onBlur={() => setTimeout(() => setShowLookupDropdown(false), 200)}
-                        placeholder="基金、股票或自定义资产名称"
+                        placeholder={(newAccount.assetType === '股票' || newAccount.assetType === '基金') && newAccount.categoryL3 === '场内' ? '请填写股票名称' : '基金、股票或自定义资产名称'}
                         className={FORM_INPUT}
                       />
                       {showLookupDropdown && (
@@ -3407,7 +3796,7 @@ export default function Finance() {
                                 className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
                               >
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400">{item.code}</span>
+                                  <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{item.code}</span>
                                   {item.price && <span className="text-xs text-gray-500 dark:text-gray-400">¥{item.price}</span>}
                                 </div>
                                 <div className="text-sm text-gray-800 dark:text-gray-200 truncate">{item.name}</div>
@@ -3448,7 +3837,7 @@ export default function Finance() {
                                 className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
                               >
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400">{item.code}</span>
+                                  <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{item.code}</span>
                                   {item.price && <span className="text-xs text-gray-500 dark:text-gray-400">¥{item.price}</span>}
                                 </div>
                                 <div className="text-sm text-gray-800 dark:text-gray-200 truncate">{item.name}</div>
@@ -3475,8 +3864,8 @@ export default function Finance() {
                           ...p,
                           cost: val,
                           currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
-                          holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
-                          holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                          holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(3) : p.holdingPnl,
+                          holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(3) : p.holdingPnlRate,
                         };
                       });
                     }}
@@ -3502,8 +3891,8 @@ export default function Finance() {
                           ...p,
                           quantity: val,
                           currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
-                          holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
-                          holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                          holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(3) : p.holdingPnl,
+                          holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(3) : p.holdingPnlRate,
                           dailyPnl: (qty && price && prev) ? dailyPnl.toFixed(2) : p.dailyPnl,
                           dailyPnlRate: (price && prev) ? dailyPnlRate.toFixed(2) : p.dailyPnlRate,
                         };
@@ -3530,8 +3919,8 @@ export default function Finance() {
                           ...p,
                           currentPrice: val,
                           currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
-                          holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
-                          holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                          holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(3) : p.holdingPnl,
+                          holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(3) : p.holdingPnlRate,
                           dailyPnl: (qty && price && prev) ? dailyPnl.toFixed(2) : p.dailyPnl,
                           dailyPnlRate: (price && prev) ? dailyPnlRate.toFixed(2) : p.dailyPnlRate,
                         };
@@ -3539,29 +3928,33 @@ export default function Finance() {
                     }} placeholder="0.0000" className={FORM_INPUT} />
                   </FormField>
 
-                  <FormField label="前一交易日净值">
-                    <input type="number" step="0.0001" value={newAccount.prevPrice} onChange={e => {
-                      const val = e.target.value;
-                      setNewAccount(p => {
-                        const qty = parseFloat(p.quantity) || 0;
-                        const price = parseFloat(p.currentPrice) || 0;
-                        const prev = parseFloat(val) || 0;
-                        const dailyPnl = qty * (price - prev);
-                        const dailyPnlRate = prev > 0 ? ((price - prev) / prev) * 100 : 0;
-                        return {
-                          ...p,
-                          prevPrice: val,
-                          dailyPnl: (qty && price && prev) ? dailyPnl.toFixed(2) : p.dailyPnl,
-                          dailyPnlRate: (price && prev) ? dailyPnlRate.toFixed(2) : p.dailyPnlRate,
-                        };
-                      });
-                    }} placeholder="0.0000" className={FORM_INPUT} />
-                  </FormField>
+                  {newAccount.assetType !== '股票' && (
+                    <FormField label="前一交易日净值">
+                      <input type="number" step="0.0001" value={newAccount.prevPrice} onChange={e => {
+                        const val = e.target.value;
+                        setNewAccount(p => {
+                          const qty = parseFloat(p.quantity) || 0;
+                          const price = parseFloat(p.currentPrice) || 0;
+                          const prev = parseFloat(val) || 0;
+                          const dailyPnl = qty * (price - prev);
+                          const dailyPnlRate = prev > 0 ? ((price - prev) / prev) * 100 : 0;
+                          return {
+                            ...p,
+                            prevPrice: val,
+                            dailyPnl: (qty && price && prev) ? dailyPnl.toFixed(2) : p.dailyPnl,
+                            dailyPnlRate: (price && prev) ? dailyPnlRate.toFixed(2) : p.dailyPnlRate,
+                          };
+                        });
+                      }} placeholder="0.0000" className={FORM_INPUT} />
+                    </FormField>
+                  )}
 
-                  <FormField label="净值日期">
-                    <input type="date" value={newAccount.priceDate} onChange={e => setNewAccount({ ...newAccount, priceDate: e.target.value })}
-                      className={FORM_INPUT} />
-                  </FormField>
+                  {newAccount.assetType !== '股票' && (
+                    <FormField label="净值日期">
+                      <input type="date" value={newAccount.priceDate} onChange={e => setNewAccount({ ...newAccount, priceDate: e.target.value })}
+                        className={FORM_INPUT} />
+                    </FormField>
+                  )}
 
                   {/* Row 8: 持仓天数 | (空) */}
                   <FormField label="持仓天数">
@@ -3637,7 +4030,7 @@ export default function Finance() {
                     取消
                   </button>
                   <button onClick={handleSaveAccount} disabled={saving || !newAccount.name || !newAccount.code || !newAccount.cost || !newAccount.quantity}
-                    className="flex-1 py-2.5 rounded-xl bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-50 font-semibold transition-colors shadow-md shadow-indigo-200">
+                    className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-semibold transition-colors shadow-sm">
                     {saving ? '保存中...' : '保存'}
                   </button>
                 </div>
@@ -3649,17 +4042,17 @@ export default function Finance() {
         {/* ══ 标签管理弹窗 ═══ */}
         {showTagModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-gray-200/60 dark:border-slate-700">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">标签管理</h3>
-                <button onClick={() => setShowTagModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                <h3 className="text-lg font-semibold font-mono tracking-tight text-gray-900 dark:text-white">标签管理</h3>
+                <button onClick={() => setShowTagModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors duration-200">
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <div className="space-y-3">
                 <div className="flex gap-2">
                   <input type="text" value={newTagName} onChange={e => setNewTagName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddTag()} placeholder="输入标签名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddTag} className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"><Plus className="w-4 h-4" /></button>
+                  <button onClick={handleAddTag} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {tags.length > 0 ? (
@@ -3696,10 +4089,10 @@ export default function Finance() {
         {/* ══ 批量编辑弹窗 ═══ */}
         {showBatchEditModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto border border-gray-200/60 dark:border-slate-700">
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">批量编辑 ({selectedIds.size} 条记录)</h3>
-                <button onClick={() => { setShowBatchEditModal(false); setBatchEditData({ market: '', currency: '', assetType: '', account: '', categoryL1: '', categoryL2: '', categoryL3: '', positionGroup: '', positionType: '', tag: '' }); }} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                <h3 className="text-lg font-semibold font-mono tracking-tight text-gray-900 dark:text-white">批量编辑 ({selectedIds.size} 条记录)</h3>
+                <button onClick={() => { setShowBatchEditModal(false); setBatchEditData({ market: '', currency: '', assetType: '', account: '', categoryL1: '', categoryL2: '', categoryL3: '', positionGroup: '', positionType: '', tag: '' }); }} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors duration-200">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -3792,7 +4185,7 @@ export default function Finance() {
                 <button onClick={() => { setShowBatchEditModal(false); setBatchEditData({ market: '', currency: '', assetType: '', account: '', categoryL1: '', categoryL2: '', categoryL3: '', positionGroup: '', positionType: '', tag: '' }); }} className="flex-1 py-2.5 rounded-xl border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 font-medium transition-colors">
                   取消
                 </button>
-                <button onClick={handleBatchSave} className="flex-1 py-2.5 rounded-xl bg-indigo-500 text-white hover:bg-indigo-600 font-semibold transition-colors shadow-md shadow-indigo-200">
+                <button onClick={handleBatchSave} className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 font-semibold transition-colors shadow-sm">
                   保存修改
                 </button>
               </div>
@@ -3802,17 +4195,17 @@ export default function Finance() {
 
         {showCategoryL3Modal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-gray-200/60 dark:border-slate-700">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">资产三级分类管理</h3>
-                <button onClick={() => setShowCategoryL3Modal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                <h3 className="text-lg font-semibold font-mono tracking-tight text-gray-900 dark:text-white">资产三级分类管理</h3>
+                <button onClick={() => setShowCategoryL3Modal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors duration-200">
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <div className="space-y-3">
                 <div className="flex gap-2">
                   <input type="text" value={newCategoryL3Name} onChange={e => setNewCategoryL3Name(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddCategoryL3()} placeholder="输入分类名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddCategoryL3} className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"><Plus className="w-4 h-4" /></button>
+                  <button onClick={handleAddCategoryL3} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {categoryL3CustomOptions.length > 0 ? (
@@ -3848,10 +4241,10 @@ export default function Finance() {
 
         {showCategoryL4Modal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-gray-200/60 dark:border-slate-700">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">资产四级分类管理</h3>
-                <button onClick={() => setShowCategoryL4Modal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                <h3 className="text-lg font-semibold font-mono tracking-tight text-gray-900 dark:text-white">资产四级分类管理</h3>
+                <button onClick={() => setShowCategoryL4Modal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors duration-200">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -3859,7 +4252,7 @@ export default function Finance() {
               <div className="space-y-3">
                 <div className="flex gap-2">
                   <input type="text" value={newCategoryL4Name} onChange={e => setNewCategoryL4Name(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddCategoryL4()} placeholder="输入分类名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddCategoryL4} className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"><Plus className="w-4 h-4" /></button>
+                  <button onClick={handleAddCategoryL4} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {(categoryL4Options[newAccount.categoryL1] || []).length > 0 ? (
@@ -3895,17 +4288,17 @@ export default function Finance() {
 
         {showPositionGroupModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-gray-200/60 dark:border-slate-700">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">持仓分组管理</h3>
-                <button onClick={() => setShowPositionGroupModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                <h3 className="text-lg font-semibold font-mono tracking-tight text-gray-900 dark:text-white">持仓分组管理</h3>
+                <button onClick={() => setShowPositionGroupModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors duration-200">
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <div className="space-y-3">
                 <div className="flex gap-2">
                   <input type="text" value={newPositionGroupName} onChange={e => setNewPositionGroupName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddPositionGroup()} placeholder="输入分组名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddPositionGroup} className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"><Plus className="w-4 h-4" /></button>
+                  <button onClick={handleAddPositionGroup} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {positionGroupOptions.length > 0 ? (
@@ -3941,17 +4334,17 @@ export default function Finance() {
 
         {showPositionTypeModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-gray-200/60 dark:border-slate-700">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">持仓分类管理</h3>
-                <button onClick={() => setShowPositionTypeModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                <h3 className="text-lg font-semibold font-mono tracking-tight text-gray-900 dark:text-white">持仓分类管理</h3>
+                <button onClick={() => setShowPositionTypeModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors duration-200">
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <div className="space-y-3">
                 <div className="flex gap-2">
                   <input type="text" value={newPositionTypeName} onChange={e => setNewPositionTypeName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddPositionType()} placeholder="输入分类名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddPositionType} className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"><Plus className="w-4 h-4" /></button>
+                  <button onClick={handleAddPositionType} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {positionTypeOptions.length > 0 ? (

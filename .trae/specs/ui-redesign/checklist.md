@@ -1,0 +1,15 @@
+- [x] Checkpoint 1: index.css 包含 Fira Code + Fira Sans 字体引入和 CSS 设计令牌定义
+- [x] Checkpoint 2: 暗色模式 CSS 变量正确定义（.dark 选择器下）
+- [x] Checkpoint 3: 侧边栏品牌区域使用新配色方案
+- [x] Checkpoint 4: 导航项活跃状态有蓝色左边界指示器
+- [x] Checkpoint 5: 导航项悬停效果平滑（200-300ms 过渡）
+- [x] Checkpoint 6: 用户头像按钮使用新配色（#2563EB）
+- [x] Checkpoint 7: Login 页面使用新设计系统（圆角、阴影、配色）
+- [x] Checkpoint 8: Overview 页面统计卡片使用新阴影和圆角
+- [x] Checkpoint 9: Overview 页面数据数字使用 Fira Code 字体
+- [x] Checkpoint 10: Finance 页面表格样式升级（表头、行间距、悬停）
+- [x] Checkpoint 11: Finance 页面弹窗使用新设计系统
+- [x] Checkpoint 12: Records 和 Analysis 页面视觉与新设计系统一致
+- [x] Checkpoint 13: 所有页面暗色模式视觉一致
+- [x] Checkpoint 14: npm run build 成功无新错误
+- [x] Checkpoint 15: 所有现有功能逻辑未被修改（无业务逻辑代码变更）

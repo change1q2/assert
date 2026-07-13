@@ -581,7 +581,7 @@ export default function Records({ onNavigate }) {
 
   const handleAddBook = async () => {
     if (!newBookName.trim()) return;
-    const newBook = { id: Date.now(), name: newBookName.trim(), icon: '', color: '#6366F1', createdAt: new Date().toISOString() };
+    const newBook = { id: Date.now(), name: newBookName.trim(), icon: '', color: '#2563EB', createdAt: new Date().toISOString() };
     const updatedBooks = [...books, newBook];
     const currentState = stateData || await fetchState();
     await saveState({ ...currentState, books: updatedBooks });
@@ -823,7 +823,7 @@ export default function Records({ onNavigate }) {
             id: Date.now() + Math.random(),
             name: bookName,
             icon: '',
-            color: '#6366F1',
+            color: '#2563EB',
             createdAt: now,
           });
         }
@@ -1081,10 +1081,10 @@ export default function Records({ onNavigate }) {
     };
 
     return (
-      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700">
+      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
         <div className="flex items-center justify-between mb-3">
           <button onClick={() => setCalendarDate(new Date(year, month - 1, 1))} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded"><ChevronLeft className="w-5 h-5" /></button>
-          <span className="font-semibold">{year}年{month + 1}月</span>
+          <span className="font-semibold font-mono tracking-tight">{year}年{month + 1}月</span>
           <button onClick={() => setCalendarDate(new Date(year, month + 1, 1))} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded"><ChevronRight className="w-5 h-5" /></button>
         </div>
         <div className={`grid grid-cols-7 ${sizeClasses[calendarSize]} text-center ${fontSizeClasses[calendarSize]}`}>
@@ -1104,9 +1104,9 @@ export default function Records({ onNavigate }) {
                 onClick={() => setSelectedDate(new Date(year, month, day))}
                 className={`${cellPaddingClasses[calendarSize]} rounded-lg relative transition-all duration-200 ${
                   isSelected
-                    ? 'bg-primary-500 text-white shadow-lg shadow-primary-500/30 ring-2 ring-primary-300'
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 ring-2 ring-blue-300'
                     : isToday
-                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 border border-primary-200'
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border border-blue-200'
                     : 'hover:bg-gray-100 dark:hover:bg-slate-700'
                 }`}
               >
@@ -1151,7 +1151,7 @@ export default function Records({ onNavigate }) {
               onClick={() => setSelectedDate(new Date())}
               className={`px-3 py-1 rounded-full transition-colors ${
                 !selectedDate || formatDate(selectedDate) === todayStr
-                  ? 'bg-primary-500 text-white'
+                  ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600'
               }`}
             >
@@ -1189,7 +1189,7 @@ export default function Records({ onNavigate }) {
                 onClick={() => setCalendarSize(size)}
                 className={`px-2 py-1 rounded text-xs transition-colors ${
                   calendarSize === size
-                    ? 'bg-primary-500 text-white'
+                    ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600'
                 }`}
               >
@@ -1217,9 +1217,9 @@ export default function Records({ onNavigate }) {
     const symbol = getCurrencySymbol(selectedCurrencyFilter);
     
     return (
-      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700">
+      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
         <div className="flex items-center justify-between mb-4">
-          <span className="font-semibold">月度收支统计 - {chartYear}年</span>
+          <span className="font-semibold font-mono tracking-tight">月度收支统计 - {chartYear}年</span>
           <div className="flex items-center gap-2">
             <button onClick={() => setChartYear(chartYear - 1)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded">
               <ChevronLeft className="w-5 h-5" />
@@ -1228,7 +1228,7 @@ export default function Records({ onNavigate }) {
               type="number"
               value={chartYear}
               onChange={(e) => setChartYear(Math.max(2000, Math.min(2100, parseInt(e.target.value) || 2000)))}
-              className="w-16 px-2 py-1 text-center border border-gray-300 dark:border-slate-600 rounded text-sm dark:bg-slate-700"
+              className="w-16 px-2 py-1 text-center border border-gray-200 dark:border-slate-700 rounded text-sm dark:bg-slate-700"
             />
             <button onClick={() => setChartYear(chartYear + 1)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded">
               <ChevronRight className="w-5 h-5" />
@@ -1260,9 +1260,9 @@ export default function Records({ onNavigate }) {
     const symbol = getCurrencySymbol(selectedCurrencyFilter);
     
     return (
-      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700">
+      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
         <div className="flex items-center justify-between mb-4">
-          <span className="font-semibold">年度收支趋势</span>
+          <span className="font-semibold font-mono tracking-tight">年度收支趋势</span>
         </div>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
@@ -1297,7 +1297,7 @@ export default function Records({ onNavigate }) {
     const { title, Chart, Series } = chartConfig[displayMode];
     
     return (
-      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700">
+      <div className="mt-4 p-4 bg-white dark:bg-slate-800 rounded-xl shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
         <div className="flex flex-wrap items-center gap-4 mb-4">
           <div className="flex items-center gap-2">
             <label className="text-sm text-gray-600 dark:text-gray-400">起始日期:</label>
@@ -1305,7 +1305,7 @@ export default function Records({ onNavigate }) {
               type="date"
               value={customStartDate}
               onChange={(e) => setCustomStartDate(e.target.value)}
-              className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm dark:bg-slate-700"
+              className="px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg text-sm dark:bg-slate-700"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -1314,12 +1314,12 @@ export default function Records({ onNavigate }) {
               type="date"
               value={customEndDate}
               onChange={(e) => setCustomEndDate(e.target.value)}
-              className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm dark:bg-slate-700"
+              className="px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg text-sm dark:bg-slate-700"
             />
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray-500 dark:text-gray-400">显示模式:</span>
-            <span className="px-3 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-full text-sm font-medium">
+            <span className="px-3 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-full text-sm font-medium">
               {title}
             </span>
           </div>
@@ -1393,13 +1393,13 @@ export default function Records({ onNavigate }) {
 
   const INCOME_CATEGORY_COLORS = [
     '#8B5CF6', '#10B981', '#F59E0B', '#06B6D4', '#EC4899', '#14B8A6',
-    '#F97316', '#6366F1', '#84CC16', '#0EA5E9', '#D946EF', '#22C55E',
+    '#F97316', '#2563EB', '#84CC16', '#0EA5E9', '#D946EF', '#22C55E',
     '#FBBF24', '#06B6D4', '#EC4899', '#8B5CF6', '#10B981', '#F59E0B',
-    '#6366F1', '#14B8A6'
+    '#2563EB', '#14B8A6'
   ];
   const EXPENSE_CATEGORY_COLORS = [
     '#EC4899', '#8B5CF6', '#F59E0B', '#06B6D4', '#10B981', '#F97316',
-    '#6366F1', '#14B8A6', '#84CC16', '#0EA5E9', '#D946EF', '#22C55E',
+    '#2563EB', '#14B8A6', '#84CC16', '#0EA5E9', '#D946EF', '#22C55E',
     '#FBBF24', '#F43F5E', '#A855F7', '#06B6D4', '#EC4899', '#8B5CF6',
     '#10B981', '#F97316'
   ];
@@ -1614,7 +1614,7 @@ export default function Records({ onNavigate }) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <div className="w-10 h-10 border-4 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-500 dark:text-gray-400">加载中...</p>
         </div>
       </div>
@@ -1628,7 +1628,7 @@ export default function Records({ onNavigate }) {
           <p className="text-red-500 mb-4">{error}</p>
           <button
             onClick={loadData}
-            className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
             重试
           </button>
@@ -1658,14 +1658,14 @@ export default function Records({ onNavigate }) {
           }}
         >
           <div className="flex flex-col gap-4">
-            <h1 className="text-2xl font-bold text-gray-900">收支分析</h1>
+            <h1 className="text-2xl font-bold font-mono tracking-tight text-gray-900">收支分析</h1>
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="relative">
                   <select
                     value={selectedBook || ''}
                     onChange={(e) => setSelectedBook(e.target.value || null)}
-                    className="appearance-none bg-white dark:bg-slate-700 border border-primary-300 dark:border-primary-600 rounded-lg pl-3 pr-8 py-2 text-sm font-medium text-primary-600 dark:text-primary-300 cursor-pointer hover:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="appearance-none bg-white dark:bg-slate-700 border border-blue-300 dark:border-blue-600 rounded-lg pl-3 pr-8 py-2 text-sm font-medium text-blue-600 dark:text-blue-300 cursor-pointer hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
                   >
                     <option value="">全部账本</option>
                     {books.map((book) => (
@@ -1674,13 +1674,13 @@ export default function Records({ onNavigate }) {
                       </option>
                     ))}
                   </select>
-                  <BookOpen className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-primary-500 pointer-events-none" />
+                  <BookOpen className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-600 pointer-events-none" />
                 </div>
                 <div className="relative">
                   <select
                     value={selectedCurrencyFilter}
                     onChange={(e) => setSelectedCurrencyFilter(e.target.value)}
-                    className="appearance-none bg-white dark:bg-slate-700 border border-primary-300 dark:border-primary-600 rounded-lg pl-3 pr-8 py-2 text-sm font-medium text-primary-600 dark:text-primary-300 cursor-pointer hover:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="appearance-none bg-white dark:bg-slate-700 border border-blue-300 dark:border-blue-600 rounded-lg pl-3 pr-8 py-2 text-sm font-medium text-blue-600 dark:text-blue-300 cursor-pointer hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
                   >
                     {CURRENCIES.map((currency) => (
                       <option key={currency.code} value={currency.code}>
@@ -1688,7 +1688,7 @@ export default function Records({ onNavigate }) {
                       </option>
                     ))}
                   </select>
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-primary-500 pointer-events-none text-xs font-bold">
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-blue-600 pointer-events-none text-xs font-bold">
                     {getCurrencySymbol(selectedCurrencyFilter)}
                   </span>
                 </div>
@@ -1696,7 +1696,7 @@ export default function Records({ onNavigate }) {
               <div className="flex items-center gap-3 shrink-0">
                 <button
                   onClick={loadData}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary-500 text-primary-500 text-sm font-medium hover:bg-primary-500 hover:text-white transition-colors"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-blue-600 text-blue-600 text-sm font-medium hover:bg-blue-600 hover:text-white transition-colors"
                 >
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                   刷新数据
@@ -1705,7 +1705,7 @@ export default function Records({ onNavigate }) {
             </div>
           </div>
         </section>
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 sm:px-7 shadow-soft border border-gray-100 dark:border-slate-700">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 sm:px-7 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
           <div className="flex items-center justify-center gap-1">
             {['全部', '日常', '月统计', '年统计', '自定义'].map((tab) => (
               <button
@@ -1713,7 +1713,7 @@ export default function Records({ onNavigate }) {
                 onClick={() => setTimePeriod(tab)}
                 className={`px-4 py-1.5 rounded-full text-sm transition-all ${
                   timePeriod === tab
-                    ? 'bg-primary-500 text-white font-medium'
+                    ? 'bg-blue-600 text-white font-medium'
                     : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
                 }`}
               >
@@ -1740,7 +1740,7 @@ export default function Records({ onNavigate }) {
             const labels = getStatLabels();
             return (
               <>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-gray-500 dark:text-gray-400">{labels.income}</span>
               <div className="bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full p-2">
@@ -1756,7 +1756,7 @@ export default function Records({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-gray-500 dark:text-gray-400">{labels.expense}</span>
               <div className="bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full p-2">
@@ -1772,7 +1772,7 @@ export default function Records({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-gray-500 dark:text-gray-400">{labels.net}</span>
               <div className={`rounded-full p-2 ${
@@ -1783,7 +1783,7 @@ export default function Records({ onNavigate }) {
                 {netIncome >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
               </div>
             </div>
-            <div className={`text-3xl font-bold tabular-nums whitespace-nowrap ${
+            <div className={`text-3xl font-bold font-mono tabular-nums whitespace-nowrap ${
               netIncome >= 0 ? 'text-green-600' : 'text-red-500'
             }`}>
               {netIncome >= 0 ? '+' : ''}{formatCurrency(netIncome, selectedCurrencyFilter)}
@@ -1796,11 +1796,11 @@ export default function Records({ onNavigate }) {
 
           <div 
             onClick={() => onNavigate && onNavigate('budget')}
-            className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 cursor-pointer hover:shadow-md transition-shadow"
+            className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 cursor-pointer hover:shadow-md transition-shadow"
           >
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-gray-500 dark:text-gray-400">本月预算</span>
-              <div className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full p-2">
+              <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-full p-2">
                 <Wallet className="w-5 h-5" />
               </div>
             </div>
@@ -1811,13 +1811,13 @@ export default function Records({ onNavigate }) {
               <span className="text-gray-500 dark:text-gray-400">
                 已用 {formatCurrency(budgets.reduce((sum, b) => sum + b.used, 0), selectedCurrencyFilter)}
               </span>
-              <span className="text-blue-500">
+              <span className="text-blue-600">
                 剩余 {formatCurrency(budgets.reduce((sum, b) => sum + (b.amount - b.used), 0), selectedCurrencyFilter)}
               </span>
             </div>
             <div className="mt-2 w-full bg-gray-100 dark:bg-slate-700 rounded-full h-2">
               <div 
-                className="bg-blue-500 h-2 rounded-full transition-all"
+                className="bg-blue-600 h-2 rounded-full transition-all"
                 style={{ 
                   width: `${Math.min(
                     (budgets.reduce((sum, b) => sum + b.used, 0) / 
@@ -1834,15 +1834,15 @@ export default function Records({ onNavigate }) {
         </section>
 
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">收入占比</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">收入占比</h3>
               <div className="flex bg-gray-100 dark:bg-slate-700 rounded-full p-0.5">
                 <button
                   onClick={() => setIncomePieView('category')}
                   className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
                     incomePieView === 'category'
-                      ? 'bg-primary-500 text-white'
+                      ? 'bg-blue-600 text-white'
                       : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
                   }`}
                 >
@@ -1852,7 +1852,7 @@ export default function Records({ onNavigate }) {
                   onClick={() => setIncomePieView('detail')}
                   className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
                     incomePieView === 'detail'
-                      ? 'bg-primary-500 text-white'
+                      ? 'bg-blue-600 text-white'
                       : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
                   }`}
                 >
@@ -1915,15 +1915,15 @@ export default function Records({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">支出占比</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">支出占比</h3>
               <div className="flex bg-gray-100 dark:bg-slate-700 rounded-full p-0.5">
                 <button
                   onClick={() => setExpensePieView('category')}
                   className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
                     expensePieView === 'category'
-                      ? 'bg-primary-500 text-white'
+                      ? 'bg-blue-600 text-white'
                       : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
                   }`}
                 >
@@ -1933,7 +1933,7 @@ export default function Records({ onNavigate }) {
                   onClick={() => setExpensePieView('detail')}
                   className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
                     expensePieView === 'detail'
-                      ? 'bg-primary-500 text-white'
+                      ? 'bg-blue-600 text-white'
                       : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
                   }`}
                 >
@@ -1997,13 +1997,13 @@ export default function Records({ onNavigate }) {
           </div>
         </section>
 
-        <section className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+        <section className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">收支记录</h3>
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">收支记录</h3>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => { setNewRecord({ date: formatDate(new Date()), type: 'expense', category: '', subCategory: '', amount: '', book: selectedBook || '', account: '', note: '', tag: '', currency: baseCurrency }); setShowAddModal(true); }}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 新增
@@ -2019,8 +2019,8 @@ export default function Records({ onNavigate }) {
                 }}
                 className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   isBatchEditMode
-                    ? 'border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700'
-                    : 'bg-blue-500 text-white hover:bg-blue-600'
+                    ? 'border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
                 }`}
               >
                 {isBatchEditMode ? '取消' : '编辑'}
@@ -2034,7 +2034,7 @@ export default function Records({ onNavigate }) {
               </button>
               <button
                 onClick={handleDownloadTemplate}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-gray-300 dark:border-slate-600 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-gray-200 dark:border-slate-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
               >
                 <Download className="w-4 h-4" />
                 下载模板
@@ -2057,13 +2057,13 @@ export default function Records({ onNavigate }) {
                   });
                   setCurrentPage(1);
                 }}
-                className="shrink-0 px-3 py-1.5 text-xs bg-primary-500 text-white rounded hover:bg-primary-600 transition-colors whitespace-nowrap"
+                className="shrink-0 px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors whitespace-nowrap"
               >
                 重置筛选
               </button>
               <button
                 onClick={() => setShowColumnSettingsModal(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 dark:border-slate-600 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
               >
                 <SlidersHorizontal className="w-4 h-4" />
                 高级列表设置
@@ -2078,7 +2078,7 @@ export default function Records({ onNavigate }) {
                   <select
                     value={listFilters.date}
                     onChange={(e) => handleFilterChange('date', e.target.value)}
-                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                    className="w-full px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">全部</option>
                     <option value="today">今日</option>
@@ -2095,7 +2095,7 @@ export default function Records({ onNavigate }) {
                   <select
                     value={listFilters.type}
                     onChange={(e) => handleFilterChange('type', e.target.value)}
-                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                    className="w-full px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                   >
                     <option value="all">全部</option>
                     <option value="income">收入</option>
@@ -2109,7 +2109,7 @@ export default function Records({ onNavigate }) {
                   <select
                     value={listFilters.category}
                     onChange={(e) => { handleFilterChange('category', e.target.value); handleFilterChange('subCategory', ''); }}
-                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                    className="w-full px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">全部</option>
                     {[...new Set([...Object.keys(categories.income || {}), ...Object.keys(categories.expense || {})])].map((cat) => (
@@ -2124,7 +2124,7 @@ export default function Records({ onNavigate }) {
                   <select
                     value={listFilters.subCategory}
                     onChange={(e) => handleFilterChange('subCategory', e.target.value)}
-                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                    className="w-full px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                     disabled={!listFilters.category}
                   >
                     <option value="">全部</option>
@@ -2146,7 +2146,7 @@ export default function Records({ onNavigate }) {
                   <select
                     value={listFilters.book}
                     onChange={(e) => handleFilterChange('book', e.target.value)}
-                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                    className="w-full px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">全部</option>
                     {books.map((book) => (
@@ -2161,7 +2161,7 @@ export default function Records({ onNavigate }) {
                   <select
                     value={listFilters.currency}
                     onChange={(e) => handleFilterChange('currency', e.target.value)}
-                    className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                    className="w-full px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                   >
                     <option value="">全部</option>
                     {CURRENCIES.map((c) => (
@@ -2185,7 +2185,7 @@ export default function Records({ onNavigate }) {
                         key={field}
                         onClick={() => { setShowBatchEditField(field); setBatchEditValue(''); }}
                         disabled={selectedRecordIds.size === 0}
-                        className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                        className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
                       >
                         {fieldNames[field]}
                       </button>
@@ -2204,9 +2204,9 @@ export default function Records({ onNavigate }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap w-12">序号</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap w-12">序号</th>
                   {isBatchEditMode && (
-                    <th className="text-center py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap w-10">
+                    <th className="text-center py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap w-10">
                       <input
                         type="checkbox"
                         checked={paginatedRecords.length > 0 && paginatedRecords.every(r => selectedRecordIds.has(r.id))}
@@ -2221,25 +2221,25 @@ export default function Records({ onNavigate }) {
                             setSelectedRecordIds(newSet);
                           }
                         }}
-                        className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-600"
                       />
                     </th>
                   )}
-                  {visibleColumns.date && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">日期</th>}
-                  {visibleColumns.type && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">收支类型</th>}
-                  {visibleColumns.amount && <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">金额</th>}
-                  {visibleColumns.category && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类别</th>}
-                  {visibleColumns.subCategory && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">二级分类</th>}
-                  {visibleColumns.book && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">所属账本</th>}
-                  {visibleColumns.currency && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">收支账户</th>}
-                  {visibleColumns.note && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">备注</th>}
-                  {visibleColumns.tag && <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">标签</th>}
-                  <th className="text-center py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">操作</th>
+                  {visibleColumns.date && <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">日期</th>}
+                  {visibleColumns.type && <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">收支类型</th>}
+                  {visibleColumns.amount && <th className="text-right py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">金额</th>}
+                  {visibleColumns.category && <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">类别</th>}
+                  {visibleColumns.subCategory && <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">二级分类</th>}
+                  {visibleColumns.book && <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">所属账本</th>}
+                  {visibleColumns.currency && <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">收支账户</th>}
+                  {visibleColumns.note && <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">备注</th>}
+                  {visibleColumns.tag && <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">标签</th>}
+                  <th className="text-center py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {paginatedRecords.map((record, index) => (
-                  <tr key={record.id} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30">
+                  <tr key={record.id} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors duration-150">
                     <td className="py-2.5 px-3 text-gray-500 text-sm">
                       {(currentPage - 1) * pageSize + index + 1}
                     </td>
@@ -2257,7 +2257,7 @@ export default function Records({ onNavigate }) {
                             }
                             setSelectedRecordIds(newSet);
                           }}
-                          className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-600"
                         />
                       </td>
                     )}
@@ -2278,7 +2278,7 @@ export default function Records({ onNavigate }) {
                       </td>
                     )}
                     {visibleColumns.amount && (
-                      <td className={`text-right font-medium tabular-nums ${
+                      <td className={`text-right font-medium font-mono tabular-nums ${
                         record.type === 'income' ? 'text-green-600' : 'text-red-500'
                       }`}>
                         {record.type === 'income' ? '+' : '-'}{formatCurrency(convertAmount(Math.abs(record.amount || 0), record.currency || DEFAULT_BASE_CURRENCY, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES), selectedCurrencyFilter)}
@@ -2318,7 +2318,7 @@ export default function Records({ onNavigate }) {
                       <div className="flex items-center justify-center gap-2">
                         <button
                           onClick={() => handleEditRecord(record)}
-                          className="p-1 text-blue-500 hover:bg-blue-100 rounded transition-colors"
+                          className="p-1 text-blue-600 hover:bg-blue-100 rounded transition-colors"
                           title="编辑"
                         >
                           <Edit2 className="w-4 h-4" />
@@ -2351,7 +2351,7 @@ export default function Records({ onNavigate }) {
                 <select
                   value={pageSize}
                   onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
-                  className="px-2 py-1.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white cursor-pointer"
+                  className="px-2 py-1.5 text-sm border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white cursor-pointer"
                 >
                   {[10, 20, 50, 100].map(size => (
                     <option key={size} value={size}>{size} 条/页</option>
@@ -2360,7 +2360,7 @@ export default function Records({ onNavigate }) {
                 <button
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
-                  className="px-3 py-1.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1.5 text-sm border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   上一页
                 </button>
@@ -2377,14 +2377,14 @@ export default function Records({ onNavigate }) {
                         setCurrentPage(Math.max(1, Math.min(totalPages, val)));
                       }
                     }}
-                    className="w-14 px-2 py-1.5 text-center text-sm border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                    className="w-14 px-2 py-1.5 text-center text-sm border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white"
                   />
                   <span>/ {totalPages} 页</span>
                 </div>
                 <button
                   onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
-                  className="px-3 py-1.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1.5 text-sm border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   下一页
                 </button>
@@ -2401,7 +2401,7 @@ export default function Records({ onNavigate }) {
                 <button onClick={() => setShowAddModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded"><X className="w-5 h-5" /></button>
               </div>
               <div className="space-y-4">
-                <div className="border-2 border-dashed border-gray-300 dark:border-slate-600 rounded-lg p-4 text-center hover:border-primary-500 transition-colors">
+                <div className="border-2 border-dashed border-gray-200 dark:border-slate-700 rounded-lg p-4 text-center hover:border-blue-600 transition-colors">
                   {uploadedImage ? (
                     <div className="relative">
                       <img src={uploadedImage} alt="预览" className="max-h-32 mx-auto rounded-lg object-contain" />
@@ -2418,7 +2418,7 @@ export default function Records({ onNavigate }) {
                     </label>
                   )}
                   {uploadedImage && (
-                    <button onClick={handleOCR} className="mt-3 inline-flex items-center gap-1 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600">
+                    <button onClick={handleOCR} className="mt-3 inline-flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                       <Image className="w-4 h-4" />
                       识别
                     </button>
@@ -2433,7 +2433,7 @@ export default function Records({ onNavigate }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日期</label>
-                  <input type="date" value={newRecord.date} onChange={e => setNewRecord({ ...newRecord, date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <input type="date" value={newRecord.date} onChange={e => setNewRecord({ ...newRecord, date: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">收支类型</label>
@@ -2446,7 +2446,7 @@ export default function Records({ onNavigate }) {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">金额</label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 text-sm">{getCurrencySymbol(newRecord.currency || baseCurrency)}</span>
-                    <input type="number" value={newRecord.amount} onChange={e => setNewRecord({ ...newRecord, amount: e.target.value })} placeholder="0.00" className="w-full pl-8 pr-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                    <input type="number" value={newRecord.amount} onChange={e => setNewRecord({ ...newRecord, amount: e.target.value })} placeholder="0.00" className="w-full pl-8 pr-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white" />
                   </div>
                 </div>
                 <div>
@@ -2455,14 +2455,14 @@ export default function Records({ onNavigate }) {
                     <select
                       value={newRecord.category}
                       onChange={e => setNewRecord({ ...newRecord, category: e.target.value, subCategory: '' })}
-                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                      className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white"
                     >
                       <option value="">请选择类别</option>
                       {Object.keys(categories[newRecord.type] || {}).map((cat) => (
                         <option key={cat} value={cat}>{cat}</option>
                       ))}
                     </select>
-                    <button onClick={() => setShowCategoryModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
+                    <button onClick={() => setShowCategoryModal(true)} className="px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
                   </div>
                 </div>
                 <div>
@@ -2471,7 +2471,7 @@ export default function Records({ onNavigate }) {
                     <select
                       value={newRecord.subCategory}
                       onChange={e => setNewRecord({ ...newRecord, subCategory: e.target.value })}
-                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                      className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white"
                       disabled={!newRecord.category}
                     >
                       <option value="">请选择二级分类</option>
@@ -2480,7 +2480,7 @@ export default function Records({ onNavigate }) {
                       ))}
                     </select>
                     {newRecord.category && (
-                      <button onClick={() => setShowSubCategoryModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
+                      <button onClick={() => setShowSubCategoryModal(true)} className="px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
                     )}
                   </div>
                 </div>
@@ -2490,14 +2490,14 @@ export default function Records({ onNavigate }) {
                     <select
                       value={newRecord.book}
                       onChange={e => setNewRecord({ ...newRecord, book: e.target.value })}
-                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                      className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white"
                     >
                       <option value="">请选择账本</option>
                       {books.map((book) => (
                         <option key={book.id || book.name} value={book.name}>{book.name}</option>
                       ))}
                     </select>
-                    <button onClick={() => setShowBookModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
+                    <button onClick={() => setShowBookModal(true)} className="px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -2506,7 +2506,7 @@ export default function Records({ onNavigate }) {
                     <select
                       value={newRecord.account || ''}
                       onChange={e => setNewRecord({ ...newRecord, account: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                      className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white"
                     >
                       <option value="">请选择账户</option>
                       {(stateData?.accounts || []).map((acc) => (
@@ -2519,7 +2519,7 @@ export default function Records({ onNavigate }) {
                     <select
                       value={newRecord.currency || baseCurrency}
                       onChange={e => setNewRecord({ ...newRecord, currency: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                      className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white"
                     >
                       {CURRENCIES.map((c) => (
                         <option key={c.code} value={c.code}>{c.name} ({c.symbol})</option>
@@ -2529,7 +2529,7 @@ export default function Records({ onNavigate }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">备注</label>
-                  <input type="text" value={newRecord.note} onChange={e => setNewRecord({ ...newRecord, note: e.target.value })} placeholder="可选" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <input type="text" value={newRecord.note} onChange={e => setNewRecord({ ...newRecord, note: e.target.value })} placeholder="可选" className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">标签</label>
@@ -2537,19 +2537,19 @@ export default function Records({ onNavigate }) {
                     <select
                       value={newRecord.tag}
                       onChange={(e) => setNewRecord({ ...newRecord, tag: e.target.value })}
-                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                      className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white"
                     >
                       <option value="">请选择标签</option>
                       {tags.map((tag) => (
                         <option key={tag.id || tag.name} value={tag.name}>{tag.name}</option>
                       ))}
                     </select>
-                    <button onClick={() => setShowTagModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
+                    <button onClick={() => setShowTagModal(true)} className="px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700"><Settings className="w-4 h-4" /></button>
                   </div>
                 </div>
                 <div className="flex gap-3 pt-2">
-                  <button onClick={() => setShowAddModal(false)} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
-                  <button onClick={handleAddRecord} disabled={saving || !newRecord.date || !newRecord.amount || !newRecord.category} className="flex-1 py-2.5 rounded-lg bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-50">{saving ? '保存中...' : '保存'}</button>
+                  <button onClick={() => setShowAddModal(false)} className="flex-1 py-2.5 rounded-lg border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                  <button onClick={handleAddRecord} disabled={saving || !newRecord.date || !newRecord.amount || !newRecord.category} className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{saving ? '保存中...' : '保存'}</button>
                 </div>
               </div>
             </div>
@@ -2565,15 +2565,15 @@ export default function Records({ onNavigate }) {
               </div>
               <div className="space-y-3">
                 <div className="flex gap-2">
-                  <input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddCategory()} placeholder="输入分类名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddCategory} className="px-3 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"><Plus className="w-4 h-4" /></button>
+                  <input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddCategory()} placeholder="输入分类名称" className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <button onClick={handleAddCategory} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {Object.keys(categories[newRecord.type] || {}).map((cat) => (
                     <div key={cat} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
                       {categoryToEdit === cat ? (
                         <>
-                          <input type="text" value={newCategoryName || cat} onChange={e => setNewCategoryName(e.target.value)} className="flex-1 px-2 py-1 border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-600 dark:text-white" autoFocus />
+                          <input type="text" value={newCategoryName || cat} onChange={e => setNewCategoryName(e.target.value)} className="flex-1 px-2 py-1 border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-600 dark:text-white" autoFocus />
                           <button onClick={handleSaveCategoryEdit} className="p-1 text-green-600 hover:bg-green-100 rounded"><Edit2 className="w-4 h-4" /></button>
                           <button onClick={() => { setCategoryToEdit(null); setNewCategoryName(''); }} className="p-1 text-gray-500 hover:bg-gray-200 rounded"><X className="w-4 h-4" /></button>
                         </>
@@ -2605,15 +2605,15 @@ export default function Records({ onNavigate }) {
               </div>
               <div className="space-y-3">
                 <div className="flex gap-2">
-                  <input type="text" value={newSubCategoryName} onChange={e => setNewSubCategoryName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddSubCategory()} placeholder="输入二级分类名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddSubCategory} className="px-3 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"><Plus className="w-4 h-4" /></button>
+                  <input type="text" value={newSubCategoryName} onChange={e => setNewSubCategoryName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddSubCategory()} placeholder="输入二级分类名称" className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <button onClick={handleAddSubCategory} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {getSubCategories(newRecord.category).map((subCat) => (
                     <div key={subCat} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
                       {subCategoryToEdit === subCat ? (
                         <>
-                          <input type="text" value={newSubCategoryName || subCat} onChange={e => setNewSubCategoryName(e.target.value)} className="flex-1 px-2 py-1 border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-600 dark:text-white" autoFocus />
+                          <input type="text" value={newSubCategoryName || subCat} onChange={e => setNewSubCategoryName(e.target.value)} className="flex-1 px-2 py-1 border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-600 dark:text-white" autoFocus />
                           <button onClick={handleSaveSubCategoryEdit} className="p-1 text-green-600 hover:bg-green-100 rounded"><Edit2 className="w-4 h-4" /></button>
                           <button onClick={() => { setSubCategoryToEdit(null); setNewSubCategoryName(''); }} className="p-1 text-gray-500 hover:bg-gray-200 rounded"><X className="w-4 h-4" /></button>
                         </>
@@ -2660,7 +2660,7 @@ export default function Records({ onNavigate }) {
                       type="checkbox"
                       checked={visibleColumns[key]}
                       onChange={(e) => setVisibleColumns(prev => ({ ...prev, [key]: e.target.checked }))}
-                      className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-600"
                     />
                     <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
                   </label>
@@ -2677,14 +2677,14 @@ export default function Records({ onNavigate }) {
                         placeholder="最小"
                         value={listFilters.amountMin}
                         onChange={(e) => handleFilterChange('amountMin', e.target.value)}
-                        className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                        className="flex-1 px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                       />
                       <input
                         type="number"
                         placeholder="最大"
                         value={listFilters.amountMax}
                         onChange={(e) => handleFilterChange('amountMax', e.target.value)}
-                        className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                        className="flex-1 px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                       />
                     </div>
                   </div>
@@ -2693,7 +2693,7 @@ export default function Records({ onNavigate }) {
                     <select
                       value={listFilters.tag}
                       onChange={(e) => handleFilterChange('tag', e.target.value)}
-                      className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      className="w-full px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                     >
                       <option value="">全部</option>
                       {tags.map((tag) => (
@@ -2708,7 +2708,7 @@ export default function Records({ onNavigate }) {
                       placeholder="筛选备注"
                       value={listFilters.note}
                       onChange={(e) => handleFilterChange('note', e.target.value)}
-                      className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                      className="w-full px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                     />
                   </div>
                 </div>
@@ -2716,7 +2716,7 @@ export default function Records({ onNavigate }) {
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={() => setShowColumnSettingsModal(false)}
-                  className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   关闭
                 </button>
@@ -2734,8 +2734,8 @@ export default function Records({ onNavigate }) {
               </div>
               <div className="space-y-3">
                 <div className="flex gap-2">
-                  <input type="text" value={newTagName} onChange={(e) => setNewTagName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddTag()} placeholder="输入标签名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddTag} className="px-3 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"><Plus className="w-4 h-4" /></button>
+                  <input type="text" value={newTagName} onChange={(e) => setNewTagName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddTag()} placeholder="输入标签名称" className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <button onClick={handleAddTag} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {tags.map((tag) => (
@@ -2763,8 +2763,8 @@ export default function Records({ onNavigate }) {
               </div>
               <div className="space-y-3">
                 <div className="flex gap-2">
-                  <input type="text" value={newBookName} onChange={(e) => setNewBookName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddBook()} placeholder="输入账本名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddBook} className="px-3 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600"><Plus className="w-4 h-4" /></button>
+                  <input type="text" value={newBookName} onChange={(e) => setNewBookName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddBook()} placeholder="输入账本名称" className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white" />
+                  <button onClick={handleAddBook} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {books.map((book) => (
@@ -2793,7 +2793,7 @@ export default function Records({ onNavigate }) {
               <div className="space-y-4">
                 {importStep === 'upload' && (
                   <>
-                    <div className="border-2 border-dashed border-gray-300 dark:border-slate-600 rounded-lg p-4 text-center hover:border-green-500 transition-colors">
+                    <div className="border-2 border-dashed border-gray-200 dark:border-slate-700 rounded-lg p-4 text-center hover:border-green-500 transition-colors">
                       <label className="cursor-pointer">
                         <div className="flex flex-col items-center gap-2 py-4">
                           <Upload className="w-8 h-8 text-gray-400" />
@@ -2819,11 +2819,11 @@ export default function Records({ onNavigate }) {
                 )}
                 {importStep === 'loading' && (
                   <div className="flex flex-col items-center justify-center py-8">
-                    <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                    <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
                     <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">正在解析文件...</div>
                     <div className="w-full max-w-xs">
                       <div className="h-2 bg-gray-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
+                        <div className="h-full bg-blue-600 transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
                       </div>
                     </div>
                   </div>
@@ -2839,7 +2839,7 @@ export default function Records({ onNavigate }) {
                             <select
                               value={fieldMapping[field] || ''}
                               onChange={(e) => setFieldMapping(prev => ({ ...prev, [field]: e.target.value }))}
-                              className="flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
+                              className="flex-1 px-2 py-1 text-xs border border-gray-200 dark:border-slate-700 rounded dark:bg-slate-700 dark:text-white"
                             >
                               <option value="">请选择</option>
                               {excelHeaders.map(header => (
@@ -2903,7 +2903,7 @@ export default function Records({ onNavigate }) {
                   </>
                 )}
                 <div className="flex gap-3 pt-2">
-                  <button onClick={() => { setShowImportModal(false); setImportPreview([]); setImportStep('upload'); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                  <button onClick={() => { setShowImportModal(false); setImportPreview([]); setImportStep('upload'); }} className="flex-1 py-2.5 rounded-lg border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
                   {importStep === 'mapping' && (
                     <button onClick={() => {
                       const formatDateValue = (val) => {
@@ -2961,7 +2961,7 @@ export default function Records({ onNavigate }) {
                       });
                       setImportPreview(mappedData);
                       setImportStep('preview');
-                    }} className="flex-1 py-2.5 rounded-lg bg-blue-500 text-white hover:bg-blue-600">下一步</button>
+                    }} className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">下一步</button>
                   )}
                   {importStep === 'preview' && (
                     <button onClick={handleImport} disabled={saving || importPreview.filter(r => r.isValid).length === 0} className="flex-1 py-2.5 rounded-lg bg-green-500 text-white hover:bg-green-600 disabled:opacity-50">{saving ? '导入中...' : '确认导入'}</button>
@@ -2986,7 +2986,7 @@ export default function Records({ onNavigate }) {
                 确定要删除这条记录吗？此操作不可撤销。
               </p>
               <div className="flex gap-3">
-                <button onClick={() => { setShowDeleteConfirm(false); setRecordToDelete(null); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                <button onClick={() => { setShowDeleteConfirm(false); setRecordToDelete(null); }} className="flex-1 py-2.5 rounded-lg border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
                 <button onClick={handleDeleteRecord} className="flex-1 py-2.5 rounded-lg bg-red-500 text-white hover:bg-red-600">删除</button>
               </div>
             </div>
@@ -3003,22 +3003,22 @@ export default function Records({ onNavigate }) {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日期</label>
-                  <input type="date" value={editingRecord.date || ''} onChange={(e) => setEditingRecord({ ...editingRecord, date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                  <input type="date" value={editingRecord.date || ''} onChange={(e) => setEditingRecord({ ...editingRecord, date: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">收支类型</label>
-                  <select value={editingRecord.type || 'expense'} onChange={(e) => setEditingRecord({ ...editingRecord, type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                  <select value={editingRecord.type || 'expense'} onChange={(e) => setEditingRecord({ ...editingRecord, type: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
                     <option value="expense">支出</option>
                     <option value="income">收入</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">金额</label>
-                  <input type="number" value={Math.abs(editingRecord.amount || 0)} onChange={(e) => setEditingRecord({ ...editingRecord, amount: parseFloat(e.target.value) })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                  <input type="number" value={Math.abs(editingRecord.amount || 0)} onChange={(e) => setEditingRecord({ ...editingRecord, amount: parseFloat(e.target.value) })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">类别</label>
-                  <select value={editingRecord.category || ''} onChange={(e) => setEditingRecord({ ...editingRecord, category: e.target.value, sub: '' })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                  <select value={editingRecord.category || ''} onChange={(e) => setEditingRecord({ ...editingRecord, category: e.target.value, sub: '' })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
                     <option value="">请选择</option>
                     {Object.keys(categories[editingRecord.type] || {}).map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
@@ -3027,7 +3027,7 @@ export default function Records({ onNavigate }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">二级分类</label>
-                  <select value={editingRecord.sub || ''} onChange={(e) => setEditingRecord({ ...editingRecord, sub: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                  <select value={editingRecord.sub || ''} onChange={(e) => setEditingRecord({ ...editingRecord, sub: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
                     <option value="">请选择</option>
                     {(categories[editingRecord.type]?.[editingRecord.category] || []).map(sub => (
                       <option key={sub} value={sub}>{sub}</option>
@@ -3036,7 +3036,7 @@ export default function Records({ onNavigate }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">所属账本</label>
-                  <select value={editingRecord.book || ''} onChange={(e) => setEditingRecord({ ...editingRecord, book: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                  <select value={editingRecord.book || ''} onChange={(e) => setEditingRecord({ ...editingRecord, book: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
                     <option value="">请选择</option>
                     {books.map(book => (
                       <option key={book.id} value={book.name}>{book.name}</option>
@@ -3045,7 +3045,7 @@ export default function Records({ onNavigate }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">标签</label>
-                  <select value={editingRecord.tag || ''} onChange={(e) => setEditingRecord({ ...editingRecord, tag: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                  <select value={editingRecord.tag || ''} onChange={(e) => setEditingRecord({ ...editingRecord, tag: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
                     <option value="">请选择</option>
                     {tags.map(tag => (
                       <option key={tag.id} value={tag.name}>{tag.name}</option>
@@ -3054,12 +3054,12 @@ export default function Records({ onNavigate }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">备注</label>
-                  <input type="text" value={editingRecord.note || ''} onChange={(e) => setEditingRecord({ ...editingRecord, note: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                  <input type="text" value={editingRecord.note || ''} onChange={(e) => setEditingRecord({ ...editingRecord, note: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
                 </div>
               </div>
               <div className="flex gap-3 pt-4">
-                <button onClick={() => { setShowEditModal(false); setEditingRecord(null); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
-                <button onClick={handleSaveEdit} disabled={saving || !editingRecord.date || !editingRecord.amount || !editingRecord.category} className="flex-1 py-2.5 rounded-lg bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-50">{saving ? '保存中...' : '保存'}</button>
+                <button onClick={() => { setShowEditModal(false); setEditingRecord(null); }} className="flex-1 py-2.5 rounded-lg border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                <button onClick={handleSaveEdit} disabled={saving || !editingRecord.date || !editingRecord.amount || !editingRecord.category} className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{saving ? '保存中...' : '保存'}</button>
               </div>
             </div>
           </div>
@@ -3073,10 +3073,10 @@ export default function Records({ onNavigate }) {
               </h3>
               <div className="mb-6">
                 {showBatchEditField === 'date' && (
-                  <input type="date" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                  <input type="date" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
                 )}
                 {showBatchEditField === 'category' && (
-                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
                     <option value="">请选择类别</option>
                     {Object.keys(categories['expense'] || {}).concat(Object.keys(categories['income'] || {})).filter((v, i, a) => a.indexOf(v) === i).map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
@@ -3084,10 +3084,10 @@ export default function Records({ onNavigate }) {
                   </select>
                 )}
                 {showBatchEditField === 'sub' && (
-                  <input type="text" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} placeholder="请输入二级分类" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                  <input type="text" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} placeholder="请输入二级分类" className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
                 )}
                 {showBatchEditField === 'book' && (
-                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
                     <option value="">请选择账本</option>
                     {books.map(book => (
                       <option key={book.id} value={book.name}>{book.name}</option>
@@ -3095,7 +3095,7 @@ export default function Records({ onNavigate }) {
                   </select>
                 )}
                 {showBatchEditField === 'tag' && (
-                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
                     <option value="">请选择标签</option>
                     {tags.map(tag => (
                       <option key={tag.id} value={tag.name}>{tag.name}</option>
@@ -3103,22 +3103,22 @@ export default function Records({ onNavigate }) {
                   </select>
                 )}
                 {showBatchEditField === 'type' && (
-                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
+                  <select value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm">
                     <option value="">请选择类型</option>
                     <option value="income">收入</option>
                     <option value="expense">支出</option>
                   </select>
                 )}
                 {showBatchEditField === 'amount' && (
-                  <input type="number" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} placeholder="请输入金额" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                  <input type="number" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} placeholder="请输入金额" className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
                 )}
                 {showBatchEditField === 'note' && (
-                  <input type="text" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} placeholder="请输入备注" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
+                  <input type="text" value={batchEditValue} onChange={(e) => setBatchEditValue(e.target.value)} placeholder="请输入备注" className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-lg dark:bg-slate-700 dark:text-white text-sm" />
                 )}
               </div>
               <div className="flex gap-3">
-                <button onClick={() => { setShowBatchEditField(null); setBatchEditValue(''); }} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
-                <button onClick={() => handleBatchEdit(showBatchEditField, batchEditValue)} disabled={!batchEditValue} className="flex-1 py-2.5 rounded-lg bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-50">确认</button>
+                <button onClick={() => { setShowBatchEditField(null); setBatchEditValue(''); }} className="flex-1 py-2.5 rounded-lg border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                <button onClick={() => handleBatchEdit(showBatchEditField, batchEditValue)} disabled={!batchEditValue} className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">确认</button>
               </div>
             </div>
           </div>
@@ -3132,7 +3132,7 @@ export default function Records({ onNavigate }) {
                 确定要删除选中的 <span className="font-semibold text-red-500">{selectedRecordIds.size}</span> 条记录吗？此操作不可恢复。
               </p>
               <div className="flex gap-3">
-                <button onClick={() => setShowBatchDeleteConfirm(false)} className="flex-1 py-2.5 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
+                <button onClick={() => setShowBatchDeleteConfirm(false)} className="flex-1 py-2.5 rounded-lg border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700">取消</button>
                 <button onClick={handleBatchDelete} className="flex-1 py-2.5 rounded-lg bg-red-500 text-white hover:bg-red-600">删除</button>
               </div>
             </div>

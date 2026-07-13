@@ -75,6 +75,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && (pathname === "/api/finance/fund-nav" || pathname === "/api/finance/fund-nav-history")) {
+      await financeRoute.handler(req, res, body, origin, pathname, url);
+      return;
+    }
+
     if (pathname.startsWith("/api/admin/")) {
       const admin = await authenticatedAdmin(req);
       if (!admin) {

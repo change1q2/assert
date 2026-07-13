@@ -9,8 +9,8 @@ import {
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Settings, X, Save, PenLine, Tag,
 } from 'lucide-react';
 
-const CATEGORY_COLORS = ['#EC4899', '#F59E0B', '#06B6D4', '#6366F1', '#10B981', '#8B5CF6', '#F97316', '#84CC16', '#0EA5E9', '#D946EF'];
-const TAG_COLORS = ['#6366F1', '#EC4899', '#10B981', '#F59E0B', '#06B6D4', '#F97316', '#8B5CF6', '#14B8A6'];
+const CATEGORY_COLORS = ['#EC4899', '#F59E0B', '#06B6D4', '#2563EB', '#10B981', '#8B5CF6', '#F97316', '#84CC16', '#0EA5E9', '#D946EF'];
+const TAG_COLORS = ['#2563EB', '#EC4899', '#10B981', '#F59E0B', '#06B6D4', '#F97316', '#8B5CF6', '#14B8A6'];
 
 function formatCurrency(value, currencyCode = DEFAULT_BASE_CURRENCY) {
   const symbol = getCurrencySymbol(currencyCode);
@@ -884,10 +884,10 @@ export default function Analysis({ onNavigate }) {
 
     return (
       <div data-testid="custom-analysis">
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
           <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
             <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-blue-500" />
+              <Calendar className="w-4 h-4 text-blue-600" />
               <span className="font-medium">自定义范围</span>
             </div>
             <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
@@ -902,24 +902,24 @@ export default function Analysis({ onNavigate }) {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-5 text-white">
+          <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white">
             <div className="text-blue-100 text-sm">总支出</div>
-            <div className="text-2xl font-bold mt-1">{formatCurrency(cExpense)}</div>
+            <div className="text-2xl font-bold font-mono mt-1">{formatCurrency(cExpense)}</div>
           </div>
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-5 text-white">
+          <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white">
             <div className="text-blue-100 text-sm">总收入</div>
-            <div className="text-2xl font-bold mt-1">{formatCurrency(cIncome)}</div>
+            <div className="text-2xl font-bold font-mono mt-1">{formatCurrency(cIncome)}</div>
           </div>
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-5 text-white">
+          <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white">
             <div className="text-blue-100 text-sm">总结余</div>
-            <div className={`text-2xl font-bold mt-1 ${cBalance >= 0 ? 'text-green-200' : 'text-red-200'}`}>
+            <div className={`text-2xl font-bold font-mono mt-1 ${cBalance >= 0 ? 'text-green-200' : 'text-red-200'}`}>
               {formatCurrency(cBalance)}
             </div>
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">收支走势</h3>
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
+          <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">收支走势</h3>
           <div className="w-full h-[300px]">
             {cDaily.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -939,7 +939,7 @@ export default function Analysis({ onNavigate }) {
                           <div className="text-xs space-y-0.5">
                             <div className="text-red-500">支出：{formatCurrency(item.expense)}</div>
                             <div className="text-green-500">收入：{formatCurrency(item.income)}</div>
-                            <div className={item.balance >= 0 ? 'text-blue-500' : 'text-red-500'}>结余：{formatCurrency(item.balance)}</div>
+                            <div className={item.balance >= 0 ? 'text-blue-600' : 'text-red-500'}>结余：{formatCurrency(item.balance)}</div>
                           </div>
                         </div>
                       );
@@ -956,23 +956,23 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">资产走势</h3>
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
+          <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">资产走势</h3>
           <div className="w-full h-[300px]">
             {cAssetTrend.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={cAssetTrend} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                   <defs>
                     <linearGradient id="customAssetGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366F1" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#6366F1" stopOpacity={0.05} />
+                      <stop offset="0%" stopColor="#2563EB" stopOpacity={0.3} />
+                      <stop offset="100%" stopColor="#2563EB" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" className="dark:stroke-slate-700" />
                   <XAxis dataKey="date" className="dark:text-gray-400" tick={{ fontSize: 10 }} />
                   <YAxis className="dark:text-gray-400" tick={{ fontSize: 10 }} tickFormatter={(value) => formatCurrency(value)} />
                   <Tooltip formatter={(value) => [formatCurrency(value), '资产']} />
-                  <Area type="monotone" dataKey="asset" stroke="#6366F1" fill="url(#customAssetGradient)" />
+                  <Area type="monotone" dataKey="asset" stroke="#2563EB" fill="url(#customAssetGradient)" />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
@@ -982,9 +982,9 @@ export default function Analysis({ onNavigate }) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">收支对比</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">收支对比</h3>
               <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
                 {[
                   { value: 'level1', label: '一级分类' },
@@ -1036,16 +1036,16 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">支出占比</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">支出占比</h3>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={customShowAmount}
                     onChange={(e) => setCustomShowAmount(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded border-gray-300 text-blue-500 focus:ring-blue-500"
+                    className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-600"
                   />
                   <span>显示收支金额</span>
                 </label>
@@ -1070,7 +1070,7 @@ export default function Analysis({ onNavigate }) {
                 <select 
                   value={pieLabelFontSize} 
                   onChange={(e) => setPieLabelFontSize(parseInt(e.target.value))}
-                  className="px-2 py-1 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-xs font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="px-2 py-1 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-xs font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >
                   <option value={8}>8px</option>
                   <option value={10}>10px</option>
@@ -1119,8 +1119,8 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">支出数据列表</h3>
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
+          <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">支出数据列表</h3>
           <div className="space-y-3">
             {cCategory.expense.map((cat, index) => (
               <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-700/50">
@@ -1142,13 +1142,13 @@ export default function Analysis({ onNavigate }) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">标签占比</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">标签占比</h3>
               <select
                 value={customTagFilter}
                 onChange={(e) => setCustomTagFilter(e.target.value)}
-                className="px-3 py-1.5 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-xs font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="px-3 py-1.5 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-xs font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               >
                 <option value="all">所有标签</option>
                 {cTagData.map(tag => (
@@ -1189,8 +1189,8 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">标签数据列表</h3>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">标签数据列表</h3>
             <div className="space-y-3 max-h-[320px] overflow-y-auto">
               {cTagStats.map((tag, index) => (
                 <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-700/50">
@@ -1223,7 +1223,7 @@ export default function Analysis({ onNavigate }) {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-red-100 text-sm">本日支出</div>
-                <div className="text-2xl font-bold mt-1">{formatCurrency(dayStats.todayExpense)}</div>
+                <div className="text-2xl font-bold font-mono mt-1">{formatCurrency(dayStats.todayExpense)}</div>
               </div>
               <div className="flex items-center gap-1 text-sm">
                 <Wallet className="w-4 h-4" />
@@ -1235,7 +1235,7 @@ export default function Analysis({ onNavigate }) {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-green-100 text-sm">本日收入</div>
-                <div className="text-2xl font-bold mt-1">{formatCurrency(dayStats.todayIncome)}</div>
+                <div className="text-2xl font-bold font-mono mt-1">{formatCurrency(dayStats.todayIncome)}</div>
               </div>
               <div className="flex items-center gap-1 text-sm">
                 <CreditCard className="w-4 h-4" />
@@ -1243,11 +1243,11 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-gradient-to-br from-blue-500 to-indigo-500 rounded-2xl p-5 text-white">
+          <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-blue-100 text-sm">本日结余</div>
-                <div className={`text-2xl font-bold mt-1 ${dayStats.todayBalance >= 0 ? 'text-green-200' : 'text-red-200'}`}>
+                <div className={`text-2xl font-bold font-mono mt-1 ${dayStats.todayBalance >= 0 ? 'text-green-200' : 'text-red-200'}`}>
                   {formatCurrency(dayStats.todayBalance)}
                 </div>
               </div>
@@ -1258,9 +1258,9 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">本周统计</h3>
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">本周统计</h3>
             <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
               <button
                 onClick={() => setDailyChartType('expense')}
@@ -1317,12 +1317,12 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">预算占比</h3>
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">预算占比</h3>
             <button 
               onClick={() => onNavigate && onNavigate('budget')}
-              className="text-xs text-blue-500 hover:text-blue-600"
+              className="text-xs text-blue-600 hover:text-blue-700"
             >
               查看详情
             </button>
@@ -1355,12 +1355,12 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">预算执行</h3>
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">预算执行</h3>
             <button
               onClick={() => onNavigate && onNavigate('budget')}
-              className="text-xs text-blue-500 hover:text-blue-600"
+              className="text-xs text-blue-600 hover:text-blue-700"
             >
               管理预算
             </button>
@@ -1371,7 +1371,7 @@ export default function Analysis({ onNavigate }) {
             )}
             {budgetCategoryData.map((item) => {
               const ratio = item.amount > 0 ? (item.used / item.amount) * 100 : 0;
-              const progressColor = ratio > 100 ? 'bg-red-500' : ratio >= 80 ? 'bg-orange-500' : 'bg-blue-500';
+              const progressColor = ratio > 100 ? 'bg-red-500' : ratio >= 80 ? 'bg-orange-500' : 'bg-blue-600';
               const isExpanded = expandedBudgetCategory === item.category;
               return (
                 <div key={item.category}>
@@ -1410,7 +1410,7 @@ export default function Analysis({ onNavigate }) {
                     <div className="mt-2 ml-11 space-y-2">
                       {item.items.map((sub, idx) => {
                         const subRatio = sub.amount > 0 ? ((sub.used || 0) / sub.amount) * 100 : 0;
-                        const subProgressColor = subRatio > 100 ? 'bg-red-500' : subRatio >= 80 ? 'bg-orange-500' : 'bg-blue-500';
+                        const subProgressColor = subRatio > 100 ? 'bg-red-500' : subRatio >= 80 ? 'bg-orange-500' : 'bg-blue-600';
                         const subName = sub.subCategory || sub.name || '其他';
                         return (
                           <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-gray-100 dark:bg-slate-600/50">
@@ -1439,12 +1439,12 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">标签数据(近一月)</h3>
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">标签数据(近一月)</h3>
             <button 
               onClick={() => onNavigate && onNavigate('records')}
-              className="text-xs text-blue-500 hover:text-blue-600"
+              className="text-xs text-blue-600 hover:text-blue-700"
             >
               查看全部
             </button>
@@ -1515,7 +1515,7 @@ export default function Analysis({ onNavigate }) {
       if (ratio < 0.25) return 'bg-blue-100 dark:bg-blue-900/30';
       if (ratio < 0.5) return 'bg-blue-200 dark:bg-blue-800/50';
       if (ratio < 0.75) return 'bg-blue-400 dark:bg-blue-600';
-      return 'bg-blue-600 dark:bg-blue-500';
+      return 'bg-blue-600 dark:bg-blue-600';
     };
 
     const maxHeatmapValue = Math.max(...yHeatmap.flatMap(m => m.days.map(d => d.total)), 1);
@@ -1523,11 +1523,11 @@ export default function Analysis({ onNavigate }) {
     return (
       <div data-testid="year-analysis">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-5 text-white">
+          <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-blue-100 text-sm">年支出</div>
-                <div className="text-2xl font-bold mt-1">{formatCurrency(yExpense)}</div>
+                <div className="text-2xl font-bold font-mono mt-1">{formatCurrency(yExpense)}</div>
               </div>
               <div className={`flex items-center gap-1 text-sm ${yExpenseYoy >= 0 ? 'text-red-200' : 'text-green-200'}`}>
                 {yExpenseYoy >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
@@ -1536,11 +1536,11 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-5 text-white">
+          <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-blue-100 text-sm">年收入</div>
-                <div className="text-2xl font-bold mt-1">{formatCurrency(yIncome)}</div>
+                <div className="text-2xl font-bold font-mono mt-1">{formatCurrency(yIncome)}</div>
               </div>
               <div className={`flex items-center gap-1 text-sm ${yIncomeYoy >= 0 ? 'text-green-200' : 'text-red-200'}`}>
                 {yIncomeYoy >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
@@ -1549,11 +1549,11 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-5 text-white">
+          <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-blue-100 text-sm">年结余</div>
-                <div className={`text-2xl font-bold mt-1 ${yBalance >= 0 ? 'text-green-200' : 'text-red-200'}`}>
+                <div className={`text-2xl font-bold font-mono mt-1 ${yBalance >= 0 ? 'text-green-200' : 'text-red-200'}`}>
                   {formatCurrency(yBalance)}
                 </div>
               </div>
@@ -1564,9 +1564,9 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">收支统计</h3>
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">收支统计</h3>
             <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
               {[
                 { value: 'all', label: '全部' },
@@ -1606,10 +1606,10 @@ export default function Analysis({ onNavigate }) {
                       <div className="text-xs space-y-0.5">
                         {yearChartType === 'all' && <div className="text-red-500">支出：{formatCurrency(expense)}</div>}
                         {yearChartType === 'all' && <div className="text-green-500">收入：{formatCurrency(income)}</div>}
-                        {yearChartType === 'all' && <div className={balance >= 0 ? 'text-blue-500' : 'text-red-500'}>结余：{formatCurrency(balance)}</div>}
+                        {yearChartType === 'all' && <div className={balance >= 0 ? 'text-blue-600' : 'text-red-500'}>结余：{formatCurrency(balance)}</div>}
                         {yearChartType === 'expense' && <div className="text-red-500">支出：{formatCurrency(expense)}</div>}
                         {yearChartType === 'income' && <div className="text-green-500">收入：{formatCurrency(income)}</div>}
-                        {yearChartType === 'balance' && <div className={balance >= 0 ? 'text-blue-500' : 'text-red-500'}>结余：{formatCurrency(balance)}</div>}
+                        {yearChartType === 'balance' && <div className={balance >= 0 ? 'text-blue-600' : 'text-red-500'}>结余：{formatCurrency(balance)}</div>}
                       </div>
                     </div>
                   );
@@ -1633,23 +1633,23 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">资产走势</h3>
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
+          <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">资产走势</h3>
           <div className="w-full h-[300px]">
             {yAssetTrend.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={yAssetTrend} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                   <defs>
                     <linearGradient id="yearAssetGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366F1" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#6366F1" stopOpacity={0.05} />
+                      <stop offset="0%" stopColor="#2563EB" stopOpacity={0.3} />
+                      <stop offset="100%" stopColor="#2563EB" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" className="dark:stroke-slate-700" />
                   <XAxis dataKey="month" className="dark:text-gray-400" tick={{ fontSize: 10 }} />
                   <YAxis className="dark:text-gray-400" tick={{ fontSize: 10 }} tickFormatter={(value) => formatCurrency(value)} />
                   <Tooltip formatter={(value) => [formatCurrency(value), '资产']} />
-                  <Area type="monotone" dataKey="asset" stroke="#6366F1" fill="url(#yearAssetGradient)" />
+                  <Area type="monotone" dataKey="asset" stroke="#2563EB" fill="url(#yearAssetGradient)" />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
@@ -1659,9 +1659,9 @@ export default function Analysis({ onNavigate }) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">收支对比</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">收支对比</h3>
               <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
                 {[
                   { value: 'level1', label: '一级分类' },
@@ -1713,13 +1713,13 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">{yearPieType === 'expense' ? '支出占比' : '收入占比'}</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">{yearPieType === 'expense' ? '支出占比' : '收入占比'}</h3>
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setYearPieType(yearPieType === 'expense' ? 'income' : 'expense')}
-                  className="px-3 py-1 text-xs rounded-lg border border-gray-300 dark:border-slate-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                  className="px-3 py-1 text-xs rounded-lg border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
                 >
                   切换到{yearPieType === 'expense' ? '收入' : '支出'}
                 </button>
@@ -1777,8 +1777,8 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">{yearPieType === 'expense' ? '支出' : '收入'}数据列表</h3>
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
+          <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">{yearPieType === 'expense' ? '支出' : '收入'}数据列表</h3>
           <div className="space-y-3">
             {(yearPieType === 'expense' ? yCategory.expense : yCategory.income).map((cat, index) => (
               <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-700/50">
@@ -1800,24 +1800,24 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">报表统计</h3>
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
+          <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">报表统计</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
-                  <th className="text-left py-3 px-4 font-medium text-gray-500 dark:text-gray-400">月份</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500 dark:text-gray-400">收入</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500 dark:text-gray-400">支出</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500 dark:text-gray-400">结余</th>
+                  <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">月份</th>
+                  <th className="text-right py-3 px-4 font-medium text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">收入</th>
+                  <th className="text-right py-3 px-4 font-medium text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">支出</th>
+                  <th className="text-right py-3 px-4 font-medium text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">结余</th>
                 </tr>
               </thead>
               <tbody>
                 {yMonthly.map((month, index) => (
-                  <tr key={index} className="border-b border-gray-100 dark:border-slate-700/50">
+                  <tr key={index} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors duration-150">
                     <td className="py-3 px-4 text-gray-900 dark:text-white">{month.label}</td>
-                    <td className="py-3 px-4 text-right text-green-600 dark:text-green-400">{formatCurrency(month.income)}</td>
-                    <td className="py-3 px-4 text-right text-red-600 dark:text-red-400">{formatCurrency(month.expense)}</td>
+                    <td className="py-3 px-4 text-right font-mono text-green-600 dark:text-green-400">{formatCurrency(month.income)}</td>
+                    <td className="py-3 px-4 text-right font-mono text-red-600 dark:text-red-400">{formatCurrency(month.expense)}</td>
                     <td className={`py-3 px-4 text-right ${month.balance >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                       {formatCurrency(month.balance)}
                     </td>
@@ -1829,13 +1829,13 @@ export default function Analysis({ onNavigate }) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">标签占比</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">标签占比</h3>
               <select
                 value={yearTagFilter}
                 onChange={(e) => setYearTagFilter(e.target.value)}
-                className="px-3 py-1.5 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-xs font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="px-3 py-1.5 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-xs font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               >
                 <option value="all">所有标签</option>
                 {yTagData.map(tag => (
@@ -1872,8 +1872,8 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">标签数据列表</h3>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">标签数据列表</h3>
             <div className="space-y-3 max-h-[320px] overflow-y-auto">
               {yTagStats.map((tag, index) => (
                 <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-700/50">
@@ -1895,9 +1895,9 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">年度总结</h3>
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">年度总结</h3>
             {!isEditingYearSummary ? (
               <button 
                 onClick={() => setIsEditingYearSummary(true)}
@@ -1909,7 +1909,7 @@ export default function Analysis({ onNavigate }) {
             ) : (
               <button 
                 onClick={saveYearSummary}
-                className="flex items-center gap-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors"
+                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
               >
                 <Save className="w-4 h-4" />
                 保存
@@ -1921,7 +1921,7 @@ export default function Analysis({ onNavigate }) {
               value={yearSummary}
               onChange={(e) => setYearSummary(e.target.value)}
               placeholder="记录本年度的财务总结..."
-              className="w-full h-32 p-4 bg-gray-50 dark:bg-slate-700 rounded-xl border-none resize-none text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full h-32 p-4 bg-gray-50 dark:bg-slate-700 rounded-xl border-none resize-none text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
             />
           ) : (
             <div className="p-4 bg-gray-50 dark:bg-slate-700 rounded-xl min-h-[128px] text-gray-900 dark:text-white">
@@ -1937,7 +1937,7 @@ export default function Analysis({ onNavigate }) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-500 dark:text-gray-400">加载中...</p>
         </div>
       </div>
@@ -1949,7 +1949,7 @@ export default function Analysis({ onNavigate }) {
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
           <p className="text-red-500 mb-4">{error}</p>
-          <button onClick={loadData} className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+          <button onClick={loadData} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
             重试
           </button>
         </div>
@@ -2003,12 +2003,12 @@ export default function Analysis({ onNavigate }) {
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div className="flex items-center gap-2">
-            <PieChartIcon className="w-8 h-8 text-blue-500" />
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">数据分析中心</h1>
+            <PieChartIcon className="w-8 h-8 text-blue-600" />
+            <h1 className="text-2xl font-bold font-mono tracking-tight text-gray-900 dark:text-white">数据分析中心</h1>
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex bg-gray-100 dark:bg-slate-700 rounded-xl p-1">
               {timeModes.map((mode) => (
@@ -2030,7 +2030,7 @@ export default function Analysis({ onNavigate }) {
               <select 
                 value={selectedYear} 
                 onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                className="px-3 py-2 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="px-3 py-2 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               >
                 {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map(year => (
                   <option key={year} value={year}>{year}年</option>
@@ -2054,7 +2054,7 @@ export default function Analysis({ onNavigate }) {
                   value={selectedYear} 
                   onChange={(e) => { setSelectedYear(parseInt(e.target.value)); setYearFilterMode('year'); }}
                   disabled={yearFilterMode === 'all'}
-                  className="px-3 py-1 bg-transparent border-none rounded-md text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="px-3 py-1 bg-transparent border-none rounded-md text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-50"
                 >
                   {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map(year => (
                     <option key={year} value={year}>{year}年</option>
@@ -2088,7 +2088,7 @@ export default function Analysis({ onNavigate }) {
                           }}
                           className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                             selectedYear === btn.year && selectedMonth === btn.value
-                              ? 'bg-blue-500 text-white'
+                              ? 'bg-blue-600 text-white'
                               : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-slate-600'
                           }`}
                         >
@@ -2118,14 +2118,14 @@ export default function Analysis({ onNavigate }) {
                   type="date" 
                   value={startDate} 
                   onChange={(e) => setStartDate(e.target.value)} 
-                  className="px-3 py-2 text-sm bg-gray-100 dark:bg-slate-700 border-none rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="px-3 py-2 text-sm bg-gray-100 dark:bg-slate-700 border-none rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
                 <span className="text-gray-500">—</span>
                 <input 
                   type="date" 
                   value={endDate} 
                   onChange={(e) => setEndDate(e.target.value)} 
-                  className="px-3 py-2 text-sm bg-gray-100 dark:bg-slate-700 border-none rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="px-3 py-2 text-sm bg-gray-100 dark:bg-slate-700 border-none rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
             )}
@@ -2133,7 +2133,7 @@ export default function Analysis({ onNavigate }) {
             <select 
               value={selectedCurrency} 
               onChange={(e) => setSelectedCurrency(e.target.value)}
-              className="px-3 py-2 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-2 bg-gray-100 dark:bg-slate-700 border-none rounded-lg text-sm font-medium text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
             >
               {['CNY', 'USD', 'EUR', 'GBP', 'JPY', 'HKD'].map((code) => (
                 <option key={code} value={code}>{code}</option>
@@ -2149,7 +2149,7 @@ export default function Analysis({ onNavigate }) {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-red-100 text-sm">月支出</div>
-                <div className="text-2xl font-bold mt-1">{formatCurrency(totalExpense)}</div>
+                <div className="text-2xl font-bold font-mono mt-1">{formatCurrency(totalExpense)}</div>
               </div>
               <div className={`flex items-center gap-1 text-sm ${expenseYoy >= 0 ? 'text-red-200' : 'text-green-200'}`}>
                 {expenseYoy >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
@@ -2162,7 +2162,7 @@ export default function Analysis({ onNavigate }) {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-green-100 text-sm">月收入</div>
-                <div className="text-2xl font-bold mt-1">{formatCurrency(totalIncome)}</div>
+                <div className="text-2xl font-bold font-mono mt-1">{formatCurrency(totalIncome)}</div>
               </div>
               <div className={`flex items-center gap-1 text-sm ${incomeYoy >= 0 ? 'text-green-200' : 'text-red-200'}`}>
                 {incomeYoy >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
@@ -2171,11 +2171,11 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-gradient-to-br from-blue-500 to-indigo-500 rounded-2xl p-5 text-white">
+          <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-blue-100 text-sm">月结余</div>
-                <div className={`text-2xl font-bold mt-1 ${balance >= 0 ? 'text-green-200' : 'text-red-200'}`}>
+                <div className={`text-2xl font-bold font-mono mt-1 ${balance >= 0 ? 'text-green-200' : 'text-red-200'}`}>
                   {formatCurrency(balance)}
                 </div>
               </div>
@@ -2187,9 +2187,9 @@ export default function Analysis({ onNavigate }) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">收支统计</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">收支统计</h3>
               <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
                 {[
                   { value: 'all', label: '全部' },
@@ -2230,10 +2230,10 @@ export default function Analysis({ onNavigate }) {
                         <div className="text-xs space-y-0.5">
                           {chartType === 'all' && <div className="text-red-500">支出：{formatCurrency(expense)}</div>}
                           {chartType === 'all' && <div className="text-green-500">收入：{formatCurrency(income)}</div>}
-                          {chartType === 'all' && <div className={balance >= 0 ? 'text-blue-500' : 'text-red-500'}>结余：{formatCurrency(balance)}</div>}
+                          {chartType === 'all' && <div className={balance >= 0 ? 'text-blue-600' : 'text-red-500'}>结余：{formatCurrency(balance)}</div>}
                           {chartType === 'expense' && <div className="text-red-500">支出：{formatCurrency(expense)}</div>}
                           {chartType === 'income' && <div className="text-green-500">收入：{formatCurrency(income)}</div>}
-                          {chartType === 'balance' && <div className={balance >= 0 ? 'text-blue-500' : 'text-red-500'}>结余：{formatCurrency(balance)}</div>}
+                          {chartType === 'balance' && <div className={balance >= 0 ? 'text-blue-600' : 'text-red-500'}>结余：{formatCurrency(balance)}</div>}
                         </div>
                       </div>
                     );
@@ -2256,8 +2256,8 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">资产走势</h3>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">资产走势</h3>
             <div className="w-full h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={assetTrend} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -2265,11 +2265,11 @@ export default function Analysis({ onNavigate }) {
                   <XAxis dataKey="date" className="dark:text-gray-400" tick={{ fontSize: 9 }} />
                   <YAxis className="dark:text-gray-400" tick={{ fontSize: 9 }} tickFormatter={(value) => formatCurrency(value)} />
                   <Tooltip formatter={(value) => [formatCurrency(value), '资产']} />
-                  <Area type="monotone" dataKey="asset" stroke="#6366F1" fill="url(#assetGradient)" />
+                  <Area type="monotone" dataKey="asset" stroke="#2563EB" fill="url(#assetGradient)" />
                   <defs>
                     <linearGradient id="assetGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366F1" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#6366F1" stopOpacity={0.05} />
+                      <stop offset="0%" stopColor="#2563EB" stopOpacity={0.3} />
+                      <stop offset="100%" stopColor="#2563EB" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
                 </AreaChart>
@@ -2279,9 +2279,9 @@ export default function Analysis({ onNavigate }) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          <div className="lg:col-span-1 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="lg:col-span-1 bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">收支对比</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">收支对比</h3>
               <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
                 {[
                   { value: 'level1', label: '一级分类' },
@@ -2341,9 +2341,9 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="lg:col-span-1 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="lg:col-span-1 bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white">支出占比</h3>
+              <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">支出占比</h3>
               <div className="flex bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
                 {[
                   { value: 'level1', label: '一级分类' },
@@ -2392,8 +2392,8 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="lg:col-span-1 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">标签占比</h3>
+          <div className="lg:col-span-1 bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">标签占比</h3>
             <div className="w-full h-[250px]">
               {tagData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -2436,8 +2436,8 @@ export default function Analysis({ onNavigate }) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">支出数据列表</h3>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">支出数据列表</h3>
             <div className="space-y-3">
               {currentCategoryData.expense.map((cat, index) => (
                 <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-700/50">
@@ -2458,8 +2458,8 @@ export default function Analysis({ onNavigate }) {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">标签数据列表</h3>
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">标签数据列表</h3>
             <div className="space-y-3">
               {tagData.map((tag, index) => (
                 <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-slate-700/50">
@@ -2480,24 +2480,24 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700 mb-6">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">报表统计</h3>
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
+          <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white mb-4">报表统计</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
-                  <th className="text-left py-3 px-4 font-medium text-gray-500 dark:text-gray-400">日期</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500 dark:text-gray-400">收入</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500 dark:text-gray-400">支出</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500 dark:text-gray-400">结余</th>
+                  <th className="text-left py-3 px-4 font-medium text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">日期</th>
+                  <th className="text-right py-3 px-4 font-medium text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">收入</th>
+                  <th className="text-right py-3 px-4 font-medium text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">支出</th>
+                  <th className="text-right py-3 px-4 font-medium text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">结余</th>
                 </tr>
               </thead>
               <tbody>
                 {dailyData.map((day, index) => (
-                  <tr key={index} className="border-b border-gray-100 dark:border-slate-700/50">
+                  <tr key={index} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors duration-150">
                     <td className="py-3 px-4 text-gray-900 dark:text-white">{day.date}</td>
-                    <td className="py-3 px-4 text-right text-green-600 dark:text-green-400">{formatCurrency(day.income)}</td>
-                    <td className="py-3 px-4 text-right text-red-600 dark:text-red-400">{formatCurrency(day.expense)}</td>
+                    <td className="py-3 px-4 text-right font-mono text-green-600 dark:text-green-400">{formatCurrency(day.income)}</td>
+                    <td className="py-3 px-4 text-right font-mono text-red-600 dark:text-red-400">{formatCurrency(day.expense)}</td>
                     <td className={`py-3 px-4 text-right ${day.balance >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                       {formatCurrency(day.balance)}
                     </td>
@@ -2508,9 +2508,9 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">本月总结</h3>
+            <h3 className="text-base font-semibold font-mono tracking-tight text-gray-900 dark:text-white">本月总结</h3>
             {!isEditingSummary ? (
               <button 
                 onClick={() => setIsEditingSummary(true)}
@@ -2522,7 +2522,7 @@ export default function Analysis({ onNavigate }) {
             ) : (
               <button 
                 onClick={saveSummary}
-                className="flex items-center gap-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors"
+                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
               >
                 <Save className="w-4 h-4" />
                 保存
@@ -2534,7 +2534,7 @@ export default function Analysis({ onNavigate }) {
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
               placeholder="记录本月的财务总结..."
-              className="w-full h-32 p-4 bg-gray-50 dark:bg-slate-700 rounded-xl border-none resize-none text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full h-32 p-4 bg-gray-50 dark:bg-slate-700 rounded-xl border-none resize-none text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
             />
           ) : (
             <div className="p-4 bg-gray-50 dark:bg-slate-700 rounded-xl min-h-[128px] text-gray-900 dark:text-white">

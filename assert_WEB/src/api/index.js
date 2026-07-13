@@ -357,3 +357,14 @@ export async function fetchFinanceQuotes(codes) {
     return []
   }
 }
+
+export async function fetchFundNav(code) {
+  try {
+    const response = await request(`/finance/fund-nav?code=${encodeURIComponent(code)}`, {
+      method: 'GET',
+    })
+    return response
+  } catch {
+    return null
+  }
+}

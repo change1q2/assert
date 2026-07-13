@@ -107,6 +107,23 @@ export async function fetchKlineData(code, market, range, apiBase, token) {
 }
 
 /**
+ * 获取场外基金净值
+ * @param {string} code - 基金代码
+ * @returns {Promise<object>} 基金净值数据
+ */
+export async function fetchFundNav(code) {
+  try {
+    const data = await apiRequest(`/finance/fund-nav?code=${encodeURIComponent(code)}`, {
+      method: "GET",
+    });
+    return data;
+  } catch (error) {
+    console.warn("基金净值获取失败", error);
+    return null;
+  }
+}
+
+/**
  * 计算移动平均线
  * @param {Array} klineData - K线数据
  * @param {number} period - 周期

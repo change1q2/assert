@@ -29,6 +29,7 @@ import UserProfile from './pages/UserProfile.jsx';
 import PremiumCheck from './pages/PremiumCheck.jsx';
 import HkIpo from './pages/HkIpo.jsx';
 import BudgetManagement from './pages/BudgetManagement.jsx';
+import AssetPenetration from './pages/AssetPenetration.jsx';
 
 const menuItems = [
   { id: 'overview', label: '资产总览', icon: LayoutDashboard },
@@ -49,6 +50,7 @@ export default function App() {
   const [userAvatar, setUserAvatar] = useState('');
   const [userName, setUserName] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [showAssetPenetration, setShowAssetPenetration] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -125,6 +127,9 @@ export default function App() {
   };
 
   const renderContent = () => {
+    if (showAssetPenetration) {
+      return <AssetPenetration onBack={() => setShowAssetPenetration(false)} />;
+    }
     if (selectedCategory) {
       return <CategoryDetail categoryName={selectedCategory} onBack={handleBackFromDetail} />;
     }
@@ -134,7 +139,7 @@ export default function App() {
       case 'records':
         return <Records onNavigate={setActiveMenu} />;
       case 'finance':
-        return <Finance />;
+        return <Finance onAssetPenetration={() => setShowAssetPenetration(true)} />;
       case 'debts':
         return <Debts />;
       case 'classes':
@@ -161,7 +166,7 @@ export default function App() {
         return (
           <div className="flex items-center justify-center min-h-[400px]">
             <div className="text-center">
-              <p className="text-gray-500 dark:text-gray-400">功能开发中...</p>
+              <p className="text-gray-400 dark:text-gray-400 font-mono">功能开发中...</p>
             </div>
           </div>
         );
@@ -173,11 +178,11 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-50 dark:bg-slate-900">
-      <aside className="w-60 bg-white dark:bg-slate-800 border-r border-gray-100 dark:border-slate-700 flex flex-col">
-        <div className="p-5 border-b border-gray-100 dark:border-slate-700">
+    <div className="flex min-h-screen bg-gray-50 dark:bg-slate-950">
+      <aside className={`w-60 bg-gradient-to-b from-white to-gray-50 dark:from-slate-900 dark:to-slate-950 border-r border-gray-200/60 dark:border-slate-800 flex flex-col ${showAssetPenetration || selectedCategory ? 'hidden' : ''}`}>
+        <div className="p-5 border-b border-gray-200/60 dark:border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2L2 7l10 5 10-5-10-5z"/>
                 <path d="M2 17l10 5 10-5"/>
@@ -185,8 +190,8 @@ export default function App() {
               </svg>
             </div>
             <div>
-              <div className="font-bold text-gray-900 dark:text-white">Wealth OS</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">V1.0.1</div>
+              <div className="font-bold text-gray-900 dark:text-white font-mono tracking-tight">Wealth OS</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">V1.0.1</div>
             </div>
           </div>
         </div>
@@ -201,10 +206,10 @@ export default function App() {
                   setActiveMenu(item.id);
                   setSelectedCategory(null);
                 }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ease-out ${
                   activeMenu === item.id && !selectedCategory
-                    ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700/50'
+                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 font-medium border-l-2 border-blue-600'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800/50 border-l-2 border-transparent'
                 }`}
               >
                 <Icon className="w-5 h-5" />
@@ -214,10 +219,10 @@ export default function App() {
           })}
         </nav>
 
-        <div className="p-4 border-t border-gray-100 dark:border-slate-700">
+        <div className="p-4 border-t border-gray-200/60 dark:border-slate-800">
           <button
             onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+            className="w-full flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800/50 rounded-lg transition-colors duration-200"
           >
             <LogOut className="w-4 h-4" />
             <span>退出登录</span>
@@ -231,7 +236,7 @@ export default function App() {
 
       <button
         onClick={() => setActiveMenu('profile')}
-        className="fixed top-4 right-4 w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center text-white shadow-lg transition-all z-50"
+        className="fixed top-4 right-4 w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-700 flex items-center justify-center text-white shadow-lg shadow-blue-500/30 transition-all duration-200 z-50"
       >
         {userAvatar ? (
           <img

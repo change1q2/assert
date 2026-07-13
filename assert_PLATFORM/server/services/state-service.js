@@ -33,14 +33,13 @@ async function loadUserState(userId) {
     const rows = transactionsByAsset.get(String(row.asset_id)) || [];
     rows.push({
       id: numericIfPossible(row.id),
-      direction: row.direction,
+      type: row.direction,
       date: row.transaction_date,
-      shares: row.shares,
+      time: '',
+      quantity: row.shares,
       price: row.price,
       amount: row.amount,
-      commission: row.commission,
-      stampDuty: row.stamp_duty,
-      transferFee: row.transfer_fee,
+      fee: row.commission,
     });
     transactionsByAsset.set(String(row.asset_id), rows);
   });

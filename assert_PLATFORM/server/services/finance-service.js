@@ -269,4 +269,280 @@ async function getKline(code, market, start, end, count) {
   return { kline, code: tc };
 }
 
-export { tencentCodeFor, lookupSecurities, getQuotes, getKline };
+async function getFundNav(code) {
+  code = String(code || "").trim();
+  if (!/^\d{6}$/.test(code)) {
+    throw new Error("invalid fund code");
+  }
+
+  let fundName = null;
+  let unitNav = null;
+  let navDate = null;
+  let prevNav = null;
+  let prevNavDate = null;
+  let changePct = null;
+  let estimatedNav = null;
+  let estimatedChangePct = null;
+  let estimateTime = null;
+
+  let historyData = null;
+  try {
+    const historyUrl = `https://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=${code}&page=1&per=5`;
+    const historyResp = await fetch(historyUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const historyText = await historyResp.text();
+    const historyStartIdx = historyText.indexOf("var apidata=");
+    if (historyStartIdx !== -1) {
+      const historyEndIdx = historyText.lastIndexOf("};");
+      if (historyEndIdx !== -1) {
+        const historyJsonStr = historyText.substring(historyStartIdx + 12, historyEndIdx + 1);
+        historyData = new Function(`return ${historyJsonStr}`)();
+      }
+    }
+  } catch (_) {
+  }
+
+  if (historyData && historyData.content) {
+    const historyContent = historyData.content;
+    const rowRegex = /<tr[^>]*>(.*?)<\/tr>/gi;
+    let rowMatch;
+    let rowCount = 0;
+    while ((rowMatch = rowRegex.exec(historyContent)) !== null && rowCount < 3) {
+      const rowContent = rowMatch[1];
+      const cellRegex = /<td[^>]*>(.*?)<\/td>/gi;
+      const cells = [];
+      let cellMatch;
+      while ((cellMatch = cellRegex.exec(rowContent)) !== null) {
+        cells.push(cellMatch[1].replace(/<[^>]*>/g, "").trim());
+      }
+      if (cells.length >= 4) {
+        if (rowCount === 0) {
+          navDate = cells[0];
+          unitNav = parseFloat(cells[1]) || null;
+          changePct = cells[3] !== '-' ? parseFloat(cells[3]) : null;
+        } else if (rowCount === 1) {
+          prevNavDate = cells[0];
+          prevNav = parseFloat(cells[1]) || null;
+        }
+        rowCount++;
+      }
+    }
+  }
+
+  try {
+    const url = `https://fundgz.1234567.com.cn/js/${code}.js`;
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const text = await resp.text();
+    const match = text.match(/jsonpgz\(({.*?})\)/);
+    if (match) {
+      const data = JSON.parse(match[1]);
+      fundName = data.name || null;
+      estimatedNav = parseFloat(data.gsz) || null;
+      estimatedChangePct = parseFloat(data.gszzl) || null;
+      estimateTime = data.gztime || null;
+      if (unitNav === null) {
+        unitNav = parseFloat(data.dwjz) || null;
+      }
+      if (navDate === null) {
+        navDate = data.jzrq || null;
+      }
+    }
+  } catch (_) {
+  }
+
+  if (changePct === null && prevNav != null && unitNav != null && prevNav !== 0) {
+    changePct = ((unitNav - prevNav) / prevNav * 100).toFixed(2);
+  }
+
+  return {
+    code,
+    name: fundName,
+    unitNav,
+    navDate,
+    prevNav,
+    prevNavDate,
+    changePct,
+    estimatedNav,
+    estimatedChangePct,
+    estimateTime,
+  };
+}
+
+async function getFundNavHistory(code, page = 1, perPage = 20) {
+  code = String(code || "").trim();
+  if (!/^\d{6}$/.test(code)) {
+    throw new Error("invalid fund code");
+  }
+  const url = `https://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=${code}&page=${page}&per=${perPage}`;
+  const resp = await fetch(url, {
+    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+    signal: AbortSignal.timeout(10000),
+  });
+  const text = await resp.text();
+  const startIdx = text.indexOf("var apidata=");
+  if (startIdx === -1) {
+    throw new Error("fund nav history data not found");
+  }
+  const endIdx = text.lastIndexOf("};");
+  if (endIdx === -1) {
+    throw new Error("fund nav history data not found");
+  }
+  const jsonStr = text.substring(startIdx + 12, endIdx + 1);
+  const data = new Function(`return ${jsonStr}`)();
+  const content = data.content || "";
+  const rows = [];
+  const rowRegex = /<tr[^>]*>(.*?)<\/tr>/gi;
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(content)) !== null) {
+    const rowContent = rowMatch[1];
+    const cellRegex = /<td[^>]*>(.*?)<\/td>/gi;
+    const cells = [];
+    let cellMatch;
+    while ((cellMatch = cellRegex.exec(rowContent)) !== null) {
+      cells.push(cellMatch[1].replace(/<[^>]*>/g, "").trim());
+    }
+    if (cells.length >= 4) {
+      rows.push({
+        date: cells[0],
+        unitNav: parseFloat(cells[1]) || null,
+        accumNav: parseFloat(cells[2]) || null,
+        dailyGrowth: parseFloat(cells[3]) || null,
+      });
+    }
+  }
+  return {
+    code,
+    rows,
+    records: data.records || rows.length,
+    pages: data.pages || 1,
+    curpage: data.curpage || page,
+  };
+}
+
+async function getUSIndex(code) {
+  code = String(code || "").trim().toUpperCase();
+  const indexMap = {
+    "IXIC": { name: "纳斯达克综合指数", baiduCode: "us-IXIC" },
+    "SPX": { name: "标普500指数", baiduCode: "us-INX" },
+  };
+  if (!indexMap[code]) {
+    throw new Error("unsupported US index code");
+  }
+  const baiduCode = indexMap[code].baiduCode;
+  try {
+    const url = `https://finance.baidu.com/index/${baiduCode}`;
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const text = await resp.text();
+    const priceMatch = text.match(/<div class="price">([^<]+)<\/div>/);
+    const changeMatch = text.match(/<div class="change">([^<]+)<\/div>/);
+    const changePctMatch = text.match(/<div class="changePercent">([^<]+)<\/div>/);
+    return {
+      code,
+      name: indexMap[code].name,
+      price: priceMatch ? parseFloat(priceMatch[1].replace(/,/g, "")) || null : null,
+      change: changeMatch ? parseFloat(changeMatch[1].replace(/,/g, "")) || null : null,
+      changeRate: changePctMatch ? parseFloat(changePctMatch[1].replace(/%/g, "")) || null : null,
+    };
+  } catch (err) {
+    throw new Error("failed to fetch US index data");
+  }
+}
+
+async function getIndexHistory(code) {
+  code = String(code || "").trim().toUpperCase();
+  if (code === "IXIC" || code === "SPX") {
+    return getUSIndexHistory(code);
+  }
+  return getCSIndexHistory(code);
+}
+
+async function getCSIndexHistory(code) {
+  try {
+    const url = `https://www.csindex.com.cn/zh-CN/indices/index-detail/${code}?tab=history`;
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const text = await resp.text();
+    const dataMatch = text.match(/var historyData = (\[.*?\]);/);
+    if (dataMatch) {
+      const data = JSON.parse(dataMatch[1]);
+      return {
+        code,
+        history: data.map(item => ({
+          date: item.date,
+          open: parseFloat(item.open) || null,
+          close: parseFloat(item.close) || null,
+          high: parseFloat(item.high) || null,
+          low: parseFloat(item.low) || null,
+          volume: item.volume || null,
+        })),
+      };
+    }
+  } catch (_) {
+  }
+  try {
+    const tc = code.startsWith("sh") ? code : "sh" + code;
+    const upstream = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tc},day,,,$(count),qfq`.replace("$(count)", "120");
+    const resp = await fetch(upstream, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await resp.json();
+    const stockData = data?.data?.[tc];
+    const kline = stockData?.qfqday || stockData?.day || [];
+    return {
+      code,
+      history: kline.map(item => ({
+        date: item[0],
+        open: parseFloat(item[1]) || null,
+        close: parseFloat(item[2]) || null,
+        high: parseFloat(item[4]) || null,
+        low: parseFloat(item[5]) || null,
+        volume: parseFloat(item[6]) || null,
+      })),
+    };
+  } catch (err) {
+    throw new Error("failed to fetch index history");
+  }
+}
+
+async function getUSIndexHistory(code) {
+  try {
+    const url = `https://finance.baidu.com/action/IndexHistoryAction?type=last&code=${code === "IXIC" ? "IXIC" : "INX"}&t=${Date.now()}`;
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const text = await resp.text();
+    const dataMatch = text.match(/\{.*\}/);
+    if (dataMatch) {
+      const data = JSON.parse(dataMatch[0]);
+      const history = [];
+      if (data.data && Array.isArray(data.data)) {
+        data.data.forEach(item => {
+          history.push({
+            date: item.date || item[0],
+            open: parseFloat(item.open || item[1]) || null,
+            close: parseFloat(item.close || item[2]) || null,
+            high: parseFloat(item.high || item[3]) || null,
+            low: parseFloat(item.low || item[4]) || null,
+          });
+        });
+      }
+      return { code, history };
+    }
+  } catch (_) {
+  }
+  return { code, history: [] };
+}
+
+export { tencentCodeFor, lookupSecurities, getQuotes, getKline, getFundNav, getFundNavHistory, getUSIndex, getIndexHistory };
