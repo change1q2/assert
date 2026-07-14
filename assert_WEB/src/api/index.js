@@ -357,3 +357,15 @@ export async function fetchFinanceQuotes(codes) {
     return []
   }
 }
+
+export async function fetchFundNav(codes) {
+  try {
+    const response = await request('/finance/fund-nav', {
+      method: 'POST',
+      body: JSON.stringify({ codes }),
+    })
+    return response.funds || []
+  } catch {
+    return []
+  }
+}

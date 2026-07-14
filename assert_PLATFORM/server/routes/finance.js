@@ -1,5 +1,5 @@
 import { json } from "../utils/http.js";
-import { lookupSecurities, getQuotes, getKline } from "../services/finance-service.js";
+import { lookupSecurities, getQuotes, getKline, getFundNav } from "../services/finance-service.js";
 
 async function handler(req, res, body, origin, pathname, url) {
   if (req.method === "GET" && pathname === "/api/finance/lookup") {
@@ -25,6 +25,21 @@ async function handler(req, res, body, origin, pathname, url) {
     }
     const result = await getQuotes(codes);
     json(res, 200, result, origin);
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/finance/fund-nav") {
+    const codes = Array.isArray(body.codes) ? body.codes : [];
+    if (!codes.length) {
+      json(res, 200, { funds: [] }, origin);
+      return;
+    }
+    try {
+      const result = await getFundNav(codes);
+      json(res, 200, result, origin);
+    } catch (err) {
+      json(res, 200, { funds: [], error: err.message }, origin);
+    }
     return;
   }
 

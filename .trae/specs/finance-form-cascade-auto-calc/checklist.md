@@ -1,0 +1,5 @@
+- [x] Checkpoint 1: Finance.jsx 中资产分类一级下拉选项从 assetClasses 动态获取
+- [x] Checkpoint 2: 新增/编辑表单中当前市值字段不可手动编辑，自动根据当前价×数量计算
+- [x] Checkpoint 3: AssetClasses.jsx 支持编辑分类名称
+- [x] Checkpoint 4: AssetClasses.jsx 支持删除二级分类
+- [x] Checkpoint 5: 构建成功

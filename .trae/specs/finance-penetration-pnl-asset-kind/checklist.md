@@ -1,0 +1,4 @@
+- [ ] Checkpoint 1: Finance.jsx 中所有总成本计算使用单价×数量公式
+- [ ] Checkpoint 2: 新增/编辑表单中资产类型前显示资产种类字段
+- [ ] Checkpoint 3: 理财模块顶栏显示场内穿透按钮，点击弹出场内资产明细弹窗
+- [ ] Checkpoint 4: 构建成功

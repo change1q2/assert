@@ -1,0 +1,14 @@
+- [x] 默认筛选栏显示搜索框、资产分类、资产类型、所属账户
+- [x] 高级筛选展开显示市场、货币、资产分类二级、持仓分组、持位分类、标签
+- [x] 市场筛选从默认栏移除，移入高级筛选
+- [x] 货币筛选保留在高级筛选
+- [x] 资产类型筛选从高级筛选移出，放入默认栏
+- [x] loadData 从 data.financeAssets 读取数据
+- [x] financeAssets 字段正确映射到前端 holding 结构
+- [x] 分类聚合逻辑使用映射后的数据正确分组
+- [x] handleSaveAccount 构建 financeAssets 格式 payload
+- [x] handleEdit 从 financeAssets 映射后的数据预填弹窗
+- [x] 保存使用 saveState（PUT /api/state）整体保存
+- [x] 新增/编辑后 loadData 刷新能看到新数据
+- [x] npm run build 构建成功
+- [x] 浏览器验证通过
