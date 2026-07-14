@@ -23,8 +23,8 @@ const SMS_CODE_TTL_MINUTES = 5;
 const SMS_RESEND_SECONDS = 60;
 
 const allowedOrigins = new Set([
-  "http://127.0.0.1:4173",
-  "http://localhost:4173",
+  "http://127.0.0.1:5173",
+  "http://localhost:5173",
   ...(process.env.APP_DOMAIN ? [`https://${process.env.APP_DOMAIN}`] : []),
   ...(process.env.EXTRA_ORIGINS ? process.env.EXTRA_ORIGINS.split(",") : []),
 ]);

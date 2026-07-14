@@ -1,52 +1,78 @@
-# 持仓详情弹窗功能 - 实现计划
+# 理财模块持仓明细功能增强 - 实现计划
 
-## [ ] Task 1: 新增详情按钮组件
+## [x] Task 1: 修改持仓分类下拉选项逻辑（股票类型专属选项）
 - **Priority**: high
 - **Depends On**: None
-- **Description**: 在 CategoryTable 组件操作列的编辑按钮后增加详情按钮，使用 Eye 图标，点击触发详情弹窗
-- **Acceptance Criteria Addressed**: AC-1
+- **Description**: 
+  - 修改持仓分类下拉选项，当资产类型为"股票"时，显示：成长股、价值股、周期股、消费股
+  - 其他资产类型保持原有选项
+- **Acceptance Criteria Addressed**: [AC-1]
 - **Test Requirements**:
-  - `human-judgement` TR-1.1: 操作列显示编辑、详情、删除三个按钮
-  - `human-judgement` TR-1.2: 点击详情按钮弹出详情弹窗
+  - `human-judgment` TR-1.1: 资产类型选择股票时，持仓分类下拉显示成长股、价值股、周期股、消费股
+  - `human-judgment` TR-1.2: 资产类型选择其他（基金、债券等）时，持仓分类保持原有选项
 
-## [ ] Task 2: 创建详情弹窗组件
+## [x] Task 2: 修改场内资产交易记录表单（价格、数量、金额自动计算）
 - **Priority**: high
-- **Depends On**: Task 1
-- **Description**: 创建 DetailModal 组件，包含以下区域：
-  - 头部：持仓名称和代码
-  - 盈亏数据区域：浮动盈亏、浮动盈亏率、当日参考盈亏、当日盈亏率
-  - 统计数据区域：持仓天数、交易税费、个股仓位占比、分红收益
-  - 买卖点区域（BS点）：图表占位
-  - 交易记录区域：交易记录列表
-- **Acceptance Criteria Addressed**: AC-2, AC-3, AC-4
+- **Depends On**: None
+- **Description**: 
+  - 修改DetailModal组件，当资产为国内市场且三级分类为"场内"时，新增记录表单显示：类型、日期、时间、价格、数量、金额（自动计算）、费用
+  - 金额字段根据价格*数量自动计算
+- **Acceptance Criteria Addressed**: [AC-2]
 - **Test Requirements**:
-  - `human-judgement` TR-2.1: 弹窗显示所有要求的字段
-  - `human-judgement` TR-2.2: 字段映射正确（浮动盈亏=持仓盈亏等）
-  - `human-judgement` TR-2.3: 买卖点区域显示图表占位
+  - `human-judgment` TR-2.1: 场内资产新增记录弹窗显示正确字段
+  - `human-judgment` TR-2.2: 输入价格和数量后，金额自动计算
 
-## [ ] Task 3: 实现交易记录图片识别上传
+## [x] Task 3: 修改场内资产图片识别与导入功能
 - **Priority**: high
 - **Depends On**: Task 2
-- **Description**: 在交易记录区域增加图片上传按钮，支持选择图片文件，展示上传的图片预览
-- **Acceptance Criteria Addressed**: AC-4
+- **Description**: 
+  - 修改图片识别结果展示，场内资产显示：类型、日期、时间、价格、数量、金额、费用
+  - 添加人工确认机制
+  - 添加"导入"按钮，确认后导入交易记录
+- **Acceptance Criteria Addressed**: [AC-3]
 - **Test Requirements**:
-  - `human-judgement` TR-3.1: 交易记录区域显示图片上传按钮
-  - `human-judgement` TR-3.2: 点击上传按钮可选择图片文件
-  - `human-judgement` TR-3.3: 上传后显示图片预览
+  - `human-judgment` TR-3.1: 图片识别结果显示正确字段
+  - `human-judgment` TR-3.2: 识别结果可编辑修改
+  - `human-judgment` TR-3.3: 点击导入按钮后，交易记录成功导入
 
-## [ ] Task 4: 实现弹窗关闭逻辑
-- **Priority**: medium
-- **Depends On**: Task 2
-- **Description**: 实现点击弹窗外部或关闭按钮关闭弹窗的功能
-- **Acceptance Criteria Addressed**: AC-5
+## [x] Task 4: 修复新增资产时数据无法录入问题
+- **Priority**: high
+- **Depends On**: None
+- **Description**: 
+  - 检查新增资产表单的数据提交逻辑
+  - 修复数据无法正确保存到数据库的问题
+- **Acceptance Criteria Addressed**: [AC-4]
 - **Test Requirements**:
-  - `human-judgement` TR-4.1: 点击弹窗外部关闭弹窗
-  - `human-judgement` TR-4.2: 点击关闭按钮关闭弹窗
+  - `human-judgment` TR-4.1: 填写完整表单后点击保存，数据成功保存并显示在列表中
 
-## [ ] Task 5: 构建验证
-- **Priority**: medium
-- **Depends On**: Tasks 1-4
-- **Description**: 运行构建命令确保代码无语法错误
-- **Acceptance Criteria Addressed**: 所有
+## [x] Task 5: 修改场外资产交易记录表单（确认金额、份额、净值）
+- **Priority**: high
+- **Depends On**: None
+- **Description**: 
+  - 修改DetailModal组件，当资产为国内市场且三级分类为"场外"时，新增记录表单显示：类型、日期、时间、确认金额、确认份额、确认净值、手续费
+- **Acceptance Criteria Addressed**: [AC-5]
 - **Test Requirements**:
-  - `programmatic` TR-5.1: `npm run build` 成功完成
+  - `human-judgment` TR-5.1: 场外资产新增记录弹窗显示正确字段
+
+## [x] Task 6: 修改场外资产明细弹窗展示
+- **Priority**: medium
+- **Depends On**: None
+- **Description**: 
+  - 修改DetailModal组件，场外资产弹窗上方显示：资产、昨日收益、持仓收益、持仓收益率
+  - 中间显示：最新净值、净值日期、日涨幅、持仓成本单价、累计收益、全部份额、可用份额、持有收益、持有收益率
+- **Acceptance Criteria Addressed**: [AC-6]
+- **Test Requirements**:
+  - `human-judgment` TR-6.1: 场外资产明细弹窗上方显示正确的统计信息
+  - `human-judgment` TR-6.2: 中间显示正确的资产字段信息
+
+## [/] Task 7: 修改场外资产图片识别与导入功能
+- **Priority**: medium
+- **Depends On**: Task 5
+- **Description**: 
+  - 修改图片识别结果展示，场外资产显示：类型、日期、时间、确认金额、确认份额、确认净值、手续费
+  - 添加人工确认机制
+  - 添加"导入"按钮，确认后导入交易记录
+- **Acceptance Criteria Addressed**: [AC-7]
+- **Test Requirements**:
+  - `human-judgment` TR-7.1: 场外资产图片识别结果显示正确字段
+  - `human-judgment` TR-7.2: 点击导入按钮后，交易记录成功导入

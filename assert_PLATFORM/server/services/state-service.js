@@ -31,27 +31,31 @@ async function loadUserState(userId) {
   const transactionsByAsset = new Map();
   transactionRows.forEach((row) => {
     const rows = transactionsByAsset.get(String(row.asset_id)) || [];
+    const [date, time] = (row.transaction_date || '').split(' ');
     rows.push({
       id: numericIfPossible(row.id),
-      type: row.direction,
-      date: row.transaction_date,
-      time: '',
+      direction: row.direction,
+      transaction_date: row.transaction_date,
+      date: date || '',
+      time: time || '',
+      shares: row.shares,
       quantity: row.shares,
       price: row.price,
       amount: row.amount,
+      commission: row.commission,
       fee: row.commission,
     });
     transactionsByAsset.set(String(row.asset_id), rows);
   });
   const financeAssets = (await sqlAll(pool, "SELECT * FROM finance_assets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
-    id: numericIfPossible(row.id), kind: row.kind, accountId: row.account_id, category: row.category,
+    id: numericIfPossible(row.id), kind: row.kind, assetKind: row.asset_kind, accountId: row.account_id, category: row.category,
     subcategory: row.subcategory, tertiaryCategory: row.tertiary_category, market: row.market,
     currency: row.currency, name: row.name, code: row.code, positionGroup: row.position_group,
     positionCategory: row.position_category, costPrice: row.cost_price, shares: row.shares,
     availableShares: row.available_shares, currentPrice: row.current_price, pnl: row.pnl,
     pnlPercent: row.pnl_percent, avgBuyPrice: row.avg_buy_price, holdingDays: row.holding_days,
     positionWeight: row.position_weight, totalFees: row.total_fees, todayPnl: row.today_pnl,
-    todayPnlPercent: row.today_pnl_percent,
+    todayPnlPercent: row.today_pnl_percent, prevPrice: row.prev_price, priceDate: row.price_date,
     transactions: transactionsByAsset.get(String(row.id)) || [],
   }));
   const customRecords = { income: [], expense: [], transfer: [] };
@@ -193,14 +197,14 @@ async function saveUserState(conn, userId, state) {
 
   for (const [index, row] of (state.financeAssets || []).entries()) {
     await sqlRun(conn, `INSERT INTO finance_assets
-      (user_id, id, kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, text(row.id), text(row.kind), text(row.accountId), text(row.category),
+      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId, text(row.id), text(row.kind), text(row.assetKind), text(row.accountId), text(row.category),
        text(row.subcategory), text(row.tertiaryCategory), text(row.market), text(row.currency),
        text(row.name), text(row.code), text(row.positionGroup), text(row.positionCategory),
        number(row.costPrice), number(row.shares), number(row.availableShares), number(row.currentPrice),
        number(row.pnl), number(row.pnlPercent), number(row.avgBuyPrice), number(row.holdingDays),
-       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), index]);
+       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), number(row.prevPrice), text(row.priceDate), index]);
     for (const [transactionIndex, transaction] of (row.transactions || []).entries()) {
       await sqlRun(conn, `INSERT INTO finance_asset_transactions
         (user_id, asset_id, id, direction, transaction_date, shares, price, amount, commission, stamp_duty, transfer_fee, sort_order)

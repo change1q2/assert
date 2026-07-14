@@ -1,4 +1,5 @@
-import { json } from "../utils/http.js";\nimport { lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getIndexHistory } from "../services/finance-service.js";
+import { json } from "../utils/http.js";
+import { lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getIndexHistory } from "../services/finance-service.js";
 
 async function handler(req, res, body, origin, pathname, url) {
   if (req.method === "GET" && pathname === "/api/finance/lookup") {

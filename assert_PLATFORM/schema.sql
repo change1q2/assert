@@ -146,6 +146,8 @@ CREATE TABLE IF NOT EXISTS finance_assets (
   total_fees DOUBLE NOT NULL DEFAULT 0,
   today_pnl DOUBLE NOT NULL DEFAULT 0,
   today_pnl_percent DOUBLE NOT NULL DEFAULT 0,
+  prev_price DOUBLE NOT NULL DEFAULT 0,
+  price_date VARCHAR(20) NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (user_id, id),
   INDEX idx_finance_assets_user_account (user_id, account_id),
