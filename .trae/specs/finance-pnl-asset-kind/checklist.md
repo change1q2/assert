@@ -1,0 +1,3 @@
+- [x] Checkpoint 1: Finance.jsx 中 financeAccounts 的 cost 映射为总成本，所有汇总计算直接使用 cost
+- [x] Checkpoint 2: 新增/编辑表单中资产类型前显示资产种类字段，支持自定义编辑
+- [x] Checkpoint 3: 构建成功

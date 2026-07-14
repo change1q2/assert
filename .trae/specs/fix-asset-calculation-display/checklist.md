@@ -1,0 +1,5 @@
+- [x] Checkpoint 1: CategoryDetail.jsx 持仓成本计算正确（不再乘以 quantity）
+- [x] Checkpoint 2: 资产分类一级不再自动填写，需手动选择
+- [x] Checkpoint 3: 明细弹窗根据分类正确显示股票/基金形式
+- [x] Checkpoint 4: 场内穿透功能正常工作
+- [x] Checkpoint 5: 构建成功

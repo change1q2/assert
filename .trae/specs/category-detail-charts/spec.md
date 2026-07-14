@@ -78,3 +78,64 @@
 ## Open Questions
 - [ ] 是否需要更多货币选项（如 EUR、JPY）？
 - [ ] 汇率是否需要从后端获取？
+
+---
+
+## 扩展需求（Tasks 8-13）：编辑、对比卡片、增强饼图、持仓明细
+
+### Overview
+- **Summary**: 将右上角新增按钮改为编辑按钮（编辑目标价值/期望收益率），第二行添加目标对比卡片，资产类型饼图按 assetType 聚合，海内外饼图细分为国内/港股/美股/其他 4 段，新增持仓明细列表延用 Finance.jsx 的筛选/搜索/列设置模式。
+- **Purpose**: 提供分类详情页的目标管理、对比分析与持仓明细，统一与 Finance 模块的交互体验。
+
+### Goals
+- 右上角按钮改为"编辑"，可编辑 targetValue 和 expectedReturn 并持久化
+- 第二行显示目标对比卡片（当前价值 vs 目标价值、当前收益率 vs 期望收益率）
+- 资产类型占比饼图（按 assetType，数据来自权益类持仓）
+- 海内外对比饼图细分为 4 段（国内/港股/美股/其他）
+- 持仓明细列表延用 Finance.jsx 的筛选/搜索/列设置/分页，仅展示当前分类持仓
+
+### ADDED Requirements
+
+### Requirement: 编辑目标价值与期望收益率
+The system SHALL provide an edit button (replacing the previous add button) in the top-right of the category detail page that opens a modal to edit targetValue and expectedReturn, persisting changes via saveState.
+
+#### Scenario: 编辑并保存目标值
+- **WHEN** 用户点击"编辑"按钮，修改 targetValue/expectedReturn 并保存
+- **THEN** stateData.assetClasses 中对应分类更新，并通过 saveState 持久化到后端
+
+### Requirement: 目标对比卡片
+The system SHALL display a comparison card on the second row showing current value vs target value and current return rate vs expected return rate, with data aggregated from accounts where categoryL1 matches the current category.
+
+#### Scenario: 显示对比
+- **WHEN** 用户查看第二行对比卡片
+- **THEN** 显示当前价值 → 目标价值、当前收益率 → 期望收益率，并配以进度条
+
+### Requirement: 资产类型占比饼图
+The system SHALL display a pie chart showing asset type breakdown (by assetType) for holdings where categoryL1 matches the current category.
+
+### Requirement: 海内外对比饼图（4 段细分）
+The system SHALL display a pie chart with 4 segments: 国内市场, 港股市场, 美股市场, 其他市场, classified by the market field of accounts where categoryL1 matches the current category.
+
+#### Scenario: 市场分类
+- **WHEN** account.market 包含"港股"
+- **THEN** 归入港股市场
+- **WHEN** account.market 包含"美股"
+- **THEN** 归入美股市场
+- **WHEN** account.market 为空或为"国内市场"
+- **THEN** 归入国内市场
+- **WHEN** 其他情况
+- **THEN** 归入其他市场
+
+### Requirement: 持仓明细列表
+The system SHALL display a holdings detail list reusing Finance.jsx's filter/search/column-settings/pagination pattern, showing only holdings where categoryL1 matches the current category, with settings persisted to localStorage using category_detail_ prefix.
+
+#### Scenario: 筛选与列设置持久化
+- **WHEN** 用户调整筛选/列设置/分页大小
+- **THEN** 设置持久化到 localStorage（key: category_detail_column_settings_<分类名> 等）
+- **WHEN** 用户重新进入页面
+- **THEN** 设置从 localStorage 恢复
+
+### MODIFIED Requirements
+
+### Requirement: 右上角按钮
+[原"+ 新增"按钮改为"编辑"按钮，点击打开编辑弹窗而非新增资产类型弹窗]

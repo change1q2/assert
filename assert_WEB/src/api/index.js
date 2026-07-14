@@ -358,7 +358,19 @@ export async function fetchFinanceQuotes(codes) {
   }
 }
 
-export async function fetchFundNav(code) {
+export async function fetchFundNav(codes) {
+  try {
+    const response = await request('/finance/fund-nav', {
+      method: 'POST',
+      body: JSON.stringify({ codes }),
+    })
+    return response.funds || []
+  } catch {
+    return []
+  }
+}
+
+export async function fetchFundNavDetail(code) {
   try {
     const response = await request(`/finance/fund-nav?code=${encodeURIComponent(code)}`, {
       method: 'GET',

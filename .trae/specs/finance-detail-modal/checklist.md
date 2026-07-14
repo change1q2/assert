@@ -1,0 +1,13 @@
+- [ ] Checkpoint 1: 操作列显示编辑、详情、删除三个按钮
+- [ ] Checkpoint 2: 点击详情按钮弹出详情弹窗
+- [ ] Checkpoint 3: 详情弹窗显示浮动盈亏、浮动盈亏率、当日参考盈亏、当日盈亏率
+- [ ] Checkpoint 4: 详情弹窗显示持仓天数、交易税费、个股仓位占比、分红收益
+- [ ] Checkpoint 5: 详情弹窗显示买卖点（BS点）图表占位区域
+- [ ] Checkpoint 6: 交易记录区域显示交易记录列表
+- [ ] Checkpoint 7: 交易记录区域显示图片上传按钮
+- [ ] Checkpoint 8: 点击上传按钮可选择图片文件
+- [ ] Checkpoint 9: 上传后显示图片预览
+- [ ] Checkpoint 10: 点击弹窗外部关闭弹窗
+- [ ] Checkpoint 11: 点击关闭按钮关闭弹窗
+- [ ] Checkpoint 12: 字段映射正确（浮动盈亏=持仓盈亏等）
+- [ ] Checkpoint 13: 构建成功通过

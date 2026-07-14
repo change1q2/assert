@@ -253,6 +253,65 @@ async function getQuotes(codes) {
   return { quotes: results };
 }
 
+// 天天基金网基金净值查询（场外基金）
+async function getFundNav(codes) {
+  const results = codes.map((item) => ({
+    code: item.code,
+    name: null,
+    nav: null,
+    prevNav: null,
+    dailyChangePct: null,
+    dailyChangeAmt: null,
+    navDate: null,
+  }));
+  await Promise.all(codes.map(async (item, index) => {
+    const code = String(item.code || '').trim();
+    if (!/^\d{6}$/.test(code)) return;
+    try {
+      const navUrl = `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=2&startDate=&endDate=`;
+      const navRes = await fetch(navUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": "https://fund.eastmoney.com/",
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      const navData = await navRes.json();
+      const list = navData?.Data?.LSJZList || [];
+      if (!list || list.length < 1) return;
+      const latest = list[0];
+      const prev = list.length > 1 ? list[1] : null;
+      const nav = Number.parseFloat(latest.DWJZ);
+      const prevNav = prev ? Number.parseFloat(prev.DWJZ) : null;
+      const dailyChangePct = Number.parseFloat(latest.JZZZL);
+      const navDate = latest.FSRQ || null;
+      results[index] = {
+        code: code,
+        name: null,
+        nav: Number.isFinite(nav) ? nav : null,
+        prevNav: Number.isFinite(prevNav) ? prevNav : null,
+        dailyChangePct: Number.isFinite(dailyChangePct) ? dailyChangePct : null,
+        dailyChangeAmt: Number.isFinite(nav) && Number.isFinite(prevNav) ? (nav - prevNav) : null,
+        navDate: navDate,
+      };
+      try {
+        const gzUrl = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
+        const gzRes = await fetch(gzUrl, {
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://fund.eastmoney.com/" },
+          signal: AbortSignal.timeout(5000),
+        });
+        const gzText = await gzRes.text();
+        const gzMatch = gzText.match(/jsonpgz\((.*)\);?/);
+        if (gzMatch && gzMatch[1]) {
+          const gzData = JSON.parse(gzMatch[1]);
+          results[index].name = gzData.name || null;
+        }
+      } catch (_) { }
+    } catch (_) { }
+  }));
+  return { funds: results };
+}
+
 async function getKline(code, market, start, end, count) {
   const tc = tencentCodeFor(code, market);
   if (!tc) {
@@ -269,7 +328,7 @@ async function getKline(code, market, start, end, count) {
   return { kline, code: tc };
 }
 
-async function getFundNav(code) {
+async function getFundNavDetail(code) {
   code = String(code || "").trim();
   if (!/^\d{6}$/.test(code)) {
     throw new Error("invalid fund code");
@@ -545,4 +604,4 @@ async function getUSIndexHistory(code) {
   return { code, history: [] };
 }
 
-export { tencentCodeFor, lookupSecurities, getQuotes, getKline, getFundNav, getFundNavHistory, getUSIndex, getIndexHistory };
+export { tencentCodeFor, lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getIndexHistory };

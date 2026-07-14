@@ -1,10 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchState, saveState } from '../api';
 import {
   ArrowLeft,
-  Plus,
   Edit2,
-  Trash2,
   X,
   Wallet,
   Target,
@@ -14,6 +12,12 @@ import {
   BarChart3,
   Globe,
   Lock,
+  Search,
+  Filter,
+  Settings,
+  ChevronUp,
+  ChevronDown,
+  Scale,
 } from 'lucide-react';
 import {
   PieChart,
@@ -31,16 +35,51 @@ import {
 import { DEFAULT_EXCHANGE_RATES } from '../utils/currency.js';
 
 function formatCurrency(value, currency = 'CNY') {
+  const num = value == null || isNaN(value) ? 0 : Number(value);
   const options = {
     style: 'currency',
     currency,
     minimumFractionDigits: 0,
   };
-  return new Intl.NumberFormat(currency === 'CNY' ? 'zh-CN' : 'en-US', options).format(value);
+  return new Intl.NumberFormat(currency === 'CNY' ? 'zh-CN' : 'en-US', options).format(num);
 }
 
 function formatPercentage(value) {
-  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+  const n = value == null || isNaN(value) ? 0 : Number(value);
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+}
+
+function formatNum(value) {
+  if (value === null || value === undefined) return '—';
+  return new Intl.NumberFormat('zh-CN', {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(value);
+}
+
+const POS_CLASS = 'text-green-600 dark:text-green-400';
+const NEG_CLASS = 'text-red-500 dark:text-red-400';
+
+function pnlClass(val) {
+  const n = parseFloat(val);
+  return isNaN(n) ? '' : (n >= 0 ? POS_CLASS : NEG_CLASS);
+}
+
+function pnlSign(n) {
+  return n > 0 ? '+' : '';
+}
+
+function computeHoldingDays(account) {
+  if (!account) return 0;
+  const base = parseInt(account.holdingDaysBase ?? account.holdingDays, 10) || 0;
+  const baseDate = account.holdingDaysDate;
+  if (!baseDate) return base;
+  const d1 = new Date(baseDate);
+  d1.setHours(0, 0, 0, 0);
+  const d2 = new Date();
+  d2.setHours(0, 0, 0, 0);
+  const days = Math.max(0, Math.floor((d2 - d1) / 86400000));
+  return base + days;
 }
 
 const PRESET_COLORS = [
@@ -67,6 +106,40 @@ const DOMESTIC_MARKET = '国内市场';
 const OVERSEAS_MARKET = '海外市场';
 
 const CURRENCIES = ['CNY', 'USD', 'EUR', 'JPY', 'GBP'];
+
+const DEFAULT_COLUMNS = [
+  { key: 'market', label: '市场', visible: true, align: 'left' },
+  { key: 'currency', label: '货币', visible: true, align: 'left' },
+  { key: 'assetType', label: '资产类型', visible: true, align: 'left' },
+  { key: 'name', label: '资产名称', visible: true, align: 'left' },
+  { key: 'code', label: '代码', visible: true, align: 'left' },
+  { key: 'categoryL2', label: '二级分类', visible: false, align: 'left' },
+  { key: 'categoryL3', label: '三级分类', visible: false, align: 'left' },
+  { key: 'positionGroup', label: '持仓分组', visible: false, align: 'left' },
+  { key: 'positionType', label: '持仓分类', visible: false, align: 'left' },
+  { key: 'cost', label: '持仓成本', visible: true, align: 'right' },
+  { key: 'quantity', label: '数量', visible: true, align: 'right' },
+  { key: 'currentPrice', label: '现价', visible: true, align: 'right' },
+  { key: 'holdingDays', label: '天数', visible: true, align: 'right' },
+  { key: 'currentValue', label: '当前市值', visible: true, align: 'right', bold: true },
+  { key: 'holdingPnl', label: '持仓盈亏', visible: true, align: 'right', bold: true, pnl: true },
+  { key: 'holdingPnlRate', label: '持仓盈亏率', visible: true, align: 'right', pnl: true },
+  { key: 'dailyPnl', label: '当日盈亏', visible: true, align: 'right', bold: true, pnl: true, indigo: true },
+  { key: 'dailyPnlRate', label: '当日收益率', visible: true, align: 'right', pnl: true },
+  { key: 'positionRatio', label: '仓位占比', visible: true, align: 'right' },
+  { key: 'account', label: '所属账户', visible: true, align: 'left' },
+];
+
+const DEFAULT_FILTERS = [
+  { key: 'market', label: '市场', visible: true },
+  { key: 'currency', label: '货币', visible: false },
+  { key: 'assetType', label: '资产类型', visible: true },
+  { key: 'categoryL2', label: '二级分类', visible: false },
+  { key: 'categoryL3', label: '三级分类', visible: false },
+  { key: 'positionGroup', label: '持仓分组', visible: false },
+  { key: 'positionType', label: '持仓分类', visible: false },
+  { key: 'account', label: '所属账户', visible: true },
+];
 
 function normalizeMarket(market) {
   if (!market) return DOMESTIC_MARKET;
@@ -182,18 +255,826 @@ function convertValue(value, fromCurrency, toCurrency) {
   return (value * fromRate) / toRate;
 }
 
+// 海内外对比饼图：国内 / 港股 / 美股 / 其他（按一级分类筛选）
+function computeCategoryDomesticOverseasPie(accounts, categoryName) {
+  const filtered = (accounts || []).filter(
+    (a) => (a.categoryL1 || a.category) === categoryName
+  );
+  let domestic = 0;
+  let hk = 0;
+  let us = 0;
+  let other = 0;
+
+  filtered.forEach((account) => {
+    const value = parseFloat(account.currentValue || account.currentPrice * account.shares || account.balance || 0);
+    const market = account.market || '';
+
+    if (!market || market === DOMESTIC_MARKET || market === '国内市场') {
+      domestic += value;
+    } else if (market.includes('港股')) {
+      hk += value;
+    } else if (market.includes('美股')) {
+      us += value;
+    } else {
+      other += value;
+    }
+  });
+
+  const total = domestic + hk + us + other;
+  return [
+    { name: DOMESTIC_MARKET, value: domestic, percent: total > 0 ? (domestic / total) * 100 : 0, color: '#3B82F6' },
+    { name: '港股市场', value: hk, percent: total > 0 ? (hk / total) * 100 : 0, color: '#F97316' },
+    { name: '美股市场', value: us, percent: total > 0 ? (us / total) * 100 : 0, color: '#EF4444' },
+    { name: '其他市场', value: other, percent: total > 0 ? (other / total) * 100 : 0, color: '#8B5CF6' },
+  ];
+}
+
+// ── 持仓汇总卡片 ──
+function HoldingsSummaryCard({ summary }) {
+  const isPos = summary.totalPnl >= 0;
+  const isDayPos = summary.totalDailyPnl >= 0;
+  return (
+    <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 mb-4">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-full p-1.5">
+          <PieChartIcon className="w-4 h-4" />
+        </div>
+        <span className="font-semibold text-gray-900 dark:text-white text-sm">筛选汇总</span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-center mb-2">
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当前总市值</p>
+          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatNum(summary.totalMarketValue)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">持仓总成本</p>
+          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatNum(summary.totalCost)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">持仓总盈亏</p>
+          <p className={`text-sm font-bold tabular-nums ${isPos ? 'text-green-600' : 'text-red-500'}`}>
+            {pnlSign(summary.totalPnl)}{formatNum(summary.totalPnl)}
+          </p>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">持仓总收益率</p>
+          <p className={`text-sm font-bold tabular-nums ${isPos ? 'text-green-600' : 'text-red-500'}`}>
+            {formatPercentage(summary.totalPnlRate)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当日总盈亏</p>
+          <p className={`text-sm font-bold tabular-nums ${isDayPos ? 'text-green-600' : 'text-red-500'}`}>
+            {pnlSign(summary.totalDailyPnl)}{formatNum(summary.totalDailyPnl)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当日总收益率</p>
+          <p className={`text-sm font-bold tabular-nums ${isDayPos ? 'text-green-600' : 'text-red-500'}`}>
+            {formatPercentage(summary.totalDailyPnlRate)}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 分页子组件 ──
+function Pagination({ page, totalPages, totalCount, onPageChange, pageSize, onPageSizeChange, pageSizeOptions = [10, 20, 50, 100] }) {
+  if (totalPages <= 1 && !onPageSizeChange) return null;
+  return (
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
+      <div className="text-sm text-gray-500 dark:text-gray-400">
+        共 {totalCount} 条记录
+      </div>
+      <div className="flex items-center gap-2">
+        {onPageSizeChange && (
+          <select
+            value={pageSize}
+            onChange={(e) => { onPageSizeChange(Number(e.target.value)); onPageChange(1); }}
+            className="px-2 py-1.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white cursor-pointer"
+          >
+            {pageSizeOptions.map(size => (
+              <option key={size} value={size}>{size} 条/页</option>
+            ))}
+          </select>
+        )}
+        <button
+          onClick={() => onPageChange(p => Math.max(1, p - 1))}
+          disabled={page === 1}
+          className="px-3 py-1.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          上一页
+        </button>
+        <div className="flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300">
+          <span>第</span>
+          <input
+            type="number"
+            min={1}
+            max={totalPages}
+            value={page}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              if (!isNaN(val)) {
+                onPageChange(Math.max(1, Math.min(totalPages, val)));
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const val = parseInt(e.target.value, 10);
+                if (!isNaN(val)) {
+                  onPageChange(Math.max(1, Math.min(totalPages, val)));
+                }
+              }
+            }}
+            className="w-14 px-2 py-1.5 text-center text-sm border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+          />
+          <span>/ {totalPages} 页</span>
+        </div>
+        <button
+          onClick={() => onPageChange(p => Math.min(totalPages, p + 1))}
+          disabled={page === totalPages}
+          className="px-3 py-1.5 text-sm border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          下一页
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── 持仓明细表格子组件（含筛选+搜索+列设置+分页），结构延用理财模块 ──
+function HoldingsTable({ holdings, categoryName }) {
+  const [filterText, setFilterText] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`category_detail_page_size_${categoryName}`);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    } catch (e) { console.error(e); }
+    return 10;
+  });
+  const [filterAccount, setFilterAccount] = useState('');
+  const [filterMarket, setFilterMarket] = useState('');
+  const [filterCurrency, setFilterCurrency] = useState('');
+  const [filterAssetType, setFilterAssetType] = useState('');
+  const [filterCategoryL2, setFilterCategoryL2] = useState('');
+  const [filterCategoryL3, setFilterCategoryL3] = useState('');
+  const [filterPositionGroup, setFilterPositionGroup] = useState('');
+  const [filterPositionType, setFilterPositionType] = useState('');
+  const [showColumnSettings, setShowColumnSettings] = useState(false);
+  const [showFilterSettings, setShowFilterSettings] = useState(false);
+  const [columnSettingsPosition, setColumnSettingsPosition] = useState('bottom');
+  const columnSettingsRef = useRef(null);
+  const filterSettingsRef = useRef(null);
+
+  const [filterSettings, setFilterSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`category_detail_filter_settings_${categoryName}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return DEFAULT_FILTERS.map(defaultFilter => {
+            const savedFilter = parsed.find(f => f.key === defaultFilter.key);
+            return savedFilter ? { ...defaultFilter, visible: savedFilter.visible } : defaultFilter;
+          });
+        }
+      }
+    } catch (e) { console.error(e); }
+    return DEFAULT_FILTERS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`category_detail_filter_settings_${categoryName}`, JSON.stringify(filterSettings));
+    } catch (e) { console.error(e); }
+  }, [filterSettings, categoryName]);
+
+  const [columns, setColumns] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`category_detail_column_settings_${categoryName}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return DEFAULT_COLUMNS.map(def => {
+            const savedCol = parsed.find(c => c.key === def.key);
+            return savedCol || def;
+          });
+        }
+      }
+    } catch (e) { console.error(e); }
+    return [...DEFAULT_COLUMNS];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`category_detail_column_settings_${categoryName}`, JSON.stringify(columns));
+    } catch (e) { console.error(e); }
+  }, [columns, categoryName]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`category_detail_page_size_${categoryName}`, String(pageSize));
+    } catch (e) { console.error(e); }
+  }, [pageSize, categoryName]);
+
+  useEffect(() => {
+    if (!showColumnSettings) return;
+    const handleClickOutside = (e) => {
+      if (columnSettingsRef.current && !columnSettingsRef.current.contains(e.target)) {
+        setShowColumnSettings(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showColumnSettings]);
+
+  useEffect(() => {
+    if (!showFilterSettings) return;
+    const handleClickOutside = (e) => {
+      if (filterSettingsRef.current && !filterSettingsRef.current.contains(e.target)) {
+        setShowFilterSettings(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showFilterSettings]);
+
+  useEffect(() => {
+    if (!showColumnSettings || !columnSettingsRef.current) return;
+    const button = columnSettingsRef.current.querySelector('button');
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    const panelHeight = 400;
+    const bottomSpace = window.innerHeight - rect.bottom;
+    setColumnSettingsPosition(bottomSpace > panelHeight ? 'bottom' : 'top');
+  }, [showColumnSettings]);
+
+  const toggleFilter = (key) => {
+    setFilterSettings(prev => prev.map(f =>
+      f.key === key ? { ...f, visible: !f.visible } : f
+    ));
+  };
+
+  const resetFiltersSettings = () => setFilterSettings([...DEFAULT_FILTERS]);
+
+  const visibleColumns = useMemo(() => columns.filter(c => c.visible), [columns]);
+
+  const toggleColumn = (key) => {
+    setColumns(prev => prev.map(c =>
+      c.key === key ? { ...c, visible: !c.visible } : c
+    ));
+  };
+
+  const moveColumn = (index, direction) => {
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === columns.length - 1) return;
+    const newColumns = [...columns];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    [newColumns[index], newColumns[targetIndex]] = [newColumns[targetIndex], newColumns[index]];
+    setColumns(newColumns);
+  };
+
+  const resetColumns = () => setColumns([...DEFAULT_COLUMNS]);
+
+  const renderCell = (h, col) => {
+    const val = h[col.key];
+    switch (col.key) {
+      case 'market':
+        return <span className="px-1.5 py-0.5 rounded text-[10px] bg-gray-100 dark:bg-slate-700 text-gray-500">{val || '-'}</span>;
+      case 'currency':
+        return val || '-';
+      case 'assetType':
+      case 'categoryL2':
+      case 'categoryL3':
+      case 'positionGroup':
+      case 'positionType':
+        return val || '-';
+      case 'name':
+        return <span className="font-medium text-gray-900 dark:text-white">{val || '-'}</span>;
+      case 'code':
+        return <span className="font-mono">{val || '-'}</span>;
+      case 'cost':
+      case 'quantity':
+      case 'currentValue':
+        return formatNum(val);
+      case 'currentPrice':
+        return formatNum(val);
+      case 'holdingDays':
+        return computeHoldingDays(h) || '-';
+      case 'holdingPnl':
+      case 'dailyPnl':
+        return <span className={pnlClass(val)}>{pnlSign(parseFloat(val))}{formatNum(val)}</span>;
+      case 'holdingPnlRate':
+      case 'dailyPnlRate':
+        return <span className={pnlClass(val)}>{formatPercentage(val)}</span>;
+      case 'positionRatio':
+        const ratio = parseFloat(val);
+        return <span className="text-gray-600 dark:text-gray-400">{isNaN(ratio) ? '—' : `${ratio.toFixed(2)}%`}</span>;
+      case 'account':
+        return <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">{val || '-'}</span>;
+      default:
+        return val || '-';
+    }
+  };
+
+  const uniqueAccounts = useMemo(() =>
+    [...new Set(holdings.map(h => h.account).filter(Boolean))].sort(),
+    [holdings]
+  );
+  const uniqueMarkets = useMemo(() =>
+    [...new Set(holdings.map(h => h.market).filter(Boolean))].sort(),
+    [holdings]
+  );
+  const uniqueCurrencies = useMemo(() =>
+    [...new Set(holdings.map(h => h.currency).filter(Boolean))].sort(),
+    [holdings]
+  );
+  const uniqueAssetTypes = useMemo(() =>
+    [...new Set(holdings.map(h => h.assetType).filter(Boolean))].sort(),
+    [holdings]
+  );
+  const uniqueCategoryL2 = useMemo(() =>
+    [...new Set(holdings.map(h => h.categoryL2).filter(Boolean))].sort(),
+    [holdings]
+  );
+  const uniqueCategoryL3 = useMemo(() =>
+    [...new Set(holdings.map(h => h.categoryL3).filter(Boolean))].sort(),
+    [holdings]
+  );
+  const uniquePositionGroups = useMemo(() =>
+    [...new Set(holdings.map(h => h.positionGroup).filter(Boolean))].sort(),
+    [holdings]
+  );
+  const uniquePositionTypes = useMemo(() =>
+    [...new Set(holdings.map(h => h.positionType).filter(Boolean))].sort(),
+    [holdings]
+  );
+
+  const filtered = useMemo(() => {
+    return holdings.filter(h => {
+      if (filterText.trim()) {
+        const q = filterText.toLowerCase();
+        const matchText =
+          (h.name || '').toLowerCase().includes(q) ||
+          (h.code || '').toLowerCase().includes(q) ||
+          (h.assetType || '').toLowerCase().includes(q) ||
+          (h.positionGroup || '').toLowerCase().includes(q);
+        if (!matchText) return false;
+      }
+      if (filterAccount && h.account !== filterAccount) return false;
+      if (filterMarket && h.market !== filterMarket) return false;
+      if (filterCurrency && h.currency !== filterCurrency) return false;
+      if (filterAssetType && h.assetType !== filterAssetType) return false;
+      if (filterCategoryL2 && h.categoryL2 !== filterCategoryL2) return false;
+      if (filterCategoryL3 && h.categoryL3 !== filterCategoryL3) return false;
+      if (filterPositionGroup && h.positionGroup !== filterPositionGroup) return false;
+      if (filterPositionType && h.positionType !== filterPositionType) return false;
+      return true;
+    });
+  }, [holdings, filterText, filterAccount, filterMarket, filterCurrency, filterAssetType, filterCategoryL2, filterCategoryL3, filterPositionGroup, filterPositionType]);
+
+  const filteredWithRatio = useMemo(() => {
+    const totalValue = filtered.reduce((sum, h) => sum + (parseFloat(h.currentValue) || parseFloat(h.balance) || 0), 0);
+    return filtered.map(h => ({
+      ...h,
+      positionRatio: totalValue > 0 ? ((parseFloat(h.currentValue) || parseFloat(h.balance) || 0) / totalValue) * 100 : 0,
+    }));
+  }, [filtered]);
+
+  const resetFilters = () => {
+    setFilterText('');
+    setFilterAccount('');
+    setFilterMarket('');
+    setFilterCurrency('');
+    setFilterAssetType('');
+    setFilterCategoryL2('');
+    setFilterCategoryL3('');
+    setFilterPositionGroup('');
+    setFilterPositionType('');
+    setPage(1);
+  };
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const paged = filteredWithRatio.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  const summary = useMemo(() => {
+    const totalValue = filtered.reduce((s, h) => s + (parseFloat(h.currentValue) || parseFloat(h.balance) || 0), 0);
+    const totalCost = filtered.reduce((s, h) => s + (parseFloat(h.cost) || parseFloat(h.costPrice) * parseFloat(h.shares) || 0), 0);
+    const totalPnl = filtered.reduce((s, h) => s + (parseFloat(h.holdingPnl) || 0), 0);
+    const totalDailyPnl = filtered.reduce((s, h) => s + (parseFloat(h.dailyPnl) || 0), 0);
+    return {
+      value: totalValue,
+      cost: totalCost,
+      pnl: totalPnl,
+      pnlRate: totalCost > 0 ? (totalValue - totalCost) / totalCost * 100 : 0,
+      dailyPnl: totalDailyPnl,
+      dailyPnlRate: totalValue > 0 ? (totalDailyPnl / totalValue) * 100 : 0,
+    };
+  }, [filtered]);
+
+  const filteredSummary = useMemo(() => {
+    const totalCost = filtered.reduce((sum, a) => sum + (parseFloat(a.cost) || parseFloat(a.costPrice) * parseFloat(a.shares) || 0), 0);
+    const totalMarketValue = filtered.reduce((sum, a) => sum + (parseFloat(a.currentValue) || parseFloat(a.balance) || 0), 0);
+    const totalPnl = filtered.reduce((sum, a) => sum + (parseFloat(a.holdingPnl) || 0), 0);
+    const totalDailyPnl = filtered.reduce((sum, a) => sum + (parseFloat(a.dailyPnl) || 0), 0);
+    return {
+      totalCost,
+      totalMarketValue,
+      totalPnl,
+      totalPnlRate: totalCost > 0 ? (totalMarketValue - totalCost) / totalCost * 100 : 0,
+      totalDailyPnl,
+      totalDailyPnlRate: totalMarketValue > 0 ? (totalDailyPnl / totalMarketValue) * 100 : 0,
+    };
+  }, [filtered]);
+
+  const handlePageSizeChange = (newSize) => {
+    setPageSize(newSize);
+    setPage(1);
+  };
+
+  const filterSelectClass = "px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/50 appearance-none cursor-pointer";
+
+  return (
+    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700">
+      {/* 筛选汇总卡片 */}
+      {filtered.length > 0 && (
+        <HoldingsSummaryCard summary={filteredSummary} />
+      )}
+
+      {/* 筛选栏 */}
+      <div className="p-4 pb-3 space-y-2.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* 市场 */}
+          {filterSettings.find(f => f.key === 'market')?.visible && (
+            <select
+              value={filterMarket}
+              onChange={e => { setFilterMarket(e.target.value); setPage(1); }}
+              className={filterSelectClass}
+            >
+              <option value="">全部市场</option>
+              {uniqueMarkets.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          )}
+
+          {/* 资产类型 */}
+          {filterSettings.find(f => f.key === 'assetType')?.visible && (
+            <select
+              value={filterAssetType}
+              onChange={e => { setFilterAssetType(e.target.value); setPage(1); }}
+              className={filterSelectClass}
+            >
+              <option value="">全部资产类型</option>
+              {uniqueAssetTypes.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
+
+          {/* 二级分类 */}
+          {filterSettings.find(f => f.key === 'categoryL2')?.visible && uniqueCategoryL2.length > 0 && (
+            <select
+              value={filterCategoryL2}
+              onChange={e => { setFilterCategoryL2(e.target.value); setPage(1); }}
+              className={filterSelectClass}
+            >
+              <option value="">全部二级分类</option>
+              {uniqueCategoryL2.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+
+          {/* 三级分类 */}
+          {filterSettings.find(f => f.key === 'categoryL3')?.visible && uniqueCategoryL3.length > 0 && (
+            <select
+              value={filterCategoryL3}
+              onChange={e => { setFilterCategoryL3(e.target.value); setPage(1); }}
+              className={filterSelectClass}
+            >
+              <option value="">全部三级分类</option>
+              {uniqueCategoryL3.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+
+          {/* 持仓分组 */}
+          {filterSettings.find(f => f.key === 'positionGroup')?.visible && uniquePositionGroups.length > 0 && (
+            <select
+              value={filterPositionGroup}
+              onChange={e => { setFilterPositionGroup(e.target.value); setPage(1); }}
+              className={filterSelectClass}
+            >
+              <option value="">全部持仓分组</option>
+              {uniquePositionGroups.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+          )}
+
+          {/* 持仓分类 */}
+          {filterSettings.find(f => f.key === 'positionType')?.visible && uniquePositionTypes.length > 0 && (
+            <select
+              value={filterPositionType}
+              onChange={e => { setFilterPositionType(e.target.value); setPage(1); }}
+              className={filterSelectClass}
+            >
+              <option value="">全部持仓分类</option>
+              {uniquePositionTypes.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
+
+          {/* 所属账户 */}
+          {filterSettings.find(f => f.key === 'account')?.visible && uniqueAccounts.length > 0 && (
+            <select
+              value={filterAccount}
+              onChange={e => { setFilterAccount(e.target.value); setPage(1); }}
+              className={filterSelectClass}
+            >
+              <option value="">全部账户</option>
+              {uniqueAccounts.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          )}
+
+          {/* 货币 */}
+          {filterSettings.find(f => f.key === 'currency')?.visible && (
+            <select
+              value={filterCurrency}
+              onChange={e => { setFilterCurrency(e.target.value); setPage(1); }}
+              className={filterSelectClass}
+            >
+              <option value="">全部货币</option>
+              {uniqueCurrencies.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+
+          {/* 筛选设置按钮 */}
+          <div className="relative" ref={filterSettingsRef}>
+            <button
+              onClick={() => setShowFilterSettings(!showFilterSettings)}
+              className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs border rounded-lg transition-colors ${
+                showFilterSettings
+                  ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-600 dark:text-primary-400'
+                  : 'border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              <Filter className="w-3.5 h-3.5" />
+              筛选设置
+            </button>
+
+            {/* 筛选设置面板 */}
+            {showFilterSettings && (
+              <div className={`absolute right-0 mt-1 z-50 w-64 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg ${
+                columnSettingsPosition === 'bottom' ? 'top-full' : 'bottom-full'
+              }`}>
+                <div className="p-3 border-b border-gray-100 dark:border-slate-700 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">筛选设置</span>
+                  <button onClick={resetFiltersSettings} className="text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400">重置</button>
+                </div>
+                <div className="p-2 space-y-1 max-h-[60vh] overflow-y-auto">
+                  {filterSettings.map(f => (
+                    <label key={f.key} className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-slate-700/50 rounded cursor-pointer">
+                      <span className="text-xs text-gray-700 dark:text-gray-300">{f.label}</span>
+                      <input
+                        type="checkbox"
+                        checked={f.visible}
+                        onChange={() => toggleFilter(f.key)}
+                        className="w-3.5 h-3.5 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 列设置按钮 */}
+          <div className="relative" ref={columnSettingsRef}>
+            <button
+              onClick={() => setShowColumnSettings(!showColumnSettings)}
+              className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs border rounded-lg transition-colors ${
+                showColumnSettings
+                  ? 'bg-primary-50 dark:bg-primary-900/30 border-primary-300 dark:border-primary-700 text-primary-600 dark:text-primary-400'
+                  : 'border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5" />
+              列设置
+            </button>
+
+            {/* 列设置面板 */}
+            {showColumnSettings && (
+              <div className={`absolute right-0 mt-1 z-50 w-72 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg ${
+                columnSettingsPosition === 'bottom' ? 'top-full' : 'bottom-full'
+              }`}>
+                <div className="p-3 border-b border-gray-100 dark:border-slate-700 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">列设置</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={resetColumns}
+                      className="px-2 py-0.5 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded transition-colors"
+                    >
+                      默认
+                    </button>
+                    <button
+                      onClick={() => setShowColumnSettings(false)}
+                      className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-[60vh] overflow-y-auto p-1">
+                  {columns.map((col, index) => (
+                    <div
+                      key={col.key}
+                      className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-slate-700/50 rounded"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={col.visible}
+                        onChange={() => toggleColumn(col.key)}
+                        className="w-3.5 h-3.5 rounded border-gray-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="flex-1 text-xs text-gray-700 dark:text-gray-300 truncate">
+                        {col.label}
+                      </span>
+                      <div className="flex items-center gap-0.5">
+                        <button
+                          onClick={() => moveColumn(index, 'up')}
+                          disabled={index === 0}
+                          className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-600 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => moveColumn(index, 'down')}
+                          disabled={index === columns.length - 1}
+                          className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-600 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 搜索框 */}
+          <div className="relative w-44 shrink-0">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              type="text"
+              value={filterText}
+              onChange={e => { setFilterText(e.target.value); setPage(1); }}
+              placeholder="搜索名称/代码/类型..."
+              className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500/50"
+            />
+          </div>
+
+          {/* 重置筛选按钮 */}
+          <button
+            onClick={resetFilters}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+          >
+            重置
+          </button>
+        </div>
+      </div>
+
+      {/* 表格 */}
+      <div className="overflow-x-auto px-4">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500">
+              {visibleColumns.map(col => (
+                <th
+                  key={col.key}
+                  className={`py-2 px-1.5 font-medium whitespace-nowrap ${
+                    col.align === 'right' ? 'text-right' : 'text-left'
+                  } ${col.bold ? 'font-semibold text-gray-700 dark:text-gray-300' : ''} ${
+                    col.indigo ? 'text-primary-600 dark:text-primary-400' : ''
+                  }`}
+                >
+                  {col.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {paged.map((h, i) => (
+              <tr key={h.id || i} className="border-b border-gray-50 dark:border-slate-700/30 hover:bg-gray-50/80 dark:hover:bg-slate-700/20">
+                {visibleColumns.map(col => (
+                  <td
+                    key={col.key}
+                    className={`py-2 px-1.5 ${
+                      col.align === 'right' ? 'text-right tabular-nums' : ''
+                    } ${col.bold ? 'font-semibold' : ''} ${
+                      col.pnl ? pnlClass(h[col.key]) : ''
+                    } ${col.indigo ? 'text-primary-600 dark:text-primary-400' : ''} ${
+                      col.key === 'currentValue' ? 'text-gray-900 dark:text-white' : ''
+                    }`}
+                  >
+                    {col.key === 'currentValue'
+                      ? formatNum(h.currentValue || h.balance)
+                      : renderCell(h, col)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {paged.length === 0 && (
+              <tr>
+                <td colSpan={visibleColumns.length} className="py-8 text-center text-gray-400 text-xs">
+                  {filterText ? '无匹配结果' : '暂无数据'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+          {/* 汇总行 */}
+          {filtered.length > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-gray-200 dark:border-slate-600 bg-gray-50/80 dark:bg-slate-700/30 font-semibold">
+                {visibleColumns.map((col, idx) => {
+                  if (idx === 0) {
+                    return (
+                      <td key={col.key} className="py-2 px-1.5 text-xs text-gray-500">
+                        合计 ({filtered.length}项)
+                      </td>
+                    );
+                  }
+                  if (col.key === 'cost') {
+                    return (
+                      <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">
+                        {formatNum(summary.cost)}
+                      </td>
+                    );
+                  }
+                  if (col.key === 'currentValue') {
+                    return (
+                      <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
+                        {formatNum(summary.value)}
+                      </td>
+                    );
+                  }
+                  if (col.key === 'holdingPnl') {
+                    return (
+                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(summary.pnl)}`}>
+                        {pnlSign(summary.pnl)}{formatNum(summary.pnl)}
+                      </td>
+                    );
+                  }
+                  if (col.key === 'holdingPnlRate') {
+                    return (
+                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(summary.pnlRate)}`}>
+                        {summary.value > 0 ? formatPercentage(summary.pnlRate) : '—'}
+                      </td>
+                    );
+                  }
+                  if (col.key === 'dailyPnl') {
+                    return (
+                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums font-semibold ${pnlClass(summary.dailyPnl)}`}>
+                        {pnlSign(summary.dailyPnl)}{formatNum(summary.dailyPnl)}
+                      </td>
+                    );
+                  }
+                  if (col.key === 'dailyPnlRate') {
+                    return (
+                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(summary.dailyPnlRate)}`}>
+                        {summary.value > 0 ? formatPercentage(summary.dailyPnlRate) : '—'}
+                      </td>
+                    );
+                  }
+                  return <td key={col.key} className="py-2 px-1.5"></td>;
+                })}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      <Pagination
+        page={safePage}
+        totalPages={totalPages}
+        totalCount={filtered.length}
+        onPageChange={setPage}
+        pageSize={pageSize}
+        onPageSizeChange={handlePageSizeChange}
+      />
+    </div>
+  );
+}
+
 export default function CategoryDetail({ categoryName, onBack }) {
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showAddChildModal, setShowAddChildModal] = useState(false);
   const [selectedCurrency, setSelectedCurrency] = useState('CNY');
-  const [newChildForm, setNewChildForm] = useState({
-    market: DOMESTIC_MARKET,
-    assetType: ASSET_TYPE_OPTIONS[0],
-    currency: 'CNY',
-    value: 0,
-    openingValue: 0,
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({
+    targetValue: 0,
+    expectedReturn: 0,
   });
 
   useEffect(() => {
@@ -244,34 +1125,53 @@ export default function CategoryDetail({ categoryName, onBack }) {
     };
   }, [categoryInfo]);
 
+  // 对比卡片数据：当前价值 vs 目标价值，当前收益率 vs 期望收益率
+  // 数据来自理财模块 stateData.financeAssets 中 category 为当前分类的持仓
+  const comparisonData = useMemo(() => {
+    const categoryAccounts = (stateData?.financeAssets || []).filter(
+      (a) => (a.categoryL1 || a.category) === categoryName
+    );
+    const currentValue = categoryAccounts.reduce(
+      (s, a) => s + (parseFloat(a.currentValue) || parseFloat(a.currentPrice) * parseFloat(a.shares) || parseFloat(a.balance) || 0),
+      0
+    );
+    const totalCost = categoryAccounts.reduce(
+      (s, a) => s + (parseFloat(a.cost) || parseFloat(a.costPrice) * parseFloat(a.shares) || 0),
+      0
+    );
+    const currentReturnRate = totalCost > 0 ? ((currentValue - totalCost) / totalCost) * 100 : 0;
+    return {
+      currentValue,
+      targetValue: categoryInfo?.targetValue || 0,
+      totalCost,
+      currentReturnRate,
+      expectedReturn: categoryInfo?.expectedReturn || 0,
+    };
+  }, [stateData, categoryName, categoryInfo]);
+
+  // 资产类型占比饼图数据（按 assetType，数据来自理财模块当前分类持仓）
   const chartData = useMemo(() => {
-    if (!categoryInfo) return { pieData: [], barData: [], domesticOverseasData: [] };
+    if (!categoryInfo) return { pieData: [], barData: [] };
 
     const children = categoryInfo.children || [];
     const typeMap = {};
-    const marketMap = { [DOMESTIC_MARKET]: 0, [OVERSEAS_MARKET]: 0 };
 
     children.forEach((child) => {
       const name = child.name || '其他';
-      const market = normalizeMarket(child.market);
       let value = parseFloat(child.value || 0);
       const childCurrency = child.currency || 'CNY';
 
       if (childCurrency !== selectedCurrency) {
         value = convertValue(value, childCurrency, selectedCurrency);
-      } else if (market === OVERSEAS_MARKET && selectedCurrency === 'CNY' && childCurrency === 'CNY') {
-        value = value;
       }
 
       if (!typeMap[name]) {
         typeMap[name] = 0;
       }
       typeMap[name] += value;
-      marketMap[market] += value;
     });
 
     const totalTypeValue = Object.values(typeMap).reduce((sum, v) => sum + v, 0);
-    const totalMarketValue = marketMap[DOMESTIC_MARKET] + marketMap[OVERSEAS_MARKET];
 
     const pieData = Object.entries(typeMap)
       .map(([name, value], index) => ({
@@ -290,180 +1190,93 @@ export default function CategoryDetail({ categoryName, onBack }) {
       }))
       .sort((a, b) => b.value - a.value);
 
-    const domesticOverseasData = [
-      {
-        name: DOMESTIC_MARKET,
-        value: marketMap[DOMESTIC_MARKET],
-        percent: totalMarketValue > 0 ? (marketMap[DOMESTIC_MARKET] / totalMarketValue) * 100 : 0,
-        color: '#3B82F6',
-      },
-      {
-        name: OVERSEAS_MARKET,
-        value: marketMap[OVERSEAS_MARKET],
-        percent: totalMarketValue > 0 ? (marketMap[OVERSEAS_MARKET] / totalMarketValue) * 100 : 0,
-        color: '#F97316',
-      },
-    ];
-
-    return { pieData, barData, domesticOverseasData };
+    return { pieData, barData };
   }, [categoryInfo, selectedCurrency]);
 
-  const { pieData = [], barData = [], domesticOverseasData = [] } = chartData;
+  // 海内外对比饼图数据（国内/港股/美股/其他，按一级分类筛选）
+  const domesticOverseasData = useMemo(() => {
+    return computeCategoryDomesticOverseasPie(stateData?.financeAssets || [], categoryName);
+  }, [stateData, categoryName]);
 
-  const getFinanceChildData = (className, market, assetType) => {
-    const accounts = stateData?.accounts || [];
-    let value = 0;
-    let openingValue = 0;
-    let found = false;
-    accounts.forEach((account) => {
-      const categoryL1 = account.categoryL1 || account.category || '';
-      const accAssetType = account.assetType || account.category || '';
-      const accMarket = normalizeMarket(account.market);
-      if (categoryL1 === className && accAssetType === assetType && accMarket === market) {
-        value += parseFloat(account.currentValue || account.balance || 0);
-        openingValue += parseFloat(account.cost || 0);
-        found = true;
-      }
+  // 持仓明细数据（仅当前分类，延用理财模块字段结构）
+  const categoryHoldings = useMemo(() => {
+    const categoryAccounts = (stateData?.financeAssets || []).filter(
+      (a) => (a.categoryL1 || a.category) === categoryName
+    );
+    return categoryAccounts.map((a) => {
+      const qty = parseFloat(a.shares || a.quantity) || 0;
+      const price = parseFloat(a.currentPrice) || 0;
+      return {
+        id: a.id,
+        market: a.market || '国内市场',
+        currency: a.currency || 'CNY',
+        name: a.name || '',
+        code: a.code || '',
+        assetType: a.kind || a.assetType || a.category || '',
+        account: a.accountId || a.account || '',
+        categoryL1: a.categoryL1 || a.category || '',
+        categoryL2: a.subcategory || a.categoryL2 || '',
+        categoryL3: a.tertiaryCategory || a.categoryL3 || '',
+        categoryL4: a.categoryL4 || '',
+        positionGroup: a.positionGroup || '',
+        positionType: a.positionCategory || a.positionType || '',
+        cost: a.cost || a.costPrice * qty || 0,
+        quantity: qty,
+        currentPrice: price,
+        holdingDays: computeHoldingDays(a),
+        balance: a.currentValue || a.balance || (price * qty),
+        currentValue: a.currentValue || a.balance || (price * qty),
+        holdingPnl: a.holdingPnl || 0,
+        holdingPnlRate: a.holdingPnlRate || 0,
+        dailyPnl: a.dailyPnl || 0,
+        dailyPnlRate: a.dailyPnlRate || 0,
+      };
     });
-    return { value, openingValue, found };
-  };
+  }, [stateData, categoryName]);
 
-  const hasDuplicateCustomChild = (clsId, market, assetType) => {
-    const arr = stateData.assetClasses || [];
-    const cls = arr.find((c) => c.id === clsId);
-    if (!cls) return false;
-    const children = cls.children || [];
-    return children.some((c) => !c.isAutoSync && c.market === market && c.name === assetType);
-  };
+  const { pieData = [], barData = [] } = chartData;
 
-  const hasAutoSyncChild = (clsId, market, assetType) => {
-    if (!hasFinanceData) return false;
-    const cls = enrichedClasses.find((c) => c.id === clsId);
-    if (!cls) return false;
-    const children = cls.children || [];
-    return children.some((c) => c.isAutoSync && c.market === market && c.name === assetType);
-  };
-
-  const addChildToClass = async (clsId, childInput) => {
-    if (!childInput) return;
-    let childObj;
-    if (typeof childInput === 'string') {
-      if (!childInput.trim()) return;
-      childObj = { name: childInput.trim(), value: 0, openingValue: 0, market: '', isAutoSync: false, currency: 'CNY' };
-    } else {
-      childObj = { ...childInput, isAutoSync: childInput.isAutoSync || false, currency: childInput.currency || 'CNY' };
-    }
-    const arr = stateData.assetClasses || [];
-    const newClasses = arr.map((c) => {
-      if (c.id === clsId) {
-        const children = Array.isArray(c.children) ? [...c.children] : [];
-        children.push(childObj);
-        return { ...c, children };
-      }
-      return c;
+  // ── 编辑功能：保存 targetValue / expectedReturn ──
+  const openEditModal = () => {
+    setEditForm({
+      targetValue: categoryInfo?.targetValue || 0,
+      expectedReturn: categoryInfo?.expectedReturn || 0,
     });
-    const newState = { ...stateData, assetClasses: newClasses };
-    const result = await saveState(newState);
-    if (result.success !== false) {
-      setStateData(newState);
-    }
+    setShowEditModal(true);
   };
 
-  const updateChildInClass = async (clsId, childIdx, updates) => {
-    const arr = stateData.assetClasses || [];
-    const newClasses = arr.map((c) => {
-      if (c.id === clsId) {
-        const children = Array.isArray(c.children) ? [...c.children] : [];
-        if (childIdx >= 0 && childIdx < children.length) {
-          children[childIdx] = { ...children[childIdx], ...updates };
-        }
-        return { ...c, children };
-      }
-      return c;
-    });
-    const newState = { ...stateData, assetClasses: newClasses };
-    const result = await saveState(newState);
-    if (result.success !== false) {
-      setStateData(newState);
-    }
+  const closeEditModal = () => {
+    setShowEditModal(false);
   };
 
-  const removeChildFromClass = async (clsId, childIdx) => {
-    if (!confirm('确定要删除该资产类型吗？')) return;
-    const arr = stateData.assetClasses || [];
-    const newClasses = arr.map((c) => {
-      if (c.id === clsId) {
-        const children = Array.isArray(c.children) ? [...c.children] : [];
-        if (childIdx >= 0 && childIdx < children.length) {
-          children.splice(childIdx, 1);
-        }
-        return { ...c, children };
-      }
-      return c;
-    });
-    const newState = { ...stateData, assetClasses: newClasses };
-    const result = await saveState(newState);
-    if (result.success !== false) {
-      setStateData(newState);
-    }
-  };
-
-  const openAddChildModal = () => {
-    setNewChildForm({
-      market: DOMESTIC_MARKET,
-      assetType: ASSET_TYPE_OPTIONS[0],
-      currency: 'CNY',
-      value: 0,
-      openingValue: 0,
-    });
-    setShowAddChildModal(true);
-  };
-
-  const closeAddChildModal = () => {
-    setShowAddChildModal(false);
-    setNewChildForm({
-      market: DOMESTIC_MARKET,
-      assetType: ASSET_TYPE_OPTIONS[0],
-      currency: 'CNY',
-      value: 0,
-      openingValue: 0,
-    });
-  };
-
-  const handleAddChildConfirm = async () => {
-    if (!categoryInfo?.id) return;
-    const { market, assetType, currency, value, openingValue } = newChildForm;
-
-    if (hasAutoSyncChild(categoryInfo.id, market, assetType)) {
-      alert('该市场+资产类型已存在自动同步项，无需重复添加');
+  const handleEditSave = async () => {
+    if (!categoryInfo?.id) {
+      alert('分类信息异常，无法保存');
       return;
     }
-    if (hasDuplicateCustomChild(categoryInfo.id, market, assetType)) {
-      alert('该市场+资产类型的自定义项已存在');
-      return;
-    }
+    const clsId = categoryInfo.id;
+    const newTargetValue = Number(editForm.targetValue) || 0;
+    const newExpectedReturn = Number(editForm.expectedReturn) || 0;
 
-    let finalValue = Number(value) || 0;
-    let finalOpeningValue = Number(openingValue) || 0;
-
-    if (hasFinanceData) {
-      const financeData = getFinanceChildData(categoryName, market, assetType);
-      if (financeData.found) {
-        finalValue = financeData.value;
-        finalOpeningValue = financeData.openingValue;
+    const arr = stateData.assetClasses || [];
+    const newClasses = arr.map((c) =>
+      c.id === clsId
+        ? { ...c, targetValue: newTargetValue, expectedReturn: newExpectedReturn }
+        : c
+    );
+    const newState = { ...stateData, assetClasses: newClasses };
+    try {
+      const result = await saveState(newState);
+      if (result && result.success !== false) {
+        setStateData(newState);
+        setShowEditModal(false);
+      } else {
+        alert('保存失败：' + (result?.error || '未知错误'));
       }
+    } catch (err) {
+      console.error('Failed to save edit:', err);
+      alert('保存失败：' + (err.message || '未知错误'));
     }
-
-    await addChildToClass(categoryInfo.id, {
-      name: assetType,
-      market,
-      currency,
-      value: finalValue,
-      openingValue: finalOpeningValue,
-      isAutoSync: false,
-    });
-
-    closeAddChildModal();
   };
 
   const CustomPieTooltip = ({ active, payload }) => {
@@ -544,7 +1357,8 @@ export default function CategoryDetail({ categoryName, onBack }) {
     );
   }
 
-  const { value, pnl, pnlRate, targetValue, expectedReturn } = stats || {};
+  const { value = 0, pnl = 0, pnlRate = 0, targetValue = 0, expectedReturn = 0 } = stats || {};
+  const { currentValue: cmpCurrentValue = 0, targetValue: cmpTargetValue = 0, currentReturnRate: cmpReturnRate = 0, expectedReturn: cmpExpectedReturn = 0 } = comparisonData || {};
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 sm:p-6">
@@ -579,15 +1393,16 @@ export default function CategoryDetail({ categoryName, onBack }) {
               </div>
             </div>
             <button
-              onClick={openAddChildModal}
+              onClick={openEditModal}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
             >
-              <Plus className="w-4 h-4" />
-              新增资产类型
+              <Edit2 className="w-4 h-4" />
+              编辑
             </button>
           </div>
         </section>
 
+        {/* 第一行：统计卡片 */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
             <div className="flex items-center gap-2 mb-2">
@@ -642,11 +1457,120 @@ export default function CategoryDetail({ categoryName, onBack }) {
               <span className="text-xs text-gray-500 dark:text-gray-400">期望收益率</span>
             </div>
             <div className="text-lg font-bold text-gray-900 dark:text-white">
-              {expectedReturn.toFixed(2)}%
+              {(expectedReturn || 0).toFixed(2)}%
             </div>
           </div>
         </section>
 
+        {/* 第二行：对比卡片 */}
+        <section className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-full p-2">
+              <Scale className="w-4 h-4" />
+            </div>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">目标对比</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 当前价值 vs 目标价值 */}
+            <div className="rounded-xl border border-gray-100 dark:border-slate-700 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">当前价值 vs 目标价值</span>
+                {cmpTargetValue > 0 && (
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                    cmpCurrentValue >= cmpTargetValue
+                      ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+                      : 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
+                  }`}>
+                    {cmpCurrentValue >= cmpTargetValue ? '已达成' : '未达成'}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-end justify-between gap-3 mb-2">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当前价值</div>
+                  <div className="text-base font-bold text-gray-900 dark:text-white tabular-nums">
+                    {formatCurrency(cmpCurrentValue, selectedCurrency)}
+                  </div>
+                </div>
+                <div className="text-gray-300 dark:text-gray-600 text-lg">→</div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">目标价值</div>
+                  <div className="text-base font-bold text-gray-900 dark:text-white tabular-nums">
+                    {formatCurrency(cmpTargetValue, selectedCurrency)}
+                  </div>
+                </div>
+              </div>
+              {cmpTargetValue > 0 && (
+                <div className="mt-2">
+                  <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    <span>完成进度</span>
+                    <span className="font-medium text-gray-700 dark:text-gray-300">
+                      {((cmpCurrentValue / cmpTargetValue) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-gray-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        cmpCurrentValue >= cmpTargetValue ? 'bg-green-500' : 'bg-primary-500'
+                      }`}
+                      style={{ width: `${Math.min((cmpCurrentValue / cmpTargetValue) * 100, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 当前收益率 vs 期望收益率 */}
+            <div className="rounded-xl border border-gray-100 dark:border-slate-700 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">当前收益率 vs 期望收益率</span>
+                {cmpExpectedReturn !== 0 && (
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                    cmpReturnRate >= cmpExpectedReturn
+                      ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+                      : 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
+                  }`}>
+                    {cmpReturnRate >= cmpExpectedReturn ? '已达标' : '未达标'}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-end justify-between gap-3 mb-2">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当前收益率</div>
+                  <div className={`text-base font-bold tabular-nums ${
+                    cmpReturnRate >= 0 ? 'text-green-600' : 'text-red-500'
+                  }`}>
+                    {formatPercentage(cmpReturnRate)}
+                  </div>
+                </div>
+                <div className="text-gray-300 dark:text-gray-600 text-lg">→</div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">期望收益率</div>
+                  <div className="text-base font-bold text-gray-900 dark:text-white tabular-nums">
+                    {(cmpExpectedReturn || 0).toFixed(2)}%
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                {cmpExpectedReturn !== 0 ? (
+                  <>
+                    差距：
+                    <span className={`font-medium ${
+                      ((cmpReturnRate || 0) - (cmpExpectedReturn || 0)) >= 0 ? 'text-green-600' : 'text-red-500'
+                    }`}>
+                      {((cmpReturnRate || 0) - (cmpExpectedReturn || 0)) >= 0 ? '+' : ''}
+                      {((cmpReturnRate || 0) - (cmpExpectedReturn || 0)).toFixed(2)}%
+                    </span>
+                  </>
+                ) : (
+                  '未设置期望收益率'
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* 第三行：资产类型占比饼图 + 金额柱状图 */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
             <div className="flex items-center gap-2 mb-3">
@@ -708,6 +1632,7 @@ export default function CategoryDetail({ categoryName, onBack }) {
           </div>
         </section>
 
+        {/* 第四行：海内外资产对比饼图（国内/港股/美股/其他） */}
         <section className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
           <div className="flex items-center gap-2 mb-3">
             <Globe className="w-4 h-4 text-primary-500" />
@@ -743,125 +1668,32 @@ export default function CategoryDetail({ categoryName, onBack }) {
           </div>
         </section>
 
-        <section className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 overflow-hidden">
-          <div className="p-6 border-b border-gray-200 dark:border-slate-600">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">资产类型明细</h3>
+        {/* 第五行：持仓明细列表（延用理财模块表单结构：筛选/搜索/列设置） */}
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-primary-500" />
+            <h2 className="text-base font-bold text-gray-900 dark:text-white">持仓明细</h2>
+            <span className="text-xs text-gray-400 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
+              共 {categoryHoldings.length} 项
+            </span>
           </div>
-          <div className="p-6">
-            {!categoryInfo.children || categoryInfo.children.length === 0 ? (
-              <div className="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">
-                暂无资产类型数据，点击上方按钮添加
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {(() => {
-                  let customIdx = 0;
-                  return categoryInfo.children.map((child, idx) => {
-                    const childPnl = (child.value || 0) - (child.openingValue || 0);
-                    const childPnlRate = (child.openingValue || 0) > 0
-                      ? (childPnl / child.openingValue) * 100 : 0;
-                    const isAuto = child.isAutoSync;
-                    const market = child.market;
-                    const isDomestic = market === DOMESTIC_MARKET;
-                    const isOverseas = market === OVERSEAS_MARKET;
-                    const currentCustomIdx = isAuto ? -1 : customIdx;
-                    if (!isAuto) customIdx++;
-
-                    const childCurrency = child.currency || 'CNY';
-                    let displayValue = parseFloat(child.value || 0);
-                    let displayOpeningValue = parseFloat(child.openingValue || 0);
-                    let displayPnl = childPnl;
-
-                    if (childCurrency !== selectedCurrency) {
-                      displayValue = convertValue(displayValue, childCurrency, selectedCurrency);
-                      displayOpeningValue = convertValue(displayOpeningValue, childCurrency, selectedCurrency);
-                      displayPnl = convertValue(displayPnl, childCurrency, selectedCurrency);
-                    }
-
-                    return (
-                      <div
-                        key={`${child.name}-${child.market}-${isAuto ? 'auto' : 'custom'}-${idx}`}
-                        className={`flex items-center justify-between rounded-lg px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors border-l-3 ${
-                          isAuto
-                            ? 'bg-white dark:bg-slate-700 border-primary-400 dark:border-primary-500'
-                            : 'bg-white dark:bg-slate-700 border-gray-300 dark:border-slate-500'
-                        }`}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            {isDomestic && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                                国内
-                              </span>
-                            )}
-                            {isOverseas && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
-                                海外
-                              </span>
-                            )}
-                            {!isAuto && (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600 dark:bg-gray-600 dark:text-gray-300">
-                                自定义
-                              </span>
-                            )}
-                            <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                              {child.name}
-                            </span>
-                            {isAuto && (
-                              <Lock className="w-3 h-3 text-gray-400 shrink-0" title="自动同步" />
-                            )}
-                          </div>
-                          <div className={`text-xs ${displayPnl >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                            {displayPnl >= 0 ? '+' : ''}{formatCurrency(displayPnl, selectedCurrency)}（{formatPercentage(childPnlRate)}）
-                          </div>
-                        </div>
-                        <div className="text-right ml-4">
-                          <div className="text-base font-bold text-gray-900 dark:text-white tabular-nums">
-                            {formatCurrency(displayValue, selectedCurrency)}
-                          </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
-                            期初 {formatCurrency(displayOpeningValue, selectedCurrency)}
-                          </div>
-                        </div>
-                        {!isAuto && (
-                          <div className="flex items-center gap-1 ml-4">
-                            <button
-                              onClick={() => {
-                                const newName = prompt('修改资产类型名称：', child.name);
-                                if (newName && newName !== child.name) {
-                                  updateChildInClass(categoryInfo.id, currentCustomIdx, { name: newName.trim() });
-                                }
-                              }}
-                              className="p-1.5 rounded text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
-                              title="编辑"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => removeChildFromClass(categoryInfo.id, currentCustomIdx)}
-                              className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
-                              title="删除"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-            )}
-          </div>
+          {categoryHoldings.length > 0 ? (
+            <HoldingsTable holdings={categoryHoldings} categoryName={categoryName} />
+          ) : (
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center shadow-soft border border-gray-100 dark:border-slate-700">
+              <p className="text-gray-400 text-sm">暂无持仓数据</p>
+            </div>
+          )}
         </section>
 
-        {showAddChildModal && (
+        {/* 编辑弹窗 */}
+        {showEditModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">添加资产类型</h3>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">编辑{categoryInfo.name}</h3>
                 <button
-                  onClick={closeAddChildModal}
+                  onClick={closeEditModal}
                   className="p-1.5 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
                 >
                   <X className="w-5 h-5" />
@@ -871,106 +1703,42 @@ export default function CategoryDetail({ categoryName, onBack }) {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    市场
+                    目标价值
                   </label>
-                  <select
-                    value={newChildForm.market}
-                    onChange={(e) => setNewChildForm({ ...newChildForm, market: e.target.value })}
+                  <input
+                    type="number"
+                    value={editForm.targetValue}
+                    onChange={(e) => setEditForm({ ...editForm, targetValue: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  >
-                    <option value={DOMESTIC_MARKET}>国内市场</option>
-                    <option value={OVERSEAS_MARKET}>海外市场</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    资产类型
+                    期望收益率 (%)
                   </label>
-                  <select
-                    value={newChildForm.assetType}
-                    onChange={(e) => setNewChildForm({ ...newChildForm, assetType: e.target.value })}
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editForm.expectedReturn}
+                    onChange={(e) => setEditForm({ ...editForm, expectedReturn: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  >
-                    {ASSET_TYPE_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    货币
-                  </label>
-                  <select
-                    value={newChildForm.currency}
-                    onChange={(e) => setNewChildForm({ ...newChildForm, currency: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  >
-                    {CURRENCIES.map((currency) => (
-                      <option key={currency} value={currency}>{currency}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {hasFinanceData && (() => {
-                  const financeData = getFinanceChildData(categoryName, newChildForm.market, newChildForm.assetType);
-                  return (
-                    <p className={`text-xs ${financeData.found ? 'text-green-600' : 'text-gray-500'}`}>
-                      {financeData.found
-                        ? '已从理财模块自动同步数据'
-                        : '暂无理财数据，将作为自定义项添加'}
-                    </p>
-                  );
-                })()}
-
-                {!hasFinanceData && (
-                  <>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          当前价值
-                        </label>
-                        <input
-                          type="number"
-                          value={newChildForm.value}
-                          onChange={(e) => setNewChildForm({ ...newChildForm, value: e.target.value })}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          期初价值
-                        </label>
-                        <input
-                          type="number"
-                          value={newChildForm.openingValue}
-                          onChange={(e) => setNewChildForm({ ...newChildForm, openingValue: e.target.value })}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        />
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-500">
-                      暂无理财数据，将作为自定义项添加
-                    </p>
-                  </>
-                )}
               </div>
 
               <div className="flex justify-end gap-3 mt-6">
                 <button
-                  onClick={closeAddChildModal}
+                  onClick={closeEditModal}
                   className="px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
                 >
                   取消
                 </button>
                 <button
-                  onClick={handleAddChildConfirm}
+                  onClick={handleEditSave}
                   className="px-4 py-2 rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
                 >
-                  确定
+                  保存
                 </button>
               </div>
             </div>
