@@ -61,6 +61,7 @@ export default function Analysis({ onNavigate }) {
   const [dailyChartType, setDailyChartType] = useState('expense');
   const [pieLabelFontSize, setPieLabelFontSize] = useState(12);
   const [expandedBudgetCategory, setExpandedBudgetCategory] = useState(null);
+  const [analysisTab, setAnalysisTab] = useState('income-expense');
 
   const { records = [], accounts = [], debts = [], tags = [], budgets = [] } = stateData || {};
 
@@ -2005,6 +2006,33 @@ export default function Analysis({ onNavigate }) {
           <div className="flex items-center gap-2">
             <PieChartIcon className="w-8 h-8 text-blue-600" />
             <h1 className="text-2xl font-bold font-mono tracking-tight text-gray-900 dark:text-white">数据分析中心</h1>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-1 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
+          <div className="flex">
+            {[
+              { value: 'income-expense', label: '收支分析' },
+              { value: 'finance', label: '理财模块' },
+              { value: 'debts', label: '债务模块' },
+            ].map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => {
+                  setAnalysisTab(tab.value);
+                  if (tab.value !== 'income-expense' && onNavigate) {
+                    onNavigate(tab.value);
+                  }
+                }}
+                className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  analysisTab === tab.value
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
 

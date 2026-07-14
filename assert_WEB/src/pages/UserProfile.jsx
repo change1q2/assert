@@ -423,7 +423,7 @@ export default function UserProfile() {
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
           <div className="flex items-center justify-between">
             <span className="text-gray-500 dark:text-gray-400">{t[language].version}</span>
-            <span className="font-medium text-gray-700 dark:text-gray-300">V1.0.1</span>
+            <span className="font-medium text-gray-700 dark:text-gray-300">V1.0.2</span>
           </div>
         </div>
       </div>

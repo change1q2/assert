@@ -353,38 +353,6 @@ export default function AssetPenetration({ onBack }) {
       .map(node => convertToTree(node, totalValue))
       .filter(n => n.value > 0);
   };
-  
-  const assetCategoryData = useMemo(() => {
-    return {
-      level1: buildHierarchicalData(financeAccounts),
-    };
-  }, [financeAccounts]);
-  
-  const getAssetCategoryData = (level, parentCategory) => {
-    if (level === 1) {
-      return assetCategoryData.level1;
-    } else if (level === 2 && parentCategory) {
-      const parent = assetCategoryData.level1.find(p => p.name === parentCategory);
-      return parent?.children || [];
-    } else if (level === 3 && parentCategory) {
-      for (const level1 of assetCategoryData.level1) {
-        const level2 = level1.children?.find(c => c.name === parentCategory);
-        if (level2) {
-          return level2.children || [];
-        }
-      }
-    } else if (level === 4 && parentCategory) {
-      for (const level1 of assetCategoryData.level1) {
-        for (const level2 of level1.children || []) {
-          const level3 = level2.children?.find(c => c.name === parentCategory);
-          if (level3) {
-            return level3.children || [];
-          }
-        }
-      }
-    }
-    return [];
-  };
 
   useEffect(() => {
     const loadData = async () => {
@@ -544,6 +512,38 @@ export default function AssetPenetration({ onBack }) {
       };
     });
   }, [financeAssets, quotesMap]);
+
+  const assetCategoryData = useMemo(() => {
+    return {
+      level1: buildHierarchicalData(financeAccounts),
+    };
+  }, [financeAccounts]);
+
+  const getAssetCategoryData = (level, parentCategory) => {
+    if (level === 1) {
+      return assetCategoryData.level1;
+    } else if (level === 2 && parentCategory) {
+      const parent = assetCategoryData.level1.find(p => p.name === parentCategory);
+      return parent?.children || [];
+    } else if (level === 3 && parentCategory) {
+      for (const level1 of assetCategoryData.level1) {
+        const level2 = level1.children?.find(c => c.name === parentCategory);
+        if (level2) {
+          return level2.children || [];
+        }
+      }
+    } else if (level === 4 && parentCategory) {
+      for (const level1 of assetCategoryData.level1) {
+        for (const level2 of level1.children || []) {
+          const level3 = level2.children?.find(c => c.name === parentCategory);
+          if (level3) {
+            return level3.children || [];
+          }
+        }
+      }
+    }
+    return [];
+  };
 
   const sortedStockData = useMemo(() => {
     return [...financeAccounts].sort((a, b) => b.holdingPnl - a.holdingPnl);
