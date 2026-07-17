@@ -1,76 +1,94 @@
-# 资产穿透页面功能增强 - The Implementation Plan (Decomposed and Prioritized Task List)
+# 资产穿透增强功能 - 实施计划
 
-## [x] Task 1: 交易记录表单双向校验
+## [x] Task 1: 仓位分析改为热力图显示
 - **Priority**: high
 - **Depends On**: None
 - **Description**: 
-  - 修改 Finance.jsx 中的交易记录表单，实现金额、价格、数量三者之间的双向校验
-  - 当前实现：价格变化更新金额，数量变化更新金额，但金额变化不会反推数量
-  - 需要实现：金额变化时，根据价格反推数量（数量=金额/价格）
-  - 修改位置：DetailModal 组件中的新增记录表单和识别结果校验表单
+  - 将仓位分析区域的饼图改为热力图显示
+  - 热力图数据基于 financeAccounts 中各资产的仓位占比（currentValue / totalValue）
+  - 使用 SVG 绘制热力图，颜色从浅到深对应占比大小
+  - 支持点击交互，显示资产名称和占比详情
 - **Acceptance Criteria Addressed**: AC-1
 - **Test Requirements**:
-  - `human-judgement` TR-1.1: 验证价格变化时金额自动更新
-  - `human-judgement` TR-1.2: 验证数量变化时金额自动更新
-  - `human-judgement` TR-1.3: 验证金额变化时数量自动反推计算
-- **Notes**: 需要注意价格为0时的除法处理，避免除以零错误
+  - `human-judgment` TR-1.1: 勾选仓位分析后显示热力图
+  - `human-judgment` TR-1.2: 热力图颜色深浅与仓位占比对应
+  - `programmatic` TR-1.3: 构建成功
 
-## [x] Task 2: 收益率曲线负数显示与实时指数
+## [x] Task 2: 仓位分析勾选时右侧数据联动
 - **Priority**: high
-- **Depends On**: None
+- **Depends On**: Task 1
 - **Description**: 
-  - 确保收益率曲线能正确显示负数收益率，Y轴刻度应包含负数范围
-  - 当前实现已有两条曲线（用户收益-红色，指数收益-蓝色），但需要确保负数数据正确显示
-  - 确保从网络API获取实时指数数据用于曲线计算
-- **Acceptance Criteria Addressed**: AC-2, AC-3, AC-4
+  - 当勾选仓位分析时，右侧收益率和收益额区域显示选中分类的汇总数据
+  - 计算选中分类的 totalValue、totalCost、totalPnl、totalPnlRate
+  - 在 analysisView 切换时保持联动数据更新
+- **Acceptance Criteria Addressed**: AC-2
 - **Test Requirements**:
-  - `human-judgement` TR-2.1: 验证负数收益率时曲线显示在0轴下方
-  - `human-judgement` TR-2.2: 验证Y轴刻度包含负数（如-10%, -5%）
-  - `human-judgement` TR-2.3: 验证同时显示用户收益曲线和指数收益曲线
-- **Notes**: 曲线计算逻辑已在 AssetPenetration.jsx 的 SVG 组件中实现，需要检查负数处理
+  - `human-judgment` TR-2.1: 勾选仓位分析后右侧数据跟随变化
+  - `human-judgment` TR-2.2: 切换收益率/盈亏金额/总资产视图时数据正确更新
+  - `programmatic` TR-2.3: 构建成功
 
-## [x] Task 3: 指数对比实时数据显示
+## [x] Task 3: 极值分析显示最大收益率和最大回撤
 - **Priority**: high
 - **Depends On**: None
 - **Description**: 
-  - 指数对比模块显示各指数的实时数据（价格、涨跌幅）
-  - 当前实现已通过 allIndexData 获取实时数据，需要确保显示的是实时数据而非模拟数据
-  - 可能需要增加指数价格的显示
+  - 实现极值分析功能，显示历史最大收益率和最大回撤
+  - 从 indexHistoryData 中计算最大收益率（单日涨幅最大）
+  - 从 indexHistoryData 中计算最大回撤（从最高点到最低点的跌幅）
+  - 显示极值数值和对应的日期信息
+- **Acceptance Criteria Addressed**: AC-3, AC-4
+- **Test Requirements**:
+  - `human-judgment` TR-3.1: 勾选极值分析后显示最大收益率
+  - `human-judgment` TR-3.2: 勾选极值分析后显示最大回撤
+  - `programmatic` TR-3.3: 构建成功
+
+## [x] Task 4: 标记买卖点改为资产类型柱状图
+- **Priority**: high
+- **Depends On**: None
+- **Description**: 
+  - 将"标记买卖点"选项改为"资产类型"
+  - 按 assetType 分组统计各类型的涨跌情况
+  - 使用 SVG 绘制柱状图，显示每个类型的市值和涨跌额
 - **Acceptance Criteria Addressed**: AC-5
 - **Test Requirements**:
-  - `human-judgement` TR-3.1: 验证指数对比模块显示各指数的实时涨跌幅
-  - `human-judgement` TR-3.2: 验证数据来源于网络API而非模拟数据
-- **Notes**: 后端 finance-service.js 已提供 getIndexHistory 和 getUSIndex 方法
+  - `human-judgment` TR-4.1: 选项名称改为"资产类型"
+  - `human-judgment` TR-4.2: 勾选后显示按资产类型分组的柱状图
+  - `programmatic` TR-4.3: 构建成功
 
-## [x] Task 4: 收益数据实时计算
-- **Priority**: medium
+## [x] Task 5: 标签分析改为资产分析柱状图
+- **Priority**: high
 - **Depends On**: None
 - **Description**: 
-  - 修改日历收益、月度收益、年度收益、阶段收益的数据生成逻辑
-  - 当前使用随机模拟数据，需要改为根据理财模块的实际金额数据计算
-  - 无数据的部分按0显示
+  - 将"标签分析"选项改为"资产分析"
+  - 按 categoryL1（一级分类）分组统计各分类的市值
+  - 使用 SVG 绘制柱状图，显示每个一级分类的市值
 - **Acceptance Criteria Addressed**: AC-6
 - **Test Requirements**:
-  - `human-judgement` TR-4.1: 验证日历收益数据基于实际资产数据
-  - `human-judgement` TR-4.2: 验证月度收益数据基于实际资产数据
-  - `human-judgement` TR-4.3: 验证年度收益数据基于实际资产数据
-  - `human-judgement` TR-4.4: 验证阶段收益数据基于实际资产数据
-  - `human-judgement` TR-4.5: 验证无数据部分显示0而非随机数据
-- **Notes**: 需要分析理财模块数据结构，了解如何计算不同时间范围的收益
+  - `human-judgment` TR-5.1: 选项名称改为"资产分析"
+  - `human-judgment` TR-5.2: 勾选后显示按一级分类分组的市值柱状图
+  - `programmatic` TR-5.3: 构建成功
 
-## [x] Task 5: 资产分类层级钻取
+## [x] Task 6: 增加百度财经备用数据源
 - **Priority**: medium
 - **Depends On**: None
 - **Description**: 
-  - 确保资产分类模块支持四级层级钻取（一级→二级→三级→四级）
-  - 当前数据结构 assetCategoryData 已支持四级分类，但需要确保点击钻取功能正常
-  - 当某层级无下一级子分类时，该分类不可点击
-  - 返回上级按钮功能完善
+  - 在 fetchFinanceQuotes 或相关数据获取逻辑中增加百度财经数据源
+  - 当主数据源（新浪财经）返回数据不全时，自动从百度财经获取补充
+  - 解析百度财经的股票数据格式
 - **Acceptance Criteria Addressed**: AC-7
 - **Test Requirements**:
-  - `human-judgement` TR-5.1: 验证点击一级分类（如股票）显示二级分类（A股、港股）
-  - `human-judgement` TR-5.2: 验证点击二级分类（如A股）显示三级分类（场内、场外）
-  - `human-judgement` TR-5.3: 验证点击三级分类（如场内）显示四级分类
-  - `human-judgement` TR-5.4: 验证无下一级子分类的分类不可点击
-  - `human-judgement` TR-5.5: 验证返回上级按钮正常工作
-- **Notes**: 当前数据结构已支持四级分类，需要检查 PieChartSVG 组件的 onClick 事件和返回上级逻辑
+  - `human-judgment` TR-6.1: 主数据源数据不全时自动使用备用数据源
+  - `programmatic` TR-6.2: 构建成功
+
+## [x] Task 7: 构建测试与验证
+- **Priority**: high
+- **Depends On**: Task 1, Task 2, Task 3, Task 4, Task 5, Task 6
+- **Description**: 
+  - 前端执行 `npm run build` 确认构建成功
+  - 检查所有修改的组件无编译错误
+- **Acceptance Criteria Addressed**: AC-8
+- **Test Requirements**:
+  - `programmatic` TR-7.1: `npm run build` 退出码为 0
+
+# Task Dependencies
+- Task 2 depends on Task 1
+- Task 7 depends on Task 1, Task 2, Task 3, Task 4, Task 5, Task 6

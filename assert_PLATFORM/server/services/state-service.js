@@ -27,9 +27,13 @@ async function loadUserState(userId) {
   const budgets = (await sqlAll(pool, "SELECT * FROM budgets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: numericIfPossible(row.id), name: row.name, category: row.category, amount: row.amount, used: row.used,
   }));
-  const transactionRows = await sqlAll(pool, "SELECT * FROM finance_asset_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
+  const indoorTransactionRows = await sqlAll(pool, "SELECT * FROM finance_asset_indoor_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
+  const outdoorTransactionRows = await sqlAll(pool, "SELECT * FROM finance_asset_outdoor_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
+  const legacyTransactionRows = await sqlAll(pool, "SELECT * FROM finance_asset_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
+
   const transactionsByAsset = new Map();
-  transactionRows.forEach((row) => {
+
+  const addTransaction = (row, isOutdoor = false) => {
     const rows = transactionsByAsset.get(String(row.asset_id)) || [];
     const [date, time] = (row.transaction_date || '').split(' ');
     rows.push({
@@ -38,15 +42,23 @@ async function loadUserState(userId) {
       transaction_date: row.transaction_date,
       date: date || '',
       time: time || '',
-      shares: row.shares,
-      quantity: row.shares,
-      price: row.price,
+      shares: isOutdoor ? row.shares : (row.shares || row.quantity),
+      quantity: isOutdoor ? row.shares : (row.shares || row.quantity),
+      price: isOutdoor ? row.net_value : row.price,
+      net_value: isOutdoor ? row.net_value : row.price,
       amount: row.amount,
       commission: row.commission,
       fee: row.commission,
+      stamp_duty: row.stamp_duty || 0,
+      transfer_fee: row.transfer_fee || 0,
+      transaction_type: isOutdoor ? 'outdoor' : 'indoor',
     });
     transactionsByAsset.set(String(row.asset_id), rows);
-  });
+  };
+
+  indoorTransactionRows.forEach(row => addTransaction(row, false));
+  outdoorTransactionRows.forEach(row => addTransaction(row, true));
+  legacyTransactionRows.forEach(row => addTransaction(row, false));
   const financeAssets = (await sqlAll(pool, "SELECT * FROM finance_assets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: numericIfPossible(row.id), kind: row.kind, assetKind: row.asset_kind, accountId: row.account_id, category: row.category,
     subcategory: row.subcategory, tertiaryCategory: row.tertiary_category, market: row.market,
@@ -150,7 +162,7 @@ async function saveUserState(conn, userId, state) {
     text(user.privacyLock || "已开启"), text(user.dataMask || "已开启"), text(user.deviceName), userId]);
 
   const tables = [
-    "exchange_rates", "accounts", "asset_classes", "records", "budgets", "finance_asset_transactions", "finance_assets",
+    "exchange_rates", "accounts", "asset_classes", "records", "budgets", "finance_asset_transactions", "finance_asset_indoor_transactions", "finance_asset_outdoor_transactions", "finance_assets",
     "custom_record_categories", "finance_tertiary_categories", "record_tags", "recorders",
     "reminders", "debt_payments", "debts", "debt_categories", "strategies", "user_settings", "books", "tags",
   ];
@@ -205,13 +217,27 @@ async function saveUserState(conn, userId, state) {
        number(row.costPrice), number(row.shares), number(row.availableShares), number(row.currentPrice),
        number(row.pnl), number(row.pnlPercent), number(row.avgBuyPrice), number(row.holdingDays),
        number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), number(row.prevPrice), text(row.priceDate), index]);
+
+    const isOutdoor = (row.market === '国内市场') && (row.tertiaryCategory === '场外' || row.categoryL3 === '场外');
+
     for (const [transactionIndex, transaction] of (row.transactions || []).entries()) {
-      await sqlRun(conn, `INSERT INTO finance_asset_transactions
-        (user_id, asset_id, id, direction, transaction_date, shares, price, amount, commission, stamp_duty, transfer_fee, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, text(row.id), text(transaction.id || `${row.id}-${transactionIndex}`), text(transaction.direction),
-         text(transaction.date), number(transaction.shares), number(transaction.price), number(transaction.amount),
-         number(transaction.commission), number(transaction.stampDuty), number(transaction.transferFee), transactionIndex]);
+      if (isOutdoor) {
+        await sqlRun(conn, `INSERT INTO finance_asset_outdoor_transactions
+          (user_id, asset_id, id, direction, transaction_date, net_value, shares, amount, commission, sort_order)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [userId, text(row.id), text(transaction.id || `${row.id}-${transactionIndex}`), text(transaction.direction),
+           text(transaction.transaction_date), number(transaction.net_value || transaction.price),
+           number(transaction.shares || transaction.quantity), number(transaction.amount),
+           number(transaction.commission), transactionIndex]);
+      } else {
+        await sqlRun(conn, `INSERT INTO finance_asset_indoor_transactions
+          (user_id, asset_id, id, direction, transaction_date, price, quantity, amount, commission, stamp_duty, transfer_fee, sort_order)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [userId, text(row.id), text(transaction.id || `${row.id}-${transactionIndex}`), text(transaction.direction),
+           text(transaction.transaction_date), number(transaction.price),
+           number(transaction.quantity || transaction.shares), number(transaction.amount),
+           number(transaction.commission), number(transaction.stampDuty), number(transaction.transferFee), transactionIndex]);
+      }
     }
   }
 

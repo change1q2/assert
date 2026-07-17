@@ -2014,6 +2014,7 @@ export default function Analysis({ onNavigate }) {
             {[
               { value: 'income-expense', label: '收支分析' },
               { value: 'finance', label: '理财模块' },
+              { value: 'independent-assets', label: '独立资产' },
               { value: 'debts', label: '债务模块' },
             ].map((tab) => (
               <button

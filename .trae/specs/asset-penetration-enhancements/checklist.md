@@ -1,21 +1,13 @@
-# 资产穿透页面功能增强 - Verification Checklist
+# 资产穿透增强功能 - 验证清单
 
-- [x] Checkpoint 1: 交易记录表单 - 修改价格时金额自动更新（金额=价格*数量）
-- [x] Checkpoint 2: 交易记录表单 - 修改数量时金额自动更新（金额=价格*数量）
-- [x] Checkpoint 3: 交易记录表单 - 修改金额时数量自动反推（数量=金额/价格）
-- [x] Checkpoint 4: 收益率曲线 - 负数收益率正确显示在0轴下方
-- [x] Checkpoint 5: 收益率曲线 - Y轴刻度包含负数范围（-10%, -5%, 0, 5%等）
-- [x] Checkpoint 6: 收益率曲线 - 同时显示用户收益曲线和指数收益曲线
-- [x] Checkpoint 7: 指数对比 - 显示各指数的实时价格和涨跌幅
-- [x] Checkpoint 8: 收益数据 - 日历收益基于实际资产数据计算
-- [x] Checkpoint 9: 收益数据 - 月度收益基于实际资产数据计算
-- [x] Checkpoint 10: 收益数据 - 年度收益基于实际资产数据计算
-- [x] Checkpoint 11: 收益数据 - 阶段收益基于实际资产数据计算
-- [x] Checkpoint 12: 收益数据 - 无数据部分显示0而非随机数据
-- [x] Checkpoint 13: 资产分类 - 点击一级分类显示二级分类
-- [x] Checkpoint 14: 资产分类 - 点击二级分类显示三级分类
-- [x] Checkpoint 15: 资产分类 - 点击三级分类显示四级分类
-- [x] Checkpoint 16: 资产分类 - 无下一级子分类的分类不可点击
-- [x] Checkpoint 17: 资产分类 - 返回上级按钮正常工作
-- [x] Checkpoint 18: 构建验证 - 项目能够正常构建
-- [x] Checkpoint 19: 页面验证 - 资产穿透页面能够正常访问和显示
+- [x] Checkpoint 1: 仓位分析区域改为热力图显示
+- [x] Checkpoint 2: 热力图颜色深浅与仓位占比对应
+- [x] Checkpoint 3: 勾选仓位分析时右侧收益率和收益额跟随变化
+- [x] Checkpoint 4: 极值分析显示历史最大收益率
+- [x] Checkpoint 5: 极值分析显示历史最大回撤
+- [x] Checkpoint 6: "标记买卖点"改为"资产类型"选项
+- [x] Checkpoint 7: 资产类型柱状图按类型分组显示涨跌统计
+- [x] Checkpoint 8: "标签分析"改为"资产分析"选项
+- [x] Checkpoint 9: 资产分析柱状图按一级分类显示市值
+- [x] Checkpoint 10: 百度财经作为备用数据源
+- [x] Checkpoint 11: 前端 `npm run build` 构建成功无错误

@@ -185,8 +185,8 @@ export default function AssetPenetration({ onBack }) {
     drawdown: false,
   });
   const [auxFeatures, setAuxFeatures] = useState({
-    markTrade: false,
-    label: false,
+    assetType: false,
+    assetAnalysis: false,
   });
 
   const [calendarView, setCalendarView] = useState('day');
@@ -198,10 +198,12 @@ export default function AssetPenetration({ onBack }) {
   const [pieHoverIndex, setPieHoverIndex] = useState(null);
   const [showCustomTimePicker, setShowCustomTimePicker] = useState(false);
   const [indexHistoryData, setIndexHistoryData] = useState(null);
+  const [tooltip, setTooltip] = useState(null);
   
   const [positionLevel, setPositionLevel] = useState(1);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [positionData, setPositionData] = useState([]);
+  const [selectedPositionItem, setSelectedPositionItem] = useState(null);
   
   const [assetCategoryLevel, setAssetCategoryLevel] = useState(1);
   const [selectedAssetCategory, setSelectedAssetCategory] = useState(null);
@@ -382,32 +384,15 @@ export default function AssetPenetration({ onBack }) {
   useEffect(() => {
     const fetchIndexData = async () => {
       try {
-        if (selectedIndex === 'IXIC' || selectedIndex === 'SPX') {
-          const response = await fetch(`/api/finance/index?code=${selectedIndex}`);
-          const result = await response.json();
-          if (result.name) {
-            setIndexData({
-              name: result.name,
-              price: result.price,
-              change: result.change,
-              changeRate: result.changeRate,
-            });
-          }
-        } else {
-          const response = await fetch(`http://hq.sinajs.cn/list=${selectedIndex}`);
-          const text = await response.text();
-          const match = text.match(/var hq_str_\w+="([^"]+)"/);
-          if (match) {
-            const parts = match[1].split(',');
-            if (parts.length > 3) {
-              setIndexData({
-                name: parts[0],
-                price: parseFloat(parts[3]),
-                change: parseFloat(parts[4]),
-                changeRate: parseFloat(parts[5]),
-              });
-            }
-          }
+        const response = await fetch(`/api/finance/index?code=${selectedIndex}`);
+        const result = await response.json();
+        if (result.name) {
+          setIndexData({
+            name: result.name,
+            price: result.price,
+            change: result.change,
+            changeRate: result.changeRate,
+          });
         }
       } catch (err) {
         console.error('Failed to fetch index data:', err);
@@ -420,32 +405,12 @@ export default function AssetPenetration({ onBack }) {
     const fetchAllIndexData = async () => {
       try {
         const data = {};
-        const domesticCodes = indexOptions.filter(o => o.code !== 'IXIC' && o.code !== 'SPX').map(o => o.code).join(',');
-        if (domesticCodes) {
-          const response = await fetch(`http://hq.sinajs.cn/list=${domesticCodes}`);
-          const text = await response.text();
-          const regex = /var hq_str_(\w+)="([^"]+)"/g;
-          let match;
-          while ((match = regex.exec(text)) !== null) {
-            const code = match[1];
-            const parts = match[2].split(',');
-            if (parts.length > 3) {
-              data[code] = {
-                name: parts[0],
-                price: parseFloat(parts[3]),
-                change: parseFloat(parts[4]),
-                changeRate: parseFloat(parts[5]),
-              };
-            }
-          }
-        }
-        const usCodes = ['IXIC', 'SPX'];
-        for (const code of usCodes) {
+        for (const option of indexOptions) {
           try {
-            const response = await fetch(`/api/finance/index?code=${code}`);
+            const response = await fetch(`/api/finance/index?code=${option.code}`);
             const result = await response.json();
             if (result.name) {
-              data[code] = {
+              data[option.code] = {
                 name: result.name,
                 price: result.price,
                 change: result.change,
@@ -465,10 +430,22 @@ export default function AssetPenetration({ onBack }) {
   useEffect(() => {
     const fetchIndexHistory = async () => {
       try {
-        const code = selectedIndex.startsWith('sh') || selectedIndex.startsWith('sz') 
-          ? selectedIndex.slice(2) 
+        const code = selectedIndex.startsWith('sh') || selectedIndex.startsWith('sz')
+          ? selectedIndex.slice(2)
           : selectedIndex;
-        const response = await fetch(`/api/finance/index-history?code=${code}`);
+        let count;
+        switch (timeRange) {
+          case 'day': count = 5; break;
+          case 'week': count = 7; break;
+          case 'month': count = 30; break;
+          case 'quarter': count = 90; break;
+          case 'halfyear': count = 180; break;
+          case 'year': count = 365; break;
+          case 'all': count = 1000; break;
+          case 'custom': count = 1000; break;
+          default: count = 30;
+        }
+        const response = await fetch(`/api/finance/index-history?code=${code}&count=${count}`);
         const result = await response.json();
         if (result.history && result.history.length > 0) {
           setIndexHistoryData(result);
@@ -479,7 +456,149 @@ export default function AssetPenetration({ onBack }) {
       }
     };
     fetchIndexHistory();
-  }, [selectedIndex]);
+  }, [selectedIndex, timeRange]);
+
+  const getDisplayDays = () => {
+    switch (timeRange) {
+      case 'day': return 5;
+      case 'week': return 7;
+      case 'month': return 30;
+      case 'quarter': return 90;
+      case 'halfyear': return 180;
+      case 'year': return 365;
+      case 'all': return Infinity;
+      case 'custom': return Infinity;
+      default: return 30;
+    }
+  };
+
+  function formatDateLabel(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${m}-${day}`;
+  }
+
+  function getYieldCurveData(history) {
+    if (!history || history.length === 0) return { data: [], labels: [] };
+
+    if (timeRange === 'day') {
+      const lastItem = history[history.length - 1];
+      const open = parseFloat(lastItem.open) || parseFloat(lastItem.close) || 1;
+      const close = parseFloat(lastItem.close) || open;
+      const times = ['9:30', '10:30', '11:30', '13:00', '14:00', '15:00'];
+      const data = times.map((time, i) => {
+        const ratio = i / (times.length - 1);
+        const price = open + (close - open) * ratio;
+        return {
+          date: lastItem.date,
+          time,
+          open: i === 0 ? open : price,
+          close: price,
+          high: price,
+          low: price,
+        };
+      });
+      return { data, labels: times.map((t, i) => ({ index: i, label: t })) };
+    }
+
+    const displayDays = getDisplayDays();
+    const rawData = displayDays === Infinity ? [...history].reverse() : history.slice(0, displayDays).reverse();
+    const data = rawData.map(item => ({ ...item }));
+
+    let labels = [];
+    if (timeRange === 'month') {
+      const seen = new Set();
+      data.forEach((item, i) => {
+        const d = new Date(item.date);
+        const day = d.getDate();
+        if ([1, 6, 13, 20, 27].includes(day) && !seen.has(day)) {
+          labels.push({ index: i, label: formatDateLabel(item.date) });
+          seen.add(day);
+        }
+      });
+    } else if (timeRange === 'quarter' || timeRange === 'halfyear') {
+      const seen = new Set();
+      data.forEach((item, i) => {
+        const d = new Date(item.date);
+        if (d.getDate() === 1) {
+          const key = `${d.getMonth()}`;
+          if (!seen.has(key)) {
+            labels.push({ index: i, label: formatDateLabel(item.date) });
+            seen.add(key);
+          }
+        }
+      });
+    } else if (timeRange === 'year') {
+      const nowYear = new Date().getFullYear();
+      const seen = new Set();
+      data.forEach((item, i) => {
+        const d = new Date(item.date);
+        if (d.getFullYear() === nowYear && d.getDate() === 1) {
+          const key = `${d.getMonth()}`;
+          if (!seen.has(key)) {
+            labels.push({ index: i, label: formatDateLabel(item.date) });
+            seen.add(key);
+          }
+        }
+      });
+    } else if (timeRange === 'all' || timeRange === 'custom') {
+      const seen = new Set();
+      data.forEach((item, i) => {
+        const d = new Date(item.date);
+        if (d.getDate() === 1) {
+          const key = `${d.getFullYear()}-${d.getMonth()}`;
+          if (!seen.has(key)) {
+            labels.push({ index: i, label: formatDateLabel(item.date) });
+            seen.add(key);
+          }
+        }
+      });
+    } else {
+      labels = data.map((item, i) => ({ index: i, label: formatDateLabel(item.date) }));
+    }
+
+    if (labels.length === 0 && data.length > 0) {
+      labels = [
+        { index: 0, label: formatDateLabel(data[0].date) },
+        { index: data.length - 1, label: formatDateLabel(data[data.length - 1].date) },
+      ];
+    }
+
+    return { data, labels };
+  }
+
+  function getYAxisStep(range) {
+    const absRange = Math.abs(range);
+    if (absRange <= 10) return 1;
+    if (absRange <= 20) return 5;
+    if (absRange <= 40) return 10;
+    if (absRange <= 100) return 20;
+    return 50;
+  }
+
+  function getYAxisTicks(minVal, maxVal) {
+    const range = maxVal - minVal;
+    const step = getYAxisStep(range);
+    const ticks = [];
+    const start = Math.ceil(minVal / step) * step;
+    const end = Math.floor(maxVal / step) * step;
+    for (let v = start; v <= end; v += step) {
+      if (Math.abs(v) < step / 2) {
+        ticks.push(0);
+      } else {
+        ticks.push(v);
+      }
+    }
+    const deduped = [...new Set(ticks)];
+    const hasZero = deduped.some(t => t === 0);
+    if (!hasZero && minVal < 0 && maxVal > 0) {
+      deduped.push(0);
+      deduped.sort((a, b) => a - b);
+    }
+    return deduped;
+  }
 
   const financeAssets = stateData?.financeAssets || [];
   const accounts = stateData?.accounts || [];
@@ -831,8 +950,8 @@ export default function AssetPenetration({ onBack }) {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900">
       <div className="bg-gradient-to-r from-blue-600 to-blue-400 text-white">
-        <div className="max-w-7xl mx-auto px-4 py-6">
-          <div className="flex items-center gap-4 mb-6">
+        <div className="max-w-7xl mx-auto px-4 py-3">
+          <div className="flex items-center gap-4 mb-3">
             <button
               onClick={onBack}
               className="p-2 hover:bg-white/20 rounded-lg transition-colors"
@@ -842,11 +961,11 @@ export default function AssetPenetration({ onBack }) {
             <h1 className="text-xl font-bold">资产穿透</h1>
           </div>
           <div className="text-center">
-            <p className="text-sm text-white/80 mb-2">{timeRangeLabels[timeRange]}盈亏</p>
-            <p className={`text-5xl font-bold mb-2 ${currentPnl >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+            <p className="text-sm text-white/80 mb-1">{timeRangeLabels[timeRange]}盈亏</p>
+            <p className={`text-3xl font-bold mb-1 ${currentPnl >= 0 ? 'text-green-300' : 'text-red-300'}`}>
               {currentPnl >= 0 ? '+' : ''}¥{formatCurrency(currentPnl)}
             </p>
-            <p className={`text-lg ${currentPnlRate >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+            <p className={`text-base ${currentPnlRate >= 0 ? 'text-green-300' : 'text-red-300'}`}>
               {formatPercentage(currentPnlRate)}
             </p>
           </div>
@@ -854,13 +973,13 @@ export default function AssetPenetration({ onBack }) {
       </div>
 
       <div className="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700">
-        <div className="max-w-7xl mx-auto px-4 py-3">
-          <div className="flex items-center justify-center gap-2 mb-4">
+        <div className="max-w-7xl mx-auto px-4 py-2">
+          <div className="flex items-center justify-center gap-2 mb-2">
             {(['day', 'month', 'quarter', 'year', 'all']).map((key) => (
               <button
                 key={key}
                 onClick={() => setTimeRange(key)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   timeRange === key
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
@@ -871,7 +990,7 @@ export default function AssetPenetration({ onBack }) {
             ))}
             <button
               onClick={() => setShowCustomTimePicker(true)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 timeRange === 'custom'
                   ? 'bg-blue-600 text-white'
                   : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
@@ -881,12 +1000,12 @@ export default function AssetPenetration({ onBack }) {
             </button>
           </div>
           
-          <div className="flex flex-wrap items-center justify-center gap-3 mb-3">
+          <div className="flex flex-wrap items-center justify-center gap-2 mb-2">
             {indexOptions.map((option) => (
               <button
                 key={option.code}
                 onClick={() => setSelectedIndex(option.code)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm transition-all ${
                   selectedIndex === option.code
                     ? 'bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white font-medium'
                     : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700/50'
@@ -905,11 +1024,11 @@ export default function AssetPenetration({ onBack }) {
                 value={customIndexCode}
                 onChange={(e) => setCustomIndexCode(e.target.value)}
                 placeholder="自定义指数"
-                className="px-3 py-1.5 text-sm border border-gray-200 dark:border-slate-600 rounded-full bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="px-2.5 py-1 text-sm border border-gray-200 dark:border-slate-600 rounded-full bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button
                 onClick={() => customIndexCode && setSelectedIndex(customIndexCode)}
-                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors"
+                className="px-2.5 py-1 text-sm bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors"
               >
                 确定
               </button>
@@ -919,7 +1038,7 @@ export default function AssetPenetration({ onBack }) {
           <div className="flex items-center justify-center gap-2">
             <button
               onClick={() => setChartType('curve')}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
                 chartType === 'curve'
                   ? 'bg-blue-600 text-white'
                   : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
@@ -929,7 +1048,7 @@ export default function AssetPenetration({ onBack }) {
             </button>
             <button
               onClick={() => setChartType('candle')}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
                 chartType === 'candle'
                   ? 'bg-blue-600 text-white'
                   : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
@@ -941,9 +1060,9 @@ export default function AssetPenetration({ onBack }) {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm border border-gray-100 dark:border-slate-700">
-          <div className="flex items-center justify-between mb-4">
+      <div className="max-w-7xl mx-auto px-4 py-3 space-y-4">
+        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-blue-500" />
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">收益率曲线</h2>
@@ -956,14 +1075,14 @@ export default function AssetPenetration({ onBack }) {
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-0.5 bg-blue-500"></span>
                 <span className="text-gray-600 dark:text-gray-300">
-                  {indexData?.name || '指数'}
+                  {indexOptions.find(o => o.code === selectedIndex)?.name || indexData?.name || '指数'}
                 </span>
               </div>
             </div>
           </div>
           <div className="relative">
             {chartType === 'curve' ? (
-              <svg viewBox="0 0 800 300" className="w-full h-auto">
+              <svg viewBox="0 0 800 260" className="w-full h-auto">
                 <defs>
                   <linearGradient id="userGradient" x1="0%" y1="0%" x2="0%" y2="100%">
                     <stop offset="0%" stopColor="rgba(239, 68, 68, 0.3)" />
@@ -976,27 +1095,43 @@ export default function AssetPenetration({ onBack }) {
                 </defs>
                 {(() => {
                   const history = indexHistoryData?.history || [];
-                  const displayData = history.slice(-30).reverse();
+                  const { data: displayData } = getYieldCurveData(history);
                   
                   const baseRate = currentPnlRate;
                   const userData = [];
                   const indexDataPoints = [];
                   
                   if (displayData.length > 0) {
-                    const firstClose = displayData[0]?.close || 1;
+                    const firstClose = timeRange === 'day'
+                      ? (parseFloat(displayData[0]?.open) || parseFloat(displayData[0]?.close) || 1)
+                      : (parseFloat(displayData[0]?.close) || 1);
                     displayData.forEach(item => {
-                      if (item.close && firstClose) {
-                        const idxRate = ((item.close - firstClose) / firstClose) * 100;
+                      const closeVal = parseFloat(item.close);
+                      if (closeVal && firstClose) {
+                        const idxRate = ((closeVal - firstClose) / firstClose) * 100;
                         indexDataPoints.push(idxRate);
-                        const userRate = idxRate * (baseRate / (indexData?.changeRate || 1)) * (0.9 + Math.random() * 0.2);
+                      }
+                    });
+                    const indexTotalRate = indexDataPoints.length > 0 ? indexDataPoints[indexDataPoints.length - 1] : 0;
+                    displayData.forEach((item, idx) => {
+                      const closeVal = parseFloat(item.close);
+                      if (closeVal && firstClose) {
+                        const idxRate = ((closeVal - firstClose) / firstClose) * 100;
+                        let userRate = 0;
+                        if (Math.abs(indexTotalRate) > 0.01) {
+                          userRate = idxRate * (baseRate / indexTotalRate);
+                        } else {
+                          userRate = idxRate;
+                        }
                         userData.push(userRate);
                       }
                     });
                   } else {
                     const indexRate = indexData?.changeRate || 0;
                     for (let i = 0; i < 7; i++) {
-                      const userRate = baseRate * (0.8 + Math.random() * 0.4) + (Math.random() - 0.5) * 2;
-                      const idxRate = indexRate * (0.8 + Math.random() * 0.4) + (Math.random() - 0.5) * 2;
+                      const ratio = indexDataPoints.length > 0 ? (indexDataPoints[i] || 0) / (indexDataPoints[indexDataPoints.length - 1] || 1) : 0;
+                      const userRate = baseRate * ratio;
+                      const idxRate = indexRate * ratio;
                       userData.push(userRate);
                       indexDataPoints.push(idxRate);
                     }
@@ -1010,16 +1145,10 @@ export default function AssetPenetration({ onBack }) {
                   const yMax = maxVal + padding;
                   const yMin = minVal - padding;
                   
-                  const ticks = [-10, -5, 0, 5].filter(t => t >= yMin && t <= yMax);
-                  if (ticks.length === 0) {
-                    const step = (yMax - yMin) / 4;
-                    for (let i = 0; i <= 4; i++) {
-                      ticks.push(Math.round((yMin + i * step) * 10) / 10);
-                    }
-                  }
+                  const ticks = getYAxisTicks(yMin, yMax);
                   
                   return ticks.map((val, i) => {
-                    const y = 75 + ((yMin - val) / (yMax - yMin)) * 175;
+                    const y = 30 + ((yMax - val) / (yMax - yMin)) * 180;
                     return (
                       <g key={val}>
                         <line
@@ -1027,13 +1156,13 @@ export default function AssetPenetration({ onBack }) {
                           y1={y}
                           x2="740"
                           y2={y}
-                          stroke="rgba(0,0,0,0.05)"
+                          stroke="#E5E7EB"
                           strokeDasharray="4"
                         />
                         <text
-                          x="50"
+                          x="750"
                           y={y + 4}
-                          textAnchor="end"
+                          textAnchor="start"
                           className="text-xs fill-gray-400"
                         >
                           {val}%
@@ -1044,54 +1173,67 @@ export default function AssetPenetration({ onBack }) {
                 })()}
                 {(() => {
                   const history = indexHistoryData?.history || [];
-                  const displayData = history.slice(-30).reverse();
-                  const dates = displayData.map(item => {
-                    const d = new Date(item.date);
-                    return `${d.getMonth() + 1}/${d.getDate()}`;
-                  });
-                  if (dates.length === 0) {
-                    for (let i = 6; i >= 0; i--) {
-                      const d = new Date();
-                      d.setDate(d.getDate() - i);
-                      dates.push(`${d.getMonth() + 1}/${d.getDate()}`);
-                    }
+                  const { data: displayData, labels } = getYieldCurveData(history);
+                  if (displayData.length === 0) {
+                    return (
+                      <text x="400" y="230" textAnchor="middle" className="text-xs fill-gray-400">
+                        暂无数据
+                      </text>
+                    );
                   }
-                  const step = dates.length > 1 ? (740 - 60) / (dates.length - 1) : 113;
-                  return dates.map((date, i) => (
+                  const dataLength = displayData.length;
+                  const step = dataLength > 1 ? (740 - 60) / (dataLength - 1) : 340;
+                  return labels.map(({ index, label }) => (
                     <text
-                      key={i}
-                      x={60 + i * step}
-                      y={290}
+                      key={index}
+                      x={60 + index * step}
+                      y="230"
                       textAnchor="middle"
                       className="text-xs fill-gray-400"
                     >
-                      {date}
+                      {label}
                     </text>
                   ));
                 })()}
                 {(() => {
                   const history = indexHistoryData?.history || [];
-                  const displayData = history.slice(-30).reverse();
+                  const { data: displayData } = getYieldCurveData(history);
                   
                   const baseRate = currentPnlRate;
                   const userData = [];
                   const indexDataPoints = [];
                   
                   if (displayData.length > 0) {
-                    const firstClose = displayData[0]?.close || 1;
+                    const firstClose = timeRange === 'day'
+                      ? (parseFloat(displayData[0]?.open) || parseFloat(displayData[0]?.close) || 1)
+                      : (parseFloat(displayData[0]?.close) || 1);
                     displayData.forEach(item => {
-                      if (item.close && firstClose) {
-                        const idxRate = ((item.close - firstClose) / firstClose) * 100;
+                      const closeVal = parseFloat(item.close);
+                      if (closeVal && firstClose) {
+                        const idxRate = ((closeVal - firstClose) / firstClose) * 100;
                         indexDataPoints.push(idxRate);
-                        const userRate = idxRate * (baseRate / (indexData?.changeRate || 1)) * (0.9 + Math.random() * 0.2);
+                      }
+                    });
+                    const indexTotalRate = indexDataPoints.length > 0 ? indexDataPoints[indexDataPoints.length - 1] : 0;
+                    displayData.forEach((item, idx) => {
+                      const closeVal = parseFloat(item.close);
+                      if (closeVal && firstClose) {
+                        const idxRate = ((closeVal - firstClose) / firstClose) * 100;
+                        let userRate = 0;
+                        if (Math.abs(indexTotalRate) > 0.01) {
+                          userRate = idxRate * (baseRate / indexTotalRate);
+                        } else {
+                          userRate = idxRate;
+                        }
                         userData.push(userRate);
                       }
                     });
                   } else {
                     const indexRate = indexData?.changeRate || 0;
                     for (let i = 0; i < 7; i++) {
-                      const userRate = baseRate * (0.8 + Math.random() * 0.4) + (Math.random() - 0.5) * 2;
-                      const idxRate = indexRate * (0.8 + Math.random() * 0.4) + (Math.random() - 0.5) * 2;
+                      const ratio = indexDataPoints.length > 0 ? (indexDataPoints[i] || 0) / (indexDataPoints[indexDataPoints.length - 1] || 1) : 0;
+                      const userRate = baseRate * ratio;
+                      const idxRate = indexRate * ratio;
                       userData.push(userRate);
                       indexDataPoints.push(idxRate);
                     }
@@ -1110,25 +1252,25 @@ export default function AssetPenetration({ onBack }) {
                   const userPath = userData
                     .map((val, i) => {
                       const x = 60 + i * step;
-                      const y = 75 + ((chartYMin - val) / (chartYMax - chartYMin)) * 175;
+                      const y = 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180;
                       return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
                     })
                     .join(' ');
                   const indexPath = indexDataPoints
                     .map((val, i) => {
                       const x = 60 + i * step;
-                      const y = 75 + ((chartYMin - val) / (chartYMax - chartYMin)) * 175;
+                      const y = 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180;
                       return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
                     })
                     .join(' ');
                   return (
                     <g>
                       <path
-                        d={`${userPath} L ${60 + (dataLength - 1) * step} 250 L 60 250 Z`}
+                        d={`${userPath} L ${60 + (dataLength - 1) * step} 210 L 60 210 Z`}
                         fill="url(#userGradient)"
                       />
                       <path
-                        d={`${indexPath} L ${60 + (dataLength - 1) * step} 250 L 60 250 Z`}
+                        d={`${indexPath} L ${60 + (dataLength - 1) * step} 210 L 60 210 Z`}
                         fill="url(#indexGradient)"
                       />
                       <path
@@ -1151,43 +1293,135 @@ export default function AssetPenetration({ onBack }) {
                         <circle
                           key={`user-${i}`}
                           cx={60 + i * step}
-                          cy={75 + ((chartYMin - val) / (chartYMax - chartYMin)) * 175}
+                          cy={30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180}
                           r="3"
                           fill="#EF4444"
                           className="opacity-0 hover:opacity-100"
+                          onMouseEnter={() => setTooltip({
+                            x: 60 + i * step,
+                            y: 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180,
+                            date: timeRange === 'day' ? displayData[i]?.time : displayData[i]?.date,
+                            userRate: val,
+                            indexRate: indexDataPoints[i],
+                          })}
+                          onMouseLeave={() => setTooltip(null)}
                         />
                       ))}
                       {indexDataPoints.map((val, i) => (
                         <circle
                           key={`index-${i}`}
                           cx={60 + i * step}
-                          cy={75 + ((chartYMin - val) / (chartYMax - chartYMin)) * 175}
+                          cy={30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180}
                           r="3"
                           fill="#3B82F6"
                           className="opacity-0 hover:opacity-100"
+                          onMouseEnter={() => setTooltip({
+                            x: 60 + i * step,
+                            y: 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180,
+                            date: timeRange === 'day' ? displayData[i]?.time : displayData[i]?.date,
+                            userRate: userData[i],
+                            indexRate: val,
+                          })}
+                          onMouseLeave={() => setTooltip(null)}
                         />
                       ))}
+                      {analysisFeatures.extreme && userData.length > 0 && (() => {
+                        const maxIdx = userData.indexOf(Math.max(...userData));
+                        const maxVal = userData[maxIdx];
+                        const maxX = 60 + maxIdx * step;
+                        const maxY = 30 + ((chartYMax - maxVal) / (chartYMax - chartYMin)) * 180;
+                        return (
+                          <g key="extreme-max">
+                            <circle cx={maxX} cy={maxY} r="8" fill="none" stroke="#22C55E" strokeWidth="2" />
+                            <circle cx={maxX} cy={maxY} r="4" fill="#22C55E" />
+                            <line x1={maxX} y1={maxY - 15} x2={maxX} y2={maxY - 35} stroke="#22C55E" strokeWidth="1" />
+                            <text x={maxX} y={maxY - 40} textAnchor="middle" className="text-xs fill-green-500 font-medium">
+                              最大收益 {maxVal.toFixed(2)}%
+                            </text>
+                          </g>
+                        );
+                      })()}
+                      {analysisFeatures.drawdown && userData.length > 0 && (() => {
+                        let maxDrawdown = 0;
+                        let drawdownEndIdx = 0;
+                        let peakVal = userData[0];
+                        for (let i = 1; i < userData.length; i++) {
+                          if (userData[i] > peakVal) {
+                            peakVal = userData[i];
+                          }
+                          const drawdown = peakVal - userData[i];
+                          if (drawdown > maxDrawdown) {
+                            maxDrawdown = drawdown;
+                            drawdownEndIdx = i;
+                          }
+                        }
+                        const drawdownX = 60 + drawdownEndIdx * step;
+                        const drawdownY = 30 + ((chartYMax - userData[drawdownEndIdx]) / (chartYMax - chartYMin)) * 180;
+                        return (
+                          <g key="drawdown-max">
+                            <circle cx={drawdownX} cy={drawdownY} r="8" fill="none" stroke="#EF4444" strokeWidth="2" />
+                            <circle cx={drawdownX} cy={drawdownY} r="4" fill="#EF4444" />
+                            <line x1={drawdownX} y1={drawdownY + 15} x2={drawdownX} y2={drawdownY + 35} stroke="#EF4444" strokeWidth="1" />
+                            <text x={drawdownX} y={drawdownY + 45} textAnchor="middle" className="text-xs fill-red-500 font-medium">
+                              最大回撤 {maxDrawdown.toFixed(2)}%
+                            </text>
+                          </g>
+                        );
+                      })()}
+                      {tooltip && (
+                        <g>
+                          <rect
+                            x={tooltip.x + 10}
+                            y={tooltip.y - 75}
+                            width="160"
+                            height="60"
+                            rx="4"
+                            fill="rgba(0,0,0,0.8)"
+                          />
+                          <text
+                            x={tooltip.x + 20}
+                            y={tooltip.y - 55}
+                            className="text-xs fill-white"
+                          >
+                            {tooltip.date}
+                          </text>
+                          <text
+                            x={tooltip.x + 20}
+                            y={tooltip.y - 40}
+                            className="text-xs fill-red-400"
+                          >
+                            用户: {tooltip.userRate?.toFixed?.(2) || '—'}%
+                          </text>
+                          <text
+                            x={tooltip.x + 20}
+                            y={tooltip.y - 25}
+                            className="text-xs fill-blue-400"
+                          >
+                            指数: {tooltip.indexRate?.toFixed?.(2) || '—'}%
+                          </text>
+                        </g>
+                      )}
                     </g>
                   );
                 })()}
               </svg>
             ) : (
-              <svg viewBox="0 0 800 350" className="w-full h-auto">
+              <svg viewBox="0 0 800 300" className="w-full h-auto">
                 {(() => {
                   const history = indexHistoryData?.history || [];
-                  const displayData = history.slice(-30).reverse();
+                  const { data: displayData, labels } = getYieldCurveData(history);
                   
                   if (displayData.length === 0) {
                     return (
-                      <text x="400" y="175" textAnchor="middle" className="text-gray-400">
+                      <text x="400" y="150" textAnchor="middle" className="text-gray-400">
                         暂无K线数据
                       </text>
                     );
                   }
                   
-                  const closes = displayData.map(item => item.close).filter(Boolean);
-                  const highs = displayData.map(item => item.high).filter(Boolean);
-                  const lows = displayData.map(item => item.low).filter(Boolean);
+                  const closes = displayData.map(item => parseFloat(item.close)).filter(Boolean);
+                  const highs = displayData.map(item => parseFloat(item.high)).filter(Boolean);
+                  const lows = displayData.map(item => parseFloat(item.low)).filter(Boolean);
                   
                   const minVal = Math.min(...lows) * 0.99;
                   const maxVal = Math.max(...highs) * 1.01;
@@ -1197,7 +1431,7 @@ export default function AssetPenetration({ onBack }) {
                   const step = (740 - 60) / (dataLength - 1);
                   const candleWidth = Math.max(8, step * 0.6);
                   
-                  const yScale = (val) => 50 + ((maxVal - val) / range) * 280;
+                  const yScale = (val) => 40 + ((maxVal - val) / range) * 230;
                   
                   return (
                     <g>
@@ -1211,13 +1445,13 @@ export default function AssetPenetration({ onBack }) {
                               y1={y}
                               x2="740"
                               y2={y}
-                              stroke="rgba(0,0,0,0.05)"
+                              stroke="#E5E7EB"
                               strokeDasharray="4"
                             />
                             <text
-                              x="50"
+                              x="750"
                               y={y + 4}
-                              textAnchor="end"
+                              textAnchor="start"
                               className="text-xs fill-gray-400"
                             >
                               {val.toFixed(2)}
@@ -1263,19 +1497,17 @@ export default function AssetPenetration({ onBack }) {
                           </g>
                         );
                       })}
-                      {displayData.map((item, i) => {
-                        const x = 60 + i * step;
-                        const d = new Date(item.date);
-                        const dateLabel = `${d.getMonth() + 1}/${d.getDate()}`;
+                      {labels.map(({ index, label }) => {
+                        const x = 60 + index * step;
                         return (
                           <text
-                            key={`date-${i}`}
+                            key={`date-${index}`}
                             x={x}
-                            y={340}
+                            y={290}
                             textAnchor="middle"
                             className="text-xs fill-gray-400"
                           >
-                            {dateLabel}
+                            {label}
                           </text>
                         );
                       })}
@@ -1348,22 +1580,22 @@ export default function AssetPenetration({ onBack }) {
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={auxFeatures.markTrade}
-                  onChange={(e) => setAuxFeatures({ ...auxFeatures, markTrade: e.target.checked })}
+                  checked={auxFeatures.assetType}
+                  onChange={(e) => setAuxFeatures({ ...auxFeatures, assetType: e.target.checked })}
                   className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
                   style={{ borderRadius: '50%' }}
                 />
-                <span className="text-sm text-gray-700 dark:text-gray-300">标记买卖点</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">资产类型</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={auxFeatures.label}
-                  onChange={(e) => setAuxFeatures({ ...auxFeatures, label: e.target.checked })}
+                  checked={auxFeatures.assetAnalysis}
+                  onChange={(e) => setAuxFeatures({ ...auxFeatures, assetAnalysis: e.target.checked })}
                   className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
                   style={{ borderRadius: '50%' }}
                 />
-                <span className="text-sm text-gray-700 dark:text-gray-300">标签分析</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">资产分析</span>
               </label>
             </div>
             {analysisFeatures.position && (
@@ -1390,21 +1622,83 @@ export default function AssetPenetration({ onBack }) {
                 </div>
                 <div className="flex items-center gap-6">
                   <div className="flex-1">
-                    <PieChartSVG
-                      data={getPositionData(positionLevel, selectedCategory)}
-                      colors={PIE_COLORS}
-                      size={200}
-                      onHover={(index) => setPieHoverIndex(index)}
-                      hoveredIndex={pieHoverIndex}
-                      onClick={(index) => {
+                    <svg viewBox="0 0 200 200" className="w-full h-auto">
+                      {(() => {
                         const data = getPositionData(positionLevel, selectedCategory);
-                        const item = data[index];
-                        if (item?.children?.length > 0 && positionLevel < 3) {
-                          setSelectedCategory(item.name);
-                          setPositionLevel(positionLevel + 1);
-                        }
-                      }}
-                    />
+                        const maxPercent = Math.max(...data.map(d => d.percent), 1);
+                        const cols = Math.ceil(Math.sqrt(data.length));
+                        const rows = Math.ceil(data.length / cols);
+                        const cellSize = 18;
+                        const padding = 8;
+                        const startX = (200 - cols * cellSize - (cols - 1) * padding) / 2;
+                        const startY = (200 - rows * cellSize - (rows - 1) * padding) / 2;
+                        
+                        return data.map((item, index) => {
+                          const col = index % cols;
+                          const row = Math.floor(index / cols);
+                          const x = startX + col * (cellSize + padding);
+                          const y = startY + row * (cellSize + padding);
+                          const intensity = item.percent / maxPercent;
+                          const r = Math.round(200 - intensity * 100);
+                          const g = Math.round(150 - intensity * 50);
+                          const b = Math.round(50 + intensity * 100);
+                          const isHovered = pieHoverIndex === index;
+                          
+                          return (
+                            <g key={index}>
+                              <rect
+                                x={x}
+                                y={y}
+                                width={cellSize}
+                                height={cellSize}
+                                fill={`rgb(${r},${g},${b})`}
+                                rx={3}
+                                className="transition-all duration-200 cursor-pointer"
+                                style={{
+                                  transform: isHovered ? 'scale(1.1)' : 'scale(1)',
+                                  transformOrigin: `${x + cellSize/2} ${y + cellSize/2}`,
+                                }}
+                                onMouseEnter={() => setPieHoverIndex(index)}
+                                onMouseLeave={() => setPieHoverIndex(null)}
+                                onClick={() => {
+                                  if (item?.children?.length > 0 && positionLevel < 3) {
+                                    setSelectedCategory(item.name);
+                                    setPositionLevel(positionLevel + 1);
+                                  } else {
+                                    setSelectedPositionItem(item);
+                                  }
+                                }}
+                              />
+                              {isHovered && (
+                                <g>
+                                  <rect
+                                    x={Math.min(x - 5, 200 - 120)}
+                                    y={y - 30}
+                                    width={120}
+                                    height={25}
+                                    fill="white"
+                                    className="dark:fill-slate-800"
+                                    stroke="rgba(0,0,0,0.1)"
+                                    rx={4}
+                                  />
+                                  <text
+                                    x={Math.min(x - 5, 200 - 120) + 60}
+                                    y={y - 15}
+                                    textAnchor="middle"
+                                    className="text-xs fill-gray-700 dark:fill-gray-300 font-medium"
+                                  >
+                                    {item.name} {item.percent.toFixed(1)}%
+                                  </text>
+                                </g>
+                              )}
+                            </g>
+                          );
+                        });
+                      })()}
+                      <text x="100" y="190" textAnchor="middle" className="text-xs fill-gray-400">
+                        仓位占比热力图
+                      </text>
+                    </svg>
                   </div>
                   <div className="flex-1 space-y-2">
                     {getPositionData(positionLevel, selectedCategory).map((item, index) => (
@@ -1417,6 +1711,8 @@ export default function AssetPenetration({ onBack }) {
                           if (item?.children?.length > 0 && positionLevel < 3) {
                             setSelectedCategory(item.name);
                             setPositionLevel(positionLevel + 1);
+                          } else {
+                            setSelectedPositionItem(item);
                           }
                         }}
                         onMouseEnter={() => setPieHoverIndex(index)}
@@ -1446,69 +1742,314 @@ export default function AssetPenetration({ onBack }) {
                 </div>
               </div>
             )}
+            {auxFeatures.assetType && (
+              <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">资产类型分析</h3>
+                <svg viewBox="0 0 350 200" className="w-full h-auto">
+                  {(() => {
+                    const assetTypeData = {};
+                    financeAccounts.forEach(a => {
+                      const type = a.assetType || '其他';
+                      if (!assetTypeData[type]) {
+                        assetTypeData[type] = { value: 0, pnl: 0, count: 0 };
+                      }
+                      assetTypeData[type].value += parseFloat(a.currentValue) || 0;
+                      assetTypeData[type].pnl += parseFloat(a.dailyPnl) || 0;
+                      assetTypeData[type].count += 1;
+                    });
+                    const items = Object.entries(assetTypeData).map(([name, data]) => ({
+                      name,
+                      ...data,
+                      pnlRate: data.value > 0 ? (data.pnl / data.value) * 100 : 0
+                    }));
+                    const maxValue = Math.max(...items.map(i => i.value), 1);
+                    const maxPnlRate = Math.max(...items.map(i => Math.abs(i.pnlRate)), 1);
+                    
+                    const barWidth = 40;
+                    const padding = 20;
+                    const startX = padding;
+                    const chartHeight = 120;
+                    const startY = 150;
+                    
+                    return items.map((item, index) => {
+                      const x = startX + index * (barWidth + 15);
+                      const barHeight = (item.value / maxValue) * chartHeight;
+                      const isProfit = item.pnl >= 0;
+                      
+                      return (
+                        <g key={index}>
+                          <rect
+                            x={x}
+                            y={startY - barHeight}
+                            width={barWidth}
+                            height={barHeight}
+                            fill={isProfit ? '#EF4444' : '#3B82F6'}
+                            rx={4}
+                          />
+                          <text
+                            x={x + barWidth / 2}
+                            y={startY + 15}
+                            textAnchor="middle"
+                            className="text-xs fill-gray-600 dark:fill-gray-400"
+                          >
+                            {item.name}
+                          </text>
+                          <text
+                            x={x + barWidth / 2}
+                            y={startY - barHeight - 8}
+                            textAnchor="middle"
+                            className={`text-xs font-medium ${isProfit ? 'fill-red-500' : 'fill-blue-500'}`}
+                          >
+                            {isProfit ? '+' : ''}{item.pnlRate.toFixed(1)}%
+                          </text>
+                        </g>
+                      );
+                    });
+                  })()}
+                  <text x="175" y="190" textAnchor="middle" className="text-xs fill-gray-400">
+                    各资产类型涨跌统计
+                  </text>
+                </svg>
+              </div>
+            )}
+            {auxFeatures.assetAnalysis && (
+              <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">资产分析（一级分类）</h3>
+                <svg viewBox="0 0 350 200" className="w-full h-auto">
+                  {(() => {
+                    const categoryL1Data = {};
+                    financeAccounts.forEach(a => {
+                      const cat = a.categoryL1 || '其他';
+                      if (!categoryL1Data[cat]) {
+                        categoryL1Data[cat] = { value: 0, cost: 0, pnl: 0, count: 0 };
+                      }
+                      categoryL1Data[cat].value += parseFloat(a.currentValue) || 0;
+                      categoryL1Data[cat].cost += a.cost * a.quantity;
+                      categoryL1Data[cat].pnl += parseFloat(a.holdingPnl) || 0;
+                      categoryL1Data[cat].count += 1;
+                    });
+                    const items = Object.entries(categoryL1Data).map(([name, data]) => ({
+                      name,
+                      ...data,
+                      pnlRate: data.cost > 0 ? (data.pnl / data.cost) * 100 : 0
+                    }));
+                    const maxValue = Math.max(...items.map(i => i.value), 1);
+                    
+                    const barWidth = 50;
+                    const padding = 20;
+                    const startX = padding;
+                    const chartHeight = 120;
+                    const startY = 150;
+                    
+                    return items.map((item, index) => {
+                      const x = startX + index * (barWidth + 10);
+                      const barHeight = (item.value / maxValue) * chartHeight;
+                      const isProfit = item.pnl >= 0;
+                      
+                      return (
+                        <g key={index}>
+                          <rect
+                            x={x}
+                            y={startY - barHeight}
+                            width={barWidth}
+                            height={barHeight}
+                            fill={isProfit ? '#22C55E' : '#EF4444'}
+                            rx={4}
+                          />
+                          <text
+                            x={x + barWidth / 2}
+                            y={startY + 15}
+                            textAnchor="middle"
+                            className="text-xs fill-gray-600 dark:fill-gray-400"
+                          >
+                            {item.name}
+                          </text>
+                          <text
+                            x={x + barWidth / 2}
+                            y={startY - barHeight - 8}
+                            textAnchor="middle"
+                            className={`text-xs font-medium ${isProfit ? 'fill-green-500' : 'fill-red-500'}`}
+                          >
+                            {isProfit ? '+' : ''}{item.pnlRate.toFixed(1)}%
+                          </text>
+                          <text
+                            x={x + barWidth / 2}
+                            y={startY + 30}
+                            textAnchor="middle"
+                            className="text-xs fill-gray-500 dark:fill-gray-500"
+                          >
+                            ¥{formatCurrency(item.value)}
+                          </text>
+                        </g>
+                      );
+                    });
+                  })()}
+                  <text x="175" y="195" textAnchor="middle" className="text-xs fill-gray-400">
+                    一级分类资产分布与盈亏
+                  </text>
+                </svg>
+              </div>
+            )}
             <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
-              {analysisView === 'rate' ? (
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">{timeRangeLabels[timeRange]}收益率</span>
-                    <span className={`font-medium ${pnlClass(currentPnlRate)}`}>{formatPercentage(currentPnlRate)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">日收益率</span>
-                    <span className={`font-medium ${pnlClass(totalDailyPnlRate)}`}>{formatPercentage(totalDailyPnlRate)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">最佳收益率</span>
-                    <span className="text-green-600 dark:text-green-400 font-medium">
-                      +{formatPercentage(bestPerformer?.holdingPnlRate || 0)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">最差收益率</span>
-                    <span className="text-red-600 dark:text-red-400 font-medium">
-                      {formatPercentage(worstPerformer?.holdingPnlRate || 0)}
-                    </span>
-                  </div>
-                </div>
-              ) : analysisView === 'amount' ? (
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">{timeRangeLabels[timeRange]}盈亏</span>
-                    <span className={`font-medium ${pnlClass(currentPnl)}`}>¥{formatCurrency(currentPnl)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">日盈亏</span>
-                    <span className={`font-medium ${pnlClass(totalDailyPnl)}`}>¥{formatCurrency(totalDailyPnl)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">盈利数量</span>
-                    <span className="text-green-600 dark:text-green-400 font-medium">{profitCount}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">亏损数量</span>
-                    <span className="text-red-600 dark:text-red-400 font-medium">{lossCount}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">总资产</span>
-                    <span className="font-medium text-gray-900 dark:text-white">¥{formatCurrency(totalValue)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">总成本</span>
-                    <span className="font-medium text-gray-900 dark:text-white">¥{formatCurrency(totalCost)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">持仓数量</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{financeAccounts.length}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 dark:text-gray-400">账户数量</span>
-                    <span className="font-medium text-gray-900 dark:text-white">{accountDistribution.length}</span>
-                  </div>
-                </div>
-              )}
+              {(() => {
+                if (analysisFeatures.position && selectedPositionItem) {
+                  const filtered = financeAccounts.filter(a => {
+                    if (positionLevel === 1) {
+                      return a.categoryL1 === selectedPositionItem.name;
+                    } else if (positionLevel === 2) {
+                      return a.categoryL1 === selectedCategory && a.categoryL2 === selectedPositionItem.name;
+                    } else {
+                      return a.categoryL2 === selectedCategory && a.categoryL3 === selectedPositionItem.name;
+                    }
+                  });
+                  const selTotalValue = filtered.reduce((sum, a) => sum + (parseFloat(a.currentValue) || 0), 0);
+                  const selTotalCost = filtered.reduce((sum, a) => sum + a.cost * a.quantity, 0);
+                  const selTotalPnl = filtered.reduce((sum, a) => sum + (parseFloat(a.holdingPnl) || 0), 0);
+                  const selTotalPnlRate = selTotalCost > 0 ? (selTotalPnl / selTotalCost) * 100 : 0;
+                  const selTotalDailyPnl = filtered.reduce((sum, a) => sum + (parseFloat(a.dailyPnl) || 0), 0);
+                  const selTotalDailyPnlRate = selTotalValue > 0 ? (selTotalDailyPnl / selTotalValue) * 100 : 0;
+                  const selProfitCount = filtered.filter(a => parseFloat(a.currentValue) > a.cost * a.quantity).length;
+                  const selLossCount = filtered.filter(a => parseFloat(a.currentValue) < a.cost * a.quantity).length;
+                  
+                  if (analysisView === 'rate') {
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">{selectedPositionItem.name}收益率</span>
+                          <span className={`font-medium ${pnlClass(selTotalPnlRate)}`}>{formatPercentage(selTotalPnlRate)}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">日收益率</span>
+                          <span className={`font-medium ${pnlClass(selTotalDailyPnlRate)}`}>{formatPercentage(selTotalDailyPnlRate)}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">最佳收益率</span>
+                          <span className="text-green-600 dark:text-green-400 font-medium">
+                            +{formatPercentage(filtered.length > 0 ? Math.max(...filtered.map(a => parseFloat(a.holdingPnlRate) || 0)) : 0)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">最差收益率</span>
+                          <span className="text-red-600 dark:text-red-400 font-medium">
+                            {formatPercentage(filtered.length > 0 ? Math.min(...filtered.map(a => parseFloat(a.holdingPnlRate) || 0)) : 0)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  } else if (analysisView === 'amount') {
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">{selectedPositionItem.name}盈亏</span>
+                          <span className={`font-medium ${pnlClass(selTotalPnl)}`}>¥{formatCurrency(selTotalPnl)}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">日盈亏</span>
+                          <span className={`font-medium ${pnlClass(selTotalDailyPnl)}`}>¥{formatCurrency(selTotalDailyPnl)}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">盈利数量</span>
+                          <span className="text-green-600 dark:text-green-400 font-medium">{selProfitCount}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">亏损数量</span>
+                          <span className="text-red-600 dark:text-red-400 font-medium">{selLossCount}</span>
+                        </div>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">{selectedPositionItem.name}总资产</span>
+                          <span className="font-medium text-gray-900 dark:text-white">¥{formatCurrency(selTotalValue)}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">总成本</span>
+                          <span className="font-medium text-gray-900 dark:text-white">¥{formatCurrency(selTotalCost)}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">持仓数量</span>
+                          <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 dark:text-gray-400">账户数量</span>
+                          <span className="font-medium text-gray-900 dark:text-white">{new Set(filtered.map(a => a.account)).size}</span>
+                        </div>
+                      </div>
+                    );
+                  }
+                }
+                
+                if (analysisView === 'rate') {
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">{timeRangeLabels[timeRange]}收益率</span>
+                        <span className={`font-medium ${pnlClass(currentPnlRate)}`}>{formatPercentage(currentPnlRate)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">日收益率</span>
+                        <span className={`font-medium ${pnlClass(totalDailyPnlRate)}`}>{formatPercentage(totalDailyPnlRate)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">最佳收益率</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
+                          +{formatPercentage(bestPerformer?.holdingPnlRate || 0)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">最差收益率</span>
+                        <span className="text-red-600 dark:text-red-400 font-medium">
+                          {formatPercentage(worstPerformer?.holdingPnlRate || 0)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                } else if (analysisView === 'amount') {
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">{timeRangeLabels[timeRange]}盈亏</span>
+                        <span className={`font-medium ${pnlClass(currentPnl)}`}>¥{formatCurrency(currentPnl)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">日盈亏</span>
+                        <span className={`font-medium ${pnlClass(totalDailyPnl)}`}>¥{formatCurrency(totalDailyPnl)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">盈利数量</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">{profitCount}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">亏损数量</span>
+                        <span className="text-red-600 dark:text-red-400 font-medium">{lossCount}</span>
+                      </div>
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">总资产</span>
+                        <span className="font-medium text-gray-900 dark:text-white">¥{formatCurrency(totalValue)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">总成本</span>
+                        <span className="font-medium text-gray-900 dark:text-white">¥{formatCurrency(totalCost)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">持仓数量</span>
+                        <span className="font-medium text-gray-900 dark:text-white">{financeAccounts.length}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 dark:text-gray-400">账户数量</span>
+                        <span className="font-medium text-gray-900 dark:text-white">{accountDistribution.length}</span>
+                      </div>
+                    </div>
+                  );
+                }
+              })()}
             </div>
           </div>
         </div>
@@ -1528,7 +2069,7 @@ export default function AssetPenetration({ onBack }) {
                 const selectedIdxData = allIndexData[selectedIndex];
                 const diff = selectedIdxData ? currentPnlRate - selectedIdxData.changeRate : 0;
                 return diff >= 0 ? '跑赢' : '跑输';
-              })()}{indexData?.name || '上证指数'}
+              })()}{indexOptions.find(o => o.code === selectedIndex)?.name || indexData?.name || '上证指数'}
             </p>
             <p className={`text-4xl font-bold mt-2 ${(() => {
               const selectedIdxData = allIndexData[selectedIndex];

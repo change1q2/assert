@@ -75,7 +75,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && (pathname === "/api/finance/fund-nav" || pathname === "/api/finance/fund-nav-history")) {
+    if ((req.method === "GET" || req.method === "POST") && (pathname === "/api/finance/fund-nav" || pathname === "/api/finance/fund-nav-history" || pathname === "/api/finance/quotes" || pathname === "/api/finance/kline" || pathname === "/api/finance/lookup" || pathname === "/api/finance/index" || pathname === "/api/finance/index-history")) {
+      if (req.method !== "GET") {
+        body = await readBody(req);
+      }
       await financeRoute.handler(req, res, body, origin, pathname, url);
       return;
     }

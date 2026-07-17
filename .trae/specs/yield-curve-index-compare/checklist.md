@@ -1,0 +1,23 @@
+# 场内穿透收益率曲线与指数对比 - 验证清单
+
+- [x] Checkpoint 1: 后端 /api/finance/index-history 接口可正常返回指数历史数据
+- [x] Checkpoint 2: A股指数使用 tencent/mootdx 数据源获取成功
+- [x] Checkpoint 3: 美股/港股指数使用 eastmoney 数据源获取成功
+- [x] Checkpoint 4: 前端获取指数历史数据调用正常，返回数据格式正确
+- [x] Checkpoint 5: 收益率曲线组件正确渲染双折线（用户收益红色、指数蓝色）
+- [x] Checkpoint 6: 鼠标悬停 tooltip 显示日期和收益率数值
+- [x] Checkpoint 7: 图例正确显示「用户收益」和「指数」
+- [x] Checkpoint 8: 时间区间按钮（当日/本月/近三月/今年/全部/自定义）可点击切换
+- [x] Checkpoint 9: 点击「自定义」弹出日期选择器，选择后曲线更新
+- [x] Checkpoint 10: 指数快捷标签（上证/深证/创业板/上证50/沪深300/中证500/纳斯达克/标普500）可切换
+- [x] Checkpoint 11: 自定义指数输入框输入代码后点击确定，曲线更新
+- [x] Checkpoint 12: 曲线/K线切换按钮可用，切换后视图正确变化
+- [x] Checkpoint 13: 用户收益率近似计算逻辑正确（基于指数缩放，终点等于当前总收益率）
+- [x] Checkpoint 14: 组件集成到资产穿透页面，样式与现有页面一致
+- [x] Checkpoint 15: npm run build 构建成功无报错
+- [x] Checkpoint 16: 响应式布局在不同屏幕宽度下正常显示
+- [x] Checkpoint 17: 当日模式X轴显示 9:30、10:30、11:30、13:00、14:00、15:00
+- [x] Checkpoint 18: 本月模式X轴每7天显示一个 MM-DD 刻度
+- [x] Checkpoint 19: 近三月模式X轴每月1日显示一个 MM-DD 刻度
+- [x] Checkpoint 20: 今年模式X轴从今年1月到当前月每月1日显示一个 MM-DD 刻度
+- [x] Checkpoint 21: 曲线图和K线图使用统一的 getYieldCurveData 生成数据与标签

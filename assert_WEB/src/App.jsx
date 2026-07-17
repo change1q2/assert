@@ -12,6 +12,7 @@ import {
   PieChart,
   LogOut,
   User,
+  Briefcase,
 } from 'lucide-react';
 import Login from './pages/Login.jsx';
 import Overview from './pages/Overview.jsx';
@@ -30,11 +31,13 @@ import PremiumCheck from './pages/PremiumCheck.jsx';
 import HkIpo from './pages/HkIpo.jsx';
 import BudgetManagement from './pages/BudgetManagement.jsx';
 import AssetPenetration from './pages/AssetPenetration.jsx';
+import IndependentAssets from './pages/IndependentAssets.jsx';
 
 const menuItems = [
   { id: 'overview', label: '资产总览', icon: LayoutDashboard },
   { id: 'records', label: '收支分析', icon: FileText },
   { id: 'finance', label: '理财模块', icon: Layers },
+  { id: 'independent-assets', label: '独立资产', icon: Briefcase },
   { id: 'debts', label: '债务模块', icon: Wallet },
   { id: 'classes', label: '资产分类', icon: PieChart },
   { id: 'analysis', label: '统计分析', icon: BarChart3 },
@@ -140,6 +143,8 @@ export default function App() {
         return <Records onNavigate={setActiveMenu} />;
       case 'finance':
         return <Finance onAssetPenetration={() => setShowAssetPenetration(true)} />;
+      case 'independent-assets':
+        return <IndependentAssets />;
       case 'debts':
         return <Debts />;
       case 'classes':
@@ -191,7 +196,7 @@ export default function App() {
             </div>
             <div>
               <div className="font-bold text-gray-900 dark:text-white font-mono tracking-tight">Wealth OS</div>
-              <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">V1.0.3</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">V1.0.11</div>
             </div>
           </div>
         </div>

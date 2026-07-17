@@ -14,6 +14,7 @@ import {
   exportHkIpoToExcel,
 } from "../services/hkipo-service.js";
 import { refreshHkIpoMarketInBackground, getHkIpoCache } from "../services/hkipo-fetcher.js";
+import { getExchangeRates, getCache as getExchangeRateCache } from "../services/exchange-rate-service.js";
 import { allowedOrigins, HK_IPO_DEFAULT_THRESHOLD } from "../config/index.js";
 
 async function handler(req, res, body, origin, pathname, url) {
@@ -33,6 +34,26 @@ async function handler(req, res, body, origin, pathname, url) {
       return;
     }
     json(res, 200, await fetchPremiumMarket(), origin);
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/api/tools/exchange-rates") {
+    const force = url.searchParams.get("refresh") === "1";
+    const cache = getExchangeRateCache();
+    const now = Date.now();
+    const shouldRefresh = force || now - cache.cachedAt > 30 * 60 * 1000;
+    
+    if (!shouldRefresh && cache.rates) {
+      json(res, 200, {
+        rates: cache.rates,
+        cached: true,
+        cachedAt: cache.cachedAt,
+      }, origin);
+      return;
+    }
+    
+    const result = await getExchangeRates();
+    json(res, 200, result, origin);
     return;
   }
 

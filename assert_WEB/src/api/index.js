@@ -337,6 +337,16 @@ export async function fetchExchangeRates(baseCurrency = 'CNY') {
   }
 }
 
+export async function fetchRealTimeExchangeRates(force = false) {
+  try {
+    const url = force ? '/tools/exchange-rates?refresh=1' : '/tools/exchange-rates'
+    const response = await request(url)
+    return response.rates || { ...DEFAULT_EXCHANGE_RATES }
+  } catch {
+    return { ...DEFAULT_EXCHANGE_RATES }
+  }
+}
+
 export async function lookupFinance(q) {
   try {
     const response = await request(`/finance/lookup?q=${encodeURIComponent(q)}`)

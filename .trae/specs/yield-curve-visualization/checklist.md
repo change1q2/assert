@@ -1,0 +1,10 @@
+- [x] Checkpoint 1: 当日模式X轴显示 9:30、10:30、11:30、13:00、14:00、15:00 六个时间点
+- [x] Checkpoint 2: 本月模式X轴每7天显示一个 MM-DD 刻度
+- [x] Checkpoint 3: 近三月模式X轴每月1日显示一个 MM-DD 刻度
+- [x] Checkpoint 4: 今年模式X轴从今年1月到当前月每月1日显示一个 MM-DD 刻度
+- [x] Checkpoint 5: Y轴刻度间隔根据数据范围自动调整（1%/5%/10%/20%/50%）
+- [x] Checkpoint 6: Y轴支持负收益率显示
+- [x] Checkpoint 7: 用户收益曲线为红色，指数曲线为蓝色
+- [x] Checkpoint 8: 网格线为浅灰色虚线样式
+- [x] Checkpoint 9: 曲线下方有渐变填充效果
+- [x] Checkpoint 10: npm run build 构建成功无报错

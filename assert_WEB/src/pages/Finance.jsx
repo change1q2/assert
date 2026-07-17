@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav } from '../api';
+import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchRealTimeExchangeRates } from '../api';
+import { CURRENCIES, getCurrencySymbol, getCurrencyName } from '../utils/currency';
 import {
   TrendingUp,
   TrendingDown,
@@ -33,6 +34,22 @@ function formatCurrency(value) {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
   }).format(value);
+}
+
+function convertCurrency(value, fromCurrency, toCurrency, rates) {
+  if (fromCurrency === toCurrency) return value;
+  const fromRate = rates[fromCurrency] || 1;
+  const toRate = rates[toCurrency] || 1;
+  return value * (fromRate / toRate);
+}
+
+function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
+  const converted = convertCurrency(value, currency, targetCurrency, rates);
+  const symbol = getCurrencySymbol(targetCurrency);
+  return `${symbol}${new Intl.NumberFormat('zh-CN', {
+    minimumFractionDigits: targetCurrency === 'JPY' ? 0 : 2,
+    maximumFractionDigits: targetCurrency === 'JPY' ? 0 : 2,
+  }).format(converted)}`;
 }
 
 function formatPercentage(value) {
@@ -108,7 +125,7 @@ const FORM_INPUT = 'w-full px-3 py-2 border border-gray-300 dark:border-slate-60
 const FORM_SELECT = 'w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors appearance-none cursor-pointer';
 
 // ── 账户卡片子组件 ──
-function AccountCard({ name, totalValue, totalCost, totalPnl, totalPnlRate, totalDailyPnl, totalDailyPnlRate, count }) {
+function AccountCard({ name, totalValue, totalCost, totalPnl, totalPnlRate, totalDailyPnl, totalDailyPnlRate, count, selectedCurrency, exchangeRates, currency = 'CNY' }) {
   const isPos = totalPnl >= 0;
   const isDayPos = totalDailyPnl >= 0;
   return (
@@ -129,16 +146,16 @@ function AccountCard({ name, totalValue, totalCost, totalPnl, totalPnlRate, tota
       <div className="grid grid-cols-3 gap-2 text-center">
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当前总市值</p>
-          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatNum(totalValue)}</p>
+          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(totalValue, currency, selectedCurrency, exchangeRates)}</p>
         </div>
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">持仓总成本</p>
-          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatNum(totalCost)}</p>
+          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(totalCost, currency, selectedCurrency, exchangeRates)}</p>
         </div>
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">持仓总盈亏</p>
           <p className={`text-sm font-bold tabular-nums ${isPos ? 'text-green-600' : 'text-red-500'}`}>
-            {pnlSign(totalPnl)}{formatNum(totalPnl)}
+            {pnlSign(totalPnl)}{formatCurrencyWithRate(totalPnl, currency, selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
           </p>
         </div>
       </div>
@@ -151,7 +168,7 @@ function AccountCard({ name, totalValue, totalCost, totalPnl, totalPnlRate, tota
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当日总盈亏</p>
           <p className={`text-sm font-bold tabular-nums ${isDayPos ? 'text-green-600' : 'text-red-500'}`}>
-            {pnlSign(totalDailyPnl)}{formatNum(totalDailyPnl)}
+            {pnlSign(totalDailyPnl)}{formatCurrencyWithRate(totalDailyPnl, currency, selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
           </p>
         </div>
         <div>
@@ -163,7 +180,7 @@ function AccountCard({ name, totalValue, totalCost, totalPnl, totalPnlRate, tota
   );
 }
 
-function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, onRefresh }) {
+function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, setStateData, onRefresh, selectedCurrency = 'CNY', exchangeRates = {}, quotesMap = {} }) {
   const latestData = stateData?.financeAssets?.find(item => String(item.id) === String(data?.id)) || data;
   if (!latestData) return null;
   const [uploadedImages, setUploadedImages] = useState([]);
@@ -186,6 +203,33 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
     return [];
   });
 
+  // 当 data.transactions 变化时（如父组件刷新后），同步更新本地 tradeRecords
+  useEffect(() => {
+    const latestItem = stateData?.financeAssets?.find(item => String(item.id) === String(data?.id));
+    const transactions = latestItem?.transactions;
+    if (transactions && Array.isArray(transactions)) {
+      const formatted = transactions.map(t => {
+        const [date, time] = (t.transaction_date || t.date || '').split(' ');
+        return {
+          ...t,
+          id: t.id || Date.now() + Math.random(),
+          type: t.direction || t.type,
+          date: date || t.date || '',
+          time: time || t.time || '',
+          quantity: t.shares || t.quantity,
+          fee: t.commission || t.fee,
+        };
+      });
+      // 只在数据真正变化时更新，避免不必要的重渲染
+      setTradeRecords(prev => {
+        if (prev.length !== formatted.length) return formatted;
+        const prevKey = prev.map(r => `${r.id}_${r.date}_${r.time}_${r.quantity}_${r.amount}`).join('|');
+        const newKey = formatted.map(r => `${r.id}_${r.date}_${r.time}_${r.quantity}_${r.amount}`).join('|');
+        return prevKey === newKey ? prev : formatted;
+      });
+    }
+  }, [stateData?.financeAssets, data?.id]);
+
   const saveTradeRecords = async (records) => {
     if (!saveState || !stateData) return;
     try {
@@ -196,6 +240,13 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
         }
         return item;
       });
+      // 同步更新父组件 stateData，使 DetailModal 能立即看到最新数据
+      if (typeof window !== 'undefined' && setStateData) {
+        setStateData({
+          ...stateData,
+          financeAssets: updatedFinanceAssets,
+        });
+      }
       await saveState({
         ...stateData,
         financeAssets: updatedFinanceAssets,
@@ -216,9 +267,10 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
     amount: '',
     fee: '',
   });
+  const [editingRecord, setEditingRecord] = useState(null);
 
   const [recordPage, setRecordPage] = useState(1);
-  const recordPageSize = 5;
+  const [recordPageSize, setRecordPageSize] = useState(5);
 
   const [recognizedRecords, setRecognizedRecords] = useState([]);
   const [showRecognizeModal, setShowRecognizeModal] = useState(false);
@@ -260,41 +312,52 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
   const costPrice = parseFloat(latestData.costPrice || latestData.cost) || 0;
   const quantity = parseFloat(latestData.shares || latestData.quantity) || 0;
   const isBondFund = latestData.categoryL1 === '债权类' && latestData.categoryL3 === '场外';
-  const isStock = latestData.kind === '股票';
-  const isDomesticIndoor = isStock || (latestData.market === '国内市场' && latestData.categoryL3 === '场内');
-  const isDomesticOutdoor = (latestData.market === '国内市场' && latestData.categoryL3 === '场外') || (!isStock && !isDomesticIndoor && latestData.market === '国内市场');
+  const isStock = latestData.kind === '股票' || latestData.assetType === '股票';
+  const isDomesticIndoor = (latestData.market === '国内市场') && (latestData.tertiaryCategory === '场内' || latestData.categoryL3 === '场内');
+  const isDomesticOutdoor = (latestData.market === '国内市场') && (latestData.tertiaryCategory === '场外' || latestData.categoryL3 === '场外');
   const prevPrice = parseFloat(latestData.prevPrice) || 0;
   const currentPrice = parseFloat(latestData.currentPrice || costPrice) || 0;
   const priceDate = latestData.priceDate || '';
 
-  const dailyPnl = prevPrice > 0 && quantity > 0 && currentPrice > 0
-    ? quantity * (currentPrice - prevPrice)
-    : parseFloat(latestData.dailyPnl) || 0;
-  const dailyPnlRate = prevPrice > 0 && currentPrice > 0
-    ? ((currentPrice - prevPrice) / prevPrice) * 100
-    : parseFloat(latestData.dailyPnlRate) || 0;
+  const savedCostTotal = parseFloat(latestData.cost) || 0;
+  const costTotal = savedCostTotal > 0 ? savedCostTotal : costPrice * quantity;
 
-  // 对于场外基金，实时计算市值和收益（不依赖后端计算字段）
-  const costTotal = costPrice * quantity;
   const computedCurrentValue = isDomesticOutdoor && currentPrice > 0 && quantity > 0
     ? Math.round(currentPrice * quantity * 100) / 100
-    : parseFloat(latestData.currentValue) || 0;
-  const computedHoldingPnl = isDomesticOutdoor
-    ? Math.round((computedCurrentValue - costTotal) * 100) / 100
-    : Math.round((parseFloat(latestData.holdingPnl) || 0) * 100) / 100;
-  const computedHoldingPnlRate = isDomesticOutdoor && costTotal > 0
-    ? Math.round((computedHoldingPnl / costTotal) * 100 * 100) / 100
-    : Math.round((parseFloat(latestData.holdingPnlRate) || 0) * 100) / 100;
-  const computedDailyPnl = isDomesticOutdoor && prevPrice > 0 && currentPrice > 0 && quantity > 0
-    ? Math.round(quantity * (currentPrice - prevPrice) * 100) / 100
-    : dailyPnl;
-  const computedDailyPnlRate = isDomesticOutdoor && prevPrice > 0 && currentPrice > 0
-    ? Math.round(((currentPrice - prevPrice) / prevPrice) * 100 * 100) / 100
-    : dailyPnlRate;
-
-  const floatPnl = computedHoldingPnl;
-  const floatPnlRate = computedHoldingPnlRate;
+    : parseFloat(latestData.currentValue) || currentPrice * quantity;
   const currentValue = computedCurrentValue;
+
+  const floatPnl = (currentValue - costTotal);
+  const floatPnlRate = costTotal > 0 ? (floatPnl / costTotal) * 100 : 0;
+
+  // 当日盈亏：优先使用实时行情（与列表保持一致），其次使用 stateData 中存储的 prevPrice/currentPrice，最后回退到 todayPnl/dailyPnl
+  const _quote = quotesMap && latestData.code ? quotesMap[latestData.code] : null;
+  const _quotePrice = _quote && _quote.price != null ? parseFloat(_quote.price) : null;
+  const _quotePrevClose = _quote && _quote.prevClose != null ? parseFloat(_quote.prevClose) : null;
+  const _quoteChangePct = _quote && _quote.changePct != null ? parseFloat(_quote.changePct) : null;
+  let computedDailyPnl = 0;
+  if (_quotePrice != null && _quotePrevClose != null && quantity > 0) {
+    computedDailyPnl = Math.round((_quotePrice - _quotePrevClose) * quantity * 100) / 100;
+  } else if (prevPrice > 0 && currentPrice > 0 && quantity > 0) {
+    computedDailyPnl = Math.round((currentPrice - prevPrice) * quantity * 100) / 100;
+  } else {
+    computedDailyPnl = parseFloat(latestData.todayPnl) || 0;
+  }
+  const dailyPnl = parseFloat(latestData.dailyPnl) || computedDailyPnl;
+
+  let computedDailyPnlRate = 0;
+  if (_quoteChangePct != null) {
+    computedDailyPnlRate = _quoteChangePct;
+  } else if (Number.isFinite(parseFloat(latestData.dailyChangePct))) {
+    computedDailyPnlRate = parseFloat(latestData.dailyChangePct);
+  } else if (prevPrice > 0 && currentPrice > 0) {
+    computedDailyPnlRate = ((currentPrice - prevPrice) / prevPrice) * 100;
+  } else {
+    computedDailyPnlRate = parseFloat(latestData.todayPnlPercent) || parseFloat(latestData.dailyPnlRate) || 0;
+  }
+  const dailyPnlRate = parseFloat(latestData.dailyPnlRate) || computedDailyPnlRate;
+
+  const computedHoldingReturnRate = floatPnlRate;
 
   const tradeStats = useMemo(() => {
     let buyTotalAmount = 0;
@@ -309,10 +372,10 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
       const qty = parseFloat(record.quantity) || 0;
       const fee = parseFloat(record.fee) || 0;
 
-      if (record.type === '买入') {
+      if (record.type === '买入' || record.type === '建仓') {
         buyTotalAmount += amount;
         buyTotalQty += qty;
-      } else if (record.type === '卖出') {
+      } else if (record.type === '卖出' || record.type === '清仓') {
         sellTotalAmount += Math.abs(amount);
         sellTotalQty += Math.abs(qty);
       } else if (record.type === '分红') {
@@ -341,21 +404,36 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
           setUploadedImages(prev => [...prev, { id: Date.now() + Math.random(), src: event.target.result, name: file.name }]);
           
           const mockRecognized = [
-            { id: Date.now() + Math.random(), type: '分红', date: '2026-06-30', time: '00:00', price: '-', quantity: '0', amount: '66.60', fee: '-' },
+            { id: Date.now() + Math.random(), type: '分红', date: '2026-06-30', time: '', price: '-', quantity: '0', amount: '66.60', fee: '-' },
             { id: Date.now() + Math.random() + 1, type: '买入', date: '2026-04-24', time: '09:30', price: '19.22', quantity: '100', amount: '1922.00', fee: '5.00' },
             { id: Date.now() + Math.random() + 2, type: '卖出', date: '2026-04-23', time: '14:45', price: '21.57', quantity: '-100', amount: '-2157.00', fee: '6.08' },
             { id: Date.now() + Math.random() + 3, type: '买入', date: '2026-03-23', time: '10:15', price: '18.63', quantity: '100', amount: '1863.00', fee: '5.00' },
-            { id: Date.now() + Math.random() + 4, type: '买入', date: '2026-03-19', time: '09:30', price: '19.91', quantity: '200', amount: '3982.00', fee: '5.00' },
-            { id: Date.now() + Math.random() + 5, type: '买入', date: '2026-03-19', time: '10:00', price: '20.20', quantity: '200', amount: '4040.00', fee: '5.00' },
+            { id: Date.now() + Math.random() + 4, type: '买入', date: '2026-03-19', time: '', price: '19.91', quantity: '200', amount: '3982.00', fee: '5.00' },
+            { id: Date.now() + Math.random() + 5, type: '买入', date: '2026-03-19', time: '', price: '20.20', quantity: '200', amount: '4040.00', fee: '5.00' },
             { id: Date.now() + Math.random() + 6, type: '买入', date: '2026-03-19', time: '14:30', price: '24.54', quantity: '500', amount: '12270.00', fee: '5.00' },
-            { id: Date.now() + Math.random() + 7, type: '买入', date: '2026-03-09', time: '09:30', price: '23.80', quantity: '400', amount: '9520.00', fee: '5.00' },
-            { id: Date.now() + Math.random() + 8, type: '买入', date: '2026-03-06', time: '09:30', price: '25.165', quantity: '400', amount: '10066.00', fee: '5.00' },
+            { id: Date.now() + Math.random() + 7, type: '买入', date: '2026-03-09', time: '', price: '23.80', quantity: '400', amount: '9520.00', fee: '5.00' },
+            { id: Date.now() + Math.random() + 8, type: '买入', date: '2026-03-06', time: '', price: '25.165', quantity: '400', amount: '10066.00', fee: '5.00' },
             { id: Date.now() + Math.random() + 9, type: '买入', date: '2026-03-05', time: '09:30', price: '22.96', quantity: '400', amount: '9184.00', fee: '5.00' },
-            { id: Date.now() + Math.random() + 10, type: '买入', date: '2026-03-04', time: '09:30', price: '22.07', quantity: '200', amount: '4414.00', fee: '5.00' },
-            { id: Date.now() + Math.random() + 11, type: '买入', date: '2026-03-04', time: '10:00', price: '22.08', quantity: '100', amount: '2208.00', fee: '5.00' },
+            { id: Date.now() + Math.random() + 10, type: '买入', date: '2026-03-04', time: '', price: '22.07', quantity: '200', amount: '4414.00', fee: '5.00' },
+            { id: Date.now() + Math.random() + 11, type: '买入', date: '2026-03-04', time: '', price: '22.08', quantity: '100', amount: '2208.00', fee: '5.00' },
             { id: Date.now() + Math.random() + 12, type: '买入', date: '2026-03-04', time: '14:00', price: '21.62', quantity: '300', amount: '6486.00', fee: '5.00' },
-            { id: Date.now() + Math.random() + 13, type: '建仓', date: '2026-03-03', time: '09:30', price: '22.04', quantity: '100', amount: '2204.00', fee: '5.00' },
-          ];
+            { id: Date.now() + Math.random() + 13, type: '建仓', date: '2026-03-03', time: '', price: '22.04', quantity: '100', amount: '2204.00', fee: '5.00' },
+          ].map(r => {
+            // 无时间字段时，自动补充 9:30-15:00 之间的随机时间
+            if (!r.time) {
+              const startMinutes = 9 * 60 + 30; // 9:30 = 570 minutes
+              const endMinutes = 15 * 60; // 15:00 = 900 minutes
+              const randomMinutes = startMinutes + Math.floor(Math.random() * (endMinutes - startMinutes + 1));
+              const hours = Math.floor(randomMinutes / 60);
+              const mins = randomMinutes % 60;
+              r.time = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+            }
+            return r;
+          }).sort((a, b) => {
+            const dateA = `${a.date} ${a.time}`;
+            const dateB = `${b.date} ${b.time}`;
+            return dateB.localeCompare(dateA);
+          });
           setRecognizedRecords(mockRecognized);
           setShowRecognizeModal(true);
         };
@@ -370,16 +448,27 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
 
   const handleAddRecord = () => {
     const record = {
-      id: Date.now(),
+      id: editingRecord ? editingRecord.id : Date.now(),
       direction: newRecord.type,
+      type: newRecord.type,
       transaction_date: `${newRecord.date} ${newRecord.time}`,
+      date: newRecord.date,
+      time: newRecord.time,
       shares: newRecord.type === '分红' ? 0 : parseFloat(newRecord.quantity) || 0,
+      quantity: newRecord.type === '分红' ? 0 : parseFloat(newRecord.quantity) || 0,
       price: newRecord.type === '分红' ? '-' : parseFloat(newRecord.price) || 0,
+      net_value: isDomesticOutdoor ? (newRecord.type === '分红' ? '-' : parseFloat(newRecord.price) || 0) : undefined,
       amount: parseFloat(newRecord.amount) || 0,
       commission: newRecord.type === '分红' ? '-' : parseFloat(newRecord.fee) || 0,
+      fee: newRecord.type === '分红' ? '-' : parseFloat(newRecord.fee) || 0,
     };
     setTradeRecords(prev => {
-      const newRecords = [...prev, record];
+      let newRecords;
+      if (editingRecord) {
+        newRecords = prev.map(r => r.id === editingRecord.id ? record : r);
+      } else {
+        newRecords = [...prev, record];
+      }
       saveTradeRecords(newRecords);
       return newRecords;
     });
@@ -392,6 +481,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
       amount: '',
       fee: '',
     });
+    setEditingRecord(null);
     setShowAddRecord(false);
     setRecordPage(1);
   };
@@ -423,8 +513,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
           {isDomesticOutdoor ? (
             <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4 mb-4">
               <div className="text-center mb-4">
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">资产（元）</p>
-                <p className="text-4xl font-bold text-gray-900 dark:text-white">{formatCurrency(currentValue)}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">资产（{getCurrencyName(selectedCurrency)}）</p>
+                <p className="text-4xl font-bold text-gray-900 dark:text-white">{formatCurrencyWithRate(currentValue, latestData.currency || 'CNY', selectedCurrency, exchangeRates)}</p>
                 {latestData.positionGroup && (
                   <span className="inline-block mt-2 px-3 py-1 text-sm bg-gray-200 dark:bg-slate-600 text-gray-600 dark:text-gray-300 rounded-full">关联组合: {latestData.positionGroup}</span>
                 )}
@@ -433,13 +523,13 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
                 <div className="text-center">
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">昨日收益</p>
                   <p className={`text-2xl font-semibold ${computedDailyPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                    {computedDailyPnl >= 0 ? '+' : ''}{computedDailyPnl.toFixed(2)}
+                    {computedDailyPnl >= 0 ? '+' : ''}{convertCurrency(computedDailyPnl, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
                   </p>
                 </div>
                 <div className="text-center">
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">持仓收益</p>
                   <p className={`text-2xl font-semibold ${floatPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                    {floatPnl >= 0 ? '+' : ''}{floatPnl.toFixed(2)}
+                    {floatPnl >= 0 ? '+' : ''}{convertCurrency(floatPnl, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
                   </p>
                 </div>
                 <div className="text-center">
@@ -451,15 +541,19 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
               </div>
               <div className="bg-white dark:bg-slate-800 rounded-lg p-4">
                 <div className="grid grid-cols-[minmax(90px,auto)_1fr_minmax(80px,auto)_1fr] gap-x-3 gap-y-3 items-center">
-                  {/* 第1行：最新净值 + 日期 | 值 | 日涨幅 | 值 */}
+                  {/* 第1行：单位净值 + 净值时间 | 值 | 日涨幅 | 值 */}
                   <div className="flex flex-col">
                     <div className="flex items-baseline gap-1">
-                      <span className="text-base text-gray-600 dark:text-gray-300">最新净值</span>
-                      {priceDate && (
-                        <span className="text-sm text-gray-400 dark:text-gray-500">{priceDate.slice(5)}</span>
-                      )}
+                      <span className="text-base text-gray-600 dark:text-gray-300">单位净值</span>
                     </div>
-                    <span className="text-[10px] text-gray-300 dark:text-gray-600">数据获取时间: 同步天天基金网 {priceDate ? `${priceDate.slice(5, 7)}月${priceDate.slice(8, 10)}日` : ''}</span>
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                      净值时间: {priceDate ? (() => {
+                        const m = priceDate.match(/(\d{4})-(\d{2})-(\d{2})/);
+                        if (m) return `${m[2]}月${m[3]}日`;
+                        const m2 = priceDate.match(/(\d{2})-(\d{2})/);
+                        return m2 ? `${m2[1]}月${m2[2]}日` : priceDate;
+                      })() : '—'}
+                    </span>
                   </div>
                   <span className="text-xl font-semibold text-gray-900 dark:text-white">{currentPrice > 0 ? currentPrice.toFixed(4) : '—'}</span>
                   <span className="text-base text-gray-600 dark:text-gray-300">日涨幅</span>
@@ -467,13 +561,11 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
                     {computedDailyPnlRate >= 0 ? '+' : ''}{computedDailyPnlRate.toFixed(2)}%
                   </span>
 
-                  {/* 第2行：持仓成本单价 | 值 | 累计收益 | 值 */}
+                  {/* 第2行：持仓成本单价 | 值 | 累计净值 | 值 */}
                   <span className="text-base text-gray-600 dark:text-gray-300">持仓成本单价</span>
                   <span className="text-xl font-semibold text-gray-900 dark:text-white">{costPrice > 0 ? costPrice.toFixed(4) : '—'}</span>
-                  <span className="text-base text-gray-600 dark:text-gray-300">累计收益</span>
-                  <span className={`text-lg font-semibold ${floatPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                    {floatPnl >= 0 ? '+' : ''}{floatPnl.toFixed(2)}
-                  </span>
+                  <span className="text-base text-gray-600 dark:text-gray-300">累计净值</span>
+                  <span className="text-xl font-semibold text-gray-900 dark:text-white">{latestData.accumulatedNav > 0 ? latestData.accumulatedNav.toFixed(4) : '—'}</span>
 
                   {/* 第3行：全部份额 | 值 | 可用份额 | 值 */}
                   <span className="text-base text-gray-600 dark:text-gray-300">全部份额</span>
@@ -484,11 +576,11 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
                   {/* 第4行：持有收益 | 值 | 持有收益率 | 值 */}
                   <span className="text-base text-gray-600 dark:text-gray-300">持有收益</span>
                   <span className={`text-lg font-semibold ${floatPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                    {floatPnl >= 0 ? '+' : ''}{floatPnl.toFixed(2)}
+                    {floatPnl >= 0 ? '+' : ''}{convertCurrency(floatPnl, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
                   </span>
                   <span className="text-base text-gray-600 dark:text-gray-300">持有收益率</span>
-                  <span className={`text-lg font-semibold ${floatPnlRate >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                    {floatPnlRate >= 0 ? '+' : ''}{floatPnlRate.toFixed(2)}%
+                  <span className={`text-lg font-semibold ${computedHoldingReturnRate >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                    {computedHoldingReturnRate >= 0 ? '+' : ''}{computedHoldingReturnRate.toFixed(2)}%
                   </span>
                 </div>
               </div>
@@ -499,7 +591,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
                 <div className={`${isFloatPos ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'} rounded-xl p-3`}>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">浮动盈亏</p>
                   <p className={`text-lg font-bold ${isFloatPos ? 'text-green-600' : 'text-red-500'}`}>
-                    {isFloatPos ? '+' : '-'}{formatNum(Math.abs(floatPnl))}
+                    {isFloatPos ? '+' : '-'}{formatCurrencyWithRate(Math.abs(floatPnl), latestData.currency || 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
                   </p>
                   <p className={`text-xs ${isFloatPos ? 'text-green-600' : 'text-red-500'}`}>
                     {isFloatPos ? '+' : ''}{floatPnlRate.toFixed(2)}%
@@ -508,7 +600,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
                 <div className={`${isDayPos ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'} rounded-xl p-3`}>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">当日参考盈亏</p>
                   <p className={`text-lg font-bold ${isDayPos ? 'text-green-600' : 'text-red-500'}`}>
-                    {isDayPos ? '+' : '-'}{formatNum(Math.abs(dailyPnl))}
+                    {isDayPos ? '+' : '-'}{formatCurrencyWithRate(Math.abs(dailyPnl), latestData.currency || 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
                   </p>
                   <p className={`text-xs ${isDayPos ? 'text-green-600' : 'text-red-500'}`}>
                     {isDayPos ? '+' : ''}{dailyPnlRate.toFixed(2)}%
@@ -559,6 +651,49 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
               </div>
             </>
           )}
+
+          {/* 数据校验区域 */}
+          <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-3 mb-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white">数据校验</h4>
+              {(() => {
+                const computedCost = tradeStats.buyTotalAmount - tradeStats.sellTotalAmount;
+                const listCost = costTotal;
+                const diff = Math.round((computedCost - listCost) * 100) / 100;
+                const isMatch = Math.abs(diff) < 0.01;
+                return (
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isMatch ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400'}`}>
+                    {isMatch ? '校验通过' : '校验异常'}
+                  </span>
+                );
+              })()}
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              {(() => {
+                const computedCost = tradeStats.buyTotalAmount - tradeStats.sellTotalAmount;
+                const listCost = costTotal;
+                const diff = Math.round((computedCost - listCost) * 100) / 100;
+                return (
+                  <>
+                    <div className="text-center">
+                      <p className="text-gray-500 dark:text-gray-400 mb-0.5">明细持仓成本</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatNum(computedCost)}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-gray-500 dark:text-gray-400 mb-0.5">列表持仓成本</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatNum(listCost)}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-gray-500 dark:text-gray-400 mb-0.5">差异</p>
+                      <p className={`text-sm font-semibold ${Math.abs(diff) < 0.01 ? 'text-green-600' : 'text-red-500'}`}>
+                        {diff > 0 ? '+' : ''}{formatNum(diff)}
+                      </p>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
 
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -694,48 +829,58 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
                     </>
                   ) : (
                     <>
-                      <div className="col-span-2">
-                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">确认金额</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={newRecord.amount}
-                          onChange={e => setNewRecord(prev => ({ ...prev, amount: e.target.value }))}
-                          className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                          placeholder="确认金额"
-                        />
-                      </div>
                       <div>
-                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">确认份额</label>
-                        <input
-                          type="number"
-                          step="0.001"
-                          value={newRecord.quantity}
-                          onChange={e => setNewRecord(prev => ({ ...prev, quantity: e.target.value }))}
-                          className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                          placeholder="确认份额"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">确认净值</label>
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">净值</label>
                         <input
                           type="number"
                           step="0.0001"
                           value={newRecord.price}
-                          onChange={e => setNewRecord(prev => ({ ...prev, price: e.target.value }))}
+                          onChange={e => {
+                            const price = e.target.value;
+                            const qty = newRecord.quantity;
+                            const amount = price && qty ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
+                            setNewRecord(prev => ({ ...prev, price, amount }));
+                          }}
                           className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                          placeholder="确认净值"
+                          placeholder="净值"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">份额</label>
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={newRecord.quantity}
+                          onChange={e => {
+                            const qty = e.target.value;
+                            const price = newRecord.price;
+                            const amount = price && qty ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
+                            setNewRecord(prev => ({ ...prev, quantity: qty, amount }));
+                          }}
+                          className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                          placeholder="份额"
                         />
                       </div>
                       <div className="col-span-2">
-                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">手续费</label>
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">金额 (净值×份额)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={newRecord.amount}
+                          readOnly
+                          className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-gray-100 dark:bg-slate-600 cursor-not-allowed"
+                          placeholder="自动计算"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">费用</label>
                         <input
                           type="number"
                           step="0.01"
                           value={newRecord.fee}
                           onChange={e => setNewRecord(prev => ({ ...prev, fee: e.target.value }))}
                           className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                          placeholder="手续费"
+                          placeholder="费用"
                         />
                       </div>
                     </>
@@ -779,85 +924,157 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
                     <span className={`font-medium ${record.type === '建仓' ? 'text-blue-600' : record.type === '买入' ? 'text-green-600' : record.type === '卖出' ? 'text-red-500' : 'text-blue-600'}`}>
                       {record.type}
                     </span>
-                    <span className="text-gray-500 dark:text-gray-400 text-xs">{record.date}</span>
+                    <span className="text-gray-500 dark:text-gray-400 text-xs">{record.date} {record.time}</span>
                   </div>
-                  <div className="grid grid-cols-5 gap-2 text-xs">
-                    <div className="col-span-2">
-                      <span className="text-gray-500 dark:text-gray-400">确认金额</span>
-                      <p className={`${record.amount >= 0 ? 'text-green-600' : 'text-red-500'}`}>{record.amount >= 0 ? '+' : ''}{record.amount}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 dark:text-gray-400">确认份额</span>
-                      <p className="text-gray-900 dark:text-white">{record.quantity}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500 dark:text-gray-400">确认净值</span>
-                      <p className="text-gray-900 dark:text-white">{record.price}</p>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-gray-500 dark:text-gray-400">手续费</span>
-                      <div className="flex items-center gap-1 justify-end flex-1">
-                        <span className="text-gray-900 dark:text-white">{record.fee}</span>
-                        <button
-                          onClick={() => {
-                            setNewRecord({
-                              type: record.type,
-                              date: record.date,
-                              time: record.time,
-                              price: record.price === '-' ? '' : String(record.price),
-                              quantity: String(record.quantity),
-                              amount: String(record.amount),
-                              fee: record.fee === '-' ? '' : String(record.fee),
-                            });
-                            setShowAddRecord(true);
-                            setTradeRecords(prev => {
+                  {isDomesticOutdoor ? (
+                    <div className="grid grid-cols-4 gap-2 text-xs">
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">净值</span>
+                        <p className="text-gray-900 dark:text-white">{record.price}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">份额</span>
+                        <p className="text-gray-900 dark:text-white">{record.quantity}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">金额</span>
+                        <p className={`${record.amount >= 0 ? 'text-green-600' : 'text-red-500'}`}>{record.amount >= 0 ? '+' : ''}{record.amount}</p>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-gray-500 dark:text-gray-400">费用</span>
+                        <div className="flex items-center gap-1 justify-end flex-1">
+                          <span className="text-gray-900 dark:text-white">{record.fee}</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingRecord(record);
+                              setNewRecord({
+                                type: record.type,
+                                date: record.date,
+                                time: record.time,
+                                price: record.price === '-' ? '' : String(record.price),
+                                quantity: String(record.quantity),
+                                amount: String(record.amount),
+                                fee: record.fee === '-' ? '' : String(record.fee),
+                              });
+                              setShowAddRecord(true);
+                            }}
+                            className="p-1.5 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded transition-colors"
+                            title="修改"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setTradeRecords(prev => {
                               const newRecords = prev.filter(r => r.id !== record.id);
                               saveTradeRecords(newRecords);
                               return newRecords;
-                            });
-                          }}
-                          className="p-1.5 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded transition-colors"
-                          title="修改"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setTradeRecords(prev => {
-                            const newRecords = prev.filter(r => r.id !== record.id);
-                            saveTradeRecords(newRecords);
-                            return newRecords;
-                          })}
-                          className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                          title="删除"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                            })}
+                            className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="grid grid-cols-4 gap-2 text-xs">
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">价格</span>
+                        <p className="text-gray-900 dark:text-white">{record.price}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">数量</span>
+                        <p className="text-gray-900 dark:text-white">{record.quantity}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 dark:text-gray-400">金额</span>
+                        <p className={`${record.amount >= 0 ? 'text-green-600' : 'text-red-500'}`}>{record.amount >= 0 ? '+' : ''}{record.amount}</p>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-gray-500 dark:text-gray-400">费用</span>
+                        <div className="flex items-center gap-1 justify-end flex-1">
+                          <span className="text-gray-900 dark:text-white">{record.fee}</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingRecord(record);
+                              setNewRecord({
+                                type: record.type,
+                                date: record.date,
+                                time: record.time,
+                                price: record.price === '-' ? '' : String(record.price),
+                                quantity: String(record.quantity),
+                                amount: String(record.amount),
+                                fee: record.fee === '-' ? '' : String(record.fee),
+                              });
+                              setShowAddRecord(true);
+                            }}
+                            className="p-1.5 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded transition-colors"
+                            title="修改"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setTradeRecords(prev => {
+                              const newRecords = prev.filter(r => r.id !== record.id);
+                              saveTradeRecords(newRecords);
+                              return newRecords;
+                            })}
+                            className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
 
-            {totalRecordPages > 1 && (
-              <div className="flex items-center justify-center gap-2 mt-3">
-                <button
-                  onClick={() => setRecordPage(p => Math.max(1, p - 1))}
-                  disabled={recordPage === 1}
-                  className="px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  上一页
-                </button>
+            {sortedRecords.length > 0 && (
+              <div className="flex items-center justify-between mt-3">
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  第 {recordPage} / {totalRecordPages} 页
+                  共 {sortedRecords.length} 条记录
                 </span>
-                <button
-                  onClick={() => setRecordPage(p => Math.min(totalRecordPages, p + 1))}
-                  disabled={recordPage === totalRecordPages}
-                  className="px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  下一页
-                </button>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={recordPageSize}
+                    onChange={(e) => {
+                      setRecordPageSize(Number(e.target.value));
+                      setRecordPage(1);
+                    }}
+                    className="px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    {[5, 10, 20, 50].map(size => (
+                      <option key={size} value={size}>{size} 条/页</option>
+                    ))}
+                  </select>
+                  {totalRecordPages > 1 && (
+                    <>
+                      <button
+                        onClick={() => setRecordPage(p => Math.max(1, p - 1))}
+                        disabled={recordPage === 1}
+                        className="px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        上一页
+                      </button>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        第 {recordPage} / {totalRecordPages} 页
+                      </span>
+                      <button
+                        onClick={() => setRecordPage(p => Math.min(totalRecordPages, p + 1))}
+                        disabled={recordPage === totalRecordPages}
+                        className="px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        下一页
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -988,13 +1205,22 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
                   onClick={() => {
                     const newRecords = recognizedRecords.map(r => ({
                       id: Date.now() + Math.random(),
+                      type: r.type,
                       direction: r.type,
+                      date: r.date,
+                      time: r.time,
                       transaction_date: `${r.date} ${r.time}`,
+                      quantity: r.type === '分红' ? 0 : parseFloat(r.quantity) || 0,
                       shares: r.type === '分红' ? 0 : parseFloat(r.quantity) || 0,
                       price: r.type === '分红' ? '-' : parseFloat(r.price) || 0,
                       amount: parseFloat(r.amount) || 0,
+                      fee: r.type === '分红' || r.fee === '-' ? '-' : parseFloat(r.fee) || 0,
                       commission: r.type === '分红' || r.fee === '-' ? '-' : parseFloat(r.fee) || 0,
-                    }));
+                    })).sort((a, b) => {
+                      const dateA = `${a.date} ${a.time}`;
+                      const dateB = `${b.date} ${b.time}`;
+                      return dateB.localeCompare(dateA);
+                    });
                     setTradeRecords(prev => {
                       const updatedRecords = [...prev, ...newRecords];
                       saveTradeRecords(updatedRecords);
@@ -1188,7 +1414,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, on
   );
 }
 
-function HoldingsSummaryCard({ summary }) {
+function HoldingsSummaryCard({ summary, selectedCurrency = 'CNY', exchangeRates = {} }) {
   const isPos = summary.totalPnl >= 0;
   const isDayPos = summary.totalDailyPnl >= 0;
   return (
@@ -1203,16 +1429,16 @@ function HoldingsSummaryCard({ summary }) {
       <div className="grid grid-cols-3 gap-2 text-center mb-2">
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当前总市值</p>
-          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatNum(summary.totalMarketValue)}</p>
+          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(summary.totalMarketValue, 'CNY', selectedCurrency, exchangeRates)}</p>
         </div>
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">持仓总成本</p>
-          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatNum(summary.totalCost)}</p>
+          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(summary.totalCost, 'CNY', selectedCurrency, exchangeRates)}</p>
         </div>
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">持仓总盈亏</p>
           <p className={`text-sm font-bold tabular-nums ${isPos ? 'text-green-600' : 'text-red-500'}`}>
-            {pnlSign(summary.totalPnl)}{formatNum(summary.totalPnl)}
+            {pnlSign(summary.totalPnl)}{formatCurrencyWithRate(summary.totalPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
           </p>
         </div>
       </div>
@@ -1226,7 +1452,7 @@ function HoldingsSummaryCard({ summary }) {
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当日总盈亏</p>
           <p className={`text-sm font-bold tabular-nums ${isDayPos ? 'text-green-600' : 'text-red-500'}`}>
-            {pnlSign(summary.totalDailyPnl)}{formatNum(summary.totalDailyPnl)}
+            {pnlSign(summary.totalDailyPnl)}{formatCurrencyWithRate(summary.totalDailyPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
           </p>
         </div>
         <div>
@@ -1318,6 +1544,7 @@ const DEFAULT_COLUMNS = [
   { key: 'positionGroup', label: '持仓分组', visible: false, align: 'left' },
   { key: 'positionType', label: '持仓分类', visible: false, align: 'left' },
   { key: 'cost', label: '持仓成本', visible: true, align: 'right' },
+  { key: 'avgCost', label: '平均买入成本', visible: true, align: 'right' },
   { key: 'quantity', label: '数量', visible: true, align: 'right' },
   { key: 'currentPrice', label: '现价', visible: true, align: 'right' },
 
@@ -1353,6 +1580,8 @@ function CategoryTable({
   tags = [],
   categoryL3CustomOptions = [],
   categoryL4Options = [],
+  selectedCurrency = 'CNY',
+  exchangeRates = {},
 }) {
   const [filterText, setFilterText] = useState('');
   const [page, setPage] = useState(1);
@@ -1561,20 +1790,31 @@ function CategoryTable({
         return <span className="font-medium text-gray-900 dark:text-white">{val || '-'}</span>;
       case 'code':
         return <span className="font-mono">{val || '-'}</span>;
-      case 'cost':
       case 'quantity':
-      case 'currentValue':
         return formatNum(val);
+      case 'cost':
+        return formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
+      case 'avgCost': {
+        const costVal = parseFloat(h.cost) || 0;
+        const qtyVal = parseFloat(h.quantity) || 0;
+        if (costVal > 0 && qtyVal > 0) {
+          const avg = costVal / qtyVal;
+          return formatCurrencyWithRate(avg, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
+        }
+        return '—';
+      }
+      case 'currentValue':
+        return formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
       case 'currentPrice':
         let colorClass = '';
         if (h.priceChange === 'up') colorClass = 'text-green-600 dark:text-green-400';
         else if (h.priceChange === 'down') colorClass = 'text-red-500 dark:text-red-400';
-        return <span className={colorClass}>{formatNum(val)}</span>;
+        return <span className={colorClass}>{formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates).replace(getCurrencySymbol(h.currency || 'CNY'), '')}</span>;
       case 'holdingDays':
         return computeHoldingDays(h) || '-';
       case 'holdingPnl':
       case 'dailyPnl':
-        return <span className={pnlClass(val)}>{pnlSign(parseFloat(val))}{formatNum(val)}</span>;
+        return <span className={pnlClass(val)}>{pnlSign(parseFloat(val))}{formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates).replace(getCurrencySymbol(h.currency || 'CNY'), '')}</span>;
       case 'holdingPnlRate':
       case 'dailyPnlRate':
         return <span className={pnlClass(val)}>{formatPercentage(val)}</span>;
@@ -1681,10 +1921,26 @@ function CategoryTable({
 
   // 分类汇总行（基于筛选后的数据）
   const summary = useMemo(() => {
-    const totalValue = filtered.reduce((s, h) => s + (parseFloat(h.currentValue) || parseFloat(h.balance) || 0), 0);
-    const totalCost = filtered.reduce((s, h) => s + (parseFloat(h.cost) || 0), 0);
-    const totalPnl = filtered.reduce((s, h) => s + (parseFloat(h.holdingPnl) || 0), 0);
-    const totalDailyPnl = filtered.reduce((s, h) => s + (parseFloat(h.dailyPnl) || 0), 0);
+    const totalValue = filtered.reduce((s, h) => {
+      const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+      const currency = h.currency || 'CNY';
+      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+    }, 0);
+    const totalCost = filtered.reduce((s, h) => {
+      const cost = parseFloat(h.cost) || 0;
+      const currency = h.currency || 'CNY';
+      return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
+    }, 0);
+    const totalPnl = filtered.reduce((s, h) => {
+      const pnl = parseFloat(h.holdingPnl) || 0;
+      const currency = h.currency || 'CNY';
+      return s + convertCurrency(pnl, currency, 'CNY', exchangeRates);
+    }, 0);
+    const totalDailyPnl = filtered.reduce((s, h) => {
+      const dailyPnl = parseFloat(h.dailyPnl) || 0;
+      const currency = h.currency || 'CNY';
+      return s + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
+    }, 0);
     return {
       value: totalValue,
       cost: totalCost,
@@ -1693,14 +1949,30 @@ function CategoryTable({
       dailyPnl: totalDailyPnl,
       dailyPnlRate: totalValue > 0 ? (totalDailyPnl / totalValue) * 100 : 0,
     };
-  }, [filtered]);
+  }, [filtered, exchangeRates]);
 
   // 筛选汇总（基于 filtered 数据）
   const filteredSummary = useMemo(() => {
-    const totalCost = filtered.reduce((sum, a) => sum + (parseFloat(a.cost) || 0), 0);
-    const totalMarketValue = filtered.reduce((sum, a) => sum + (parseFloat(a.currentValue) || parseFloat(a.balance) || 0), 0);
-    const totalPnl = filtered.reduce((sum, a) => sum + (parseFloat(a.holdingPnl) || 0), 0);
-    const totalDailyPnl = filtered.reduce((sum, a) => sum + (parseFloat(a.dailyPnl) || 0), 0);
+    const totalCost = filtered.reduce((sum, a) => {
+      const cost = parseFloat(a.cost) || 0;
+      const currency = a.currency || 'CNY';
+      return sum + convertCurrency(cost, currency, 'CNY', exchangeRates);
+    }, 0);
+    const totalMarketValue = filtered.reduce((sum, a) => {
+      const value = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
+      const currency = a.currency || 'CNY';
+      return sum + convertCurrency(value, currency, 'CNY', exchangeRates);
+    }, 0);
+    const totalPnl = filtered.reduce((sum, a) => {
+      const pnl = parseFloat(a.holdingPnl) || 0;
+      const currency = a.currency || 'CNY';
+      return sum + convertCurrency(pnl, currency, 'CNY', exchangeRates);
+    }, 0);
+    const totalDailyPnl = filtered.reduce((sum, a) => {
+      const dailyPnl = parseFloat(a.dailyPnl) || 0;
+      const currency = a.currency || 'CNY';
+      return sum + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
+    }, 0);
     return {
       totalCost,
       totalMarketValue,
@@ -1709,13 +1981,13 @@ function CategoryTable({
       totalDailyPnl,
       totalDailyPnlRate: totalMarketValue > 0 ? (totalDailyPnl / totalMarketValue) * 100 : 0,
     };
-  }, [filtered]);
+  }, [filtered, exchangeRates]);
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700">
       {/* 筛选汇总卡片 */}
       {filtered.length > 0 && (
-        <HoldingsSummaryCard summary={filteredSummary} />
+        <HoldingsSummaryCard summary={filteredSummary} selectedCurrency={selectedCurrency} exchangeRates={exchangeRates} />
       )}
 
       {/* 筛选栏 */}
@@ -2168,21 +2440,21 @@ function CategoryTable({
                   if (col.key === 'cost') {
                     return (
                       <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">
-                        {formatNum(summary.cost)}
+                        {formatCurrencyWithRate(summary.cost, 'CNY', selectedCurrency, exchangeRates)}
                       </td>
                     );
                   }
                   if (col.key === 'currentValue') {
                     return (
                       <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
-                        {formatNum(summary.value)}
+                        {formatCurrencyWithRate(summary.value, 'CNY', selectedCurrency, exchangeRates)}
                       </td>
                     );
                   }
                   if (col.key === 'holdingPnl') {
                     return (
                       <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(summary.pnl)}`}>
-                        {pnlSign(summary.pnl)}{formatNum(summary.pnl)}
+                        {pnlSign(summary.pnl)}{formatCurrencyWithRate(summary.pnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
                       </td>
                     );
                   }
@@ -2196,7 +2468,7 @@ function CategoryTable({
                   if (col.key === 'dailyPnl') {
                     return (
                       <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums font-semibold ${pnlClass(summary.dailyPnl)}`}>
-                        {pnlSign(summary.dailyPnl)}{formatNum(summary.dailyPnl)}
+                        {pnlSign(summary.dailyPnl)}{formatCurrencyWithRate(summary.dailyPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
                       </td>
                     );
                   }
@@ -2243,6 +2515,10 @@ export default function Finance({ onAssetPenetration }) {
   const [editingId, setEditingId] = useState(null);
   const [quotesMap, setQuotesMap] = useState({});
   const [quotesLoading, setQuotesLoading] = useState(false);
+
+  // 汇率和币种切换状态
+  const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.2, JPY: 0.048, HKD: 0.92, EUR: 7.8 });
+  const [selectedCurrency, setSelectedCurrency] = useState('CNY');
 
   // 标签管理状态
   const [books, setBooks] = useState([]);
@@ -2410,6 +2686,7 @@ export default function Finance({ onAssetPenetration }) {
   useEffect(() => {
     loadData();
     loadBooksAndTags();
+    loadExchangeRates();
     const saved = localStorage.getItem('finance_categoryL3_options');
     if (saved) {
       try {
@@ -2419,6 +2696,22 @@ export default function Finance({ onAssetPenetration }) {
       }
     }
   }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      loadExchangeRates();
+    }, 30 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const loadExchangeRates = async () => {
+    try {
+      const rates = await fetchRealTimeExchangeRates();
+      setExchangeRates(rates);
+    } catch (err) {
+      console.error('Failed to load exchange rates:', err);
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem('finance_categoryL3_options', JSON.stringify(categoryL3CustomOptions));
@@ -2485,7 +2778,7 @@ export default function Finance({ onAssetPenetration }) {
       const financeAssetsData = data?.financeAssets || [];
       if (financeAssetsData.length > 0) {
         loadQuotes(financeAssetsData);
-        loadFundNav(financeAssetsData, data);
+        await loadFundNav(financeAssetsData, data);
       }
     } catch (err) {
       console.error('Failed to load finance data:', err);
@@ -2498,7 +2791,13 @@ export default function Finance({ onAssetPenetration }) {
   const loadQuotes = async (financeAssetsData) => {
     if (!financeAssetsData || financeAssetsData.length === 0) return;
     const codes = financeAssetsData
-      .filter(a => a.code)
+      .filter(a => {
+        if (!a.code) return false;
+        // 排除场外基金（由 loadFundNav 单独处理）
+        const catL3 = a.categoryL3 || a.tertiaryCategory;
+        if (catL3 === '场外' || (!catL3 && a.market === '场外基金')) return false;
+        return true;
+      })
       .map(a => ({ code: a.code, market: a.market || '国内市场' }));
     if (codes.length === 0) return;
     setQuotesLoading(true);
@@ -2524,12 +2823,14 @@ export default function Finance({ onAssetPenetration }) {
     const fundItems = financeAssetsData.filter(a => {
       if (!a.code || !/^\d{6}$/.test(String(a.code).trim())) return false;
       // 场外基金（包含 债权类/场外、商品类/场外 等任意一级分类下三级为场外的基金）
-      return a.categoryL3 === '场外' || (!a.categoryL3 && a.market === '场外基金');
+      const catL3 = a.categoryL3 || a.tertiaryCategory;
+      return catL3 === '场外' || (!catL3 && a.market === '场外基金');
     });
     if (fundItems.length === 0) return;
     try {
       const codes = fundItems.map(a => ({ code: a.code }));
       const funds = await fetchFundNav(codes);
+      console.log('[DEBUG-FRONT] 基金净值API返回:', JSON.stringify(funds, null, 2));
       if (!funds || funds.length === 0) return;
       let changed = false;
       const updatedAssets = (currentState?.financeAssets || []).map(a => {
@@ -2537,6 +2838,7 @@ export default function Finance({ onAssetPenetration }) {
         if (!fund) return a;
         const newNav = Number.isFinite(Number(fund.nav)) ? Number(fund.nav) : null;
         const newPrevNav = Number.isFinite(Number(fund.prevNav)) ? Number(fund.prevNav) : null;
+        const newAccNav = Number.isFinite(Number(fund.accumulatedNav)) ? Number(fund.accumulatedNav) : null;
         const newDate = fund.navDate || a.priceDate || '';
         const newChangePct = Number.isFinite(Number(fund.dailyChangePct)) ? Number(fund.dailyChangePct) : null;
         // 仅在 API 返回有效数据时更新
@@ -2546,6 +2848,7 @@ export default function Finance({ onAssetPenetration }) {
           ...a,
           currentPrice: newNav != null ? String(newNav) : a.currentPrice,
           prevPrice: newPrevNav != null ? String(newPrevNav) : a.prevPrice,
+          accumulatedNav: newAccNav != null ? newAccNav : a.accumulatedNav,
           priceDate: newDate,
           dailyChangePct: newChangePct != null ? newChangePct : a.dailyChangePct,
         };
@@ -2623,6 +2926,11 @@ export default function Finance({ onAssetPenetration }) {
         pnlPercent: _holdingPnlRate,
         todayPnl: _dailyPnl,
         todayPnlPercent: _dailyPnlRate,
+        holdingPnl: _holdingPnl,
+        holdingPnlRate: _holdingPnlRate,
+        dailyPnl: _dailyPnl,
+        dailyPnlRate: _dailyPnlRate,
+        currentValue: _currentPrice * _quantity,
         positionWeight: 0,
         totalFees: 0,
       };
@@ -3572,25 +3880,42 @@ export default function Finance({ onAssetPenetration }) {
         <section className="rounded-2xl p-5 sm:p-6 shadow-soft"
           style={{ background: 'linear-gradient(135deg, #EEEDFF 0%, #F5F3FF 40%, #FEF3E2 100%)' }}>
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">💎 理财模块</h1>
-              <p className="text-sm text-gray-500 mt-0.5">持仓管理 · 账户总览 · 实时盈亏</p>
+            <div className="flex items-center gap-3">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">💎 理财模块</h1>
+                <p className="text-sm text-gray-500 mt-0.5">持仓管理 · 账户总览 · 实时盈亏</p>
+              </div>
+              <div className="relative">
+                <select
+                  value={selectedCurrency}
+                  onChange={(e) => setSelectedCurrency(e.target.value)}
+                  className="appearance-none bg-white/80 dark:bg-slate-800/80 border border-gray-200 dark:border-slate-600 rounded-lg px-3 py-1.5 pr-8 text-sm font-medium text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent cursor-pointer">
+                  {['CNY', 'USD', 'JPY', 'HKD', 'EUR'].map(code => (
+                    <option key={code} value={code}>{getCurrencySymbol(code)} {getCurrencyName(code)}</option>
+                  ))}
+                </select>
+                <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
             </div>
             <div className="text-center lg:text-right">
               <div className="text-4xl sm:text-5xl font-black text-gray-900 whitespace-nowrap tabular-nums tracking-tight">
-                ¥{formatCurrency(totalValue)}
+                {formatCurrencyWithRate(totalValue, 'CNY', selectedCurrency, exchangeRates)}
               </div>
               <div className="mt-1 flex items-center justify-center lg:justify-end gap-2 text-sm flex-wrap">
                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
                   isTotalPos ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                 }`}>
                   {isTotalPos ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                  总盈亏 {isTotalPos ? '+' : ''}{formatCurrency(totalPnl)} ({formatPercentage(totalPnlRate)})
+                  总盈亏 {isTotalPos ? '+' : ''}{formatCurrencyWithRate(totalPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')} ({formatPercentage(totalPnlRate)})
                 </span>
                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
                   isDayPos ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'
                 }`}>
-                  当日 {isDayPos ? '+' : ''}{formatCurrency(totalDailyPnl)} ({formatPercentage(totalDailyPnlRate)})
+                  当日 {isDayPos ? '+' : ''}{formatCurrencyWithRate(totalDailyPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')} ({formatPercentage(totalDailyPnlRate)})
                 </span>
               </div>
             </div>
@@ -3610,9 +3935,9 @@ export default function Finance({ onAssetPenetration }) {
         {/* ═══ 四张核心统计卡 ═══ */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
           {[
-            { IconComp: Wallet, label: '总市值', val: `¥${formatCurrency(totalValue)}`, cls: 'bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400' },
-            { IconComp: Briefcase, label: '总成本', val: `¥${formatCurrency(totalCost)}`, cls: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' },
-            { IconComp: isTotalPos ? TrendingUp : TrendingDown, label: '总盈亏', val: `${isTotalPos ? '+' : '-'}¥${formatCurrency(Math.abs(totalPnl))}`, cls: `${isTotalPos ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'} dark:${isTotalPos ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}` },
+            { IconComp: Wallet, label: '总市值', val: formatCurrencyWithRate(totalValue, 'CNY', selectedCurrency, exchangeRates), cls: 'bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400' },
+            { IconComp: Briefcase, label: '总成本', val: formatCurrencyWithRate(totalCost, 'CNY', selectedCurrency, exchangeRates), cls: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' },
+            { IconComp: isTotalPos ? TrendingUp : TrendingDown, label: '总盈亏', val: `${isTotalPos ? '+' : '-'}${formatCurrencyWithRate(Math.abs(totalPnl), 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}`, cls: `${isTotalPos ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'} dark:${isTotalPos ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}` },
             { IconComp: PieChart, label: '总收益率', val: formatPercentage(totalPnlRate), cls: `${isTotalPos ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'} dark:${isTotalPos ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}` },
           ].map((card, idx) => (
             <div key={idx} className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-4 sm:p-5 shadow-soft border border-gray-100/80 dark:border-slate-700/50 hover:shadow-md transition-all">
@@ -3633,6 +3958,26 @@ export default function Finance({ onAssetPenetration }) {
           ))}
         </section>
 
+        {/* ═══ 实时汇率卡片 ═══ */}
+        <section className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-4 shadow-soft border border-gray-100/80 dark:border-slate-700/50">
+          <div className="flex items-center gap-2 mb-3">
+            <RefreshCw className="w-4 h-4 text-indigo-500" />
+            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">实时汇率</span>
+            <span className="text-xs text-gray-400">基准：人民币(CNY)</span>
+          </div>
+          <div className="flex flex-wrap gap-4">
+            {Object.entries(exchangeRates).filter(([code]) => ['USD', 'JPY', 'HKD', 'EUR'].includes(code)).map(([code, rate]) => (
+              <div key={code} className="flex items-center gap-3">
+                <span className="text-sm font-medium text-gray-600 dark:text-gray-400">{getCurrencyName(code)}</span>
+                <span className="text-xs text-gray-400">1 {code}</span>
+                <span className="text-base font-bold text-gray-900 dark:text-white tabular-nums">
+                  = {getCurrencySymbol('CNY')}{rate.toFixed(code === 'JPY' ? 4 : 2)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+
         {/* ═══ 账户本区域 ═══ */}
         <section className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-5 shadow-soft border border-gray-100/80 dark:border-slate-700/50">
           <div className="flex items-center justify-between mb-4">
@@ -3651,7 +3996,7 @@ export default function Finance({ onAssetPenetration }) {
           {computed.accountBook.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {pagedAccountBook.map(acc =>
-                <AccountCard key={acc.name} {...acc} />
+                <AccountCard key={acc.name} {...acc} selectedCurrency={selectedCurrency} exchangeRates={exchangeRates} />
               )}
             </div>
           ) : (
@@ -3665,11 +4010,11 @@ export default function Finance({ onAssetPenetration }) {
             <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-700 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-center text-xs">
               {[
                 ['账户数', `${computed.accountBook.length}个`, ''],
-                ['合计市值', `¥${formatCurrency(totalValue)}`, ''],
-                ['合计成本', `¥${formatCurrency(totalCost)}`, ''],
-                ['合计盈亏', `${isTotalPos?'+':''}¥${formatCurrency(totalPnl)}`, isTotalPos?POS_CLASS:NEG_CLASS],
+                ['合计市值', formatCurrencyWithRate(totalValue, 'CNY', selectedCurrency, exchangeRates), ''],
+                ['合计成本', formatCurrencyWithRate(totalCost, 'CNY', selectedCurrency, exchangeRates), ''],
+                ['合计盈亏', `${isTotalPos?'+':''}${formatCurrencyWithRate(totalPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}`, isTotalPos?POS_CLASS:NEG_CLASS],
                 ['合计收益率', formatPercentage(totalPnlRate), isTotalPos?POS_CLASS:NEG_CLASS],
-                ['当日收益', `${isDayPos?'+':''}¥${formatCurrency(totalDailyPnl)}`, isDayPos?POS_CLASS:NEG_CLASS],
+                ['当日收益', `${isDayPos?'+':''}${formatCurrencyWithRate(totalDailyPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}`, isDayPos?POS_CLASS:NEG_CLASS],
               ].map(([label, val, cls], i) => (
                 <div key={i}>
                   <p className="text-gray-400 mb-0.5">{label}</p>
@@ -3717,6 +4062,8 @@ export default function Finance({ onAssetPenetration }) {
               marketGroups={MARKET_GROUPS}
               categoryL3CustomOptions={categoryL3CustomOptions}
               categoryL4Options={categoryL4Options}
+              selectedCurrency={selectedCurrency}
+              exchangeRates={exchangeRates}
             />
           ) : (
             <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-12 text-center shadow-soft border border-gray-100/80 dark:border-slate-700/50">
@@ -3740,7 +4087,11 @@ export default function Finance({ onAssetPenetration }) {
             onClose={() => setShowDetailModal(false)}
             saveState={saveState}
             stateData={stateData}
+            setStateData={setStateData}
             onRefresh={loadData}
+            selectedCurrency={selectedCurrency}
+            exchangeRates={exchangeRates}
+            quotesMap={quotesMap}
           />
         )}
 
@@ -3830,6 +4181,10 @@ export default function Finance({ onAssetPenetration }) {
                 </div>
 
                 {/* 表单主体 */}
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs flex items-center justify-center font-bold">1</div>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">分类选择</span>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
                   {/* Row 1: 市场 | 货币单位（可自由编辑） */}
                   <FormField label="市场" required>
@@ -4038,257 +4393,260 @@ export default function Finance({ onAssetPenetration }) {
                     </div>
                   </FormField>
 
-                  {/* Row 6: 资产名称 | 资产代码 */}
-                  <FormField label="资产名称" required>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={newAccount.name}
-                        onChange={e => {
-                          setNewAccount({ ...newAccount, name: e.target.value });
-                          handleCodeSearch(e.target.value);
-                        }}
-                        onFocus={() => newAccount.name && handleCodeSearch(newAccount.name)}
-                        onBlur={() => setTimeout(() => setShowLookupDropdown(false), 200)}
-                        placeholder="基金、股票或自定义资产名称"
-                        className={FORM_INPUT}
-                      />
-                      {showLookupDropdown && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-50 max-h-52 overflow-y-auto">
-                          {lookupLoading ? (
-                            <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">搜索中...</div>
-                          ) : lookupResults.length === 0 ? (
-                            <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">无匹配结果</div>
-                          ) : (
-                            lookupResults.map((item, idx) => (
-                              <div
-                                key={idx}
-                                onClick={() => handleSelectLookup(item)}
-                                className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400">{item.code}</span>
-                                  {item.price && <span className="text-xs text-gray-500 dark:text-gray-400">¥{item.price}</span>}
-                                </div>
-                                <div className="text-sm text-gray-800 dark:text-gray-200 truncate">{item.name}</div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </FormField>
-
-                  {/* Row 6: 代码 | 成本 */}
-                  <FormField label="资产代码" required>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={newAccount.code}
-                        onChange={e => {
-                          setNewAccount({ ...newAccount, code: e.target.value });
-                          handleCodeSearch(e.target.value);
-                        }}
-                        onFocus={() => newAccount.code && handleCodeSearch(newAccount.code)}
-                        onBlur={() => setTimeout(() => setShowLookupDropdown(false), 200)}
-                        placeholder="输入代码如 600519"
-                        className={`${FORM_INPUT} font-mono`}
-                      />
-                      {showLookupDropdown && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-50 max-h-52 overflow-y-auto">
-                          {lookupLoading ? (
-                            <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">搜索中...</div>
-                          ) : lookupResults.length === 0 ? (
-                            <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">无匹配结果</div>
-                          ) : (
-                            lookupResults.map((item, idx) => (
-                              <div
-                                key={idx}
-                                onClick={() => handleSelectLookup(item)}
-                                className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400">{item.code}</span>
-                                  {item.price && <span className="text-xs text-gray-500 dark:text-gray-400">¥{item.price}</span>}
-                                </div>
-                                <div className="text-sm text-gray-800 dark:text-gray-200 truncate">{item.name}</div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </FormField>
-
-                  <FormField label="持仓成本" required>
-                    <input type="number" step="0.001" value={newAccount.cost} onChange={e => {
-                      const val = e.target.value;
-                      setNewAccount(p => {
-                        const qty = parseFloat(p.quantity) || 0;
-                        const cost = parseFloat(val) || 0;
-                        const price = parseFloat(p.currentPrice) || 0;
-                        const currentValue = qty * price;
-                        const unitPnl = price - cost;
-                        const holdingPnl = unitPnl * qty;
-                        const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
-                        return {
-                          ...p,
-                          cost: val,
-                          currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
-                          holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
-                          holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
-                        };
-                      });
-                    }}
-                      placeholder="0.00" className={FORM_INPUT} />
-                  </FormField>
-
-                  {/* Row 7: 数量 | 现价 */}
-                  <FormField label="份额 / 数量" required>
-                    <input type="number" step="0.0001" value={newAccount.quantity} onChange={e => {
-                      const val = e.target.value;
-                      setNewAccount(p => {
-                        const qty = parseFloat(val) || 0;
-                        const cost = parseFloat(p.cost) || 0;
-                        const price = parseFloat(p.currentPrice) || 0;
-                        const prev = parseFloat(p.prevPrice) || 0;
-                        const currentValue = qty * price;
-                        const unitPnl = price - cost;
-                        const holdingPnl = unitPnl * qty;
-                        const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
-                        const dailyPnl = qty * (price - prev);
-                        const dailyPnlRate = prev > 0 ? ((price - prev) / prev) * 100 : 0;
-                        return {
-                          ...p,
-                          quantity: val,
-                          currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
-                          holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
-                          holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
-                          dailyPnl: (qty && price && prev) ? dailyPnl.toFixed(2) : p.dailyPnl,
-                          dailyPnlRate: (price && prev) ? dailyPnlRate.toFixed(2) : p.dailyPnlRate,
-                        };
-                      });
-                    }}
-                      placeholder="0" className={FORM_INPUT} />
-                  </FormField>
-
-                  <FormField label="现价">
-                    <input type="number" step="0.0001" value={newAccount.currentPrice} onChange={e => {
-                      const val = e.target.value;
-                      setNewAccount(p => {
-                        const qty = parseFloat(p.quantity) || 0;
-                        const cost = parseFloat(p.cost) || 0;
-                        const price = parseFloat(val) || 0;
-                        const prev = parseFloat(p.prevPrice) || 0;
-                        const currentValue = qty * price;
-                        const unitPnl = price - cost;
-                        const holdingPnl = unitPnl * qty;
-                        const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
-                        const dailyPnl = qty * (price - prev);
-                        const dailyPnlRate = prev > 0 ? ((price - prev) / prev) * 100 : 0;
-                        return {
-                          ...p,
-                          currentPrice: val,
-                          currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
-                          holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
-                          holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
-                          dailyPnl: (qty && price && prev) ? dailyPnl.toFixed(2) : p.dailyPnl,
-                          dailyPnlRate: (price && prev) ? dailyPnlRate.toFixed(2) : p.dailyPnlRate,
-                        };
-                      });
-                    }} placeholder="0.0000" className={FORM_INPUT} />
-                  </FormField>
-
-                  <FormField label="前一交易日净值">
-                    <input type="number" step="0.0001" value={newAccount.prevPrice} onChange={e => {
-                      const val = e.target.value;
-                      setNewAccount(p => {
-                        const qty = parseFloat(p.quantity) || 0;
-                        const price = parseFloat(p.currentPrice) || 0;
-                        const prev = parseFloat(val) || 0;
-                        const dailyPnl = qty * (price - prev);
-                        const dailyPnlRate = prev > 0 ? ((price - prev) / prev) * 100 : 0;
-                        return {
-                          ...p,
-                          prevPrice: val,
-                          dailyPnl: (qty && price && prev) ? dailyPnl.toFixed(2) : p.dailyPnl,
-                          dailyPnlRate: (price && prev) ? dailyPnlRate.toFixed(2) : p.dailyPnlRate,
-                        };
-                      });
-                    }} placeholder="0.0000" className={FORM_INPUT} />
-                  </FormField>
-
-                  <FormField label="净值日期">
-                    <input type="date" value={newAccount.priceDate} onChange={e => setNewAccount({ ...newAccount, priceDate: e.target.value })}
-                      className={FORM_INPUT} />
-                  </FormField>
-
-                  {/* Row 8: 持仓天数 | (空) */}
-                  <FormField label="持仓天数">
-                    <input type="number" value={newAccount.holdingDays} onChange={e => setNewAccount({ ...newAccount, holdingDays: e.target.value })}
-                      placeholder="0" className={FORM_INPUT} />
-                  </FormField>
-
-                  <div></div>
-
-                  {/* Row 8: 持仓盈亏 | 持仓盈亏率 */}
-                  <FormField label="持仓盈亏">
-                    <div className="relative">
-                      <input type="number" step="0.001" value={newAccount.holdingPnl}
-                        onChange={e => setNewAccount({ ...newAccount, holdingPnl: e.target.value })}
-                        placeholder="自动计算 或 手动输入"
-                        className={`${FORM_INPUT} pl-7 ${pnlClass(newAccount.holdingPnl)}`} />
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">¥</span>
-                    </div>
-                  </FormField>
-
-                  <FormField label="持仓盈亏率">
-                    <div className="relative">
-                      <input type="number" step="0.001" value={newAccount.holdingPnlRate}
-                        onChange={e => setNewAccount({ ...newAccount, holdingPnlRate: e.target.value })}
-                        placeholder="自动计算 或 手动输入" className={`${FORM_INPUT} pr-7 ${pnlClass(newAccount.holdingPnlRate)}`} />
-                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
-                    </div>
-                  </FormField>
-
-                  {/* Row 9: 当前价值 — 全宽 */}
-                  <div className="sm:col-span-2">
-                    <FormField label="当前市值" markRequired fullWidth>
-                      <div className="relative">
-                        <input type="number" step="0.001" value={newAccount.currentValue}
-                          readOnly
-                          placeholder="自动计算"
-                          className={`${FORM_INPUT} pl-7 font-semibold bg-gray-50 dark:bg-slate-700 cursor-not-allowed`} />
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">¥</span>
-                      </div>
-                      {(newAccount.quantity && newAccount.currentPrice) && (
-                        <p className="mt-1 text-xs text-gray-400">
-                          = {newAccount.quantity} × {newAccount.currentPrice} = {(parseFloat(newAccount.quantity) * parseFloat(newAccount.currentPrice)).toFixed(2)}
-                        </p>
-                      )}
-                    </FormField>
-                  </div>
-
-                  {/* Row 12: 标签 — 全宽 */}
-                  <div className="sm:col-span-2">
-                    <FormField label="标签" fullWidth>
-                      <div className="flex gap-2">
-                        <select 
-                          value={newAccount.tags || ''} 
-                          onChange={e => setNewAccount({ ...newAccount, tags: e.target.value })}
-                          className={`${FORM_SELECT} flex-1`}>
-                          <option value="">请选择标签</option>
-                          {tags.map(tag => (
-                            <option key={tag} value={tag}>{tag}</option>
-                          ))}
-                        </select>
-                        <button onClick={() => setShowTagModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
-                          <Settings className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </FormField>
-                  </div>
                 </div>
+
+                {/* === 第二步：资产详情（分类选择完成后显示）=== */}
+                {newAccount.market && newAccount.assetType && newAccount.categoryL1 && newAccount.categoryL2 && newAccount.categoryL3 ? (
+                  <>
+                    <div className="border-t border-gray-200 dark:border-slate-700 pt-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs flex items-center justify-center font-bold">2</div>
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">资产详情</span>
+                        <span className="text-xs text-gray-400">
+                          {newAccount.market === '国内市场' && newAccount.assetType === '股票' && '· 股票'}
+                          {newAccount.market === '国内市场' && newAccount.assetType === '基金' && newAccount.categoryL3 === '场内' && '· 场内基金'}
+                          {newAccount.market === '国内市场' && newAccount.assetType === '基金' && newAccount.categoryL3 === '场外' && '· 场外基金'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+                      {/* 资产名称 */}
+                      <FormField label="资产名称" required>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={newAccount.name}
+                            onChange={e => {
+                              setNewAccount({ ...newAccount, name: e.target.value });
+                              handleCodeSearch(e.target.value);
+                            }}
+                            onFocus={() => newAccount.name && handleCodeSearch(newAccount.name)}
+                            onBlur={() => setTimeout(() => setShowLookupDropdown(false), 200)}
+                            placeholder="基金、股票或自定义资产名称"
+                            className={FORM_INPUT}
+                          />
+                          {showLookupDropdown && (
+                            <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-50 max-h-52 overflow-y-auto">
+                              {lookupLoading ? (
+                                <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">搜索中...</div>
+                              ) : lookupResults.length === 0 ? (
+                                <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">无匹配结果</div>
+                              ) : (
+                                lookupResults.map((item, idx) => (
+                                  <div
+                                    key={idx}
+                                    onClick={() => handleSelectLookup(item)}
+                                    className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400">{item.code}</span>
+                                      {item.price && <span className="text-xs text-gray-500 dark:text-gray-400">¥{item.price}</span>}
+                                    </div>
+                                    <div className="text-sm text-gray-800 dark:text-gray-200 truncate">{item.name}</div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </FormField>
+
+                      {/* 资产代码 */}
+                      <FormField label="资产代码" required>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={newAccount.code}
+                            onChange={e => {
+                              setNewAccount({ ...newAccount, code: e.target.value });
+                              handleCodeSearch(e.target.value);
+                            }}
+                            onFocus={() => newAccount.code && handleCodeSearch(newAccount.code)}
+                            onBlur={() => setTimeout(() => setShowLookupDropdown(false), 200)}
+                            placeholder="输入代码如 600519"
+                            className={`${FORM_INPUT} font-mono`}
+                          />
+                          {showLookupDropdown && (
+                            <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-50 max-h-52 overflow-y-auto">
+                              {lookupLoading ? (
+                                <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">搜索中...</div>
+                              ) : lookupResults.length === 0 ? (
+                                <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">无匹配结果</div>
+                              ) : (
+                                lookupResults.map((item, idx) => (
+                                  <div
+                                    key={idx}
+                                    onClick={() => handleSelectLookup(item)}
+                                    className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400">{item.code}</span>
+                                      {item.price && <span className="text-xs text-gray-500 dark:text-gray-400">¥{item.price}</span>}
+                                    </div>
+                                    <div className="text-sm text-gray-800 dark:text-gray-200 truncate">{item.name}</div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </FormField>
+
+                      {/* 持仓成本 */}
+                      <FormField label="持仓成本" required>
+                        <input type="number" step="0.001" value={newAccount.cost} onChange={e => {
+                          const val = e.target.value;
+                          setNewAccount(p => {
+                            const qty = parseFloat(p.quantity) || 0;
+                            const cost = parseFloat(val) || 0;
+                            const price = parseFloat(p.currentPrice) || 0;
+                            const currentValue = qty * price;
+                            const unitPnl = price - cost;
+                            const holdingPnl = unitPnl * qty;
+                            const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+                            return {
+                              ...p,
+                              cost: val,
+                              currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
+                              holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
+                              holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                            };
+                          });
+                        }}
+                          placeholder="0.00" className={FORM_INPUT} />
+                      </FormField>
+
+                      {/* 份额/数量 - 根据资产类型动态显示标签 */}
+                      <FormField label={
+                        newAccount.market === '国内市场' && newAccount.assetType === '基金' && newAccount.categoryL3 === '场外'
+                          ? '持仓份额'
+                          : (newAccount.market === '国内市场' && (newAccount.assetType === '股票' || (newAccount.assetType === '基金' && newAccount.categoryL3 === '场内')))
+                            ? '持仓数量'
+                            : '份额 / 数量'
+                      } required>
+                        <input type="number" step="0.0001" value={newAccount.quantity} onChange={e => {
+                          const val = e.target.value;
+                          setNewAccount(p => {
+                            const qty = parseFloat(val) || 0;
+                            const cost = parseFloat(p.cost) || 0;
+                            const price = parseFloat(p.currentPrice) || 0;
+                            const currentValue = qty * price;
+                            const unitPnl = price - cost;
+                            const holdingPnl = unitPnl * qty;
+                            const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+                            return {
+                              ...p,
+                              quantity: val,
+                              currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
+                              holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
+                              holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                            };
+                          });
+                        }}
+                          placeholder="0" className={FORM_INPUT} />
+                      </FormField>
+
+                      {/* 持仓天数 */}
+                      <FormField label="持仓天数">
+                        <input type="number" value={newAccount.holdingDays} onChange={e => setNewAccount({ ...newAccount, holdingDays: e.target.value })}
+                          placeholder="0" className={FORM_INPUT} />
+                      </FormField>
+
+                      {/* 以下字段仅在非国内市场简单模式（股票/基金场内/基金场外）时显示 */}
+                      {!(newAccount.market === '国内市场' && (newAccount.assetType === '股票' || (newAccount.assetType === '基金' && (newAccount.categoryL3 === '场内' || newAccount.categoryL3 === '场外')))) && (
+                        <>
+                          <FormField label="现价">
+                            <input type="number" step="0.0001" value={newAccount.currentPrice} onChange={e => {
+                              const val = e.target.value;
+                              setNewAccount(p => {
+                                const qty = parseFloat(p.quantity) || 0;
+                                const cost = parseFloat(p.cost) || 0;
+                                const price = parseFloat(val) || 0;
+                                const currentValue = qty * price;
+                                const unitPnl = price - cost;
+                                const holdingPnl = unitPnl * qty;
+                                const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+                                return {
+                                  ...p,
+                                  currentPrice: val,
+                                  currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
+                                  holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
+                                  holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                                };
+                              });
+                            }} placeholder="0.0000" className={FORM_INPUT} />
+                          </FormField>
+
+                          <div></div>
+
+                          <FormField label="持仓盈亏">
+                            <div className="relative">
+                              <input type="number" step="0.001" value={newAccount.holdingPnl}
+                                onChange={e => setNewAccount({ ...newAccount, holdingPnl: e.target.value })}
+                                placeholder="自动计算 或 手动输入"
+                                className={`${FORM_INPUT} pl-7 ${pnlClass(newAccount.holdingPnl)}`} />
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">¥</span>
+                            </div>
+                          </FormField>
+
+                          <FormField label="持仓盈亏率">
+                            <div className="relative">
+                              <input type="number" step="0.001" value={newAccount.holdingPnlRate}
+                                onChange={e => setNewAccount({ ...newAccount, holdingPnlRate: e.target.value })}
+                                placeholder="自动计算 或 手动输入" className={`${FORM_INPUT} pr-7 ${pnlClass(newAccount.holdingPnlRate)}`} />
+                              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                            </div>
+                          </FormField>
+
+                          <div className="sm:col-span-2">
+                            <FormField label="当前市值" markRequired fullWidth>
+                              <div className="relative">
+                                <input type="number" step="0.001" value={newAccount.currentValue}
+                                  readOnly
+                                  placeholder="自动计算"
+                                  className={`${FORM_INPUT} pl-7 font-semibold bg-gray-50 dark:bg-slate-700 cursor-not-allowed`} />
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">¥</span>
+                              </div>
+                              {(newAccount.quantity && newAccount.currentPrice) && (
+                                <p className="mt-1 text-xs text-gray-400">
+                                  = {newAccount.quantity} × {newAccount.currentPrice} = {(parseFloat(newAccount.quantity) * parseFloat(newAccount.currentPrice)).toFixed(2)}
+                                </p>
+                              )}
+                            </FormField>
+                          </div>
+                        </>
+                      )}
+
+                      {/* 标签 — 全宽 */}
+                      <div className="sm:col-span-2">
+                        <FormField label="标签" fullWidth>
+                          <div className="flex gap-2">
+                            <select
+                              value={newAccount.tags || ''}
+                              onChange={e => setNewAccount({ ...newAccount, tags: e.target.value })}
+                              className={`${FORM_SELECT} flex-1`}>
+                              <option value="">请选择标签</option>
+                              {tags.map(tag => (
+                                <option key={tag} value={tag}>{tag}</option>
+                              ))}
+                            </select>
+                            <button onClick={() => setShowTagModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
+                              <Settings className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </FormField>
+                      </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="border-t border-gray-200 dark:border-slate-700 pt-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-6 h-6 rounded-full bg-gray-300 dark:bg-slate-600 text-gray-500 text-xs flex items-center justify-center font-bold">2</div>
+                      <span className="text-sm text-gray-400 dark:text-gray-500">资产详情</span>
+                    </div>
+                    <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">请先完成上方市场、资产类型和分类选择</p>
+                  </div>
+                )}
 
                 {/* 操作按钮 */}
                 <div className="flex gap-3 pt-3 border-t border-gray-200 dark:border-slate-700">

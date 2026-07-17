@@ -1,5 +1,5 @@
 import { json } from "../utils/http.js";
-import { lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getIndexHistory } from "../services/finance-service.js";
+import { lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getCSIndex, getIndexHistory } from "../services/finance-service.js";
 
 async function handler(req, res, body, origin, pathname, url) {
   if (req.method === "GET" && pathname === "/api/finance/lookup") {
@@ -97,8 +97,14 @@ async function handler(req, res, body, origin, pathname, url) {
       return;
     }
     try {
-      const result = await getUSIndex(code);
-      json(res, 200, result, origin);
+      const upperCode = code.toUpperCase();
+      if (upperCode === "IXIC" || upperCode === "SPX") {
+        const result = await getUSIndex(code);
+        json(res, 200, result, origin);
+      } else {
+        const result = await getCSIndex(code);
+        json(res, 200, result, origin);
+      }
     } catch (err) {
       json(res, 502, { error: "index data unavailable", detail: err.message }, origin);
     }
@@ -111,8 +117,9 @@ async function handler(req, res, body, origin, pathname, url) {
       json(res, 400, { error: "index code required" }, origin);
       return;
     }
+    const count = parseInt(url.searchParams.get("count") || "120", 10);
     try {
-      const result = await getIndexHistory(code);
+      const result = await getIndexHistory(code, count);
       json(res, 200, result, origin);
     } catch (err) {
       json(res, 502, { error: "index history unavailable", detail: err.message }, origin);

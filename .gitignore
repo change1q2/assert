@@ -33,3 +33,8 @@ Thumbs.db
 nul
 assert_PLATFORM/releases/*/packages/*
 !assert_PLATFORM/releases/*/packages/.gitkeep
+
+# IDE & temp files
+assert_WEB/.trae/
+assert_PLATFORM/temp_state.json
+tmp_login.js

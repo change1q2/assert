@@ -250,6 +250,42 @@ async function getQuotes(codes) {
       };
     } catch (_) { }
   }));
+
+  const baiduFallbackItems = queryItems.filter(({ index }) => results[index].price == null);
+  await Promise.all(baiduFallbackItems.map(async ({ tencentCode, index }) => {
+    const prefix = tencentCode.slice(0, 2);
+    if (!["sh", "sz"].includes(prefix)) return;
+    const stockCode = tencentCode.slice(2);
+    try {
+      const baiduUrl = `https://finance.baidu.com/stock/${tencentCode}.html`;
+      const baiduRes = await fetch(baiduUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        signal: AbortSignal.timeout(8000),
+      });
+      const baiduText = await baiduRes.text();
+      
+      const priceMatch = baiduText.match(/最新价[\s\S]*?<span[^>]*>([\d.]+)<\/span>/);
+      const changePctMatch = baiduText.match(/涨跌幅[\s\S]*?<span[^>]*>([\d.-]+)%<\/span>/);
+      const prevCloseMatch = baiduText.match(/昨收[\s\S]*?<span[^>]*>([\d.]+)<\/span>/);
+      const highMatch = baiduText.match(/最高[\s\S]*?<span[^>]*>([\d.]+)<\/span>/);
+      const lowMatch = baiduText.match(/最低[\s\S]*?<span[^>]*>([\d.]+)<\/span>/);
+      const nameMatch = baiduText.match(/<title>([^<]+?)_百度财经<\/title>/);
+      
+      const price = priceMatch ? parseFloat(priceMatch[1]) : null;
+      if (price != null) {
+        results[index] = {
+          ...results[index],
+          name: nameMatch ? nameMatch[1] : null,
+          price: price,
+          prevClose: prevCloseMatch ? parseFloat(prevCloseMatch[1]) : null,
+          changePct: changePctMatch ? parseFloat(changePctMatch[1]) : null,
+          high: highMatch ? parseFloat(highMatch[1]) : null,
+          low: lowMatch ? parseFloat(lowMatch[1]) : null,
+        };
+      }
+    } catch (_) { }
+  }));
+
   return { quotes: results };
 }
 
@@ -260,6 +296,7 @@ async function getFundNav(codes) {
     name: null,
     nav: null,
     prevNav: null,
+    accumulatedNav: null,
     dailyChangePct: null,
     dailyChangeAmt: null,
     navDate: null,
@@ -267,8 +304,15 @@ async function getFundNav(codes) {
   await Promise.all(codes.map(async (item, index) => {
     const code = String(item.code || '').trim();
     if (!/^\d{6}$/.test(code)) return;
+    let nav = null;
+    let prevNav = null;
+    let accumulatedNav = null;
+    let dailyChangePct = null;
+    let navDate = null;
+
+    // 主数据源：Eastmoney API（增大 pageSize 确保获取前一日净值）
     try {
-      const navUrl = `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=2&startDate=&endDate=`;
+      const navUrl = `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=5&startDate=&endDate=`;
       const navRes = await fetch(navUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -278,35 +322,209 @@ async function getFundNav(codes) {
       });
       const navData = await navRes.json();
       const list = navData?.Data?.LSJZList || [];
-      if (!list || list.length < 1) return;
-      const latest = list[0];
-      const prev = list.length > 1 ? list[1] : null;
-      const nav = Number.parseFloat(latest.DWJZ);
-      const prevNav = prev ? Number.parseFloat(prev.DWJZ) : null;
-      const dailyChangePct = Number.parseFloat(latest.JZZZL);
-      const navDate = latest.FSRQ || null;
-      results[index] = {
-        code: code,
-        name: null,
-        nav: Number.isFinite(nav) ? nav : null,
-        prevNav: Number.isFinite(prevNav) ? prevNav : null,
-        dailyChangePct: Number.isFinite(dailyChangePct) ? dailyChangePct : null,
-        dailyChangeAmt: Number.isFinite(nav) && Number.isFinite(prevNav) ? (nav - prevNav) : null,
-        navDate: navDate,
-      };
+      console.log(`[DEBUG] Fund ${code} Eastmoney API response:`, JSON.stringify({
+        listLength: list.length,
+        firstItem: list[0] ? { DWJZ: list[0].DWJZ, JZZZL: list[0].JZZZL, FSRQ: list[0].FSRQ } : null,
+        secondItem: list[1] ? { DWJZ: list[1].DWJZ, FSRQ: list[1].FSRQ } : null,
+      }));
+      if (list && list.length >= 1) {
+        const latest = list[0];
+        const prev = list.length > 1 ? list[1] : null;
+        nav = Number.parseFloat(latest.DWJZ);
+        prevNav = prev ? Number.parseFloat(prev.DWJZ) : null;
+        accumulatedNav = latest.LJJZ ? Number.parseFloat(latest.LJJZ) : null;
+        dailyChangePct = Number.parseFloat(latest.JZZZL);
+        navDate = latest.FSRQ || null;
+      }
+    } catch (e) {
+      console.error(`[DEBUG] Fund ${code} Eastmoney API error:`, e.message);
+    }
+
+    // 备用数据源：如果主数据源未获取到 prevNav 或 dailyChangePct，尝试 Eastmoney F10DataApi
+    if (!Number.isFinite(prevNav) || !Number.isFinite(dailyChangePct)) {
       try {
-        const gzUrl = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
-        const gzRes = await fetch(gzUrl, {
-          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://fund.eastmoney.com/" },
-          signal: AbortSignal.timeout(5000),
+        const historyUrl = `https://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=${code}&page=1&per=5`;
+        const historyResp = await fetch(historyUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          signal: AbortSignal.timeout(8000),
         });
-        const gzText = await gzRes.text();
-        const gzMatch = gzText.match(/jsonpgz\((.*)\);?/);
-        if (gzMatch && gzMatch[1]) {
-          const gzData = JSON.parse(gzMatch[1]);
-          results[index].name = gzData.name || null;
+        const historyText = await historyResp.text();
+        const startIdx = historyText.indexOf("var apidata=");
+        if (startIdx !== -1) {
+          const endIdx = historyText.lastIndexOf("};");
+          if (endIdx !== -1) {
+            const jsonStr = historyText.substring(startIdx + 12, endIdx + 1);
+            const data = new Function(`return ${jsonStr}`)();
+            const content = data.content || "";
+            const rows = [];
+            const rowRegex = /<tr[^>]*>(.*?)<\/tr>/gi;
+            let rowMatch;
+            while ((rowMatch = rowRegex.exec(content)) !== null) {
+              const cellRegex = /<td[^>]*>(.*?)<\/td>/gi;
+              const cells = [];
+              let cellMatch;
+              while ((cellMatch = cellRegex.exec(rowMatch[1])) !== null) {
+                cells.push(cellMatch[1].replace(/<[^>]*>/g, "").trim());
+              }
+              if (cells.length >= 4) {
+                rows.push({ date: cells[0], nav: parseFloat(cells[1]) || null });
+              }
+            }
+            console.log(`[DEBUG] Fund ${code} F10DataApi rows:`, rows.length);
+            if (rows.length >= 1 && !Number.isFinite(nav)) {
+              nav = rows[0].nav;
+              navDate = rows[0].date;
+            }
+            if (rows.length >= 2 && !Number.isFinite(prevNav)) {
+              prevNav = rows[1].nav;
+            }
+            if (Number.isFinite(nav) && Number.isFinite(prevNav) && !Number.isFinite(dailyChangePct)) {
+              dailyChangePct = ((nav - prevNav) / prevNav * 100);
+            }
+          }
         }
-      } catch (_) { }
+      } catch (e) {
+        console.error(`[DEBUG] Fund ${code} F10DataApi error:`, e.message);
+      }
+    }
+
+    // 第二数据源：fundgz API - 天天基金网估值API，提供最新的已确认净值
+    // 重要：fundgz.dwjz 是经过基金确认的最新净值（可能比 eastmoney LSJZ 数据更新更快）
+    // 如果 fundgz 提供的净值日期比 eastmoney 晚，则使用 fundgz 的数据
+    try {
+      const gzUrl = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
+      const gzRes = await fetch(gzUrl, {
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://fund.eastmoney.com/" },
+        signal: AbortSignal.timeout(5000),
+      });
+      const gzText = await gzRes.text();
+      const gzMatch = gzText.match(/jsonpgz\((.*)\);?/);
+      if (gzMatch && gzMatch[1]) {
+        const gzData = JSON.parse(gzMatch[1]);
+        console.log(`[DEBUG] Fund ${code} fundgz data:`, {
+          dwjz: gzData.dwjz,
+          jzrq: gzData.jzrq,
+          gszzl: gzData.gszzl,
+          gzTime: gzData.gztime,
+        });
+        // fundgz 的 dwjz 是经过确认的最新净值，覆盖 eastmoney LSJZ（因为 LSJZ 经常滞后一天）
+        if (gzData.dwjz) {
+          const gzNav = Number.parseFloat(gzData.dwjz);
+          const gzDate = gzData.jzrq;
+          // 比较日期：如果 fundgz 的日期 >= 当前已知的净值日期，则使用 fundgz 的数据
+          if (Number.isFinite(gzNav)) {
+            if (!Number.isFinite(nav) || (gzDate && navDate && gzDate > navDate)) {
+              nav = gzNav;
+              if (gzDate) navDate = gzDate;
+            }
+          }
+        }
+        // gszzl 是今日估值涨跌幅，不应该作为 dailyChangePct（日涨幅基于昨日）
+        // 但是可以尝试计算 prevNav：如果已知今日净值，prevNav = nav / (1 + gszzl/100)
+        if (Number.isFinite(nav) && !Number.isFinite(prevNav) && gzData.gszzl) {
+          const changeRate = Number.parseFloat(gzData.gszzl);
+          if (Number.isFinite(changeRate)) {
+            prevNav = nav / (1 + changeRate / 100);
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`[DEBUG] Fund ${code} fundgz error:`, e.message);
+    }
+
+    // 第三数据源：pingzhongdata API - 天天基金网历史数据，用于计算昨日收益
+    // 当 fundgz 和 eastmoney 都没法计算 dailyChangePct 时，从历史数据中拿最近两天的净值
+    if (!Number.isFinite(dailyChangePct) && Number.isFinite(nav)) {
+      try {
+        const pzUrl = `https://fund.eastmoney.com/pingzhongdata/${code}.js?rt=${Date.now()}`;
+        const pzRes = await fetch(pzUrl, {
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://fund.eastmoney.com/" },
+          signal: AbortSignal.timeout(8000),
+        });
+        const pzBuffer = Buffer.from(await pzRes.arrayBuffer());
+        // pingzhongdata 是 GBK 编码，需要用 iconv-lite 解码
+        const iconv = (await import("iconv-lite")).default;
+        const pzText = iconv.decode(pzBuffer, "GBK");
+        // 提取 Data_netWorthTrend 数组
+        const pzMatch = pzText.match(/Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);/);
+        if (pzMatch && pzMatch[1]) {
+          const items = JSON.parse(pzMatch[1]);
+          if (items.length >= 2) {
+            // items 是按时间正序排列的
+            // 找到与当前 navDate 匹配的那条
+            let latestIdx = -1;
+            if (navDate) {
+              for (let i = items.length - 1; i >= 0; i--) {
+                const itemDate = new Date(items[i].x).toISOString().substring(0, 10);
+                if (itemDate === navDate) {
+                  latestIdx = i;
+                  break;
+                }
+                if (itemDate < navDate) {
+                  latestIdx = i + 1;
+                  break;
+                }
+              }
+              if (latestIdx < 0) latestIdx = items.length - 1;
+            } else {
+              latestIdx = items.length - 1;
+            }
+            const latest = items[latestIdx];
+            const prev = latestIdx > 0 ? items[latestIdx - 1] : null;
+            if (latest) {
+              // 如果 pingzhongdata 有比当前更晚的日期
+              const pzLatestDate = new Date(latest.x).toISOString().substring(0, 10);
+              if (pzLatestDate > (navDate || "")) {
+                nav = latest.y;
+                navDate = pzLatestDate;
+              }
+              if (prev) {
+                const pzPrevNav = prev.y;
+                prevNav = pzPrevNav;
+                if (Number.isFinite(nav) && Number.isFinite(prevNav)) {
+                  dailyChangePct = ((nav - prevNav) / prevNav) * 100;
+                }
+              }
+            }
+            console.log(`[DEBUG] Fund ${code} pingzhongdata: latest=${latest?.y} prev=${prev?.y} dailyChangePct=${dailyChangePct}`);
+          }
+        }
+      } catch (e) {
+        console.error(`[DEBUG] Fund ${code} pingzhongdata error:`, e.message);
+      }
+    }
+
+    console.log(`[DEBUG] Fund ${code} final result:`, {
+      nav,
+      prevNav,
+      dailyChangePct,
+      navDate,
+    });
+
+    results[index] = {
+      code: code,
+      name: null,
+      nav: Number.isFinite(nav) ? nav : null,
+      prevNav: Number.isFinite(prevNav) ? prevNav : null,
+      accumulatedNav: Number.isFinite(accumulatedNav) ? accumulatedNav : null,
+      dailyChangePct: Number.isFinite(dailyChangePct) ? dailyChangePct : null,
+      dailyChangeAmt: Number.isFinite(nav) && Number.isFinite(prevNav) ? (nav - prevNav) : null,
+      navDate: navDate,
+    };
+
+    // 获取基金名称
+    try {
+      const gzUrl = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
+      const gzRes = await fetch(gzUrl, {
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://fund.eastmoney.com/" },
+        signal: AbortSignal.timeout(5000),
+      });
+      const gzText = await gzRes.text();
+      const gzMatch = gzText.match(/jsonpgz\((.*)\);?/);
+      if (gzMatch && gzMatch[1]) {
+        const gzData = JSON.parse(gzMatch[1]);
+        results[index].name = gzData.name || null;
+      }
     } catch (_) { }
   }));
   return { funds: results };
@@ -515,42 +733,95 @@ async function getUSIndex(code) {
   }
 }
 
-async function getIndexHistory(code) {
-  code = String(code || "").trim().toUpperCase();
-  if (code === "IXIC" || code === "SPX") {
-    return getUSIndexHistory(code);
-  }
-  return getCSIndexHistory(code);
-}
-
-async function getCSIndexHistory(code) {
+async function getCSIndex(code) {
+  code = String(code || "").trim().toLowerCase();
+  const baiduCode = code.startsWith("sh") || code.startsWith("sz") ? code : "sh" + code;
   try {
-    const url = `https://www.csindex.com.cn/zh-CN/indices/index-detail/${code}?tab=history`;
+    const url = `https://finance.baidu.com/action/IndexHistoryAction?type=last&code=${baiduCode}&t=${Date.now()}`;
     const resp = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
       signal: AbortSignal.timeout(10000),
     });
     const text = await resp.text();
-    const dataMatch = text.match(/var historyData = (\[.*?\]);/);
+    const dataMatch = text.match(/\{[\s\S]*\}/);
     if (dataMatch) {
-      const data = JSON.parse(dataMatch[1]);
-      return {
-        code,
-        history: data.map(item => ({
-          date: item.date,
-          open: parseFloat(item.open) || null,
-          close: parseFloat(item.close) || null,
-          high: parseFloat(item.high) || null,
-          low: parseFloat(item.low) || null,
-          volume: item.volume || null,
-        })),
-      };
+      const data = JSON.parse(dataMatch[0]);
+      if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+        const latest = data.data[0];
+        return {
+          code,
+          name: data.name || "",
+          price: parseFloat(latest.close || latest[2]) || null,
+          change: parseFloat(latest.change || latest[3]) || null,
+          changeRate: parseFloat(latest.changePercent || latest[4]) || null,
+        };
+      }
+    }
+  } catch (_) {}
+  try {
+    const url = `https://finance.baidu.com/stock/${baiduCode}.html`;
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const text = await resp.text();
+    const nameMatch = text.match(/<title>([^<]+?)_百度财经<\/title>/);
+    const priceMatch = text.match(/最新价[\s\S]*?<span[^>]*>([\d.]+)<\/span>/);
+    const changeMatch = text.match(/涨跌[\s\S]*?<span[^>]*>([\d.-]+)<\/span>/);
+    const changePctMatch = text.match(/涨跌幅[\s\S]*?<span[^>]*>([\d.-]+)%<\/span>/);
+    return {
+      code,
+      name: nameMatch ? nameMatch[1] : "",
+      price: priceMatch ? parseFloat(priceMatch[1]) || null : null,
+      change: changeMatch ? parseFloat(changeMatch[1]) || null : null,
+      changeRate: changePctMatch ? parseFloat(changePctMatch[1]) || null : null,
+    };
+  } catch (err) {
+    throw new Error("failed to fetch CS index data");
+  }
+}
+
+async function getIndexHistory(code, count = 120) {
+  code = String(code || "").trim().toUpperCase();
+  if (code === "IXIC" || code === "SPX") {
+    return getUSIndexHistory(code, count);
+  }
+  return getCSIndexHistory(code, count);
+}
+
+async function getCSIndexHistory(code, count = 120) {
+  try {
+    const baiduCode = code.startsWith("sh") || code.startsWith("sz") ? code : "sh" + code;
+    const url = `https://finance.baidu.com/action/IndexHistoryAction?type=last&code=${baiduCode}&t=${Date.now()}`;
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const text = await resp.text();
+    const dataMatch = text.match(/\{[\s\S]*\}/);
+    if (dataMatch) {
+      const data = JSON.parse(dataMatch[0]);
+      const history = [];
+      if (data.data && Array.isArray(data.data)) {
+        data.data.forEach(item => {
+          history.push({
+            date: item.date || item[0],
+            open: parseFloat(item.open || item[1]) || null,
+            close: parseFloat(item.close || item[2]) || null,
+            high: parseFloat(item.high || item[3]) || null,
+            low: parseFloat(item.low || item[4]) || null,
+          });
+        });
+      }
+      if (history.length > 0) {
+        return { code, history };
+      }
     }
   } catch (_) {
   }
   try {
     const tc = code.startsWith("sh") ? code : "sh" + code;
-    const upstream = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tc},day,,,$(count),qfq`.replace("$(count)", "120");
+    const upstream = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tc},day,,,${count},qfq`;
     const resp = await fetch(upstream, {
       headers: { "User-Agent": "Mozilla/5.0" },
       signal: AbortSignal.timeout(10000),
@@ -574,7 +845,7 @@ async function getCSIndexHistory(code) {
   }
 }
 
-async function getUSIndexHistory(code) {
+async function getUSIndexHistory(code, count = 120) {
   try {
     const url = `https://finance.baidu.com/action/IndexHistoryAction?type=last&code=${code === "IXIC" ? "IXIC" : "INX"}&t=${Date.now()}`;
     const resp = await fetch(url, {
@@ -604,4 +875,4 @@ async function getUSIndexHistory(code) {
   return { code, history: [] };
 }
 
-export { tencentCodeFor, lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getIndexHistory };
+export { tencentCodeFor, lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getCSIndex, getIndexHistory };
