@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchState, saveState, fetchFinanceQuotes, fetchFundNav } from '../api';
 import {
   ArrowLeft,
@@ -19,6 +19,7 @@ import {
   Target,
   Clock,
   Activity,
+  X,
 } from 'lucide-react';
 
 function formatCurrency(value) {
@@ -177,16 +178,26 @@ export default function AssetPenetration({ onBack }) {
   const [indexData, setIndexData] = useState(null);
   const [allIndexData, setAllIndexData] = useState({});
   const [customIndexCode, setCustomIndexCode] = useState('');
+  // 搜索下拉相关状态：候选项、加载状态、是否展示下拉
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  // 防抖定时器，避免每次按键都发请求
+  const searchTimerRef = useRef(null);
+  // 用户自定义指数列表（localStorage 持久化），与内置 indexOptions 合并用于展示与联动
+  const [customIndices, setCustomIndices] = useState(() => {
+    try {
+      const stored = localStorage.getItem('asset_penetration_custom_indices');
+      return stored ? JSON.parse(stored) : [];
+    } catch (_) {
+      return [];
+    }
+  });
   const [chartType, setChartType] = useState('curve');
   const [analysisView, setAnalysisView] = useState('rate');
-  const [analysisFeatures, setAnalysisFeatures] = useState({
-    position: false,
-    extreme: false,
-    drawdown: false,
-  });
+  const [selectedAnalysis, setSelectedAnalysis] = useState('');
   const [auxFeatures, setAuxFeatures] = useState({
     assetType: false,
-    assetAnalysis: false,
   });
 
   const [calendarView, setCalendarView] = useState('day');
@@ -198,6 +209,7 @@ export default function AssetPenetration({ onBack }) {
   const [pieHoverIndex, setPieHoverIndex] = useState(null);
   const [showCustomTimePicker, setShowCustomTimePicker] = useState(false);
   const [indexHistoryData, setIndexHistoryData] = useState(null);
+  const [indexPeriodReturns, setIndexPeriodReturns] = useState({});
   const [tooltip, setTooltip] = useState(null);
   
   const [positionLevel, setPositionLevel] = useState(1);
@@ -218,16 +230,118 @@ export default function AssetPenetration({ onBack }) {
     { key: 'year', label: '近一年', days: 365 },
   ];
 
+  // 内置指数：etfCode 为对应的 ETF 代码（用于实际拉取行情），code 为业务标识（selectedIndex）
   const indexOptions = [
-    { code: 'sh000001', name: '上证', color: '#3B82F6' },
-    { code: 'sz399001', name: '深证', color: '#EF4444' },
-    { code: 'sz399006', name: '创业板', color: '#F59E0B' },
-    { code: 'sh000016', name: '上证50', color: '#8B5CF6' },
-    { code: 'sh000300', name: '沪深300', color: '#EC4899' },
-    { code: 'sh000905', name: '中证500', color: '#10B981' },
-    { code: 'IXIC', name: '纳斯达克', color: '#0071C5' },
-    { code: 'SPX', name: '标普500', color: '#EE3233' },
+    { code: 'sh000001', name: '上证', color: '#3B82F6', etfCode: 'sh530060' },
+    { code: 'sz399001', name: '深证', color: '#EF4444', etfCode: 'sz159943' },
+    { code: 'sz399006', name: '创业板', color: '#F59E0B', etfCode: 'sz159247' },
+    { code: 'sh000016', name: '上证50', color: '#8B5CF6', etfCode: 'sh510100' },
+    { code: 'sh000300', name: '沪深300', color: '#EC4899', etfCode: 'sh510360' },
+    { code: 'sh000905', name: '中证500', color: '#10B981', etfCode: 'sh510580' },
+    { code: 'IXIC', name: '纳斯达克', color: '#0071C5', etfCode: 'sz159660' },
+    { code: 'SPX', name: '标普500', color: '#EE3233', etfCode: 'sh513650' },
   ];
+
+  // 合并内置与自定义指数（用于展示与联动）。自定义指数自身代码即作为 etfCode 使用
+  const allIndexOptions = useMemo(() => {
+    const custom = customIndices.map((c, i) => ({
+      code: c.code,
+      name: c.name || c.code,
+      color: ['#06B6D4', '#A855F7', '#F97316', '#84CC16', '#14B8A6'][i % 5],
+      etfCode: c.code,
+      custom: true,
+    }));
+    return [...indexOptions, ...custom];
+  }, [customIndices]);
+
+  // 当前选中指数对应的 ETF 代码（内置用映射值，自定义用自身 code）
+  const selectedEtfCode = useMemo(() => {
+    const option = allIndexOptions.find(o => o.code === selectedIndex);
+    return option ? (option.etfCode || option.code) : selectedIndex;
+  }, [allIndexOptions, selectedIndex]);
+
+  // 添加自定义指数：rawCode 必填，name 可选（默认 rawCode）；规范化代码、避免重复、加入后选中
+  const addCustomIndex = (rawCode, name) => {
+    const trimmed = (rawCode || '').trim();
+    if (!trimmed) return;
+    let code = trimmed;
+    const upper = trimmed.toUpperCase();
+    // 已是内置指数代码：仅选中、清空输入，不重复添加
+    if (indexOptions.some(o => o.code === trimmed || o.code === upper)) {
+      setSelectedIndex(indexOptions.find(o => o.code === trimmed || o.code === upper).code);
+      setCustomIndexCode('');
+      setShowSearchDropdown(false);
+      setSearchResults([]);
+      return;
+    }
+    // 规范化国内代码：纯数字 6 位以 6/9 开头补 sh，其他补 sz；已是 sh/sz 开头小写化；IXIC/SPX 保持大写
+    if (/^\d{6}$/.test(trimmed)) {
+      code = /^[69]/.test(trimmed) ? `sh${trimmed}` : `sz${trimmed}`;
+    } else if (/^(sh|sz)\d{6}$/i.test(trimmed)) {
+      code = trimmed.toLowerCase();
+    } else if (upper === 'IXIC' || upper === 'SPX') {
+      code = upper;
+    } else if (/^(us)/i.test(trimmed)) {
+      code = upper;
+    }
+    setCustomIndices(prev => {
+      if (prev.some(c => c.code === code)) return prev;
+      const next = [...prev, { code, name: name || code }];
+      try { localStorage.setItem('asset_penetration_custom_indices', JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+    setSelectedIndex(code);
+    setCustomIndexCode('');
+    setShowSearchDropdown(false);
+    setSearchResults([]);
+  };
+
+  // 搜索输入处理：防抖 300ms 调用 /api/finance/lookup，过滤掉 Index 类型，保留 ETF/AStock 等
+  const handleSearchInput = (value) => {
+    setCustomIndexCode(value);
+    if (searchTimerRef.current) {
+      clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = null;
+    }
+    if (!value.trim()) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setShowSearchDropdown(false);
+      return;
+    }
+    setSearchLoading(true);
+    setShowSearchDropdown(true);
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/finance/lookup?q=${encodeURIComponent(value.trim())}`);
+        const result = await response.json();
+        const items = (result.items || [])
+          .slice(0, 8);
+        setSearchResults(items);
+      } catch (err) {
+        console.error('Failed to lookup finance:', err);
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+  };
+
+  const removeCustomIndex = (code) => {
+    setCustomIndices(prev => {
+      const next = prev.filter(c => c.code !== code);
+      try { localStorage.setItem('asset_penetration_custom_indices', JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+    if (selectedIndex === code) setSelectedIndex('sh000001');
+  };
+
+  // 根据代码获取展示名称（优先 indexData 实时名称，再查合并列表）
+  const getIndexName = (code) => {
+    if (indexData && selectedIndex === code && indexData.name) return indexData.name;
+    const found = allIndexOptions.find(o => o.code === code);
+    return found?.name || code;
+  };
   
   const positionDataMock = {
     level1: [
@@ -384,7 +498,8 @@ export default function AssetPenetration({ onBack }) {
   useEffect(() => {
     const fetchIndexData = async () => {
       try {
-        const response = await fetch(`/api/finance/index?code=${selectedIndex}`);
+        // 使用 ETF 代码拉取行情，但数据归属于 selectedIndex（业务标识）
+        const response = await fetch(`/api/finance/index?code=${selectedEtfCode}`);
         const result = await response.json();
         if (result.name) {
           setIndexData({
@@ -399,17 +514,19 @@ export default function AssetPenetration({ onBack }) {
       }
     };
     fetchIndexData();
-  }, [selectedIndex]);
+  }, [selectedEtfCode]);
 
   useEffect(() => {
     const fetchAllIndexData = async () => {
       try {
         const data = {};
-        for (const option of indexOptions) {
+        for (const option of allIndexOptions) {
           try {
-            const response = await fetch(`/api/finance/index?code=${option.code}`);
+            // 内置指数用 etfCode 拉取，自定义指数用自身 code
+            const response = await fetch(`/api/finance/index?code=${option.etfCode || option.code}`);
             const result = await response.json();
             if (result.name) {
+              // data 的 key 用 option.code（即 selectedIndex 用的 code）
               data[option.code] = {
                 name: result.name,
                 price: result.price,
@@ -425,14 +542,17 @@ export default function AssetPenetration({ onBack }) {
       }
     };
     fetchAllIndexData();
-  }, []);
+  }, [customIndices]);
 
   useEffect(() => {
     const fetchIndexHistory = async () => {
+      // 切换指数时先清空旧数据，避免曲线图短暂显示上一只指数的数据
+      setIndexHistoryData(null);
       try {
-        const code = selectedIndex.startsWith('sh') || selectedIndex.startsWith('sz')
-          ? selectedIndex.slice(2)
-          : selectedIndex;
+        // 后端 getCSIndexHistory 会自动补 sh/sz 前缀，这里去掉前缀传纯代码
+        const code = selectedEtfCode.startsWith('sh') || selectedEtfCode.startsWith('sz')
+          ? selectedEtfCode.slice(2)
+          : selectedEtfCode;
         let count;
         switch (timeRange) {
           case 'day': count = 5; break;
@@ -449,6 +569,8 @@ export default function AssetPenetration({ onBack }) {
         const result = await response.json();
         if (result.history && result.history.length > 0) {
           setIndexHistoryData(result);
+          const periodReturn = getIndexPeriodReturn(result.history, timeRange);
+          setIndexPeriodReturns(prev => ({ ...prev, [selectedIndex]: periodReturn }));
         }
       } catch (err) {
         console.error('Failed to fetch index history:', err);
@@ -456,7 +578,7 @@ export default function AssetPenetration({ onBack }) {
       }
     };
     fetchIndexHistory();
-  }, [selectedIndex, timeRange]);
+  }, [selectedEtfCode, timeRange]);
 
   const getDisplayDays = () => {
     switch (timeRange) {
@@ -504,7 +626,8 @@ export default function AssetPenetration({ onBack }) {
     }
 
     const displayDays = getDisplayDays();
-    const rawData = displayDays === Infinity ? [...history].reverse() : history.slice(0, displayDays).reverse();
+    // 后端已按 count 返回最近 N 条数据，且按时间升序排列（最早在前），直接复制即可
+    const rawData = displayDays === Infinity ? [...history] : history.slice(-displayDays);
     const data = rawData.map(item => ({ ...item }));
 
     let labels = [];
@@ -598,6 +721,27 @@ export default function AssetPenetration({ onBack }) {
       deduped.sort((a, b) => a - b);
     }
     return deduped;
+  }
+
+  function getIndexPeriodReturn(history, timeRange) {
+    if (!history || history.length === 0) return 0;
+    const now = new Date();
+    let startDate;
+    switch (timeRange) {
+      case 'day': startDate = new Date(now); break;
+      case 'week': startDate = new Date(now); startDate.setDate(now.getDate() - 7); break;
+      case 'month': startDate = new Date(now.getFullYear(), now.getMonth(), 1); break;
+      case 'quarter': startDate = new Date(now); startDate.setMonth(now.getMonth() - 3); break;
+      case 'halfyear': startDate = new Date(now); startDate.setMonth(now.getMonth() - 6); break;
+      case 'year': startDate = new Date(now.getFullYear(), 0, 1); break;
+      default: startDate = new Date(history[0].date); break;
+    }
+    // 找起始日之后第一个数据点
+    const startItem = history.find(h => new Date(h.date) >= startDate) || history[0];
+    const endItem = history[history.length - 1];
+    const startClose = parseFloat(startItem.close) || 1;
+    const endClose = parseFloat(endItem.close) || startClose;
+    return ((endClose - startClose) / startClose) * 100;
   }
 
   const financeAssets = stateData?.financeAssets || [];
@@ -1001,37 +1145,81 @@ export default function AssetPenetration({ onBack }) {
           </div>
           
           <div className="flex flex-wrap items-center justify-center gap-2 mb-2">
-            {indexOptions.map((option) => (
-              <button
-                key={option.code}
-                onClick={() => setSelectedIndex(option.code)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm transition-all ${
-                  selectedIndex === option.code
-                    ? 'bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white font-medium'
-                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700/50'
-                }`}
-              >
-                <span
-                  className="w-2.5 h-2.5 rounded-full"
-                  style={{ backgroundColor: option.color }}
-                />
-                {option.name}
-              </button>
+            {allIndexOptions.map((option) => (
+              <div key={option.code} className="flex items-center">
+                <button
+                  onClick={() => setSelectedIndex(option.code)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm transition-all ${
+                    selectedIndex === option.code
+                      ? 'bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white font-medium'
+                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700/50'
+                  }`}
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: option.color }}
+                  />
+                  {allIndexData[option.code]?.name || option.name}
+                </button>
+                {option.custom && (
+                  <button
+                    onClick={() => removeCustomIndex(option.code)}
+                    title="移除自定义指数"
+                    className="ml-0.5 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50 dark:hover:bg-red-900/30"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
             ))}
-            <div className="flex items-center gap-1">
+            <div className="relative flex items-center gap-1">
               <input
                 type="text"
                 value={customIndexCode}
-                onChange={(e) => setCustomIndexCode(e.target.value)}
-                placeholder="自定义指数"
+                onChange={(e) => handleSearchInput(e.target.value)}
+                onFocus={() => { if (customIndexCode.trim()) setShowSearchDropdown(true); }}
+                onBlur={() => setTimeout(() => setShowSearchDropdown(false), 200)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') addCustomIndex(customIndexCode);
+                  if (e.key === 'Escape') setShowSearchDropdown(false);
+                }}
+                placeholder="搜索代码或名称"
                 className="px-2.5 py-1 text-sm border border-gray-200 dark:border-slate-600 rounded-full bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <button
-                onClick={() => customIndexCode && setSelectedIndex(customIndexCode)}
-                className="px-2.5 py-1 text-sm bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors"
-              >
-                确定
-              </button>
+              {/* 搜索下拉候选列表：仅在 showSearchDropdown 且有输入时展示 */}
+              {showSearchDropdown && customIndexCode.trim() && (
+                <div className="absolute top-full left-0 mt-1 w-64 max-h-60 overflow-y-auto bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-50">
+                  {searchLoading && (
+                    <div className="px-3 py-2 text-sm text-gray-400">搜索中…</div>
+                  )}
+                  {!searchLoading && searchResults.length === 0 && (
+                    <div className="px-3 py-2 text-sm text-gray-400">无匹配项，可直接按代码添加</div>
+                  )}
+                  {!searchLoading && searchResults.map((item) => (
+                    <button
+                      key={`${item.code}-${item.name}`}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        addCustomIndex(item.code, item.name);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-900 dark:text-white flex items-center justify-between gap-2"
+                      title={item.typeName || item.classify}
+                    >
+                      <span className="truncate">{item.name}</span>
+                      <span className="text-xs text-gray-400 shrink-0">{item.code}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* 快捷添加按钮：只要输入内容有效即可直接按代码添加 */}
+              {customIndexCode.trim() && (
+                <button
+                  onClick={() => addCustomIndex(customIndexCode)}
+                  className="px-2.5 py-1 text-sm bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors"
+                >
+                  添加
+                </button>
+              )}
             </div>
           </div>
           
@@ -1075,7 +1263,7 @@ export default function AssetPenetration({ onBack }) {
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-0.5 bg-blue-500"></span>
                 <span className="text-gray-600 dark:text-gray-300">
-                  {indexOptions.find(o => o.code === selectedIndex)?.name || indexData?.name || '指数'}
+                  {getIndexName(selectedIndex)}
                 </span>
               </div>
             </div>
@@ -1096,12 +1284,13 @@ export default function AssetPenetration({ onBack }) {
                 {(() => {
                   const history = indexHistoryData?.history || [];
                   const { data: displayData } = getYieldCurveData(history);
-                  
+
                   const baseRate = currentPnlRate;
                   const userData = [];
                   const indexDataPoints = [];
-                  
+
                   if (displayData.length > 0) {
+                    // 计算指数真实涨跌幅度
                     const firstClose = timeRange === 'day'
                       ? (parseFloat(displayData[0]?.open) || parseFloat(displayData[0]?.close) || 1)
                       : (parseFloat(displayData[0]?.close) || 1);
@@ -1112,31 +1301,26 @@ export default function AssetPenetration({ onBack }) {
                         indexDataPoints.push(idxRate);
                       }
                     });
-                    const indexTotalRate = indexDataPoints.length > 0 ? indexDataPoints[indexDataPoints.length - 1] : 0;
+
+                    // 用户收益线：从0%到currentPnlRate线性缩放
                     displayData.forEach((item, idx) => {
-                      const closeVal = parseFloat(item.close);
-                      if (closeVal && firstClose) {
-                        const idxRate = ((closeVal - firstClose) / firstClose) * 100;
-                        let userRate = 0;
-                        if (Math.abs(indexTotalRate) > 0.01) {
-                          userRate = idxRate * (baseRate / indexTotalRate);
-                        } else {
-                          userRate = idxRate;
-                        }
-                        userData.push(userRate);
-                      }
+                      const ratio = displayData.length > 1 ? idx / (displayData.length - 1) : 0;
+                      const userRate = baseRate * ratio;
+                      userData.push(userRate);
                     });
                   } else {
+                    // 无历史数据时的回退逻辑
                     const indexRate = indexData?.changeRate || 0;
                     for (let i = 0; i < 7; i++) {
-                      const ratio = indexDataPoints.length > 0 ? (indexDataPoints[i] || 0) / (indexDataPoints[indexDataPoints.length - 1] || 1) : 0;
+                      const ratio = i / 6;
                       const userRate = baseRate * ratio;
                       const idxRate = indexRate * ratio;
                       userData.push(userRate);
                       indexDataPoints.push(idxRate);
                     }
                   }
-                  
+
+                  // Y轴范围包含用户收益率和指数收益率的最值
                   const allData = [...userData, ...indexDataPoints];
                   const maxVal = Math.max(...allData, 5);
                   const minVal = Math.min(...allData, -10);
@@ -1144,9 +1328,9 @@ export default function AssetPenetration({ onBack }) {
                   const padding = range * 0.1;
                   const yMax = maxVal + padding;
                   const yMin = minVal - padding;
-                  
+
                   const ticks = getYAxisTicks(yMin, yMax);
-                  
+
                   return ticks.map((val, i) => {
                     const y = 30 + ((yMax - val) / (yMax - yMin)) * 180;
                     return (
@@ -1210,32 +1394,24 @@ export default function AssetPenetration({ onBack }) {
                     displayData.forEach(item => {
                       const closeVal = parseFloat(item.close);
                       if (closeVal && firstClose) {
+                        // 指数收益率：真实涨跌幅度
                         const idxRate = ((closeVal - firstClose) / firstClose) * 100;
                         indexDataPoints.push(idxRate);
                       }
                     });
-                    const indexTotalRate = indexDataPoints.length > 0 ? indexDataPoints[indexDataPoints.length - 1] : 0;
+                    // 用户收益线：从0%到currentPnlRate线性缩放
                     displayData.forEach((item, idx) => {
-                      const closeVal = parseFloat(item.close);
-                      if (closeVal && firstClose) {
-                        const idxRate = ((closeVal - firstClose) / firstClose) * 100;
-                        let userRate = 0;
-                        if (Math.abs(indexTotalRate) > 0.01) {
-                          userRate = idxRate * (baseRate / indexTotalRate);
-                        } else {
-                          userRate = idxRate;
-                        }
-                        userData.push(userRate);
-                      }
+                      const ratio = displayData.length > 1 ? idx / (displayData.length - 1) : 0;
+                      const userRate = baseRate * ratio;
+                      userData.push(userRate);
                     });
                   } else {
+                    // 无历史数据时的回退逻辑：线性缩放
                     const indexRate = indexData?.changeRate || 0;
                     for (let i = 0; i < 7; i++) {
-                      const ratio = indexDataPoints.length > 0 ? (indexDataPoints[i] || 0) / (indexDataPoints[indexDataPoints.length - 1] || 1) : 0;
-                      const userRate = baseRate * ratio;
-                      const idxRate = indexRate * ratio;
-                      userData.push(userRate);
-                      indexDataPoints.push(idxRate);
+                      const ratio = i / 6;
+                      userData.push(baseRate * ratio);
+                      indexDataPoints.push(indexRate * ratio);
                     }
                   }
                   
@@ -1325,49 +1501,7 @@ export default function AssetPenetration({ onBack }) {
                           onMouseLeave={() => setTooltip(null)}
                         />
                       ))}
-                      {analysisFeatures.extreme && userData.length > 0 && (() => {
-                        const maxIdx = userData.indexOf(Math.max(...userData));
-                        const maxVal = userData[maxIdx];
-                        const maxX = 60 + maxIdx * step;
-                        const maxY = 30 + ((chartYMax - maxVal) / (chartYMax - chartYMin)) * 180;
-                        return (
-                          <g key="extreme-max">
-                            <circle cx={maxX} cy={maxY} r="8" fill="none" stroke="#22C55E" strokeWidth="2" />
-                            <circle cx={maxX} cy={maxY} r="4" fill="#22C55E" />
-                            <line x1={maxX} y1={maxY - 15} x2={maxX} y2={maxY - 35} stroke="#22C55E" strokeWidth="1" />
-                            <text x={maxX} y={maxY - 40} textAnchor="middle" className="text-xs fill-green-500 font-medium">
-                              最大收益 {maxVal.toFixed(2)}%
-                            </text>
-                          </g>
-                        );
-                      })()}
-                      {analysisFeatures.drawdown && userData.length > 0 && (() => {
-                        let maxDrawdown = 0;
-                        let drawdownEndIdx = 0;
-                        let peakVal = userData[0];
-                        for (let i = 1; i < userData.length; i++) {
-                          if (userData[i] > peakVal) {
-                            peakVal = userData[i];
-                          }
-                          const drawdown = peakVal - userData[i];
-                          if (drawdown > maxDrawdown) {
-                            maxDrawdown = drawdown;
-                            drawdownEndIdx = i;
-                          }
-                        }
-                        const drawdownX = 60 + drawdownEndIdx * step;
-                        const drawdownY = 30 + ((chartYMax - userData[drawdownEndIdx]) / (chartYMax - chartYMin)) * 180;
-                        return (
-                          <g key="drawdown-max">
-                            <circle cx={drawdownX} cy={drawdownY} r="8" fill="none" stroke="#EF4444" strokeWidth="2" />
-                            <circle cx={drawdownX} cy={drawdownY} r="4" fill="#EF4444" />
-                            <line x1={drawdownX} y1={drawdownY + 15} x2={drawdownX} y2={drawdownY + 35} stroke="#EF4444" strokeWidth="1" />
-                            <text x={drawdownX} y={drawdownY + 45} textAnchor="middle" className="text-xs fill-red-500 font-medium">
-                              最大回撤 {maxDrawdown.toFixed(2)}%
-                            </text>
-                          </g>
-                        );
-                      })()}
+
                       {tooltip && (
                         <g>
                           <rect
@@ -1549,31 +1683,31 @@ export default function AssetPenetration({ onBack }) {
             <div className="flex flex-wrap gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
-                  type="checkbox"
-                  checked={analysisFeatures.position}
-                  onChange={(e) => setAnalysisFeatures({ ...analysisFeatures, position: e.target.checked })}
-                  className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
-                  style={{ borderRadius: '50%' }}
+                  type="radio"
+                  name="analysis"
+                  checked={selectedAnalysis === 'position'}
+                  onChange={() => setSelectedAnalysis('position')}
+                  className="w-4 h-4 border-2 border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">仓位分析</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
-                  type="checkbox"
-                  checked={analysisFeatures.extreme}
-                  onChange={(e) => setAnalysisFeatures({ ...analysisFeatures, extreme: e.target.checked })}
-                  className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
-                  style={{ borderRadius: '50%' }}
+                  type="radio"
+                  name="analysis"
+                  checked={selectedAnalysis === 'extreme'}
+                  onChange={() => setSelectedAnalysis('extreme')}
+                  className="w-4 h-4 border-2 border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">极值分析</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
-                  type="checkbox"
-                  checked={analysisFeatures.drawdown}
-                  onChange={(e) => setAnalysisFeatures({ ...analysisFeatures, drawdown: e.target.checked })}
-                  className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
-                  style={{ borderRadius: '50%' }}
+                  type="radio"
+                  name="analysis"
+                  checked={selectedAnalysis === 'drawdown'}
+                  onChange={() => setSelectedAnalysis('drawdown')}
+                  className="w-4 h-4 border-2 border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">最大回撤</span>
               </label>
@@ -1587,18 +1721,8 @@ export default function AssetPenetration({ onBack }) {
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">资产类型</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={auxFeatures.assetAnalysis}
-                  onChange={(e) => setAuxFeatures({ ...auxFeatures, assetAnalysis: e.target.checked })}
-                  className="w-4 h-4 rounded-full border-2 border-gray-300 dark:border-slate-500 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
-                  style={{ borderRadius: '50%' }}
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">资产分析</span>
-              </label>
             </div>
-            {analysisFeatures.position && (
+            {selectedAnalysis === 'position' && (
               <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">仓位分析</h3>
@@ -2069,7 +2193,7 @@ export default function AssetPenetration({ onBack }) {
                 const selectedIdxData = allIndexData[selectedIndex];
                 const diff = selectedIdxData ? currentPnlRate - selectedIdxData.changeRate : 0;
                 return diff >= 0 ? '跑赢' : '跑输';
-              })()}{indexOptions.find(o => o.code === selectedIndex)?.name || indexData?.name || '上证指数'}
+              })()}{getIndexName(selectedIndex)}
             </p>
             <p className={`text-4xl font-bold mt-2 ${(() => {
               const selectedIdxData = allIndexData[selectedIndex];
@@ -2096,13 +2220,20 @@ export default function AssetPenetration({ onBack }) {
                 {formatPercentage(currentPnlRate)}
               </span>
             </div>
-            {indexOptions.map((option) => {
+            {allIndexOptions.map((option) => {
               const idxData = allIndexData[option.code];
               const rate = idxData?.changeRate || 0;
               const price = idxData?.price || 0;
+              const isSelected = selectedIndex === option.code;
               return (
-                <div key={option.code} className="flex items-center gap-3">
-                  <span className="w-14 text-sm text-gray-700 dark:text-gray-300">{option.name}</span>
+                <div
+                  key={option.code}
+                  className={`flex items-center gap-3 px-2 py-1 rounded cursor-pointer transition-colors ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-50 dark:hover:bg-slate-700/30'}`}
+                  onClick={() => setSelectedIndex(option.code)}
+                >
+                  <span className="w-14 text-sm text-gray-700 dark:text-gray-300 truncate" title={idxData?.name || option.name}>
+                    {idxData?.name || option.name}
+                  </span>
                   <div className="flex-1 h-6 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all duration-500"

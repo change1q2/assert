@@ -1,0 +1,22 @@
+# 指数关联ETF与自定义搜索下拉 - 验证清单
+
+- [x] Checkpoint 1: indexOptions 数组中每个内置指数包含 etfCode 字段，映射关系正确（上证→sh530060、深证→sz159943、创业板→sz159247、上证50→sh510100、沪深300→sh510360、中证500→sh510580、纳斯达克→sz159660、标普500→sh513650）
+- [x] Checkpoint 2: selectedEtfCode 派生值正确：内置指数返回对应 etfCode，自定义指数返回自身 code
+- [x] Checkpoint 3: fetchIndexData useEffect 使用 selectedEtfCode 调用 /api/finance/index 接口
+- [x] Checkpoint 4: fetchAllIndexData useEffect 使用每个 option 的 etfCode 调用接口，allIndexData 以 selectedIndex 为 key 存储
+- [x] Checkpoint 5: fetchIndexHistory useEffect 依赖 selectedEtfCode，使用 etfCode 调用 index-history 接口
+- [x] Checkpoint 6: 自定义输入框输入代码或名称片段时调用 /api/finance/lookup 接口（300ms 防抖）
+- [x] Checkpoint 7: 下拉候选列表显示候选项（中文名称 + 代码），点击后调用 addCustomIndex(code, name)
+- [x] Checkpoint 8: addCustomIndex 接收 (code, name) 参数，自动补全 sh/sz 前缀，避免重复，写入 localStorage
+- [x] Checkpoint 9: 自定义指数添加后立即选中，曲线图刷新
+- [x] Checkpoint 10: 自定义指数 X 删除按钮工作正常，删除后从列表与 localStorage 移除
+- [x] Checkpoint 11: 切换指数时收益率曲线图立即刷新，无残留旧数据（先 setIndexHistoryData(null)）
+- [x] Checkpoint 12: 切换时间区间时使用当前标的的 etfCode 重新获取数据
+- [x] Checkpoint 13: 收益率曲线图例右侧指数名称随切换同步更新（使用 getIndexName）
+- [x] Checkpoint 14: "指数对比"卡片列表显示所有指数（含自定义），点击行切换为当前选中
+- [x] Checkpoint 15: "指数对比"卡片"本月跑赢/跑输"差异根据当前选中标的的 changeRate 计算
+- [x] Checkpoint 16: npm run build 成功无报错
+- [x] Checkpoint 17: 浏览器测试：内置指数数据来自关联 ETF 代码（上证指数显示 530060 的实时价格 0.976，沪深300 显示 510360 的 1.783）
+- [x] Checkpoint 18: 浏览器测试：自定义输入"159"或"创业板"，下拉显示候选，选择后以中文名称显示
+- [x] Checkpoint 19: 浏览器测试：删除自定义指数后列表正确更新，若当前选中被删除则回退到第一个内置指数
+- [x] Checkpoint 20: 后端 getCSIndex 接口能正常处理 ETF 代码（sh530060 返回"上证指数ETF易方达"，sh510360 返回"沪深300ETF广发"）

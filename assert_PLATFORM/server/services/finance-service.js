@@ -58,6 +58,46 @@ async function lookupSecurities(q) {
       if (!items.some((entry) => entry.code === item.code && entry.classify === item.classify)) items.push(item);
     }
 
+    // 补充：若东方财富搜索无结果/不足且输入是纯6位数字，直接查腾讯接口获取名称
+    const trimmedQ = q.trim();
+    if (items.length < 3 && /^\d{6}$/.test(trimmedQ)) {
+      try {
+        const tencentSearchCodes = [`sh${trimmedQ}`, `sz${trimmedQ}`];
+        const tsUrl = `http://qt.gtimg.cn/q=${tencentSearchCodes.join(",")}`;
+        const tsRes = await fetch(tsUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          signal: AbortSignal.timeout(6000),
+        });
+        const tsBuf = Buffer.from(await tsRes.arrayBuffer());
+        const tsText = new TextDecoder("gbk").decode(tsBuf);
+        const tsSegments = tsText.split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
+        for (const segment of tsSegments) {
+          const match = segment.match(/v_(\w+)="(.*)"/);
+          if (!match || !match[2]) continue;
+          const fullCode = match[1];
+          const parts = match[2].split("~");
+          if (parts.length > 32 && parts[1]) {
+            const code = fullCode.replace(/^(sh|sz)/, "");
+            const prefix = fullCode.startsWith("sh") ? "sh" : "sz";
+            if (!items.some((entry) => entry.code === code)) {
+              items.push({
+                code,
+                name: parts[1],
+                classify: "ETF",
+                typeName: "ETF",
+                marketType: prefix === "sh" ? "1" : "2",
+                mktNum: "",
+                jys: prefix === "sh" ? "SH" : "SZ",
+                price: parseFloat(parts[3]) || null,
+                changePct: parseFloat(parts[32]) || null,
+                changeAmt: parseFloat(parts[31]) || null,
+              });
+            }
+          }
+        }
+      } catch (_) { }
+    }
+
     const tencentQueries = [];
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
@@ -704,12 +744,40 @@ async function getFundNavHistory(code, page = 1, perPage = 20) {
 async function getUSIndex(code) {
   code = String(code || "").trim().toUpperCase();
   const indexMap = {
-    "IXIC": { name: "纳斯达克综合指数", baiduCode: "us-IXIC" },
-    "SPX": { name: "标普500指数", baiduCode: "us-INX" },
+    "IXIC": { name: "纳斯达克综合指数", baiduCode: "us-IXIC", tencentCode: "usIXIC" },
+    "SPX": { name: "标普500指数", baiduCode: "us-INX", tencentCode: "usINX" },
   };
   if (!indexMap[code]) {
     throw new Error("unsupported US index code");
   }
+  // 优先：腾讯理财通实时指数接口
+  try {
+    const url = `http://qt.gtimg.cn/q=${indexMap[code].tencentCode}`;
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(8000),
+    });
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const text = new TextDecoder("gbk").decode(buf);
+    const match = text.match(/v_(\w+)="(.*)"/);
+    if (match && match[2]) {
+      const parts = match[2].split("~");
+      if (parts.length > 32) {
+        const numeric = (v) => {
+          const n = parseFloat(v);
+          return Number.isFinite(n) ? n : null;
+        };
+        return {
+          code,
+          name: parts[1] || indexMap[code].name,
+          price: numeric(parts[3]),
+          change: numeric(parts[31]),
+          changeRate: numeric(parts[32]),
+        };
+      }
+    }
+  } catch (_) {}
+  // 备用：百度财经
   const baiduCode = indexMap[code].baiduCode;
   try {
     const url = `https://finance.baidu.com/index/${baiduCode}`;
@@ -735,7 +803,36 @@ async function getUSIndex(code) {
 
 async function getCSIndex(code) {
   code = String(code || "").trim().toLowerCase();
-  const baiduCode = code.startsWith("sh") || code.startsWith("sz") ? code : "sh" + code;
+  const tcCode = code.startsWith("sh") || code.startsWith("sz") ? code : "sh" + code;
+  // 优先：腾讯理财通实时指数接口（支持任意 sh/sz 代码，便于自定义指数）
+  try {
+    const url = `http://qt.gtimg.cn/q=${tcCode}`;
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(8000),
+    });
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const text = new TextDecoder("gbk").decode(buf);
+    const match = text.match(/v_(\w+)="(.*)"/);
+    if (match && match[2]) {
+      const parts = match[2].split("~");
+      if (parts.length > 32) {
+        const numeric = (v) => {
+          const n = parseFloat(v);
+          return Number.isFinite(n) ? n : null;
+        };
+        return {
+          code,
+          name: parts[1] || "",
+          price: numeric(parts[3]),
+          change: numeric(parts[31]),
+          changeRate: numeric(parts[32]),
+        };
+      }
+    }
+  } catch (_) {}
+  // 备用：百度财经
+  const baiduCode = tcCode;
   try {
     const url = `https://finance.baidu.com/action/IndexHistoryAction?type=last&code=${baiduCode}&t=${Date.now()}`;
     const resp = await fetch(url, {
@@ -790,8 +887,36 @@ async function getIndexHistory(code, count = 120) {
 }
 
 async function getCSIndexHistory(code, count = 120) {
+  // 规范化：统一小写处理（getIndexHistory 可能传入大写代码）
+  const normalized = String(code || "").trim().toLowerCase();
+  // 优先：腾讯理财通K线接口（支持任意 sh/sz 代码，便于自定义指数）
   try {
-    const baiduCode = code.startsWith("sh") || code.startsWith("sz") ? code : "sh" + code;
+    const tc = normalized.startsWith("sh") || normalized.startsWith("sz") ? normalized : "sh" + normalized;
+    const upstream = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tc},day,,,${count},qfq`;
+    const resp = await fetch(upstream, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await resp.json();
+    const stockData = data?.data?.[tc];
+    const kline = stockData?.qfqday || stockData?.day || [];
+    if (kline.length > 0) {
+      return {
+        code,
+        history: kline.map(item => ({
+          date: item[0],
+          open: parseFloat(item[1]) || null,
+          close: parseFloat(item[2]) || null,
+          high: parseFloat(item[4]) || null,
+          low: parseFloat(item[5]) || null,
+          volume: parseFloat(item[6]) || null,
+        })),
+      };
+    }
+  } catch (_) {}
+  // 备用：百度财经指数历史
+  try {
+    const baiduCode = normalized.startsWith("sh") || normalized.startsWith("sz") ? normalized : "sh" + normalized;
     const url = `https://finance.baidu.com/action/IndexHistoryAction?type=last&code=${baiduCode}&t=${Date.now()}`;
     const resp = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
@@ -817,32 +942,8 @@ async function getCSIndexHistory(code, count = 120) {
         return { code, history };
       }
     }
-  } catch (_) {
-  }
-  try {
-    const tc = code.startsWith("sh") ? code : "sh" + code;
-    const upstream = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tc},day,,,${count},qfq`;
-    const resp = await fetch(upstream, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(10000),
-    });
-    const data = await resp.json();
-    const stockData = data?.data?.[tc];
-    const kline = stockData?.qfqday || stockData?.day || [];
-    return {
-      code,
-      history: kline.map(item => ({
-        date: item[0],
-        open: parseFloat(item[1]) || null,
-        close: parseFloat(item[2]) || null,
-        high: parseFloat(item[4]) || null,
-        low: parseFloat(item[5]) || null,
-        volume: parseFloat(item[6]) || null,
-      })),
-    };
-  } catch (err) {
-    throw new Error("failed to fetch index history");
-  }
+  } catch (_) {}
+  return { code, history: [] };
 }
 
 async function getUSIndexHistory(code, count = 120) {
