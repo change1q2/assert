@@ -4,7 +4,7 @@ function tencentCodeFor(code, market) {
   market = String(market || "").toLowerCase();
   if (market === "domestic" || /^sh/i.test(code)) {
     const raw = code.replace(/^(sh|sz)/i, "");
-    return (raw.startsWith("6") || raw.startsWith("9")) ? "sh" + raw : "sz" + raw;
+    return (raw.startsWith("6") || raw.startsWith("9") || raw.startsWith("11")) ? "sh" + raw : "sz" + raw;
   }
   if (market === "hk" || /^hk/i.test(code) || /^0[0-9]{4}$/.test(code)) {
     return "hk" + code.replace(/^hk/i, "").padStart(5, "0");
@@ -13,6 +13,8 @@ function tencentCodeFor(code, market) {
     return "us" + code.replace(/^us/i, "").toUpperCase();
   }
   if (/^[569]/.test(code)) return "sh" + code;
+  if (/^11/.test(code)) return "sh" + code;
+  if (/^12/.test(code)) return "sz" + code;
   if (/^[013]/.test(code)) return "sz" + code;
   return null;
 }
