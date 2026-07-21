@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+import path from "node:path";
+dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
 import http from "node:http";
 import { initDb } from "./db/index.js";
 import { PORT } from "./config/index.js";

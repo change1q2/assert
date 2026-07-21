@@ -61,10 +61,42 @@ export default function Accounts() {
     setError(null);
     try {
       const data = await fetchState();
+      // 后端账户为空时，尝试从 localStorage 读取缓存
+      const cachedAccounts = localStorage.getItem('wealth_os_accounts');
+      if ((!data.accounts || data.accounts.length === 0) && cachedAccounts) {
+        try {
+          const parsed = JSON.parse(cachedAccounts);
+          data.accounts = parsed;
+        } catch {
+          /* ignore parse error */
+        }
+      }
+      // 首次使用：既然后端和本地都没有账户，初始化测试数据
+      if (!data.accounts || data.accounts.length === 0) {
+        const demoAccounts = [
+          { id: 'demo-1', name: '招商银行', category: '银行', currency: 'CNY', liability: false },
+          { id: 'demo-2', name: '支付宝', category: '储蓄', currency: 'CNY', liability: false },
+          { id: 'demo-3', name: '微信支付', category: '储蓄', currency: 'CNY', liability: false },
+          { id: 'demo-4', name: '工商银行信用卡', category: '信用卡', currency: 'CNY', liability: true },
+        ];
+        data.accounts = demoAccounts;
+        localStorage.setItem('wealth_os_accounts', JSON.stringify(demoAccounts));
+      }
       setStateData(data);
     } catch (err) {
       console.error('Failed to load accounts data:', err);
-      setError('加载数据失败');
+      // 后端完全不可用，从本地缓存加载
+      const cachedAccounts = localStorage.getItem('wealth_os_accounts');
+      if (cachedAccounts) {
+        try {
+          const parsed = JSON.parse(cachedAccounts);
+          setStateData({ accounts: parsed, records: [], finance: {}, debts: [] });
+        } catch {
+          setError('加载数据失败');
+        }
+      } else {
+        setError('加载数据失败');
+      }
     } finally {
       setLoading(false);
     }
@@ -162,12 +194,18 @@ export default function Accounts() {
     try {
       const newAccounts = (stateData.accounts || []).filter(a => a.id !== accountId);
       const newState = { ...stateData, accounts: newAccounts };
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
       const result = await saveState(newState);
       if (result.success !== false) {
         setStateData(newState);
       }
     } catch (err) {
       console.error('Failed to delete account:', err);
+      alert('后端删除失败，但本地缓存已更新');
+      const newAccounts = (stateData.accounts || []).filter(a => a.id !== accountId);
+      const newState = { ...stateData, accounts: newAccounts };
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+      setStateData(newState);
     }
   };
 
@@ -190,19 +228,29 @@ export default function Accounts() {
             id: Date.now().toString(),
             name: formData.name,
             category: formData.category,
+            currency: formData.currency || 'CNY',
             liability: formData.liability,
           },
         ];
       }
 
       const newState = { ...stateData, accounts: newAccounts };
+
+      // 本地缓存兜底：无论后端是否成功，都先写 localStorage
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+
       const result = await saveState(newState);
       if (result.success !== false) {
+        setStateData(newState);
+        setShowModal(false);
+      } else {
+        alert('后端保存失败，但数据已写入本地缓存');
         setStateData(newState);
         setShowModal(false);
       }
     } catch (err) {
       console.error('Failed to save account:', err);
+      alert('后端保存失败：' + (err.message || '网络错误') + '，数据已写入本地缓存');
     }
   };
 

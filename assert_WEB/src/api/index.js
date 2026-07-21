@@ -207,7 +207,7 @@ export async function saveState(state) {
     method: 'PUT',
     body: JSON.stringify({ state }),
   })
-  if (response && response.ok) return response
+  if (response && (response.ok || response.success)) return response
   throw new Error(response?.error || '保存状态失败')
 }
 
