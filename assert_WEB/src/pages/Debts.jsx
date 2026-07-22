@@ -431,7 +431,7 @@ export default function Debts() {
     );
   };
 
-  const DEFAULT_CATEGORIES = ['信用卡', '房贷', '车贷', '消费贷', '亲友借款', '其他'];
+  const DEFAULT_CATEGORIES = ['信用卡', '房贷', '车贷', '消费贷', '亲友借款', '他人借款'];
   const defaultCategories = DEFAULT_CATEGORIES.map((name, idx) => ({ id: `cat_${idx}`, name }));
   const debtCategories = stateData?.debtCategories?.length > 0 
     ? stateData.debtCategories 
@@ -467,12 +467,32 @@ export default function Debts() {
     setError(null);
     try {
       const data = await fetchState();
-      if (data && data.debts && data.debts.length > 0) {
+      if (data) {
+        if (!data.accounts || data.accounts.length === 0) {
+          const cachedAccounts = localStorage.getItem('wealth_os_accounts');
+          if (cachedAccounts) {
+            try {
+              data.accounts = JSON.parse(cachedAccounts);
+            } catch {
+              /* ignore parse error */
+            }
+          }
+        }
         setStateData(data);
       }
     } catch (err) {
       console.error('Failed to load debts data:', err);
-      setError('加载数据失败');
+      const cachedAccounts = localStorage.getItem('wealth_os_accounts');
+      if (cachedAccounts) {
+        try {
+          const accounts = JSON.parse(cachedAccounts);
+          setStateData({ debts: [], accounts, records: [] });
+        } catch {
+          setError('加载数据失败');
+        }
+      } else {
+        setError('加载数据失败');
+      }
     } finally {
       setLoading(false);
     }
@@ -957,8 +977,14 @@ export default function Debts() {
       );
     }
     
-    const payables = filtered.filter((d) => d.category === 'payable' || (!d.category && (d.type === '借入' || d.type === '应付')));
-    const receivables = filtered.filter((d) => d.category === 'receivable' || (!d.category && (d.type === '借出' || d.type === '应收')));
+    const payables = filtered.filter((d) => {
+      const type = d.type || (d.category === 'payable' ? '借入' : d.category === 'receivable' ? '借出' : d.category);
+      return d.category === 'payable' || type === '借入' || type === '应付';
+    });
+    const receivables = filtered.filter((d) => {
+      const type = d.type || (d.category === 'payable' ? '借入' : d.category === 'receivable' ? '借出' : d.category);
+      return d.category === 'receivable' || type === '借出' || type === '应收';
+    });
 
     const pTotal = payables.reduce((s, d) => s + (d.amount || 0), 0);
     const pPrincipal = payables.reduce((s, d) => s + (d.principal || d.amount || 0), 0);
@@ -1382,7 +1408,7 @@ export default function Debts() {
                 })}
                 {/* 未分类 */}
                 {(() => {
-                  const uncategorized = stats.receivables.filter((d) => !d.debtCategory || d.debtCategory === '');
+                  const uncategorized = stats.receivables.filter((d) => !d.debtCategory || d.debtCategory === '' || !debtCategories.find(c => c.id === d.debtCategory));
                   if (uncategorized.length === 0) return null;
                   const totalAmount = uncategorized.reduce((s, d) => s + (d.amount || 0), 0);
                   const cardKey = 'receivable_uncategorized';
@@ -1406,14 +1432,18 @@ export default function Debts() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">大类 <span className="text-red-500">*</span></label>
-                    <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
-                      <option value="payable">应付 / 借入</option>
-                      <option value="receivable">应收 / 借出</option>
+                    <select value={form.category} onChange={(e) => {
+                      const newCategory = e.target.value;
+                      const newType = newCategory === 'payable' ? '借入' : '借出';
+                      setForm({ ...form, category: newCategory, type: newType, debtCategory: '' });
+                    }} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
+                      <option value="payable">入账</option>
+                      <option value="receivable">出账</option>
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">类型</label>
-                    <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
+                    <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value, debtCategory: '' })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
                       {form.category === 'payable' ? (
                         <><option value="借入">借入</option><option value="应付">应付</option></>
                       ) : (
@@ -1428,9 +1458,13 @@ export default function Debts() {
                       </label>
                       <select value={form.debtCategory} onChange={(e) => setForm({ ...form, debtCategory: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
                         <option value="">请选择类别</option>
-                        {debtCategories.map((cat) => (
-                          <option key={cat.id} value={cat.id}>{cat.name}</option>
-                        ))}
+                        {form.type === '借出' || form.type === '应收' ? (
+                          <><option value="cat_4">亲友借款</option><option value="cat_5">他人借款</option></>
+                        ) : (
+                          debtCategories.map((cat) => (
+                            <option key={cat.id} value={cat.id}>{cat.name}</option>
+                          ))
+                        )}
                       </select>
                     </div>
                     <div>

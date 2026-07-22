@@ -802,8 +802,14 @@ async function getUSIndex(code) {
 }
 
 async function getCSIndex(code) {
-  code = String(code || "").trim().toLowerCase();
-  const tcCode = code.startsWith("sh") || code.startsWith("sz") ? code : "sh" + code;
+  let normalized = String(code || "").trim().toLowerCase();
+  // 处理东方财富 secid 格式：1B0300 -> sh000300, 0B03906 -> sz399006
+  if (/^\d[bB]/.test(normalized)) {
+    const marketId = normalized.charAt(0);
+    const realCode = normalized.substring(2);
+    normalized = (marketId === "1" ? "sh" : "sz") + realCode;
+  }
+  const tcCode = normalized.startsWith("sh") || normalized.startsWith("sz") ? normalized : "sh" + normalized;
   // 优先：腾讯理财通实时指数接口（支持任意 sh/sz 代码，便于自定义指数）
   try {
     const url = `http://qt.gtimg.cn/q=${tcCode}`;
@@ -888,7 +894,13 @@ async function getIndexHistory(code, count = 120) {
 
 async function getCSIndexHistory(code, count = 120) {
   // 规范化：统一小写处理（getIndexHistory 可能传入大写代码）
-  const normalized = String(code || "").trim().toLowerCase();
+  let normalized = String(code || "").trim().toLowerCase();
+  // 处理东方财富 secid 格式：1B0300 -> sh000300, 0B03906 -> sz399006
+  if (/^\d[bB]/.test(normalized)) {
+    const marketId = normalized.charAt(0);
+    const realCode = normalized.substring(2);
+    normalized = (marketId === "1" ? "sh" : "sz") + realCode;
+  }
   // 优先：腾讯理财通K线接口（支持任意 sh/sz 代码，便于自定义指数）
   try {
     const tc = normalized.startsWith("sh") || normalized.startsWith("sz") ? normalized : "sh" + normalized;
@@ -976,4 +988,53 @@ async function getUSIndexHistory(code, count = 120) {
   return { code, history: [] };
 }
 
-export { tencentCodeFor, lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getCSIndex, getIndexHistory };
+async function getCpiData(year) {
+  const cpiCache = new Map();
+  
+  if (cpiCache.has(year)) {
+    return cpiCache.get(year);
+  }
+
+  try {
+    const url = `https://data.stats.gov.cn/easyquery.htm?m=QueryData&dbcode=hgjd&rowcode=zb&colcode=sj&wds=[{%22wdcode%22:%22zb%22,%22valuecode%22:%22A0101%22}]&dfwds=[{%22wdcode%22:%22sj%22,%22valuecode%22:%22${year}%22}]&k1=${Date.now()}`;
+    
+    const resp = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://data.stats.gov.cn/",
+        "Accept": "application/json, text/plain, */*",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const data = await resp.json();
+    const retData = data?.returndata?.datanodes || [];
+    
+    const monthlyData = [];
+    for (let month = 1; month <= 12; month++) {
+      const monthStr = `${year}-${String(month).padStart(2, '0')}`;
+      const node = retData.find(n => n.wds.some(w => w.valuecode === monthStr));
+      if (node && node.data && node.data.hasOwnProperty('data')) {
+        const value = parseFloat(node.data.data);
+        if (Number.isFinite(value)) {
+          monthlyData.push({ month: monthStr, value: value });
+        }
+      }
+    }
+
+    const cumulativeSum = monthlyData.reduce((sum, item) => sum + item.value, 0);
+    
+    const result = {
+      year,
+      monthly: monthlyData,
+      cumulative: cumulativeSum,
+    };
+
+    cpiCache.set(year, result);
+    return result;
+  } catch (err) {
+    throw new Error(`Failed to fetch CPI data: ${err.message}`);
+  }
+}
+
+export { tencentCodeFor, lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getCSIndex, getIndexHistory, getCpiData };

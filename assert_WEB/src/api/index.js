@@ -1,4 +1,7 @@
 import { DEFAULT_EXCHANGE_RATES, CURRENCIES } from '../utils/currency.js'
+import { getCache, setCache, markPendingSync, getPendingSyncs, clearPendingSync, clearAllPendingSyncs } from '../utils/cache.js'
+
+export { getPendingSyncs }
 
 const API_BASE = '/api'
 
@@ -29,63 +32,89 @@ async function request(url, options = {}) {
 export async function fetchAssets() {
   try {
     const response = await request('/assets')
-    return response.data || []
+    const data = response.data || []
+    setCache('assets', data)
+    return data
   } catch {
-    return []
+    const cached = getCache('assets')
+    return cached || []
   }
 }
 
 export async function fetchOverview() {
   try {
     const response = await request('/overview')
-    return response.data || {}
+    const data = response.data || {}
+    setCache('overview', data)
+    return data
   } catch {
-    return {}
+    const cached = getCache('overview')
+    return cached || {}
   }
 }
 
 export async function fetchRecords() {
   try {
     const response = await request('/records')
-    return response.data || []
+    const data = response.data || []
+    setCache('records', data)
+    return data
   } catch {
-    return []
+    const cached = getCache('records')
+    return cached || []
   }
 }
 
 export async function fetchDebts() {
   try {
     const response = await request('/debts')
-    return response.data || []
+    const data = response.data || []
+    setCache('debts', data)
+    return data
   } catch {
-    return []
+    const cached = getCache('debts')
+    return cached || []
   }
 }
 
 export async function fetchAccounts() {
   try {
     const response = await request('/accounts')
-    return response.data || []
+    const data = response.data || []
+    setCache('accounts', data)
+    return data
   } catch {
-    return []
+    const cached = getCache('accounts')
+    if (cached) return cached
+    return [
+      { id: '1', name: '工商银行储蓄卡', owner: '本人', currency: 'CNY', type: 'bank', balance: 10000, liability: 0, enabled: true, is_default: true, sort_order: 0 },
+      { id: '2', name: '支付宝余额', owner: '本人', currency: 'CNY', type: 'wallet', balance: 5000, liability: 0, enabled: true, is_default: false, sort_order: 1 },
+      { id: '3', name: '微信零钱', owner: '本人', currency: 'CNY', type: 'wallet', balance: 2000, liability: 0, enabled: true, is_default: false, sort_order: 2 },
+    ]
   }
 }
 
 export async function fetchAssetClasses() {
   try {
     const response = await request('/asset-classes')
-    return response.data || []
+    const data = response.data || []
+    setCache('assetClasses', data)
+    return data
   } catch {
-    return []
+    const cached = getCache('assetClasses')
+    return cached || []
   }
 }
 
 export async function fetchAnalysis() {
   try {
     const response = await request('/analysis')
-    return response.data || {}
+    const data = response.data || {}
+    setCache('analysis', data)
+    return data
   } catch {
-    return {}
+    const cached = getCache('analysis')
+    return cached || {}
   }
 }
 
@@ -95,6 +124,8 @@ export async function createRecord(data) {
       method: 'POST',
       body: JSON.stringify(data),
     })
+    removeCache('records')
+    removeCache('state')
     return response
   } catch {
     return { success: true, data: { ...data, id: Date.now() } }
@@ -107,6 +138,8 @@ export async function createDebt(data) {
       method: 'POST',
       body: JSON.stringify(data),
     })
+    removeCache('debts')
+    removeCache('state')
     return response
   } catch {
     return { success: true, data: { ...data, id: Date.now() } }
@@ -119,6 +152,8 @@ export async function createAccount(data) {
       method: 'POST',
       body: JSON.stringify(data),
     })
+    removeCache('accounts')
+    removeCache('state')
     return response
   } catch {
     return { success: true, data: { ...data, id: Date.now() } }
@@ -131,6 +166,8 @@ export async function updateAccount(id, data) {
       method: 'PUT',
       body: JSON.stringify(data),
     })
+    removeCache('accounts')
+    removeCache('state')
     return response
   } catch {
     return { success: true, data: { ...data, id } }
@@ -142,6 +179,8 @@ export async function deleteAccount(id) {
     const response = await request(`/accounts/${id}`, {
       method: 'DELETE',
     })
+    removeCache('accounts')
+    removeCache('state')
     return response
   } catch {
     return { success: true }
@@ -154,6 +193,8 @@ export async function createAsset(data) {
       method: 'POST',
       body: JSON.stringify(data),
     })
+    removeCache('assets')
+    removeCache('state')
     return response
   } catch {
     return { success: true, data: { ...data, id: Date.now() } }
@@ -170,45 +211,132 @@ export async function fetchState() {
       return {}
     }
     if (response.message && response.message.includes('登录')) {
-      return {
-        debts: [],
-        records: [],
-        accounts: [],
-        assetClasses: [],
-        overviewGoals: {},
-        books: [],
-        tags: [],
-      }
+      const cached = getCache('state')
+      if (cached) return cached
+      return getDefaultState()
     }
-    return response.state || response.data || {
-      debts: [],
-      records: [],
-      accounts: [],
-      assetClasses: [],
-      overviewGoals: {},
-      books: [],
-      tags: [],
-    }
-  } catch {
-    return {
-      debts: [],
-      records: [],
-      accounts: [],
-      assetClasses: [],
-      overviewGoals: {},
-      books: [],
-      tags: [],
-    }
+    const data = response.state || response.data || getDefaultState()
+    setCache('state', data)
+    return data
+  } catch (err) {
+    console.warn('Fetch state failed, using cache:', err.message)
+    const cached = getCache('state')
+    if (cached) return cached
+    console.info('No cache found, using default state')
+    const defaultState = getDefaultState()
+    setCache('state', defaultState)
+    return defaultState
+  }
+}
+
+function getDefaultState() {
+  return {
+    debts: [],
+    records: [],
+    accounts: [
+      { id: '1', name: '工商银行储蓄卡', owner: '本人', currency: 'CNY', type: 'bank', balance: 10000, liability: 0, enabled: true, is_default: true, sort_order: 0 },
+      { id: '2', name: '支付宝余额', owner: '本人', currency: 'CNY', type: 'wallet', balance: 5000, liability: 0, enabled: true, is_default: false, sort_order: 1 },
+      { id: '3', name: '微信零钱', owner: '本人', currency: 'CNY', type: 'wallet', balance: 2000, liability: 0, enabled: true, is_default: false, sort_order: 2 },
+    ],
+    assetClasses: [],
+    overviewGoals: {},
+    books: [],
+    tags: [],
+    exchangeRates: {},
+    customRecordCategories: [],
+    financeTertiaryCategories: [],
+    recordTags: [],
+    recorders: [],
+    reminders: [],
+    debtPayments: [],
+    debtCategories: [],
+    strategies: [],
+    userSettings: {},
+    financeAssets: [],
+    financeAssetTransactions: [],
+    financeAssetIndoorTransactions: [],
+    financeAssetOutdoorTransactions: [],
   }
 }
 
 export async function saveState(state) {
-  const response = await request('/state', {
-    method: 'PUT',
-    body: JSON.stringify({ state }),
-  })
-  if (response && (response.ok || response.success)) return response
-  throw new Error(response?.error || '保存状态失败')
+  try {
+    const response = await request('/state', {
+      method: 'PUT',
+      body: JSON.stringify({ state }),
+    })
+    if (response && (response.ok || response.success)) {
+      setCache('state', state)
+      clearPendingSync('state')
+      return response
+    }
+    throw new Error(response?.error || '保存状态失败')
+  } catch (err) {
+    console.warn('Save state to server failed, saving to local cache:', err.message)
+    setCache('state', state)
+    markPendingSync('state', state)
+    return { success: true, data: state, cached: true }
+  }
+}
+
+// 同步待同步数据到数据库
+export async function syncPendingData() {
+  const pending = getPendingSyncs()
+  const keys = Object.keys(pending)
+
+  if (keys.length === 0) {
+    return { synced: 0, message: '没有待同步的数据' }
+  }
+
+  let syncedCount = 0
+  const errors = []
+
+  for (const key of keys) {
+    try {
+      if (key === 'state') {
+        const response = await request('/state', {
+          method: 'PUT',
+          body: JSON.stringify({ state: pending[key].data }),
+        })
+        if (response && (response.ok || response.success)) {
+          clearPendingSync('state')
+          syncedCount++
+        }
+      }
+    } catch (err) {
+      errors.push({ key, error: err.message })
+    }
+  }
+
+  if (syncedCount > 0) {
+    console.log(`✅ 已同步 ${syncedCount} 条本地数据到数据库`)
+  }
+
+  return {
+    synced: syncedCount,
+    total: keys.length,
+    errors: errors.length > 0 ? errors : null,
+    message: errors.length > 0 ? `同步完成，${errors.length} 条失败` : `已同步 ${syncedCount} 条数据`
+  }
+}
+
+// 检查网络连接并自动同步
+export async function checkAndSync() {
+  if (!navigator.onLine) {
+    return { online: false, message: '网络未连接' }
+  }
+
+  try {
+    const response = await request('/state')
+    if (response && !response.error) {
+      const syncResult = await syncPendingData()
+      return { online: true, connected: true, ...syncResult }
+    }
+  } catch {
+    return { online: true, connected: false, message: '数据库未连接' }
+  }
+
+  return { online: true, connected: true, synced: 0 }
 }
 
 export async function fetchBooks() {

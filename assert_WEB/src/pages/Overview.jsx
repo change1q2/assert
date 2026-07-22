@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchState, saveState } from '../api';
+import { PieChart, Pie, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import {
   Wallet,
   Briefcase,
@@ -14,7 +15,13 @@ import {
   Calendar,
   ArrowUpRight,
   ArrowDownRight,
+  PiggyBank,
+  Landmark,
+  Banknote,
+  CreditCard,
 } from 'lucide-react';
+
+const ASSET_CATEGORY_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#F97316', '#EF4444'];
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
@@ -46,8 +53,16 @@ export default function Overview() {
     targetAnnualReturn: 0,
     ultimateGoal: 0,
   });
+  const [showEditYearlyModal, setShowEditYearlyModal] = useState(false);
+  const [editYearlyForm, setEditYearlyForm] = useState({
+    year: new Date().getFullYear(),
+    openingAsset: 0,
+    closingAsset: 0,
+    targetProfit: 0,
+  });
+  const [editingYearIndex, setEditingYearIndex] = useState(-1);
 
-  const { debts = [], records = [], accounts = [], overviewGoals = {} } = stateData || {};
+  const { debts = [], records = [], accounts = [], overviewGoals = {}, financeAssets = [], independentAssets = {} } = stateData || {};
 
   useEffect(() => {
     loadData();
@@ -59,9 +74,7 @@ export default function Overview() {
       const data = await fetchState();
       setStateData(data);
       if (data.accounts) {
-        const liabilityAccounts = data.accounts.filter(a => a.liability);
         const nonLiabilityAccounts = data.accounts.filter(a => !a.liability);
-        const totalAssets = nonLiabilityAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
         setAssets(data.assets || nonLiabilityAccounts.map(a => ({
           id: a.id,
           name: a.name,
@@ -222,26 +235,124 @@ export default function Overview() {
     };
   };
 
-  const computeGoals = (goals, assetsData) => {
-    const totalValue = (assetsData || []).reduce((sum, a) => sum + (a.rmbValue || 0), 0);
-    const liabilitiesData = computeLiabilities(debts);
-    const currentNetWorth = totalValue - liabilitiesData.total;
+  const computeYearlyRows = (yearlyRecords, netAssetVal) => {
+    const currentYear = new Date().getFullYear();
+    const now = new Date();
+    const dayOfYear = Math.floor((now - new Date(currentYear, 0, 0)) / 1000 / 60 / 60 / 24);
+    const sorted = [...(yearlyRecords || [])].sort((a, b) => a.year - b.year);
 
-    const yearlyProfit = goals?.yearlyProfit || 0;
-    const yearlyGoal = goals?.yearlyGoal || 400000;
+    const rows = [];
+    sorted.forEach((record, idx) => {
+      const prevRecord = rows[idx - 1];
+      const prevClosing = prevRecord ? prevRecord.closingAsset : 0;
+      const rawOpening = parseFloat(record.openingAsset) || 0;
+      const openingAsset = idx === 0 ? (rawOpening || prevClosing) : prevClosing;
+      const closingAsset = parseFloat(record.closingAsset) || netAssetVal;
+      const targetProfit = parseFloat(record.targetProfit) || 0;
+      const actualProfit = closingAsset - openingAsset;
+      const actualRate = openingAsset > 0 ? (actualProfit / openingAsset) * 100 : 0;
+      const completionRate = targetProfit > 0 ? (actualProfit / targetProfit) * 100 : 0;
+      const isCurrentYear = record.year === currentYear;
+
+      // 累计年化收益率（CAGR）: 从第一年期初到当前行期末的累计年化
+      const firstOpening = rows[0]?.openingAsset || openingAsset;
+      let yearsElapsed;
+      if (isCurrentYear) {
+        // 当前年份按实际已过天数折算
+        yearsElapsed = (record.year - sorted[0].year) + dayOfYear / 365;
+      } else {
+        // 历史完整年份
+        yearsElapsed = record.year - sorted[0].year + 1;
+      }
+      let annualizedRate = 0;
+      if (firstOpening > 0 && yearsElapsed > 0 && closingAsset > 0) {
+        annualizedRate = (Math.pow(closingAsset / firstOpening, 1 / yearsElapsed) - 1) * 100;
+      }
+
+      const isCompleted = completionRate >= 100;
+
+      rows.push({
+        ...record,
+        originalIndex: (yearlyRecords || []).findIndex(r => r.year === record.year),
+        openingAsset,
+        closingAsset,
+        targetProfit,
+        actualProfit,
+        actualRate,
+        annualizedRate,
+        completionRate,
+        isCurrentYear,
+        isCompleted,
+      });
+    });
+
+    // 本年未录入时的自动计算行
+    const hasCurrentYear = sorted.some(r => r.year === currentYear);
+    if (!hasCurrentYear) {
+      const lastRecord = rows[rows.length - 1];
+      const openingAsset = lastRecord ? lastRecord.closingAsset : 0;
+      const closingAsset = netAssetVal;
+      const actualProfit = openingAsset > 0 ? closingAsset - openingAsset : 0;
+      const actualRate = openingAsset > 0 ? (actualProfit / openingAsset) * 100 : 0;
+      // 累计年化：从第一年期初到当前期末
+      const firstOpening = rows[0]?.openingAsset || openingAsset;
+      const yearsElapsed = sorted.length > 0
+        ? (currentYear - sorted[0].year) + dayOfYear / 365
+        : dayOfYear / 365;
+      let annualizedRate = 0;
+      if (firstOpening > 0 && yearsElapsed > 0 && closingAsset > 0) {
+        annualizedRate = (Math.pow(closingAsset / firstOpening, 1 / yearsElapsed) - 1) * 100;
+      }
+      rows.push({
+        year: currentYear,
+        openingAsset,
+        closingAsset,
+        targetProfit: 0,
+        actualProfit,
+        actualRate,
+        annualizedRate,
+        completionRate: 0,
+        isCurrentYear: true,
+        isCompleted: false,
+        isAuto: true,
+      });
+    }
+
+    return rows.reverse();
+  };
+
+  const computeGoals = (goals, assetsData, yearlyRecords, netAssetVal) => {
+    const currentYear = new Date().getFullYear();
+    const currentYearRecord = (yearlyRecords || []).find(r => r.year === currentYear);
+    const sortedRecords = [...(yearlyRecords || [])].sort((a, b) => a.year - b.year);
+    const lastRecord = sortedRecords[sortedRecords.length - 1];
+    const prevClosing = lastRecord ? (parseFloat(lastRecord.closingAsset) || 0) : 0;
+
+    const openingAsset = currentYearRecord
+      ? (parseFloat(currentYearRecord.openingAsset) || prevClosing)
+      : prevClosing;
+    const closingAsset = netAssetVal;
+    const yearlyProfit = closingAsset - openingAsset;
+    const yearlyProfitRate = openingAsset > 0 ? (yearlyProfit / openingAsset) * 100 : 0;
+
+    const now = new Date();
+    const dayOfYear = Math.floor((now - new Date(currentYear, 0, 0)) / 1000 / 60 / 60 / 24);
+    const annualizedReturn = dayOfYear > 0 ? yearlyProfitRate * (365 / dayOfYear) : yearlyProfitRate;
+
+    const yearlyGoal = currentYearRecord?.targetProfit || goals?.yearlyGoal || 400000;
     const targetAnnualReturn = goals?.targetAnnualReturn || 15;
     const ultimateGoal = goals?.ultimateGoal || 53000000;
 
-    const yearlyProfitRate = totalValue > 0 ? (yearlyProfit / totalValue) * 100 : 0;
     const yearlyProgress = yearlyGoal > 0 ? Math.min((yearlyProfit / yearlyGoal) * 100, 100) : 0;
-    const ultimateProgress = ultimateGoal > 0 ? (currentNetWorth / ultimateGoal) * 100 : 0;
-    const returnProgress = targetAnnualReturn > 0 ? Math.min((yearlyProfitRate / targetAnnualReturn) * 100, 100) : 0;
+    const ultimateProgress = ultimateGoal > 0 ? (netAssetVal / ultimateGoal) * 100 : 0;
+    const returnProgress = targetAnnualReturn > 0 ? Math.min((annualizedReturn / targetAnnualReturn) * 100, 100) : 0;
 
     return {
       yearlyProfit,
       yearlyProfitRate,
+      annualizedReturn,
       ultimateGoal,
-      currentNetWorth,
+      currentNetWorth: netAssetVal,
       yearlyGoal,
       targetAnnualReturn,
       yearlyProgress,
@@ -281,6 +392,59 @@ export default function Overview() {
     }
   };
 
+  // 计算真实数据
+  const liabilities = computeLiabilities(debts);
+  const incomeExpense = computeIncomeExpense(records);
+  const liquidity = computeLiquidity(accounts, records);
+
+  // 计算理财总资产（与理财模块的总市值计算保持一致：currentValue = currentPrice × shares，货币汇率折算）
+  const exchangeRates = stateData?.exchangeRates || { CNY: 1 };
+  const financeTotalValue = (financeAssets || []).reduce((sum, a) => {
+    const _price = parseFloat(a.currentPrice) || parseFloat(a.costPrice) || parseFloat(a.cost) || 0;
+    const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
+    const value = _price * _qty;
+    const currency = a.currency || 'CNY';
+    const fromRate = exchangeRates[currency] ?? 1;
+    const toRate = exchangeRates['CNY'] ?? 1;
+    const rmbValue = currency === 'CNY' ? value : (value * fromRate) / toRate;
+    return sum + rmbValue;
+  }, 0);
+
+  // 计算独立总资产
+  let independentTotalValue = 0;
+  Object.values(independentAssets || {}).forEach(items => {
+    (items || []).forEach(item => {
+      const type = item.type || item.category;
+      if (type === 'insurance') {
+        independentTotalValue += parseFloat(item.premiumTotal || 0);
+      } else if (type === 'realestate') {
+        const marketValue = parseFloat(item.marketValue || 0);
+        const taxAmount = parseFloat(item.taxAmount || 0);
+        const agencyFee = parseFloat(item.agencyFee || 0);
+        const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFee) : parseFloat(item.purchasePrice || 0);
+        independentTotalValue += actualValue;
+      } else if (type === 'vehicle') {
+        const purchasePrice = parseFloat(item.purchasePrice || 0);
+        const depreciationRate = parseFloat(item.depreciationRate || 0);
+        const years = parseFloat(item.ownershipYears || 0);
+        const residualValue = purchasePrice * Math.pow(1 - depreciationRate / 100, years);
+        independentTotalValue += residualValue;
+      } else if (type === 'fixedinvestment') {
+        independentTotalValue += parseFloat(item.investmentCost || 0);
+      } else if (type === 'equity') {
+        independentTotalValue += parseFloat(item.marketValue || item.investmentCost || 0);
+      } else if (type === 'fixeddeposit') {
+        independentTotalValue += parseFloat(item.amount || 0);
+      }
+    });
+  });
+
+  // 资产总览 = 理财总资产 + 独立总资产 - 总负债
+  const netAssetValue = financeTotalValue + independentTotalValue - liabilities.total;
+
+  const yearlyRecords = stateData?.yearlyRecords || [];
+  const goals = computeGoals(overviewGoals, assets, yearlyRecords, netAssetValue);
+
   const totalValue = assets.reduce((sum, asset) => sum + asset.rmbValue, 0);
   const totalCost = assets.reduce((sum, asset) => sum + asset.costValue, 0);
   const totalPnl = totalValue - totalCost;
@@ -304,15 +468,85 @@ export default function Overview() {
 
   const topHoldings = [...assets].sort((a, b) => b.rmbValue - a.rmbValue).slice(0, 5);
 
+  const assetAllocationData = () => {
+    const allocation = {};
+
+    const financeKindLabels = {
+      stock: '股票',
+      fund: '基金',
+      commodity: '商品',
+      futures: '期货',
+      options: '期权',
+      crypto: '加密货币',
+      cashflow: '现金',
+      custom: '其他理财',
+    };
+
+    (financeAssets || []).forEach(asset => {
+      const category = asset.category || asset.kind || '其他理财';
+      const label = financeKindLabels[asset.kind] || category;
+      const _price = parseFloat(asset.currentPrice) || parseFloat(asset.costPrice) || parseFloat(asset.cost) || 0;
+      const _qty = parseFloat(asset.shares) || parseFloat(asset.quantity) || 0;
+      const value = _price * _qty;
+      const currency = asset.currency || 'CNY';
+      const fromRate = exchangeRates[currency] ?? 1;
+      const toRate = exchangeRates['CNY'] ?? 1;
+      const rmbValue = currency === 'CNY' ? value : (value * fromRate) / toRate;
+      allocation[label] = (allocation[label] || 0) + rmbValue;
+    });
+
+    const independentTypeLabels = {
+      insurance: '保险',
+      realestate: '房产',
+      vehicle: '车辆',
+      fixedinvestment: '固定投资',
+      equity: '股权',
+      fixeddeposit: '定期资产',
+    };
+
+    Object.values(independentAssets || {}).forEach(items => {
+      (items || []).forEach(item => {
+        const type = item.type || item.category;
+        const label = independentTypeLabels[type] || type;
+        let value = 0;
+        if (type === 'insurance') {
+          value = parseFloat(item.premiumTotal || 0);
+        } else if (type === 'realestate') {
+          const marketValue = parseFloat(item.marketValue || 0);
+          const taxAmount = parseFloat(item.taxAmount || 0);
+          const agencyFee = parseFloat(item.agencyFee || 0);
+          value = marketValue > 0 ? (marketValue - taxAmount - agencyFee) : parseFloat(item.purchasePrice || 0);
+        } else if (type === 'vehicle') {
+          const purchasePrice = parseFloat(item.purchasePrice || 0);
+          const depreciationRate = parseFloat(item.depreciationRate || 0);
+          const years = parseFloat(item.ownershipYears || 0);
+          value = purchasePrice * Math.pow(1 - depreciationRate / 100, years);
+        } else if (type === 'fixedinvestment') {
+          value = parseFloat(item.investmentCost || 0);
+        } else if (type === 'equity') {
+          value = parseFloat(item.marketValue || item.investmentCost || 0);
+        } else if (type === 'fixeddeposit') {
+          value = parseFloat(item.amount || 0);
+        }
+        allocation[label] = (allocation[label] || 0) + value;
+      });
+    });
+
+    return Object.entries(allocation)
+      .filter(([, value]) => value > 0)
+      .map(([name, value], idx) => ({
+        name,
+        value,
+        color: ASSET_CATEGORY_COLORS[idx % ASSET_CATEGORY_COLORS.length],
+      }))
+      .sort((a, b) => b.value - a.value);
+  };
+
+  const assetAllocation = assetAllocationData();
+
   const toggleSection = (section) => {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
-
-  // 计算真实数据
-  const liabilities = computeLiabilities(debts);
-  const incomeExpense = computeIncomeExpense(records);
-  const liquidity = computeLiquidity(accounts, records);
-  const goals = computeGoals(overviewGoals, assets);
 
   if (loading) {
     return (
@@ -328,43 +562,6 @@ export default function Overview() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 sm:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
-        {/* 时间筛选栏 */}
-        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 sm:px-7 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center gap-1">
-              {['日常', '月统计', '年统计', '自定义'].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setTimePeriod(tab)}
-                  className={`px-4 py-1.5 rounded-full text-sm transition-all ${
-                    timePeriod === tab
-                      ? 'bg-blue-600 text-white font-medium'
-                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-blue-600 mr-1">2026年</span>
-              {['本月', '上月', '4月', '3月', '2月', '1月'].map((month, idx) => (
-                <button
-                  key={month}
-                  onClick={() => setSelectedMonth(month)}
-                  className={`px-3 py-1 rounded-full text-xs transition-all ${
-                    selectedMonth === month
-                      ? 'bg-blue-600 text-white font-medium'
-                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  {month}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
         {/* Hero Bar */}
         <section
           className="rounded-xl p-6 sm:p-7"
@@ -378,11 +575,11 @@ export default function Overview() {
             </div>
             <div className="text-center lg:text-right">
               <div className="text-4xl sm:text-5xl font-bold font-mono text-gray-900 whitespace-nowrap tabular-nums tracking-tight">
-                {formatCurrency(totalValue)}
+                {formatCurrency(netAssetValue)}
               </div>
               <div className="mt-1 flex items-center justify-center lg:justify-end gap-1 text-sm text-green-600">
                 <TrendingUp className="w-4 h-4" />
-                <span>较上月 +¥12,345 (+0.53%)</span>
+                <span>资产总览 = 理财 + 独立 - 负债</span>
               </div>
             </div>
             <div className="flex items-center gap-3 shrink-0">
@@ -448,7 +645,7 @@ export default function Overview() {
             <div className="rounded-lg p-4" style={{ background: '#EFF6FF' }}>
               <div className="text-xs text-gray-500 mb-1">目标年化收益率</div>
               <div className="text-sm font-semibold font-mono text-gray-900 mb-2 tabular-nums">
-                {goals.yearlyProfitRate.toFixed(1)}% / {goals.targetAnnualReturn}%
+                {goals.annualizedReturn.toFixed(1)}% / {goals.targetAnnualReturn}%
               </div>
               <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
                 <div
@@ -459,188 +656,238 @@ export default function Overview() {
               <div className="text-right text-xs mt-1 font-mono text-gray-400">{goals.returnProgress.toFixed(1)}%</div>
             </div>
           </div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-gray-400">历史年份可手动录入，本年数据自动计算</span>
+            <button
+              onClick={() => {
+                setEditingYearIndex(-1);
+                setEditYearlyForm({
+                  year: new Date().getFullYear() - 1,
+                  openingAsset: 0,
+                  targetProfit: 0,
+                });
+                setShowEditYearlyModal(true);
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              + 新增年份
+            </button>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
                   <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">年份</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">期初资产</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">期末资产</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">目标收益额</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">实际收益额</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">实际收益率</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">年化收益率</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">完成率</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">状态</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 dark:text-gray-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">操作</th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors duration-150">
-                  <td className="py-2.5 px-3 text-gray-900 dark:text-white">2026</td>
-                  <td className="py-2.5 px-3 font-mono tabular-nums text-gray-900 dark:text-white">¥0</td>
-                  <td className="py-2.5 px-3 font-mono tabular-nums text-gray-900 dark:text-white">¥0</td>
-                  <td className="py-2.5 px-3 font-mono tabular-nums text-gray-900 dark:text-white">¥0</td>
-                  <td className="py-2.5 px-3 font-mono text-green-600 tabular-nums">0.00%</td>
-                  <td className="py-2.5 px-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-14 h-2 rounded-full bg-gray-200 dark:bg-slate-700 overflow-hidden">
-                        <div className="h-full rounded-full bg-blue-600" style={{ width: '0%' }} />
+                {computeYearlyRows(stateData?.yearlyRecords, netAssetValue).map((row) => (
+                  <tr key={row.year} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors duration-150">
+                    <td className="py-2.5 px-3 text-gray-900 dark:text-white">{row.year}</td>
+                    <td className="py-2.5 px-3 font-mono tabular-nums text-gray-900 dark:text-white">{formatCurrency(row.openingAsset)}</td>
+                    <td className="py-2.5 px-3 font-mono tabular-nums text-blue-600 dark:text-blue-400">{formatCurrency(row.closingAsset)}</td>
+                    <td className="py-2.5 px-3 font-mono tabular-nums text-gray-900 dark:text-white">{formatCurrency(row.targetProfit)}</td>
+                    <td className={`py-2.5 px-3 font-mono tabular-nums ${row.actualProfit >= 0 ? 'text-green-600' : 'text-red-500'}`}>{formatCurrency(row.actualProfit)}</td>
+                    <td className={`py-2.5 px-3 font-mono tabular-nums ${row.actualRate >= 0 ? 'text-green-600' : 'text-red-500'}`}>{row.actualRate.toFixed(2)}%</td>
+                    <td className={`py-2.5 px-3 font-mono tabular-nums ${row.annualizedRate >= 0 ? 'text-green-600' : 'text-red-500'}`}>{row.annualizedRate.toFixed(2)}%</td>
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-14 h-2 rounded-full bg-gray-200 dark:bg-slate-700 overflow-hidden">
+                          <div className="h-full rounded-full bg-blue-600" style={{ width: `${Math.min(Math.abs(row.completionRate), 100)}%` }} />
+                        </div>
+                        <span className="text-xs text-gray-400">{row.completionRate.toFixed(1)}%</span>
                       </div>
-                      <span className="text-xs text-gray-400">0.0%</span>
-                    </div>
-                  </td>
-                  <td className="py-2.5 px-3">
-                    <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-                      进行中
-                    </span>
-                  </td>
-                </tr>
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${row.isCompleted ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'}`}>
+                        {row.isCompleted ? '已完成' : '未完成'}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setEditingYearIndex(row.isAuto ? -1 : row.originalIndex);
+                            setEditYearlyForm({
+                              year: row.year,
+                              openingAsset: row.isAuto ? row.openingAsset : (row.openingAsset || 0),
+                              closingAsset: row.isAuto ? 0 : (row.closingAsset || 0),
+                              targetProfit: row.targetProfit || 0,
+                            });
+                            setShowEditYearlyModal(true);
+                          }}
+                          className="text-xs text-blue-600 hover:text-blue-700 transition-colors"
+                        >
+                          编辑
+                        </button>
+                        {!row.isAuto && <span className="text-gray-300">|</span>}
+                        {!row.isAuto && (
+                          <button
+                            onClick={async () => {
+                              if (confirm(`确定删除 ${row.year} 年的记录吗？`)) {
+                                try {
+                                  const existing = stateData?.yearlyRecords || [];
+                                  const updated = existing.filter((_, i) => i !== row.originalIndex);
+                                  await saveState({ ...stateData, yearlyRecords: updated });
+                                  setStateData(prev => ({ ...prev, yearlyRecords: updated }));
+                                } catch (err) {
+                                  console.error('删除失败:', err);
+                                  alert('删除失败，请重试');
+                                }
+                              }
+                            }}
+                            className="text-xs text-red-500 hover:text-red-600 transition-colors"
+                          >
+                            删除
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </section>
 
-        {/* 核心指标三列 */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* 总资产 */}
+        {/* 核心指标五列 */}
+        <section className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {/* 总收入 */}
           <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
-            <div
-              className="flex items-center justify-between cursor-pointer select-none"
-              onClick={() => toggleSection('assets')}
-            >
-              <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">总资产</h2>
-              {expandedSections.assets ? (
-                <ChevronUp className="w-4 h-4 text-gray-400 transition-transform" />
-              ) : (
-                <ChevronDown className="w-4 h-4 text-gray-400 transition-transform" />
-              )}
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">总收入</h2>
+              <Banknote className="w-4 h-4 text-green-500" />
             </div>
-            <div className="mt-2 text-3xl font-bold font-mono text-gray-900 dark:text-white tabular-nums whitespace-nowrap">
-              {formatCurrency(totalValue)}
+            <div className="flex items-center gap-2 mt-1">
+              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-600">
+                {incomeExpense.income.length} 个来源
+              </span>
             </div>
-            <div className="flex flex-wrap gap-2 mt-3">
-              {categoryStats.map((stat, idx) => (
+            <div className="mt-2 text-2xl font-bold font-mono text-green-600 tabular-nums whitespace-nowrap">
+              {formatCurrency(incomeExpense.totalIncome)}
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {incomeExpense.income.slice(0, 3).map((item) => (
                 <span
-                  key={stat.category}
-                  className="px-2.5 py-1 rounded-full text-xs font-medium"
-                  style={{
-                    background: idx < 3 ? '#EFF6FF' : '#F3F4F6',
-                    color: idx < 3 ? '#2563EB' : '#6B7280',
-                  }}
+                  key={item.category}
+                  className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-600"
                 >
-                  {stat.category} {formatCurrency(stat.value)}
+                  {item.category}
                 </span>
               ))}
             </div>
-            {expandedSections.assets && (
-              <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700 space-y-2">
-                {categoryStats.map((stat) => (
-                  <div key={stat.category}>
-                    <div className="flex justify-between items-center py-1.5 text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">{stat.category}</span>
-                      <span className="font-medium font-mono text-gray-900 dark:text-white tabular-nums">
-                        {formatCurrency(stat.value)}
-                      </span>
-                    </div>
-                    <div className="pl-4 space-y-1">
-                      {categoryGroups[stat.category].slice(0, 3).map((asset) => (
-                        <div key={asset.id} className="flex justify-between py-1 text-xs text-gray-500 dark:text-gray-400">
-                          <span>{asset.name}</span>
-                          <span className="font-mono tabular-nums">{formatCurrency(asset.rmbValue)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+          </div>
+
+          {/* 总支出 */}
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">总支出</h2>
+              <CreditCard className="w-4 h-4 text-red-500" />
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-600">
+                {incomeExpense.expense.length} 个类别
+              </span>
+            </div>
+            <div className="mt-2 text-2xl font-bold font-mono text-red-500 tabular-nums whitespace-nowrap">
+              {formatCurrency(incomeExpense.totalExpense)}
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {incomeExpense.expense.slice(0, 3).map((item) => (
+                <span
+                  key={item.category}
+                  className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600"
+                >
+                  {item.category}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* 理财总资产 */}
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">理财总资产</h2>
+              <PiggyBank className="w-4 h-4 text-blue-500" />
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-600">
+                {(financeAssets || []).length} 个持仓
+              </span>
+            </div>
+            <div className="mt-2 text-2xl font-bold font-mono text-blue-600 tabular-nums whitespace-nowrap">
+              {formatCurrency(financeTotalValue)}
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {Array.from(new Set((financeAssets || []).map(a => a.category).filter(Boolean))).slice(0, 3).map((cat) => (
+                <span
+                  key={cat}
+                  className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-600"
+                >
+                  {cat}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* 独立总资产 */}
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">独立总资产</h2>
+              <Landmark className="w-4 h-4 text-purple-500" />
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-600">
+                {Object.values(independentAssets || {}).reduce((sum, items) => sum + (items?.length || 0), 0)} 项资产
+              </span>
+            </div>
+            <div className="mt-2 text-2xl font-bold font-mono text-purple-600 tabular-nums whitespace-nowrap">
+              {formatCurrency(independentTotalValue)}
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {Object.keys(independentAssets || {}).slice(0, 3).map((type) => (
+                <span
+                  key={type}
+                  className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-600"
+                >
+                  {type === 'insurance' ? '保险' : type === 'realestate' ? '房产' : type === 'vehicle' ? '车辆' : type === 'fixedinvestment' ? '固定投资' : type === 'equity' ? '股权' : type === 'fixeddeposit' ? '定期' : type}
+                </span>
+              ))}
+            </div>
           </div>
 
           {/* 总负债 */}
           <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
-            <div
-              className="flex items-center justify-between cursor-pointer select-none"
-              onClick={() => toggleSection('liabilities')}
-            >
+            <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">总负债</h2>
-              {expandedSections.liabilities ? (
-                <ChevronUp className="w-4 h-4 text-gray-400 transition-transform" />
-              ) : (
-                <ChevronDown className="w-4 h-4 text-gray-400 transition-transform" />
-              )}
+              <CreditCard className="w-4 h-4 text-red-500" />
             </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">
                 30天待还 {formatCurrency(liabilities.dueIn30Days)}
               </span>
             </div>
-            <div className="mt-2 text-3xl font-bold font-mono text-red-500 tabular-nums whitespace-nowrap">
+            <div className="mt-2 text-2xl font-bold font-mono text-red-500 tabular-nums whitespace-nowrap">
               {formatCurrency(liabilities.total)}
             </div>
-            <div className="flex flex-wrap gap-2 mt-3">
-              {liabilities.items.map((item) => (
+            <div className="flex flex-wrap gap-1.5 mt-3">
+              {liabilities.items.slice(0, 3).map((item) => (
                 <span
                   key={item.name}
-                  className="px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400"
+                  className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600"
                 >
-                  {item.name} {formatCurrency(item.amount)}
+                  {item.name}
                 </span>
               ))}
-            </div>
-            {expandedSections.liabilities && (
-              <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700 space-y-2">
-                {liabilities.items.map((item) => (
-                  <div key={item.name} className="flex justify-between items-center py-1.5 text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">{item.name}</span>
-                    <span className="font-medium font-mono text-gray-900 dark:text-white tabular-nums">
-                      {formatCurrency(item.amount)}
-                      {item.dueIn30Days && (
-                        <span className="ml-2 text-xs text-red-500">
-                          (30天待还 {formatCurrency(item.dueIn30Days)})
-                        </span>
-                      )}
-                      {item.remainingPeriods && (
-                        <span className="ml-2 text-xs text-gray-400">(剩余{item.remainingPeriods}期)</span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* 流动性指标 */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
-            <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">流动性指标</h2>
-            <div className="mt-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500 dark:text-gray-400">应急月数</span>
-                <span className="text-lg font-semibold font-mono text-green-600 tabular-nums">
-                  {liquidity.emergencyMonths.toFixed(1)}个月
-                </span>
-              </div>
-              <div className="mt-2 h-2 rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-green-500 transition-all duration-700"
-                  style={{ width: `${Math.min(liquidity.emergencyMonths / 12 * 100, 100)}%` }}
-                />
-              </div>
-              <p className="text-xs mt-1 text-gray-400">
-                流动资产 {formatCurrency(liquidity.liquidAssets)} / 月均支出 {formatCurrency(liquidity.monthlyExpense)}
-              </p>
-            </div>
-            <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500 dark:text-gray-400">自由现金流</span>
-                <span className={`text-lg font-semibold font-mono tabular-nums ${liquidity.freeCashFlow >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                  {liquidity.freeCashFlow >= 0 ? '+' : ''}{formatCurrency(liquidity.freeCashFlow)}
-                </span>
-              </div>
-              <p className="text-xs mt-1 text-gray-400">
-                本月收入 {formatCurrency(liquidity.monthlyIncome)} - 刚性支出 {formatCurrency(liquidity.fixedExpense)}
-              </p>
-              <div className="flex items-center gap-1 mt-2">
-                <CheckCircle className="w-3 h-3 text-green-500" />
-                <span className="text-xs text-green-600">可投资额度充足</span>
-              </div>
             </div>
           </div>
         </section>
@@ -704,12 +951,55 @@ export default function Overview() {
           {/* 资产配置 */}
           <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
             <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">资产配置</h2>
-            <div className="mt-4">
-              <img
-                src="https://mdn.alipayobjects.com/one_clip/afts/img/iEmqSZyyxSQAAAAARkAAAAgAoEACAQFr/original"
-                alt="资产配置结构"
-                className="w-full h-auto rounded-lg"
-              />
+            <div className="mt-4 h-[240px]">
+              {assetAllocation.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={assetAllocation}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={35}
+                      outerRadius={65}
+                      dataKey="value"
+                      nameKey="name"
+                      label={({ name, percent }) => {
+                        const text = `${name}: ${(percent * 100).toFixed(1)}%`;
+                        return text.length > 16 ? text.slice(0, 15) + '…' : text;
+                      }}
+                      labelLine={{ strokeWidth: 1, stroke: '#9CA3AF' }}
+                      style={{ fontSize: '11px', fontWeight: '500' }}
+                    >
+                      {assetAllocation.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, name) => [formatCurrency(value), name]}
+                      contentStyle={{
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '8px',
+                        padding: '8px 12px',
+                        fontSize: '13px',
+                        fontWeight: '500',
+                      }}
+                      labelStyle={{
+                        fontWeight: '600',
+                        fontSize: '13px',
+                        color: '#111827',
+                      }}
+                    />
+                    <Legend
+                      iconType="circle"
+                      iconSize={10}
+                      formatter={(value) => <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">暂无数据</div>
+              )}
             </div>
             <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
               <h3 className="text-xs font-medium mb-2 text-gray-500 dark:text-gray-400">集中度预警</h3>
@@ -746,45 +1036,56 @@ export default function Overview() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
               <h3 className="text-base font-semibold font-mono text-gray-900 dark:text-white">收入占比</h3>
-              <div className="mt-3 flex justify-center">
-                <div className="w-full max-w-[240px]">
-                  <svg viewBox="0 0 100 100" className="w-full h-auto">
-                    {(() => {
-                      const colors = ['#3B82F6', '#10B981', '#F59E0B', '#06B6D4'];
-                      let cumulativePercent = 0;
-                      return incomeExpense.income.map((item, idx) => {
-                        const startPercent = cumulativePercent;
-                        cumulativePercent += item.percent;
-                        const endPercent = cumulativePercent;
-                        const largeArcFlag = item.percent > 50 ? 1 : 0;
-                        const startAngle = (startPercent / 100) * 2 * Math.PI - Math.PI / 2;
-                        const endAngle = (endPercent / 100) * 2 * Math.PI - Math.PI / 2;
-                        const x1 = 50 + 40 * Math.cos(startAngle);
-                        const y1 = 50 + 40 * Math.sin(startAngle);
-                        const x2 = 50 + 40 * Math.cos(endAngle);
-                        const y2 = 50 + 40 * Math.sin(endAngle);
-                        return (
-                          <path
-                            key={idx}
-                            d={`M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArcFlag} 1 ${x2} ${y2} Z`}
-                            fill={colors[idx % colors.length]}
-                          />
-                        );
-                      });
-                    })()}
-                  </svg>
-                </div>
+              <div className="mt-3 h-[240px]">
+                {incomeExpense.income.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={incomeExpense.income}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={70}
+                        dataKey="amount"
+                        nameKey="category"
+                        label={({ percent }) => percent * 100 > 1 ? `${(percent * 100).toFixed(2)}%` : ''}
+                        labelLine={({ percent }) => percent * 100 > 1}
+                      >
+                        {incomeExpense.income.map((_, idx) => (
+                          <Cell key={`cell-${idx}`} fill={['#3B82F6', '#10B981', '#F59E0B', '#06B6D4'][idx % 4]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value, name) => [formatCurrency(value), name]}
+                        contentStyle={{
+                          backgroundColor: '#FFFFFF',
+                          border: '1px solid #E5E7EB',
+                          borderRadius: '8px',
+                          padding: '8px 12px',
+                          fontSize: '13px',
+                          fontWeight: '500',
+                        }}
+                      />
+                      <Legend
+                        iconType="circle"
+                        iconSize={10}
+                        formatter={(value) => <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{value}</span>}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">暂无数据</div>
+                )}
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {incomeExpense.income.map((item, idx) => (
                   <div key={item.category} className="flex items-center gap-2 text-xs">
                     <div
                       className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: ['#3B82F6', '#10B981', '#F59E0B', '#06B6D4'][idx] }}
+                      style={{ backgroundColor: ['#3B82F6', '#10B981', '#F59E0B', '#06B6D4'][idx % 4] }}
                     />
-                    <span className="text-gray-500 dark:text-gray-400">{item.category}</span>
+                    <span className="text-gray-500 dark:text-gray-400 truncate">{item.category}</span>
                     <span className="ml-auto text-gray-700 dark:text-gray-300 font-mono tabular-nums font-medium">
-                      {item.percent}%
+                      {item.percent.toFixed(2)}%
                     </span>
                   </div>
                 ))}
@@ -793,45 +1094,49 @@ export default function Overview() {
 
             <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-800">
               <h3 className="text-base font-semibold font-mono text-gray-900 dark:text-white">支出占比</h3>
-              <div className="mt-3 flex justify-center">
-                <div className="w-full max-w-[240px]">
-                  <svg viewBox="0 0 100 100" className="w-full h-auto">
-                    {(() => {
-                      const colors = ['#EC4899', '#3B82F6', '#F59E0B', '#06B6D4', '#10B981'];
-                      let cumulativePercent = 0;
-                      return incomeExpense.expense.map((item, idx) => {
-                        const startPercent = cumulativePercent;
-                        cumulativePercent += item.percent;
-                        const endPercent = cumulativePercent;
-                        const largeArcFlag = item.percent > 50 ? 1 : 0;
-                        const startAngle = (startPercent / 100) * 2 * Math.PI - Math.PI / 2;
-                        const endAngle = (endPercent / 100) * 2 * Math.PI - Math.PI / 2;
-                        const x1 = 50 + 40 * Math.cos(startAngle);
-                        const y1 = 50 + 40 * Math.sin(startAngle);
-                        const x2 = 50 + 40 * Math.cos(endAngle);
-                        const y2 = 50 + 40 * Math.sin(endAngle);
-                        return (
-                          <path
-                            key={idx}
-                            d={`M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArcFlag} 1 ${x2} ${y2} Z`}
-                            fill={colors[idx % colors.length]}
-                          />
-                        );
-                      });
-                    })()}
-                  </svg>
-                </div>
+              <div className="mt-3 h-[240px]">
+                {incomeExpense.expense.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={incomeExpense.expense}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={70}
+                        dataKey="amount"
+                        nameKey="category"
+                      >
+                        {incomeExpense.expense.map((_, idx) => (
+                          <Cell key={`cell-${idx}`} fill={['#EC4899', '#3B82F6', '#F59E0B', '#06B6D4', '#10B981', '#8B5CF6', '#F97316', '#EF4444'][idx % 8]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value, name) => [formatCurrency(value), name]}
+                        contentStyle={{
+                          backgroundColor: '#FFFFFF',
+                          border: '1px solid #E5E7EB',
+                          borderRadius: '8px',
+                          padding: '8px 12px',
+                          fontSize: '13px',
+                          fontWeight: '500',
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">暂无数据</div>
+                )}
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {incomeExpense.expense.map((item, idx) => (
                   <div key={item.category} className="flex items-center gap-2 text-xs">
                     <div
                       className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: ['#EC4899', '#3B82F6', '#F59E0B', '#06B6D4', '#10B981'][idx] }}
+                      style={{ backgroundColor: ['#EC4899', '#3B82F6', '#F59E0B', '#06B6D4', '#10B981', '#8B5CF6', '#F97316', '#EF4444'][idx % 8] }}
                     />
-                    <span className="text-gray-500 dark:text-gray-400">{item.category}</span>
+                    <span className="text-gray-500 dark:text-gray-400 truncate">{item.category}</span>
                     <span className="ml-auto text-gray-700 dark:text-gray-300 font-mono tabular-nums font-medium">
-                      {item.percent}%
+                      {item.percent.toFixed(2)}%
                     </span>
                   </div>
                 ))}
@@ -1095,6 +1400,97 @@ export default function Overview() {
                   className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
                   {savingGoals ? '保存中...' : '保存'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 编辑年份记录弹窗 */}
+        {showEditYearlyModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md shadow-xl">
+              <h3 className="text-lg font-semibold font-mono text-gray-900 dark:text-white mb-4">
+                {editingYearIndex >= 0 ? '编辑年份记录' : '新增年份记录'}
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">年份</label>
+                  <input
+                    type="number"
+                    value={editYearlyForm.year || ''}
+                    onChange={(e) => setEditYearlyForm({ ...editYearlyForm, year: e.target.value === '' ? '' : Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">期初资产 (¥)</label>
+                  <input
+                    type="number"
+                    value={editYearlyForm.openingAsset === 0 ? '' : editYearlyForm.openingAsset}
+                    onChange={(e) => setEditYearlyForm({ ...editYearlyForm, openingAsset: e.target.value === '' ? 0 : Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">期末资产 (¥)</label>
+                  <input
+                    type="number"
+                    value={editYearlyForm.closingAsset === 0 ? '' : editYearlyForm.closingAsset}
+                    onChange={(e) => setEditYearlyForm({ ...editYearlyForm, closingAsset: e.target.value === '' ? 0 : Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">目标收益额 (¥)</label>
+                  <input
+                    type="number"
+                    value={editYearlyForm.targetProfit === 0 ? '' : editYearlyForm.targetProfit}
+                    onChange={(e) => setEditYearlyForm({ ...editYearlyForm, targetProfit: e.target.value === '' ? 0 : Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => setShowEditYearlyModal(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      const newRecord = {
+                        year: Number(editYearlyForm.year),
+                        openingAsset: Number(editYearlyForm.openingAsset),
+                        closingAsset: Number(editYearlyForm.closingAsset),
+                        targetProfit: Number(editYearlyForm.targetProfit),
+                      };
+                      let updated = [...(stateData?.yearlyRecords || [])];
+                      const existsIndex = updated.findIndex(r => r.year === newRecord.year);
+                      if (existsIndex >= 0) {
+                        updated[existsIndex] = newRecord;
+                      } else {
+                        updated.push(newRecord);
+                      }
+                      // 年份唯一：同一年份已覆盖
+                      // 级联更新：按年份排序后，每一年期初=上一年期末
+                      updated = updated.sort((a, b) => a.year - b.year).map((r, idx, arr) => {
+                        if (idx === 0) return r;
+                        return { ...r, openingAsset: parseFloat(arr[idx - 1].closingAsset) || 0 };
+                      });
+                      await saveState({ ...stateData, yearlyRecords: updated });
+                      setStateData(prev => ({ ...prev, yearlyRecords: updated }));
+                      setShowEditYearlyModal(false);
+                    } catch (err) {
+                      console.error('保存年份记录失败:', err);
+                      alert('保存失败，请重试');
+                    }
+                  }}
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                >
+                  保存
                 </button>
               </div>
             </div>
