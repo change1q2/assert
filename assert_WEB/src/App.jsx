@@ -32,6 +32,7 @@ import HkIpo from './pages/HkIpo.jsx';
 import BudgetManagement from './pages/BudgetManagement.jsx';
 import AssetPenetration from './pages/AssetPenetration.jsx';
 import IndependentAssets from './pages/IndependentAssets.jsx';
+import { checkAndSync, getPendingSyncs } from './api/index.js';
 
 const menuItems = [
   { id: 'overview', label: '资产总览', icon: LayoutDashboard },
@@ -54,6 +55,7 @@ export default function App() {
   const [userName, setUserName] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [showAssetPenetration, setShowAssetPenetration] = useState(false);
+  const [syncStatus, setSyncStatus] = useState({ pending: 0, lastSync: null });
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -90,6 +92,39 @@ export default function App() {
     window.addEventListener('storage', checkAuth);
     return () => window.removeEventListener('storage', checkAuth);
   }, []);
+
+  // 自动同步逻辑
+  useEffect(() => {
+    if (!loggedIn) return;
+
+    const doSync = async () => {
+      const pending = getPendingSyncs();
+      const pendingCount = Object.keys(pending).length;
+      setSyncStatus(prev => ({ ...prev, pending: pendingCount }));
+
+      if (pendingCount > 0) {
+        console.log(`🔄 检测到 ${pendingCount} 条待同步数据，正在同步...`);
+        const result = await checkAndSync();
+        if (result.synced > 0) {
+          setSyncStatus({ pending: 0, lastSync: new Date() });
+        }
+      }
+    };
+
+    doSync();
+
+    const interval = setInterval(doSync, 30000);
+    const handleOnline = () => {
+      console.log('📶 网络已恢复，检查待同步数据...');
+      doSync();
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [loggedIn]);
 
   const handleLogin = () => {
     setLoggedIn(true);
@@ -255,6 +290,11 @@ export default function App() {
           />
         ) : (
           <span className="text-sm font-bold">{getInitial(userName)}</span>
+        )}
+        {syncStatus.pending > 0 && (
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-orange-500 text-white text-xs rounded-full flex items-center justify-center animate-pulse" title={`${syncStatus.pending} 条数据待同步`}>
+            {syncStatus.pending}
+          </span>
         )}
       </button>
     </div>

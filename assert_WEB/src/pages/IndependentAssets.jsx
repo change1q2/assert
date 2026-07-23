@@ -539,6 +539,7 @@ export default function IndependentAssets() {
 
   const summaryData = useMemo(() => {
     let totalValue = 0;
+    let totalCost = 0;
     let demoProfit = 0;
     let actualProfit = 0;
 
@@ -547,6 +548,7 @@ export default function IndependentAssets() {
       items.forEach(item => {
         if (type === 'insurance') {
           totalValue += parseFloat(item.premiumTotal || 0);
+          totalCost += parseFloat(item.premiumTotal || 0);
           demoProfit += parseFloat(item.demoProfitAmount || 0);
           actualProfit += parseFloat(item.actualProfitAmount || 0);
         } else if (type === 'realestate') {
@@ -559,11 +561,14 @@ export default function IndependentAssets() {
             const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFeeAmount) : parseFloat(item.purchasePrice || 0);
             totalValue += actualValue;
           }
+          totalCost += parseFloat(item.purchasePrice || 0);
         } else if (type === 'vehicle') {
           const { residualValue } = calculateVehicleResidualValue(item);
           totalValue += residualValue;
+          totalCost += parseFloat(item.purchasePrice || 0);
         } else if (type === 'fixedinvestment') {
           totalValue += parseFloat(item.investmentCost || 0);
+          totalCost += parseFloat(item.investmentCost || 0);
           if (item.dividendRecords && Array.isArray(item.dividendRecords)) {
             actualProfit += item.dividendRecords.reduce((sum, r) => sum + parseFloat(r.dividendAmount || 0), 0);
           } else {
@@ -577,19 +582,21 @@ export default function IndependentAssets() {
           }
         } else if (type === 'equity') {
           totalValue += parseFloat(item.marketValue || 0);
+          totalCost += parseFloat(item.investmentCost || 0);
           actualProfit += parseFloat(item.pnl || 0);
         } else if (type === 'fixeddeposit') {
           totalValue += parseFloat(item.amount || 0);
+          totalCost += parseFloat(item.amount || 0);
           actualProfit += parseFloat(item.actualReturn || 0);
         }
       });
     });
 
-    return { totalValue, demoProfit, actualProfit };
+    return { totalValue, totalCost, demoProfit, actualProfit };
   }, [independentAssets]);
 
   const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white shadow-lg shadow-blue-500/20">
         <div className="flex items-center justify-between">
           <div>
@@ -598,6 +605,17 @@ export default function IndependentAssets() {
           </div>
           <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
             <Wallet className="w-6 h-6" />
+          </div>
+        </div>
+      </div>
+      <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-5 text-white shadow-lg shadow-orange-500/20">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-orange-100 text-sm">总成本</p>
+            <p className="text-2xl font-bold mt-1">{formatCurrency(summaryData.totalCost)}</p>
+          </div>
+          <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+            <DollarSign className="w-6 h-6" />
           </div>
         </div>
       </div>
