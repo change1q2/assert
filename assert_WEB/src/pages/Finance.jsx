@@ -315,8 +315,13 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   const isStock = latestData.kind === '股票' || latestData.assetType === '股票';
   const isDomesticIndoor = (latestData.market === '国内市场') && (latestData.tertiaryCategory === '场内' || latestData.categoryL3 === '场内');
   const isDomesticOutdoor = (latestData.market === '国内市场') && (latestData.tertiaryCategory === '场外' || latestData.categoryL3 === '场外');
-  const prevPrice = parseFloat(latestData.prevPrice) || 0;
-  const currentPrice = parseFloat(latestData.currentPrice || costPrice) || 0;
+  const _quote = quotesMap && latestData.code ? quotesMap[latestData.code] : null;
+  const _quotePrice = _quote && _quote.price != null ? parseFloat(_quote.price) : null;
+  const _quotePrevClose = _quote && _quote.prevClose != null ? parseFloat(_quote.prevClose) : null;
+  const _quoteChangePct = _quote && _quote.changePct != null ? parseFloat(_quote.changePct) : null;
+
+  const prevPrice = _quotePrevClose != null ? _quotePrevClose : (parseFloat(latestData.prevPrice) || 0);
+  const currentPrice = _quotePrice != null ? _quotePrice : (parseFloat(latestData.currentPrice || costPrice) || 0);
   const priceDate = latestData.priceDate || '';
 
   const savedCostTotal = parseFloat(latestData.cost) || 0;
@@ -331,19 +336,19 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   const floatPnlRate = costTotal > 0 ? (floatPnl / costTotal) * 100 : 0;
 
   // 当日盈亏：优先使用实时行情（与列表保持一致），其次使用 stateData 中存储的 prevPrice/currentPrice，最后回退到 todayPnl/dailyPnl
-  const _quote = quotesMap && latestData.code ? quotesMap[latestData.code] : null;
-  const _quotePrice = _quote && _quote.price != null ? parseFloat(_quote.price) : null;
-  const _quotePrevClose = _quote && _quote.prevClose != null ? parseFloat(_quote.prevClose) : null;
-  const _quoteChangePct = _quote && _quote.changePct != null ? parseFloat(_quote.changePct) : null;
   let computedDailyPnl = 0;
-  if (_quotePrice != null && _quotePrevClose != null && quantity > 0) {
+  if (_quotePrice != null && _quotePrevClose != null && _quotePrevClose !== 0 && quantity > 0) {
     computedDailyPnl = Math.round((_quotePrice - _quotePrevClose) * quantity * 100) / 100;
+  } else if (_quotePrice != null && _quoteChangePct != null && quantity > 0) {
+    // prevClose为0但changePct可用时，用changePct反推prevClose
+    const _prevClose = _quotePrice / (1 + _quoteChangePct / 100);
+    computedDailyPnl = Math.round((_quotePrice - _prevClose) * quantity * 100) / 100;
   } else if (prevPrice > 0 && currentPrice > 0 && quantity > 0) {
     computedDailyPnl = Math.round((currentPrice - prevPrice) * quantity * 100) / 100;
   } else {
     computedDailyPnl = parseFloat(latestData.todayPnl) || 0;
   }
-  const dailyPnl = parseFloat(latestData.dailyPnl) || computedDailyPnl;
+  const dailyPnl = (_quotePrice != null && (_quotePrevClose != null || _quoteChangePct != null)) ? computedDailyPnl : (parseFloat(latestData.dailyPnl) || computedDailyPnl);
 
   let computedDailyPnlRate = 0;
   if (_quoteChangePct != null) {
@@ -355,7 +360,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   } else {
     computedDailyPnlRate = parseFloat(latestData.todayPnlPercent) || parseFloat(latestData.dailyPnlRate) || 0;
   }
-  const dailyPnlRate = parseFloat(latestData.dailyPnlRate) || computedDailyPnlRate;
+  const dailyPnlRate = _quoteChangePct != null ? computedDailyPnlRate : (parseFloat(latestData.dailyPnlRate) || computedDailyPnlRate);
 
   const computedHoldingReturnRate = floatPnlRate;
 
@@ -659,7 +664,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
               {(() => {
                 const computedCost = tradeStats.buyTotalAmount - tradeStats.sellTotalAmount;
                 const listCost = costTotal;
-                const diff = Math.round((computedCost - listCost) * 100) / 100;
+                const fee = tradeStats.totalFee || 0;
+                const diff = Math.round((computedCost - listCost + fee) * 100) / 100;
                 const isMatch = Math.abs(diff) < 0.01;
                 return (
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isMatch ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400'}`}>
@@ -668,11 +674,12 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                 );
               })()}
             </div>
-            <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="grid grid-cols-4 gap-2 text-xs">
               {(() => {
                 const computedCost = tradeStats.buyTotalAmount - tradeStats.sellTotalAmount;
                 const listCost = costTotal;
-                const diff = Math.round((computedCost - listCost) * 100) / 100;
+                const fee = tradeStats.totalFee || 0;
+                const diff = Math.round((computedCost - listCost + fee) * 100) / 100;
                 return (
                   <>
                     <div className="text-center">
@@ -682,6 +689,10 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                     <div className="text-center">
                       <p className="text-gray-500 dark:text-gray-400 mb-0.5">列表持仓成本</p>
                       <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatNum(listCost)}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-gray-500 dark:text-gray-400 mb-0.5">交易税费</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatNum(fee)}</p>
                     </div>
                     <div className="text-center">
                       <p className="text-gray-500 dark:text-gray-400 mb-0.5">差异</p>
@@ -3647,9 +3658,16 @@ export default function Finance({ onAssetPenetration }) {
   // ══════════════════════════════════════
   const computed = useMemo(() => {
     const getDailyPnl = (a) => {
-      if (a.code && quotesMap[a.code] && quotesMap[a.code].price != null && quotesMap[a.code].prevClose != null) {
+      const q = a.code && quotesMap[a.code] ? quotesMap[a.code] : null;
+      if (q && q.price != null && q.prevClose != null && q.prevClose !== 0) {
         const qty = parseFloat(a.shares || a.quantity) || 0;
-        return (quotesMap[a.code].price - quotesMap[a.code].prevClose) * qty;
+        return (q.price - q.prevClose) * qty;
+      }
+      // prevClose为0但changePct可用时，用changePct反推prevClose
+      if (q && q.price != null && q.changePct != null) {
+        const qty = parseFloat(a.shares || a.quantity) || 0;
+        const prevClose = q.price / (1 + q.changePct / 100);
+        return (q.price - prevClose) * qty;
       }
       // 其次使用资产自身存储的 prevPrice + currentPrice 计算（适用于场外基金）
       const _prevPrice = parseFloat(a.prevPrice) || 0;
