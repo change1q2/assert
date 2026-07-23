@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { fetchState, saveState } from '../api';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { fetchState, saveState, lookupFinance, fetchFinanceQuotes } from '../api';
 import {
   Wallet,
   Plus,
@@ -17,6 +17,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
+  Settings,
+  Upload,
+  Calculator,
+  FileText,
+  Download,
 } from 'lucide-react';
 import { VEHICLE_TYPES, VEHICLE_BRANDS, VEHICLE_MODELS } from '../data/vehicle-data';
 
@@ -28,6 +33,14 @@ const CURRENCY_OPTIONS = [
   { code: 'EUR', symbol: '€', label: '欧元 (EUR)' },
   { code: 'GBP', symbol: '£', label: '英镑 (GBP)' },
 ];
+
+const FIXED_INVESTMENT_EVENT_TYPES = [
+  { value: '投入本金', label: '投入本金' },
+  { value: '追加', label: '追加' },
+  { value: '分红', label: '分红' },
+];
+
+const FIXED_INVESTMENT_OUTFLOW_EVENTS = ['投入本金', '追加'];
 
 function formatCurrency(value, currency = 'CNY') {
   if (value === null || value === undefined) return '—';
@@ -55,6 +68,75 @@ function formatPercentage(value) {
   return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
+// XIRR 算法：输入现金流数组和日期数组，输出年化收益率
+function calculateXIRR(cashflows, dates) {
+  if (!cashflows || !dates || cashflows.length !== dates.length || cashflows.length < 2) {
+    return null;
+  }
+
+  const hasPositive = cashflows.some(amount => amount > 0);
+  const hasNegative = cashflows.some(amount => amount < 0);
+  if (!hasPositive || !hasNegative) return null;
+
+  const baseDate = new Date(Math.min(...dates.map(d => d.getTime())));
+  const msPerDay = 1000 * 60 * 60 * 24;
+
+  const npv = (rate) => {
+    return cashflows.reduce((sum, amount, index) => {
+      const days = (dates[index] - baseDate) / msPerDay;
+      return sum + amount / Math.pow(1 + rate, days / 365);
+    }, 0);
+  };
+
+  const derivative = (rate) => {
+    return cashflows.reduce((sum, amount, index) => {
+      const days = (dates[index] - baseDate) / msPerDay;
+      return sum - (amount * days / 365) / Math.pow(1 + rate, days / 365 + 1);
+    }, 0);
+  };
+
+  // 牛顿迭代法
+  let rate = 0.1;
+  for (let i = 0; i < 100; i++) {
+    const n = npv(rate);
+    const d = derivative(rate);
+    if (Math.abs(n) < 1e-10) return rate;
+    if (Math.abs(d) < 1e-10) break;
+    const newRate = rate - n / d;
+    if (newRate <= -1) break;
+    if (Math.abs(newRate - rate) < 1e-10) return newRate;
+    rate = newRate;
+  }
+
+  // 二分法兜底
+  let low = -0.9999;
+  let high = 1;
+  let nLow = npv(low);
+  let nHigh = npv(high);
+
+  while (nLow * nHigh > 0 && high < 1e6) {
+    high *= 2;
+    nHigh = npv(high);
+  }
+  if (nLow * nHigh > 0) return null;
+
+  for (let i = 0; i < 100; i++) {
+    const mid = (low + high) / 2;
+    const nMid = npv(mid);
+    if (Math.abs(nMid) < 1e-10) return mid;
+    if (nLow * nMid < 0) {
+      high = mid;
+      nHigh = nMid;
+    } else {
+      low = mid;
+      nLow = nMid;
+    }
+  }
+
+  const result = (low + high) / 2;
+  return isFinite(result) && !isNaN(result) ? result : null;
+}
+
 const ASSET_TABS = [
   { id: 'insurance', label: '保险', icon: Briefcase },
   { id: 'realestate', label: '房产', icon: Building2 },
@@ -63,6 +145,23 @@ const ASSET_TABS = [
   { id: 'equity', label: '股权', icon: DollarSign },
   { id: 'fixeddeposit', label: '定期资产', icon: Clock },
 ];
+
+// 股权模块 - 同步理财模块的字段选项
+const EQUITY_MARKET_OPTIONS = ['国内市场', '港股市场', '美股市场'];
+const EQUITY_CURRENCY_SUGGESTIONS = ['CNY', 'CNH', 'HKD', 'USD', 'EUR', 'JPY', 'GBP', 'SGD'];
+const EQUITY_DEFAULT_ASSET_KIND_OPTIONS = ['流动资产', '非流动资产'];
+const EQUITY_DEFAULT_CATEGORY_L1_OPTIONS = ['权益类', '债权类', '现金类', '商品类', '分红类', '固收类', '另类投资'];
+const EQUITY_DEFAULT_CATEGORY_L2_OPTIONS = {
+  '权益类': ['A股', '港股', '美股', '其他'],
+  '债权类': ['A股', '中债', '美债', '其他'],
+  '现金类': ['活期存款', '定期存款', 'A股', '其他'],
+  '商品类': ['A股', '其他'],
+  '分红类': ['A股', '固定投资', '其他'],
+  '固收类': ['A股', '其他'],
+  '另类投资': ['A股', '其他'],
+};
+const EQUITY_DEFAULT_POSITION_GROUP_OPTIONS = ['核心仓位', '卫星仓位', '观察仓位', '套利仓位', '现金仓位'];
+const EQUITY_DEFAULT_POSITION_TYPE_OPTIONS = ['成长股', '价值股', '周期股', '消费股', '核心股票仓位', 'ETF仓位', '基金定投', '打新仓位', '波段操作', '其他'];
 
 const COUNTRY_REGION_DATA = {
   '中国': {
@@ -180,6 +279,125 @@ export default function IndependentAssets() {
   const [customVehicleModels, setCustomVehicleModels] = useState({});
   const [customFixedInvestmentTypes, setCustomFixedInvestmentTypes] = useState([]);
   const [customFixedDepositTypes, setCustomFixedDepositTypes] = useState([]);
+  const [showInsuranceDetailModal, setShowInsuranceDetailModal] = useState(false);
+  const [selectedInsurance, setSelectedInsurance] = useState(null);
+  const [showCalculationModal, setShowCalculationModal] = useState(false);
+  const [calculationData, setCalculationData] = useState(null);
+  const [showInsuranceTransactionModal, setShowInsuranceTransactionModal] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState(null);
+  const [transactionFormData, setTransactionFormData] = useState({});
+  const [ocrImage, setOcrImage] = useState(null);
+  const [ocrResult, setOcrResult] = useState(null);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [selectedOcrRecords, setSelectedOcrRecords] = useState([]);
+  // 股权模块字段选项（同步理财模块）
+  const [equityAssetKindOptions, setEquityAssetKindOptions] = useState(() => {
+    const saved = localStorage.getItem('ia_equity_asset_kind_options');
+    return saved ? JSON.parse(saved) : EQUITY_DEFAULT_ASSET_KIND_OPTIONS;
+  });
+  const [equityCategoryL1Options, setEquityCategoryL1Options] = useState(() => {
+    const saved = localStorage.getItem('ia_equity_category_l1_options');
+    return saved ? JSON.parse(saved) : EQUITY_DEFAULT_CATEGORY_L1_OPTIONS;
+  });
+  const [equityCategoryL2OptionsMap, setEquityCategoryL2OptionsMap] = useState(() => {
+    const saved = localStorage.getItem('ia_equity_category_l2_options');
+    return saved ? JSON.parse(saved) : EQUITY_DEFAULT_CATEGORY_L2_OPTIONS;
+  });
+  const [equityPositionGroupOptions, setEquityPositionGroupOptions] = useState(() => {
+    const saved = localStorage.getItem('ia_equity_position_group_options');
+    return saved ? JSON.parse(saved) : EQUITY_DEFAULT_POSITION_GROUP_OPTIONS;
+  });
+  const [equityPositionTypeOptions, setEquityPositionTypeOptions] = useState(() => {
+    const saved = localStorage.getItem('ia_equity_position_type_options');
+    return saved ? JSON.parse(saved) : EQUITY_DEFAULT_POSITION_TYPE_OPTIONS;
+  });
+  // 持久化股权模块选项
+  useEffect(() => { localStorage.setItem('ia_equity_asset_kind_options', JSON.stringify(equityAssetKindOptions)); }, [equityAssetKindOptions]);
+  useEffect(() => { localStorage.setItem('ia_equity_category_l1_options', JSON.stringify(equityCategoryL1Options)); }, [equityCategoryL1Options]);
+  useEffect(() => { localStorage.setItem('ia_equity_category_l2_options', JSON.stringify(equityCategoryL2OptionsMap)); }, [equityCategoryL2OptionsMap]);
+  useEffect(() => { localStorage.setItem('ia_equity_position_group_options', JSON.stringify(equityPositionGroupOptions)); }, [equityPositionGroupOptions]);
+  useEffect(() => { localStorage.setItem('ia_equity_position_type_options', JSON.stringify(equityPositionTypeOptions)); }, [equityPositionTypeOptions]);
+
+  // 股权模块 - 资产名称/代码实时搜索联想
+  const [equityLookupResults, setEquityLookupResults] = useState([]);
+  const [equityShowLookupDropdown, setEquityShowLookupDropdown] = useState(false);
+  const [equityLookupLoading, setEquityLookupLoading] = useState(false);
+  const equityLookupTimerRef = useRef(null);
+
+  const handleEquityCodeSearch = (q) => {
+    if (equityLookupTimerRef.current) {
+      clearTimeout(equityLookupTimerRef.current);
+    }
+    if (!q || q.trim().length < 1) {
+      setEquityLookupResults([]);
+      setEquityShowLookupDropdown(false);
+      return;
+    }
+    setEquityLookupLoading(true);
+    setEquityShowLookupDropdown(true);
+    equityLookupTimerRef.current = setTimeout(async () => {
+      try {
+        const results = await lookupFinance(q.trim());
+        setEquityLookupResults(results);
+      } catch (e) {
+        console.error('Equity lookup failed:', e);
+        setEquityLookupResults([]);
+      } finally {
+        setEquityLookupLoading(false);
+      }
+    }, 300);
+  };
+
+  const handleEquitySelectLookup = async (item) => {
+    setEquityShowLookupDropdown(false);
+    const code = item.code || formData.code || '';
+    const name = item.name || formData.name || '';
+    const price = item.price ? parseFloat(item.price) : null;
+
+    setFormData(prev => {
+      const qty = parseFloat(prev.quantity) || 0;
+      const cost = parseFloat(prev.cost) || 0;
+      const currentPrice = price !== null ? price : (parseFloat(prev.currentPrice) || 0);
+      const marketValue = qty * currentPrice;
+      const pnl = marketValue - cost * qty;
+      const pnlRate = cost > 0 ? ((currentPrice - cost) / cost) * 100 : 0;
+      return {
+        ...prev,
+        code,
+        name,
+        currentPrice: currentPrice ? String(currentPrice) : prev.currentPrice,
+        marketValue: marketValue ? marketValue.toFixed(2) : prev.marketValue,
+        pnl: pnl ? pnl.toFixed(2) : prev.pnl,
+        pnlRate: pnlRate ? pnlRate.toFixed(2) : prev.pnlRate,
+      };
+    });
+
+    // 如果没拿到价格，再补一次实时报价
+    if (price === null && code) {
+      try {
+        const quotes = await fetchFinanceQuotes([code]);
+        if (quotes && quotes.length > 0 && quotes[0].price) {
+          setFormData(prev => {
+            const qty = parseFloat(prev.quantity) || 0;
+            const cost = parseFloat(prev.cost) || 0;
+            const cp = parseFloat(quotes[0].price) || 0;
+            const mv = qty * cp;
+            const p = mv - cost * qty;
+            const pr = cost > 0 ? ((cp - cost) / cost) * 100 : 0;
+            return {
+              ...prev,
+              currentPrice: String(quotes[0].price),
+              marketValue: mv ? mv.toFixed(2) : prev.marketValue,
+              pnl: p ? p.toFixed(2) : prev.pnl,
+              pnlRate: pr ? pr.toFixed(2) : prev.pnlRate,
+            };
+          });
+        }
+      } catch (e) {
+        console.error('Equity fetch quotes failed:', e);
+      }
+    }
+  };
   const [showFixedDepositDetailModal, setShowFixedDepositDetailModal] = useState(false);
   const [selectedFixedDeposit, setSelectedFixedDeposit] = useState(null);
   const [showFixedInvestmentTypeModal, setShowFixedInvestmentTypeModal] = useState(false);
@@ -191,17 +409,31 @@ export default function IndependentAssets() {
   const [dividendRecords, setDividendRecords] = useState([]);
   const [showDividendAddForm, setShowDividendAddForm] = useState(false);
   const [newDividendRecord, setNewDividendRecord] = useState({
-    month: '',
-    investmentCost: '',
-    annualContribution: '',
-    dividendAmount: '',
+    dividendDate: '',
+    eventType: '分红',
+    cashflow: '',
   });
+  const [editingDividendRecordId, setEditingDividendRecordId] = useState(null);
+  const [editDividendRecord, setEditDividendRecord] = useState({
+    dividendDate: '',
+    eventType: '分红',
+    cashflow: '',
+  });
+  const [fixedInvestmentCashflowStartDate, setFixedInvestmentCashflowStartDate] = useState('');
+  const [fixedInvestmentCashflowEndDate, setFixedInvestmentCashflowEndDate] = useState('');
+  const [fixedInvestmentCashflowEventType, setFixedInvestmentCashflowEventType] = useState('');
+  const [fixedInvestmentCashflowSign, setFixedInvestmentCashflowSign] = useState('all');
+  const [fixedInvestmentCashflowPage, setFixedInvestmentCashflowPage] = useState(1);
 
   const { accounts = [], independentAssets = {} } = stateData || {};
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    setFixedInvestmentCashflowPage(1);
+  }, [fixedInvestmentCashflowStartDate, fixedInvestmentCashflowEndDate, fixedInvestmentCashflowEventType, fixedInvestmentCashflowSign]);
 
   const loadData = async () => {
     setLoading(true);
@@ -249,6 +481,112 @@ export default function IndependentAssets() {
     await loadData();
   };
 
+  const calculateXIRR = (dates, cashflows, guess = 0.1) => {
+    const maxIterations = 300;
+    const tolerance = 1e-7;
+
+    if (!dates || !cashflows || dates.length < 2 || cashflows.length < 2) return null;
+    if (dates.length !== cashflows.length) return null;
+
+    const hasPositive = cashflows.some(c => c > 0);
+    const hasNegative = cashflows.some(c => c < 0);
+    if (!hasPositive || !hasNegative) return null;
+
+    const t0 = dates[0].getTime();
+    const years = dates.map(d => (d.getTime() - t0) / (365 * 24 * 60 * 60 * 1000));
+
+    if (years.some(y => y < 0)) return null;
+
+    const npv = (rate) => {
+      let total = 0;
+      for (let i = 0; i < cashflows.length; i++) {
+        if (rate <= -1) return NaN;
+        total += cashflows[i] / Math.pow(1 + rate, years[i]);
+      }
+      return total;
+    };
+
+    if (dates.length === 2) {
+      const pv0 = cashflows[0];
+      const pv1 = cashflows[1];
+      const t = years[1];
+      if (t <= 0 || pv0 >= 0 || pv1 <= 0) return null;
+      return (Math.pow(pv1 / -pv0, 1 / t) - 1) * 100;
+    }
+
+    const npvDerivative = (rate) => {
+      let total = 0;
+      for (let i = 0; i < cashflows.length; i++) {
+        total -= cashflows[i] * years[i] / Math.pow(1 + rate, years[i] + 1);
+      }
+      return total;
+    };
+
+    const bisect = (lo, hi) => {
+      let flowLo = npv(lo);
+      let flowHi = npv(hi);
+      if (isNaN(flowLo) || isNaN(flowHi)) return null;
+      if (flowLo * flowHi > 0) return null;
+      for (let i = 0; i < 200; i++) {
+        const mid = (lo + hi) / 2;
+        const fMid = npv(mid);
+        if (isNaN(fMid)) return null;
+        if (Math.abs(fMid) < tolerance) return mid;
+        if (fMid * flowLo < 0) {
+          hi = mid;
+          flowHi = fMid;
+        } else {
+          lo = mid;
+          flowLo = fMid;
+        }
+      }
+      return (lo + hi) / 2;
+    };
+
+    let rate = null;
+    const candidates = [-0.999, -0.99, -0.9, -0.5, -0.25, 0, 0.1, 0.25, 0.5, 1, 2, 5, 10, 50, 100];
+    for (const g of candidates) {
+      const f = npv(g);
+      if (!isNaN(f) && Math.abs(f) < 1e6) {
+        if (Math.abs(f) < tolerance) { rate = g; break; }
+      }
+    }
+    if (rate === null) {
+      for (const lo of candidates) {
+        for (const hi of candidates) {
+          if (lo >= hi) continue;
+          const fLo = npv(lo);
+          const fHi = npv(hi);
+          if (isNaN(fLo) || isNaN(fHi)) continue;
+          if (fLo * fHi < 0) {
+            const root = bisect(lo, hi);
+            if (root !== null) { rate = root; break; }
+          }
+        }
+        if (rate !== null) break;
+      }
+    }
+    if (rate === null) {
+      for (let i = 0; i < maxIterations; i++) {
+        const f = npv(guess);
+        if (isNaN(f)) break;
+        if (Math.abs(f) < tolerance) { rate = guess; break; }
+        const d = npvDerivative(guess);
+        if (isNaN(d) || Math.abs(d) < 1e-12) break;
+        const next = guess - f / d;
+        if (!isFinite(next) || next <= -1) {
+          guess = (guess - 0.99) / 2;
+        } else {
+          guess = next;
+        }
+      }
+      rate = guess;
+    }
+
+    if (!isFinite(rate) || rate <= -1) return null;
+    return rate * 100;
+  };
+
   const getAssets = (type) => {
     return independentAssets[type] || [];
   };
@@ -265,19 +603,22 @@ export default function IndependentAssets() {
   const getDefaultFormData = (type) => {
     const defaults = {
       insurance: {
-        policyYear: '',
-        premiumTotal: '',
-        guaranteedAmount: '',
-        nonGuaranteedAmount: '',
-        demoProfitAmount: '',
-        demoProfitRate: '',
-        demoAnnualRate: '',
-        actualProfitAmount: '',
-        actualProfitRate: '',
-        actualAnnualRate: '',
+        policyNumber: '',
+        insuranceType: '',
+        insurancePurpose: '',
+        policyName: '',
+        insured: '',
+        insuredAge: '',
+        beneficiary: '',
+        policyDate: '',
+        policyStatus: '待生效',
+        paymentMethod: '年付',
+        paidAmount: '',
+        cashValue: '',
         currency: 'CNY',
         accountId: '',
         accountName: '',
+        attachments: [],
       },
       realestate: {
         country: '',
@@ -410,6 +751,536 @@ export default function IndependentAssets() {
     setShowVehicleDetailModal(true);
   };
 
+  const handleShowInsuranceDetail = (item) => {
+    setSelectedInsurance(item);
+    setShowInsuranceDetailModal(true);
+  };
+
+  const handleAddInsuranceTransaction = () => {
+    setEditingTransaction(null);
+    setTransactionFormData({
+      year: '',
+      premiumPaid: '',
+      guaranteedCashValue: '',
+      bonusDividend: '',
+      midTermDividend: '',
+      demoProfitAmount: '',
+      demoProfitRate: '',
+      actualProfitAmount: '',
+      actualProfitRate: '',
+      irr: '',
+      dividendRealizationRate: '',
+    });
+    setOcrImage(null);
+    setOcrResult(null);
+    setOcrLoading(false);
+    setSelectedOcrRecords([]);
+    setShowInsuranceTransactionModal(true);
+  };
+
+  const handleEditInsuranceTransaction = (record) => {
+    setEditingTransaction(record);
+    setTransactionFormData({ ...record });
+    setOcrImage(null);
+    setOcrResult(null);
+    setOcrLoading(false);
+    setShowInsuranceTransactionModal(true);
+  };
+
+  const handleOCRUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setOcrImage(event.target.result);
+      setOcrResult(null);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRunOCR = async () => {
+    if (!ocrImage) return;
+    setOcrLoading(true);
+
+    setTimeout(() => {
+      const mockResult = [
+        {
+          year: '1',
+          premiumPaid: '50000',
+          guaranteedCashValue: '38334',
+          bonusDividend: '0',
+          midTermDividend: '0',
+          demoProfitAmount: '',
+          demoProfitRate: '',
+        },
+        {
+          year: '2',
+          premiumPaid: '50000',
+          guaranteedCashValue: '38334',
+          bonusDividend: '0',
+          midTermDividend: '492',
+          demoProfitAmount: '',
+          demoProfitRate: '',
+        },
+        {
+          year: '3',
+          premiumPaid: '50000',
+          guaranteedCashValue: '40251',
+          bonusDividend: '0',
+          midTermDividend: '5394',
+          demoProfitAmount: '',
+          demoProfitRate: '',
+        },
+        {
+          year: '4',
+          premiumPaid: '50000',
+          guaranteedCashValue: '42167',
+          bonusDividend: '0',
+          midTermDividend: '7698',
+          demoProfitAmount: '',
+          demoProfitRate: '',
+        },
+        {
+          year: '5',
+          premiumPaid: '50000',
+          guaranteedCashValue: '45468',
+          bonusDividend: '0',
+          midTermDividend: '9078',
+          demoProfitAmount: '',
+          demoProfitRate: '',
+        },
+      ];
+      setOcrResult(mockResult);
+      setOcrLoading(false);
+    }, 1500);
+  };
+
+  const handleRunOCRFromAttachment = async () => {
+    if (!selectedInsurance || !selectedInsurance.attachments || selectedInsurance.attachments.length === 0) return;
+    const imageAttachments = selectedInsurance.attachments.filter(a => a.type && a.type.startsWith('image/'));
+    if (imageAttachments.length === 0) {
+      alert('附件中没有图片文件，无法识别');
+      return;
+    }
+    const firstImage = imageAttachments[0];
+    try {
+      const response = await fetch(firstImage.url);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setOcrImage(event.target.result);
+        setOcrResult(null);
+        setShowInsuranceTransactionModal(true);
+      };
+      reader.readAsDataURL(blob);
+    } catch (err) {
+      console.error('Failed to load attachment image:', err);
+      alert('加载附件图片失败，请手动上传');
+    }
+  };
+
+  const handleApplyOCRResult = (record) => {
+    if (!record) return;
+    setTransactionFormData(prev => ({
+      ...prev,
+      ...record,
+    }));
+    setOcrImage(null);
+    setOcrResult(null);
+  };
+
+  const handleApplySelectedOcrRecords = async () => {
+    if (!selectedInsurance || selectedOcrRecords.length === 0 || !ocrResult) return;
+
+    const recordsToSave = selectedOcrRecords.map(index => ocrResult[index])
+      .filter(record => record.year);
+
+    const currentItems = independentAssets.insurance || [];
+    const nextItems = currentItems.map(item => {
+      if (item.id === selectedInsurance.id) {
+        const existingRecords = item.transactionRecords || [];
+        const newRecords = recordsToSave.map(r => ({
+          ...r,
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${r.year}`,
+        }));
+        return {
+          ...item,
+          transactionRecords: [...existingRecords, ...newRecords],
+        };
+      }
+      return item;
+    });
+
+    try {
+      try {
+        await updateAssets('insurance', nextItems);
+      } catch (err) {
+        console.error('Failed to save OCR transactions:', err);
+        try {
+          const saved = localStorage.getItem('wealth_os_independent_assets');
+          const localAssets = saved ? JSON.parse(saved) : {};
+          localAssets.insurance = nextItems;
+          localStorage.setItem('wealth_os_independent_assets', JSON.stringify(localAssets));
+          const currentData = stateData || {};
+          setStateData({
+            ...currentData,
+            independentAssets: {
+              ...(currentData.independentAssets || {}),
+              insurance: nextItems,
+            },
+          });
+        } catch (storageErr) {
+          console.error('Failed to write fallback to localStorage:', storageErr);
+        }
+      }
+      setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+    } finally {
+      setOcrImage(null);
+      setOcrResult(null);
+      setSelectedOcrRecords([]);
+      setShowInsuranceTransactionModal(false);
+      loadData();
+    }
+  };
+
+  const handleCalculateProjection = () => {
+    if (!selectedInsurance) return;
+    const records = selectedInsurance.transactionRecords || [];
+    if (records.length === 0) {
+      alert('暂无交易记录，无法测算');
+      return;
+    }
+
+    const sortedRecords = records.slice().sort((a, b) => {
+      const yearA = parseInt(a.year) || 0;
+      const yearB = parseInt(b.year) || 0;
+      return yearA - yearB;
+    });
+
+    const year6Record = sortedRecords.find(r => parseInt(r.year) === 6) || sortedRecords[sortedRecords.length - 1];
+    const baseAmount = parseFloat(year6Record.guaranteedCashValue || 0) + parseFloat(year6Record.bonusDividend || 0) + parseFloat(year6Record.midTermDividend || 0);
+    const baseGuaranteedCV = parseFloat(year6Record.guaranteedCashValue || 0);
+    const totalPremium = parseFloat(selectedInsurance.paidAmount || 0);
+    const policyDate = selectedInsurance.policyDate;
+
+    const cvRecords = sortedRecords.filter(r => parseFloat(r.guaranteedCashValue || 0) > 0);
+    let cvGrowthRate = 0.005;
+    if (cvRecords.length >= 2) {
+      const firstCV = parseFloat(cvRecords[0].guaranteedCashValue || 0);
+      const lastCV = parseFloat(cvRecords[cvRecords.length - 1].guaranteedCashValue || 0);
+      const yearDiff = parseInt(cvRecords[cvRecords.length - 1].year || 0) - parseInt(cvRecords[0].year || 0);
+      if (yearDiff > 0 && firstCV > 0) {
+        cvGrowthRate = Math.pow(lastCV / firstCV, 1 / yearDiff) - 1;
+      }
+    }
+
+    const projectionYears = 30;
+    const data = [];
+
+    for (let y = 1; y <= projectionYears; y++) {
+      const record = sortedRecords.find(r => parseInt(r.year) === y);
+      let guaranteedCV, conservativeAmount, neutralAmount, optimisticAmount;
+
+      if (record) {
+        guaranteedCV = parseFloat(record.guaranteedCashValue || 0);
+        const bonus = parseFloat(record.bonusDividend || 0);
+        const midTerm = parseFloat(record.midTermDividend || 0);
+        const total = guaranteedCV + bonus + midTerm;
+        if (y <= 6) {
+          conservativeAmount = total;
+          neutralAmount = total;
+          optimisticAmount = total;
+        } else {
+          conservativeAmount = Math.max(baseAmount * Math.pow(1.04, y - 6), guaranteedCV);
+          neutralAmount = Math.max(baseAmount * Math.pow(1.05, y - 6), guaranteedCV);
+          optimisticAmount = Math.max(baseAmount * Math.pow(1.06, y - 6), guaranteedCV);
+        }
+      } else {
+        const lastRecordYear = sortedRecords.length > 0 ? parseInt(sortedRecords[sortedRecords.length - 1].year || 0) : 0;
+        const lastRecordCV = sortedRecords.length > 0 ? parseFloat(sortedRecords[sortedRecords.length - 1].guaranteedCashValue || 0) : 0;
+        if (lastRecordYear > 0 && lastRecordCV > 0) {
+          guaranteedCV = lastRecordCV * Math.pow(1 + cvGrowthRate, y - lastRecordYear);
+        } else {
+          guaranteedCV = 0;
+        }
+        if (y <= 6) {
+          conservativeAmount = guaranteedCV;
+          neutralAmount = guaranteedCV;
+          optimisticAmount = guaranteedCV;
+        } else {
+          conservativeAmount = Math.max(baseAmount * Math.pow(1.04, y - 6), guaranteedCV);
+          neutralAmount = Math.max(baseAmount * Math.pow(1.05, y - 6), guaranteedCV);
+          optimisticAmount = Math.max(baseAmount * Math.pow(1.06, y - 6), guaranteedCV);
+        }
+      }
+
+      let guaranteedXIRR = null, conservativeXIRR = null, neutralXIRR = null, optimisticXIRR = null;
+      if (policyDate && totalPremium > 0) {
+        const startDate = new Date(policyDate);
+        const endDate = new Date(startDate);
+        endDate.setFullYear(endDate.getFullYear() + y);
+
+        const gcvXIRR = calculateXIRR([startDate, endDate], [-totalPremium, guaranteedCV]);
+        guaranteedXIRR = gcvXIRR;
+
+        const conXIRR = calculateXIRR([startDate, endDate], [-totalPremium, conservativeAmount]);
+        conservativeXIRR = conXIRR;
+
+        const neuXIRR = calculateXIRR([startDate, endDate], [-totalPremium, neutralAmount]);
+        neutralXIRR = neuXIRR;
+
+        const optXIRR = calculateXIRR([startDate, endDate], [-totalPremium, optimisticAmount]);
+        optimisticXIRR = optXIRR;
+      }
+
+      let neutralGrowthRate = 0;
+      if (y > 1 && data[y - 2] && data[y - 2].neutralAmount > 0) {
+        neutralGrowthRate = (neutralAmount - data[y - 2].neutralAmount) / data[y - 2].neutralAmount * 100;
+      }
+
+      data.push({
+        year: y,
+        age: selectedInsurance.insuredAge ? parseInt(selectedInsurance.insuredAge) + y : null,
+        guaranteedCV,
+        conservativeAmount,
+        neutralAmount,
+        optimisticAmount,
+        guaranteedXIRR,
+        conservativeXIRR,
+        neutralXIRR,
+        optimisticXIRR,
+        neutralGrowthRate,
+      });
+    }
+
+    setCalculationData({
+      policyName: selectedInsurance.policyName,
+      policyNumber: selectedInsurance.policyNumber,
+      insured: selectedInsurance.insured,
+      insuredAge: selectedInsurance.insuredAge,
+      premium: totalPremium,
+      currency: selectedInsurance.currency,
+      baseAmount,
+      years: data,
+    });
+    setShowCalculationModal(true);
+  };
+
+  const handleDeleteInsuranceTransaction = async (record) => {
+    if (!confirm('确定删除该交易记录吗？')) return;
+    if (!selectedInsurance) return;
+    const currentItems = independentAssets.insurance || [];
+    const nextItems = currentItems.map(item => {
+      if (item.id === selectedInsurance.id) {
+        return {
+          ...item,
+          transactionRecords: (item.transactionRecords || []).filter(r => r.id !== record.id),
+        };
+      }
+      return item;
+    });
+    try {
+      await updateAssets('insurance', nextItems);
+    } catch (err) {
+      console.error('Failed to delete transaction:', err);
+      try {
+        const saved = localStorage.getItem('wealth_os_independent_assets');
+        const localAssets = saved ? JSON.parse(saved) : {};
+        localStorage.setItem(
+          'wealth_os_independent_assets',
+          JSON.stringify({ ...localAssets, insurance: nextItems })
+        );
+        const currentData = stateData || {};
+        setStateData({
+          ...currentData,
+          independentAssets: {
+            ...(currentData.independentAssets || {}),
+            insurance: nextItems,
+          },
+        });
+      } catch (storageErr) {
+        console.error('Failed to write fallback to localStorage:', storageErr);
+      }
+    }
+    setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+  };
+
+  const handleSaveInsuranceTransaction = async () => {
+    if (!selectedInsurance) return;
+    const record = {
+      ...transactionFormData,
+      id: editingTransaction ? editingTransaction.id : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    };
+    const currentItems = independentAssets.insurance || [];
+    const nextItems = currentItems.map(item => {
+      if (item.id === selectedInsurance.id) {
+        const records = item.transactionRecords || [];
+        if (editingTransaction) {
+          return { ...item, transactionRecords: records.map(r => r.id === record.id ? record : r) };
+        }
+        return { ...item, transactionRecords: [...records, record] };
+      }
+      return item;
+    });
+    try {
+      try {
+        await updateAssets('insurance', nextItems);
+      } catch (err) {
+        console.error('Failed to save transaction:', err);
+        try {
+          const saved = localStorage.getItem('wealth_os_independent_assets');
+          const localAssets = saved ? JSON.parse(saved) : {};
+          localAssets.insurance = nextItems;
+          localStorage.setItem('wealth_os_independent_assets', JSON.stringify(localAssets));
+          const currentData = stateData || {};
+          const nextState = {
+            ...currentData,
+            independentAssets: {
+              ...(currentData.independentAssets || {}),
+              insurance: nextItems,
+            },
+          };
+          setStateData(nextState);
+        } catch (storageErr) {
+          console.error('Failed to write fallback to localStorage:', storageErr);
+        }
+      }
+      setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+    } finally {
+      setShowInsuranceTransactionModal(false);
+      setEditingTransaction(null);
+      setTransactionFormData({});
+    }
+  };
+
+  const handleUpdateTransactionField = async (newRecords) => {
+    if (!selectedInsurance) return;
+    const currentItems = independentAssets.insurance || [];
+    const nextItems = currentItems.map(item => {
+      if (item.id === selectedInsurance.id) {
+        return { ...item, transactionRecords: newRecords };
+      }
+      return item;
+    });
+    try {
+      try {
+        await updateAssets('insurance', nextItems);
+      } catch (err) {
+        console.error('Failed to update transaction field:', err);
+        try {
+          const saved = localStorage.getItem('wealth_os_independent_assets');
+          const localAssets = saved ? JSON.parse(saved) : {};
+          localAssets.insurance = nextItems;
+          localStorage.setItem('wealth_os_independent_assets', JSON.stringify(localAssets));
+          const currentData = stateData || {};
+          setStateData({
+            ...currentData,
+            independentAssets: {
+              ...(currentData.independentAssets || {}),
+              insurance: nextItems,
+            },
+          });
+        } catch (storageErr) {
+          console.error('Failed to write fallback to localStorage:', storageErr);
+        }
+      }
+      setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+    } catch (err) {
+      console.error('Error updating transaction field:', err);
+    }
+  };
+
+  const handleAttachmentUpload = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !selectedInsurance) return;
+
+    const newAttachments = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const url = URL.createObjectURL(file);
+      newAttachments.push({
+        name: file.name,
+        url: url,
+        size: file.size,
+        type: file.type,
+      });
+    }
+
+    const currentItems = independentAssets.insurance || [];
+    const nextItems = currentItems.map(item => {
+      if (item.id === selectedInsurance.id) {
+        return {
+          ...item,
+          attachments: [...(item.attachments || []), ...newAttachments],
+        };
+      }
+      return item;
+    });
+
+    try {
+      await updateAssets('insurance', nextItems);
+    } catch (err) {
+      console.error('Failed to save attachments:', err);
+      try {
+        const saved = localStorage.getItem('wealth_os_independent_assets');
+        const localAssets = saved ? JSON.parse(saved) : {};
+        localAssets.insurance = nextItems;
+        localStorage.setItem('wealth_os_independent_assets', JSON.stringify(localAssets));
+        const currentData = stateData || {};
+        setStateData({
+          ...currentData,
+          independentAssets: {
+            ...(currentData.independentAssets || {}),
+            insurance: nextItems,
+          },
+        });
+      } catch (storageErr) {
+        console.error('Failed to write fallback to localStorage:', storageErr);
+      }
+    }
+    setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+  };
+
+  const handleDeleteAttachment = async (index) => {
+    if (!selectedInsurance) return;
+
+    const currentItems = independentAssets.insurance || [];
+    const nextItems = currentItems.map(item => {
+      if (item.id === selectedInsurance.id) {
+        const attachments = item.attachments || [];
+        return {
+          ...item,
+          attachments: attachments.filter((_, i) => i !== index),
+        };
+      }
+      return item;
+    });
+
+    try {
+      await updateAssets('insurance', nextItems);
+    } catch (err) {
+      console.error('Failed to delete attachment:', err);
+      try {
+        const saved = localStorage.getItem('wealth_os_independent_assets');
+        const localAssets = saved ? JSON.parse(saved) : {};
+        localAssets.insurance = nextItems;
+        localStorage.setItem('wealth_os_independent_assets', JSON.stringify(localAssets));
+        const currentData = stateData || {};
+        setStateData({
+          ...currentData,
+          independentAssets: {
+            ...(currentData.independentAssets || {}),
+            insurance: nextItems,
+          },
+        });
+      } catch (storageErr) {
+        console.error('Failed to write fallback to localStorage:', storageErr);
+      }
+    }
+    setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+  };
+
   const handleShowPropertyDetails = (item) => {
     setSelectedProperty(item);
     setShowPropertyDetailModal(true);
@@ -425,15 +1296,40 @@ export default function IndependentAssets() {
   const handleViewFixedInvestmentDetail = (item) => {
     setSelectedFixedInvestment(item);
     setFixedInvestmentExpandedYears(new Set([new Date().getFullYear().toString()]));
-    setDividendRecords(item.dividendRecords || []);
+    // 兼容旧数据：补充分红日期、事件类型和现金流字段
+    const normalizedRecords = (item.dividendRecords || []).map(r => {
+      const dividendDate = r.dividendDate || (r.month ? `${r.month}-01` : '');
+      let eventType = r.eventType;
+      let cashflow = r.cashflow;
+      if (!eventType) {
+        const dividendAmount = parseFloat(r.dividendAmount || 0);
+        if (dividendAmount > 0) {
+          eventType = '分红';
+          cashflow = dividendAmount;
+        } else {
+          eventType = '投入本金';
+          const outflow = parseFloat(r.investmentCost || r.buyCost || r.annualContribution || 0);
+          cashflow = outflow > 0 ? -outflow : 0;
+        }
+      }
+      return {
+        ...r,
+        dividendDate,
+        month: dividendDate.slice(0, 7),
+        eventType,
+        cashflow: cashflow !== undefined ? parseFloat(cashflow || 0) : undefined,
+      };
+    });
+    setDividendRecords(normalizedRecords);
     setShowDividendAddForm(false);
+    setEditingDividendRecordId(null);
     const now = new Date();
-    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     setNewDividendRecord({
-      month: currentMonth,
-      investmentCost: item.investmentCost || '',
-      annualContribution: item.annualContribution || '',
-      dividendAmount: '',
+      dividendDate: currentDate,
+      eventType: '分红',
+      cashflow: '',
+      buyCost: '',
     });
     setShowFixedInvestmentDetailModal(true);
   };
@@ -546,9 +1442,7 @@ export default function IndependentAssets() {
       const items = independentAssets[type] || [];
       items.forEach(item => {
         if (type === 'insurance') {
-          totalValue += parseFloat(item.premiumTotal || 0);
-          demoProfit += parseFloat(item.demoProfitAmount || 0);
-          actualProfit += parseFloat(item.actualProfitAmount || 0);
+          totalValue += parseFloat(item.paidAmount || 0);
         } else if (type === 'realestate') {
           if (item.usage === '出租') {
             totalValue += parseFloat(item.purchasePrice || 0);
@@ -708,10 +1602,10 @@ export default function IndependentAssets() {
                       profitLoss += residualValue - pp;
                       actualValue += residualValue;
                     } else if (item.type === 'insurance') {
-                      const premium = parseFloat(item.premiumTotal || 0);
-                      marketValue += premium;
-                      purchaseCost += premium;
-                      actualValue += premium;
+                      const paid = parseFloat(item.paidAmount || 0);
+                      marketValue += paid;
+                      purchaseCost += paid;
+                      actualValue += paid;
                     } else if (item.type === 'fixedinvestment') {
                       const cost = parseFloat(item.investmentCost || 0);
                       marketValue += cost;
@@ -820,53 +1714,60 @@ export default function IndependentAssets() {
           <table className="w-full">
             <thead className="bg-gray-50 dark:bg-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">保单年度</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">保费总额</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">保证金额</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">非保证金额</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">演示收益额</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">演示收益率</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">演示年化收益率</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">实际收益额</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">实际收益率</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">实际年化收益率</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">保单号码</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">保险类型</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">保险名称</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">受保人</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">受益人</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">保单日期</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">保单状况</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">缴纳方式</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">已付金额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">现金价值</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">累计分红额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">货币单位</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-              {items.map(item => (
-                <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyYear}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.premiumTotal, item.currency)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.guaranteedAmount, item.currency)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.nonGuaranteedAmount, item.currency)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.demoProfitAmount, item.currency)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatPercentage(item.demoProfitRate)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatPercentage(item.demoAnnualRate)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.actualProfitAmount, item.currency)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatPercentage(item.actualProfitRate)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatPercentage(item.actualAnnualRate)}</td>
-                  <td className="px-4 py-3 text-sm">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleEdit(item)}
-                        className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(item)}
-                        className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {items.map(item => {
+                const records = item.transactionRecords || [];
+                const totalDividend = records.reduce((sum, r) => {
+                  return sum + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0);
+                }, 0);
+                return (
+                  <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyNumber || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.insuranceType || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyName || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.insured || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.beneficiary || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyDate || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyStatus || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.paymentMethod || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.paidAmount, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.cashValue, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(totalDividend, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.currency || '—'}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => handleShowInsuranceDetail(item)} className="text-green-600 hover:text-green-700 hover:bg-green-50 px-2 py-1 rounded text-xs font-medium transition-colors">
+                          明细
+                        </button>
+                        <button onClick={() => handleEdit(item)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded text-xs font-medium transition-colors">
+                          编辑
+                        </button>
+                        <button onClick={() => handleDelete(item)} className="text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded text-xs font-medium transition-colors">
+                          删除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无保险资产数据</td>
+                  <td colSpan={13} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无保险资产数据</td>
                 </tr>
               )}
             </tbody>
@@ -986,12 +1887,17 @@ export default function IndependentAssets() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">起租时间</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">到期时间</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">是否出租</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">累计收益</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">累计收益率</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">IRR收益率</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">币种</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-                  {rentalItems.map(item => (
+                  {rentalItems.map(item => {
+                    const rentalStats = calculateRentalStats(item);
+                    return (
                     <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.country}</td>
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.province}</td>
@@ -1004,6 +1910,9 @@ export default function IndependentAssets() {
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.startDate || '—'}</td>
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.endDate || '—'}</td>
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.isRented || '—'}</td>
+                      <td className="px-4 py-3 text-sm text-orange-600 dark:text-orange-400 font-medium">{rentalStats.cumulativeIncome !== 0 ? formatCurrency(rentalStats.cumulativeIncome, item.currency) : '—'}</td>
+                      <td className="px-4 py-3 text-sm text-purple-600 dark:text-purple-400 font-medium">{rentalStats.cumulativeYield}</td>
+                      <td className="px-4 py-3 text-sm text-blue-600 dark:text-blue-400 font-medium">{rentalStats.irrDisplay}</td>
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.currency || '—'}</td>
                       <td className="px-4 py-3 text-sm">
                         <div className="flex items-center gap-2">
@@ -1017,7 +1926,8 @@ export default function IndependentAssets() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1113,6 +2023,159 @@ export default function IndependentAssets() {
     );
   };
 
+  // 计算单条固定投资在列表中显示所需的统计数据
+  const calculateFixedInvestmentStats = (item) => {
+    const records = (item.dividendRecords || []).map(r => ({
+      ...r,
+      dividendDate: r.dividendDate || (r.month ? `${r.month}-01` : ''),
+    }));
+    const sorted = [...records].sort((a, b) =>
+      (b.dividendDate || '').localeCompare(a.dividendDate || '')
+    );
+    const getEventType = (r) => {
+      if (r.eventType) return r.eventType;
+      return parseFloat(r.dividendAmount || 0) > 0 ? '分红' : '投入本金';
+    };
+    const getCashflow = (r) => {
+      if (r.cashflow !== undefined) return parseFloat(r.cashflow || 0);
+      const et = getEventType(r);
+      if (et === '分红') return Math.abs(parseFloat(r.dividendAmount || 0));
+      const out = parseFloat(r.investmentCost || r.buyCost || r.annualContribution || 0);
+      return out > 0 ? -out : 0;
+    };
+    const getCostBasis = (r) => {
+      const et = getEventType(r);
+      if (et === '分红') return parseFloat(r.buyCost || r.investmentCost || 0);
+      return Math.abs(getCashflow(r));
+    };
+
+    const totalDividend = sorted.reduce((s, r) => s + (getCashflow(r) > 0 ? getCashflow(r) : 0), 0);
+    const totalBuyCost = sorted.reduce((s, r) => s + getCostBasis(r), 0);
+    const investmentCost = parseFloat(item.investmentCost || 0);
+    const annualContribution = parseFloat(item.annualContribution || 0);
+    const totalInvested = investmentCost + annualContribution;
+
+    const dividendRate = totalInvested > 0 && totalDividend > 0
+      ? ((totalDividend / totalInvested) * 100).toFixed(2) + '%'
+      : '—';
+
+    // IRR (XIRR) 计算
+    let irr = null;
+    const cashflows = [];
+    const dates = [];
+    sorted.forEach(r => {
+      const ds = r.dividendDate;
+      if (!ds) return;
+      const amt = getCashflow(r);
+      if (amt === 0 || isNaN(amt)) return;
+      const parts = ds.split('-').map(Number);
+      let d;
+      if (parts.length === 3) d = new Date(parts[0], parts[1] - 1, parts[2]);
+      else if (parts.length === 2) d = new Date(parts[0], parts[1] - 1, 1);
+      else return;
+      cashflows.push(amt);
+      dates.push(d);
+    });
+    if (cashflows.length >= 2 && cashflows.some(c => c > 0) && cashflows.some(c => c < 0)) {
+      // 内联 XIRR 简化版
+      const baseDate = new Date(Math.min(...dates.map(d => d.getTime())));
+      const npv = (rate) => cashflows.reduce((s, cf, i) => {
+        const days = (dates[i] - baseDate) / 86400000;
+        return s + cf / Math.pow(1 + rate, days / 365);
+      }, 0);
+      let rate = 0.1;
+      for (let i = 0; i < 100; i++) {
+        const n = npv(rate);
+        if (Math.abs(n) < 1e-8) { irr = rate; break; }
+        const d = (npv(rate + 1e-8) - n) / 1e-8;
+        if (Math.abs(d) < 1e-12) break;
+        rate -= n / d;
+      }
+      if (irr === null) {
+        let lo = -0.99, hi = 10;
+        for (let i = 0; i < 100; i++) {
+          const mid = (lo + hi) / 2;
+          const n = npv(mid);
+          if (Math.abs(n) < 1e-8) { irr = mid; break; }
+          if (n > 0) lo = mid; else hi = mid;
+        }
+      }
+    }
+    const irrDisplay = irr !== null ? `${(irr * 100).toFixed(2)}%` : '—';
+
+    return { totalInvested, totalDividend, dividendRate, irrDisplay };
+  };
+
+  const calculateRentalStats = (item) => {
+    const startDate = item.startDate ? new Date(item.startDate) : null;
+    const endDate = item.endDate ? new Date(item.endDate) : null;
+    const rentAmount = parseFloat(item.rentAmount || 0);
+    
+    const totalMonths = startDate && endDate && endDate > startDate
+      ? Math.max(0, Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24 * 30)))
+      : 0;
+
+    const generatePaymentRecords = () => {
+      if (!startDate || !endDate || totalMonths <= 0) return [];
+      const records = item.paymentRecords || [];
+      if (records.length > 0) {
+        return records.map(r => ({
+          ...r,
+          rentalStatus: r.rentalStatus || '已出租',
+          isTerminated: r.isTerminated || '未退租',
+          refundAmount: r.refundAmount !== undefined ? r.refundAmount : (r.isTerminated === '已退租' ? rentAmount : 0),
+        }));
+      }
+
+      const result = [];
+      for (let i = 0; i < totalMonths; i++) {
+        const monthDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+        result.push({
+          id: `pay-${item.id}-${i}`,
+          dueDate: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}-01`,
+          received: 0,
+          status: 'unpaid',
+        });
+      }
+      return result;
+    };
+
+    const paymentRecords = generatePaymentRecords();
+
+    const cumulativeIncome = paymentRecords.reduce((sum, r) => {
+      if (r.status !== 'paid') return sum;
+      return sum + parseFloat(r.received || 0);
+    }, 0);
+
+    const holdingCost = parseFloat(item.holdingCost || 0);
+    const cumulativeYield = holdingCost > 0 && cumulativeIncome > 0
+      ? ((cumulativeIncome / holdingCost) * 100).toFixed(2) + '%'
+      : '—';
+
+    const cashflows = [];
+    const dates = [];
+    if (holdingCost > 0 && startDate) {
+      cashflows.push(-holdingCost);
+      dates.push(new Date(startDate));
+    }
+    paymentRecords.forEach(r => {
+      if (r.status !== 'paid') return;
+      const received = parseFloat(r.received || 0);
+      if (received <= 0 || !r.dueDate) return;
+      const parts = r.dueDate.split('-').map(Number);
+      if (parts.length < 2) return;
+      const d = new Date(parts[0], parts[1] - 1, parts[2] || 1);
+      cashflows.push(received);
+      dates.push(d);
+    });
+    const irr = (cashflows.length >= 2 && cashflows.some(c => c > 0) && cashflows.some(c => c < 0))
+      ? calculateXIRR(cashflows, dates)
+      : null;
+    const irrDisplay = irr !== null ? `${(irr * 100).toFixed(2)}%` : '—';
+
+    return { cumulativeIncome, cumulativeYield, irrDisplay };
+  };
+
   const renderFixedInvestmentTable = () => {
     const items = getAssets('fixedinvestment');
     return (
@@ -1133,19 +2196,29 @@ export default function IndependentAssets() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">地区</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">类型</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">投入本金</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">累计投入本金</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">分红频率</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">累计分红</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">累计分红率</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">IRR 分红率</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-              {items.map(item => (
+              {items.map(item => {
+                const listStats = calculateFixedInvestmentStats(item);
+                return (
                 <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.country}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.province}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.district}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.type}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.investmentCost, item.currency)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listStats.totalInvested, item.currency)}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.dividendFrequency || '每年'}</td>
+                  <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400">{formatCurrency(listStats.totalDividend, item.currency)}</td>
+                  <td className="px-4 py-3 text-sm text-purple-600 dark:text-purple-400">{listStats.dividendRate}</td>
+                  <td className="px-4 py-3 text-sm text-blue-600 dark:text-blue-400">{listStats.irrDisplay}</td>
                   <td className="px-4 py-3 text-sm">
                     <div className="flex items-center gap-2">
                       <button onClick={() => handleViewFixedInvestmentDetail(item)} className="text-green-600 hover:text-green-700 hover:bg-green-50 px-2 py-1 rounded text-xs font-medium transition-colors">
@@ -1160,10 +2233,11 @@ export default function IndependentAssets() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无固定投资数据</td>
+                  <td colSpan={11} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无固定投资数据</td>
                 </tr>
               )}
             </tbody>
@@ -1262,13 +2336,27 @@ export default function IndependentAssets() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">利率</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">开始时间</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">结束时间</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">预期收益</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">实际收益</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">到期总利息</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">到期总金额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">到期日倒计时</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-              {items.map(item => (
+              {items.map(item => {
+                const calcAmount = parseFloat(item.amount || 0);
+                const calcRate = parseFloat(item.interestRate !== undefined && item.interestRate !== '' ? item.interestRate : (item.interest || 0));
+                const calcYears = (() => {
+                  if (!item.startDate || !item.endDate) return 0;
+                  const s = new Date(item.startDate);
+                  const e = new Date(item.endDate);
+                  if (e <= s) return 0;
+                  return (e - s) / (1000 * 60 * 60 * 24) / 365;
+                })();
+                const listTotalReturn = calcAmount > 0 && calcRate > 0 && calcYears > 0 ? calcAmount * (calcRate / 100) * calcYears : null;
+                const listTotalAmount = calcAmount > 0 && listTotalReturn !== null ? calcAmount + listTotalReturn : null;
+                const listDaysToMaturity = item.endDate ? Math.max(0, Math.ceil((new Date(item.endDate) - new Date()) / (1000 * 60 * 60 * 24))) : null;
+                return (
                 <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.market || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.location || '—'}</td>
@@ -1279,8 +2367,9 @@ export default function IndependentAssets() {
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.interestRate !== undefined && item.interestRate !== '' ? formatPercentage(item.interestRate) : (item.interest ? formatPercentage(item.interest) : '—')}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.startDate || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.endDate || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.expectedReturn ? formatCurrency(item.expectedReturn, item.currency) : '—'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.actualReturn ? formatCurrency(item.actualReturn, item.currency) : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{listTotalReturn !== null ? formatCurrency(listTotalReturn, item.currency) : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{listTotalAmount !== null ? formatCurrency(listTotalAmount, item.currency) : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-orange-600 dark:text-orange-400 font-medium">{listDaysToMaturity !== null ? `${listDaysToMaturity} 天` : '—'}</td>
                   <td className="px-4 py-3 text-sm">
                     <div className="flex items-center gap-2">
                       <button onClick={() => { setSelectedFixedDeposit(item); setShowFixedDepositDetailModal(true); }} className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded transition-colors" title="明细">
@@ -1295,10 +2384,11 @@ export default function IndependentAssets() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无定期资产数据</td>
+                  <td colSpan={13} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无定期资产数据</td>
                 </tr>
               )}
             </tbody>
@@ -1346,44 +2436,70 @@ export default function IndependentAssets() {
       <>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保单年度</label>
-            <input type="text" value={formData.policyYear || ''} onChange={(e) => setFormData({ ...formData, policyYear: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保单号码</label>
+            <input type="text" value={formData.policyNumber || ''} onChange={(e) => setFormData({ ...formData, policyNumber: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保费总额</label>
-            <input type="number" value={formData.premiumTotal || ''} onChange={(e) => setFormData({ ...formData, premiumTotal: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保险类型</label>
+            <select value={formData.insuranceType || ''} onChange={(e) => setFormData({ ...formData, insuranceType: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">请选择</option>
+              <option value="储蓄险">储蓄险</option>
+              <option value="年金险">年金险</option>
+              <option value="分红险">分红险</option>
+              <option value="养老保险">养老保险</option>
+            </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保证金额</label>
-            <input type="number" value={formData.guaranteedAmount || ''} onChange={(e) => setFormData({ ...formData, guaranteedAmount: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保险名称</label>
+            <input type="text" value={formData.policyName || ''} onChange={(e) => setFormData({ ...formData, policyName: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">非保证金额</label>
-            <input type="number" value={formData.nonGuaranteedAmount || ''} onChange={(e) => setFormData({ ...formData, nonGuaranteedAmount: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保险作用</label>
+            <select value={formData.insurancePurpose || ''} onChange={(e) => setFormData({ ...formData, insurancePurpose: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">请选择</option>
+              <option value="养老">养老</option>
+              <option value="现金流：生活">现金流：生活</option>
+              <option value="教育">教育</option>
+            </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">演示收益额</label>
-            <input type="number" value={formData.demoProfitAmount || ''} onChange={(e) => setFormData({ ...formData, demoProfitAmount: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">受保人</label>
+            <input type="text" value={formData.insured || ''} onChange={(e) => setFormData({ ...formData, insured: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">演示收益率(%)</label>
-            <input type="number" value={formData.demoProfitRate || ''} onChange={(e) => setFormData({ ...formData, demoProfitRate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">受保人年龄</label>
+            <input type="number" value={formData.insuredAge || ''} onChange={(e) => setFormData({ ...formData, insuredAge: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">演示年化收益率(%)</label>
-            <input type="number" value={formData.demoAnnualRate || ''} onChange={(e) => setFormData({ ...formData, demoAnnualRate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">受益人</label>
+            <input type="text" value={formData.beneficiary || ''} onChange={(e) => setFormData({ ...formData, beneficiary: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际收益额</label>
-            <input type="number" value={formData.actualProfitAmount || ''} onChange={(e) => setFormData({ ...formData, actualProfitAmount: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保单日期</label>
+            <input type="date" value={formData.policyDate || ''} onChange={(e) => setFormData({ ...formData, policyDate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际收益率(%)</label>
-            <input type="number" value={formData.actualProfitRate || ''} onChange={(e) => setFormData({ ...formData, actualProfitRate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保单状况</label>
+            <select value={formData.policyStatus || '待生效'} onChange={(e) => setFormData({ ...formData, policyStatus: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="待生效">待生效</option>
+              <option value="已生效">已生效</option>
+            </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际年化收益率(%)</label>
-            <input type="number" value={formData.actualAnnualRate || ''} onChange={(e) => setFormData({ ...formData, actualAnnualRate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">缴纳方式</label>
+            <select value={formData.paymentMethod || '年付'} onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="整付">整付</option>
+              <option value="年付">年付</option>
+              <option value="月付">月付</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">已付金额</label>
+            <input type="number" value={formData.paidAmount || ''} onChange={(e) => setFormData({ ...formData, paidAmount: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">现金价值</label>
+            <input type="number" value={formData.cashValue || ''} onChange={(e) => setFormData({ ...formData, cashValue: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">货币单位</label>
@@ -1929,7 +3045,7 @@ export default function IndependentAssets() {
               <input type="number" value={formData.investmentCost || ''} onChange={(e) => setFormData({ ...formData, investmentCost: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">持续投入/年</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">持续投入</label>
               <input type="number" value={formData.annualContribution || ''} onChange={(e) => setFormData({ ...formData, annualContribution: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="每年追加投入" />
             </div>
             <div>
@@ -2012,52 +3128,409 @@ export default function IndependentAssets() {
       );
     };
 
-    const renderEquityForm = () => (
-      <>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">名称</label>
-            <input type="text" value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    const renderEquityForm = () => {
+      const market = formData.market || '国内市场';
+      const l2Options = equityCategoryL2OptionsMap[formData.categoryL1] || [];
+      const cost = parseFloat(formData.cost) || 0;
+      const quantity = parseFloat(formData.quantity) || 0;
+      const currentPrice = parseFloat(formData.currentPrice) || 0;
+      const marketValue = quantity * currentPrice;
+      const pnl = marketValue - cost * quantity;
+      const pnlRate = cost > 0 ? ((currentPrice - cost) / cost) * 100 : 0;
+
+      const handleMarketChange = (val) => {
+        let newCurrency = formData.currency;
+        if (val === '国内市场') newCurrency = 'CNY';
+        else if (val === '港股市场') newCurrency = 'HKD';
+        else if (val === '美股市场') newCurrency = 'USD';
+        setFormData({ ...formData, market: val, currency: newCurrency });
+      };
+
+      return (
+        <>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs flex items-center justify-center font-bold">1</div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">分类选择</span>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">代码</label>
-            <input type="text" value={formData.code || ''} onChange={(e) => setFormData({ ...formData, code: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <span className="text-red-500 mr-0.5">*</span>市场
+              </label>
+              <select
+                value={market}
+                onChange={(e) => handleMarketChange(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {EQUITY_MARKET_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">货币单位</label>
+              <input
+                type="text"
+                list="equity-currency-suggestions"
+                value={formData.currency || ''}
+                onChange={(e) => setFormData({ ...formData, currency: e.target.value.toUpperCase() })}
+                placeholder="CNY / USD / 自定义..."
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+              />
+              <datalist id="equity-currency-suggestions">
+                {EQUITY_CURRENCY_SUGGESTIONS.map(c => <option key={c} value={c} />)}
+              </datalist>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">资产种类</label>
+              <div className="flex gap-2">
+                <select
+                  value={formData.assetKind || ''}
+                  onChange={(e) => setFormData({ ...formData, assetKind: e.target.value })}
+                  className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">请选择资产种类</option>
+                  {equityAssetKindOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newKind = prompt('请输入新的资产种类名称');
+                    if (newKind && newKind.trim() && !equityAssetKindOptions.includes(newKind.trim())) {
+                      setEquityAssetKindOptions([...equityAssetKindOptions, newKind.trim()].sort());
+                    }
+                  }}
+                  className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors"
+                  title="添加资产种类"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <span className="text-red-500 mr-0.5">*</span>资产类型
+              </label>
+              <input
+                type="text"
+                value="股票"
+                readOnly
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-900 dark:text-white cursor-not-allowed"
+              />
+            </div>
+            {renderAccountSelect()}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <span className="text-red-500 mr-0.5">*</span>资产分类一级
+              </label>
+              <div className="flex gap-2">
+                <select
+                  value={formData.categoryL1 || ''}
+                  onChange={(e) => setFormData({ ...formData, categoryL1: e.target.value, categoryL2: '', categoryL3: '' })}
+                  className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">请选择</option>
+                  {equityCategoryL1Options.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newL1 = prompt('请输入新的一级分类名称');
+                    if (newL1 && newL1.trim() && !equityCategoryL1Options.includes(newL1.trim())) {
+                      setEquityCategoryL1Options([...equityCategoryL1Options, newL1.trim()].sort());
+                    }
+                  }}
+                  className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors"
+                  title="管理一级分类"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">资产分类二级</label>
+              <div className="flex gap-2">
+                <select
+                  value={formData.categoryL2 || ''}
+                  onChange={(e) => setFormData({ ...formData, categoryL2: e.target.value, categoryL3: '' })}
+                  className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">请选择</option>
+                  {l2Options.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!formData.categoryL1) { alert('请先选择资产分类一级'); return; }
+                    const newL2 = prompt(`请输入 "${formData.categoryL1}" 下新的二级分类名称`);
+                    if (newL2 && newL2.trim() && !l2Options.includes(newL2.trim())) {
+                      setEquityCategoryL2OptionsMap({
+                        ...equityCategoryL2OptionsMap,
+                        [formData.categoryL1]: [...l2Options, newL2.trim()].sort(),
+                      });
+                    }
+                  }}
+                  className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors"
+                  title="管理二级分类"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">持仓分组</label>
+              <div className="flex gap-2">
+                <select
+                  value={formData.positionGroup || ''}
+                  onChange={(e) => setFormData({ ...formData, positionGroup: e.target.value })}
+                  className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">请选择</option>
+                  {equityPositionGroupOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newG = prompt('请输入新的持仓分组名称');
+                    if (newG && newG.trim() && !equityPositionGroupOptions.includes(newG.trim())) {
+                      setEquityPositionGroupOptions([...equityPositionGroupOptions, newG.trim()].sort());
+                    }
+                  }}
+                  className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors"
+                  title="管理持仓分组"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <span className="text-red-500 mr-0.5">*</span>持仓分类
+              </label>
+              <div className="flex gap-2">
+                <select
+                  value={formData.positionType || ''}
+                  onChange={(e) => setFormData({ ...formData, positionType: e.target.value })}
+                  className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">请选择</option>
+                  {equityPositionTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newT = prompt('请输入新的持仓分类名称');
+                    if (newT && newT.trim() && !equityPositionTypeOptions.includes(newT.trim())) {
+                      setEquityPositionTypeOptions([...equityPositionTypeOptions, newT.trim()].sort());
+                    }
+                  }}
+                  className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors"
+                  title="管理持仓分类"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">成本</label>
-            <input type="number" value={formData.cost || ''} onChange={(e) => setFormData({ ...formData, cost: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">数量</label>
-            <input type="number" value={formData.quantity || ''} onChange={(e) => setFormData({ ...formData, quantity: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">当前价格</label>
-            <input type="number" value={formData.currentPrice || ''} onChange={(e) => setFormData({ ...formData, currentPrice: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">市值</label>
-            <input type="number" value={formData.marketValue || ''} onChange={(e) => setFormData({ ...formData, marketValue: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">盈亏</label>
-            <input type="number" value={formData.pnl || ''} onChange={(e) => setFormData({ ...formData, pnl: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">盈亏比例(%)</label>
-            <input type="number" value={formData.pnlRate || ''} onChange={(e) => setFormData({ ...formData, pnlRate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">货币单位</label>
-            <select value={formData.currency || ''} onChange={(e) => setFormData({ ...formData, currency: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="">请选择</option>
-              {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
-            </select>
-          </div>
-          {renderAccountSelect()}
-        </div>
-      </>
-    );
+
+          {/* 第二步：资产详情 */}
+          {formData.categoryL1 && formData.categoryL2 ? (
+            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs flex items-center justify-center font-bold">2</div>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">资产详情</span>
+                <span className="text-xs text-gray-400">· 股票</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <span className="text-red-500 mr-0.5">*</span>资产名称
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={formData.name || ''}
+                      onChange={(e) => {
+                        setFormData({ ...formData, name: e.target.value });
+                        handleEquityCodeSearch(e.target.value);
+                      }}
+                      onFocus={() => formData.name && handleEquityCodeSearch(formData.name)}
+                      onBlur={() => setTimeout(() => setEquityShowLookupDropdown(false), 200)}
+                      placeholder="输入名称联想搜索"
+                      className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    {equityShowLookupDropdown && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-50 max-h-52 overflow-y-auto">
+                        {equityLookupLoading ? (
+                          <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">搜索中...</div>
+                        ) : equityLookupResults.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">无匹配结果</div>
+                        ) : (
+                          equityLookupResults.map((item, idx) => (
+                            <div
+                              key={idx}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => handleEquitySelectLookup(item)}
+                              className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400">{item.code}</span>
+                                {item.price && <span className="text-xs text-gray-500 dark:text-gray-400">¥{item.price}</span>}
+                              </div>
+                              <div className="text-sm text-gray-800 dark:text-gray-200 truncate">{item.name}</div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <span className="text-red-500 mr-0.5">*</span>资产代码
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={formData.code || ''}
+                      onChange={(e) => {
+                        setFormData({ ...formData, code: e.target.value });
+                        handleEquityCodeSearch(e.target.value);
+                      }}
+                      onFocus={() => formData.code && handleEquityCodeSearch(formData.code)}
+                      onBlur={() => setTimeout(() => setEquityShowLookupDropdown(false), 200)}
+                      placeholder="如 000725"
+                      className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                    />
+                    {equityShowLookupDropdown && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-50 max-h-52 overflow-y-auto">
+                        {equityLookupLoading ? (
+                          <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">搜索中...</div>
+                        ) : equityLookupResults.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">无匹配结果</div>
+                        ) : (
+                          equityLookupResults.map((item, idx) => (
+                            <div
+                              key={idx}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => handleEquitySelectLookup(item)}
+                              className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400">{item.code}</span>
+                                {item.price && <span className="text-xs text-gray-500 dark:text-gray-400">¥{item.price}</span>}
+                              </div>
+                              <div className="text-sm text-gray-800 dark:text-gray-200 truncate">{item.name}</div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <span className="text-red-500 mr-0.5">*</span>持仓成本
+                  </label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={formData.cost || ''}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      cost: e.target.value,
+                      marketValue: marketValue ? marketValue.toFixed(2) : formData.marketValue,
+                      pnl: pnl ? pnl.toFixed(2) : formData.pnl,
+                      pnlRate: pnlRate ? pnlRate.toFixed(2) : formData.pnlRate,
+                    })}
+                    placeholder="0.00"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <span className="text-red-500 mr-0.5">*</span>持仓数量
+                  </label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={formData.quantity || ''}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      quantity: e.target.value,
+                      marketValue: marketValue ? marketValue.toFixed(2) : formData.marketValue,
+                      pnl: pnl ? pnl.toFixed(2) : formData.pnl,
+                      pnlRate: pnlRate ? pnlRate.toFixed(2) : formData.pnlRate,
+                    })}
+                    placeholder="0"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">现价</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={formData.currentPrice || ''}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      currentPrice: e.target.value,
+                      marketValue: marketValue ? marketValue.toFixed(2) : formData.marketValue,
+                      pnl: pnl ? pnl.toFixed(2) : formData.pnl,
+                      pnlRate: pnlRate ? pnlRate.toFixed(2) : formData.pnlRate,
+                    })}
+                    placeholder="0.0000"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">当前市值</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={marketValue ? marketValue.toFixed(2) : (formData.marketValue || '')}
+                    readOnly
+                    placeholder="自动计算"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-900 dark:text-white font-semibold cursor-not-allowed"
+                  />
+                  {quantity > 0 && currentPrice > 0 && (
+                    <p className="mt-1 text-xs text-gray-400">= {quantity} × {currentPrice} = {marketValue.toFixed(2)}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">持仓盈亏</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={pnl ? pnl.toFixed(2) : (formData.pnl || '')}
+                    onChange={(e) => setFormData({ ...formData, pnl: e.target.value })}
+                    placeholder="自动计算"
+                    className={`w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">持仓盈亏率(%)</label>
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={pnlRate ? pnlRate.toFixed(2) : (formData.pnlRate || '')}
+                    onChange={(e) => setFormData({ ...formData, pnlRate: e.target.value })}
+                    placeholder="自动计算"
+                    className={`w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-full bg-gray-300 dark:bg-slate-600 text-gray-500 text-xs flex items-center justify-center font-bold">2</div>
+                <span className="text-sm text-gray-400 dark:text-gray-500">资产详情</span>
+              </div>
+              <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">请先完成上方市场、分类选择</p>
+            </div>
+          )}
+        </>
+      );
+    };
 
     const renderFixedDepositForm = () => {
       const market = formData.market || '国内市场';
@@ -2190,7 +3663,7 @@ export default function IndependentAssets() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">结束时间</label>
               <input type="date" value={formData.endDate || ''} onChange={(e) => setFormData({ ...formData, endDate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
-            <div>
+            <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">预期收益（自动）</label>
               <input
                 type="text"
@@ -2199,10 +3672,6 @@ export default function IndependentAssets() {
                 placeholder="填写金额、利率、起止时间后自动计算"
                 className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none"
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际收益</label>
-              <input type="number" value={formData.actualReturn || ''} onChange={(e) => setFormData({ ...formData, actualReturn: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
         </>
@@ -2306,6 +3775,737 @@ export default function IndependentAssets() {
           <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end">
             <button onClick={() => setShowVehicleDetailModal(false)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
               关闭
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderInsuranceDetailModal = () => {
+    if (!showInsuranceDetailModal || !selectedInsurance) return null;
+    const item = selectedInsurance;
+
+    const paidAmount = parseFloat(item.paidAmount || 0);
+    const cashValue = parseFloat(item.cashValue || 0);
+    const records = item.transactionRecords || [];
+
+    const totalDividend = records.reduce((sum, r) => {
+      return sum + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0);
+    }, 0);
+
+    const dividendRate = paidAmount > 0 && totalDividend > 0
+      ? ((totalDividend / paidAmount) * 100).toFixed(2) + '%'
+      : '—';
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+          <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">保险明细 - {item.policyName || item.policyNumber || '保单'}</h2>
+            <button onClick={() => setShowInsuranceDetailModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
+              <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+
+          <div className="p-4">
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">保单号码</span>
+                <span className="text-gray-900 dark:text-white font-medium">{item.policyNumber || '—'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">保险名称</span>
+                <span className="text-gray-900 dark:text-white font-medium">{item.policyName || '—'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">受保人</span>
+                <span className="text-gray-900 dark:text-white font-medium">{item.insured || '—'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">受益人</span>
+                <span className="text-gray-900 dark:text-white font-medium">{item.beneficiary || '—'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">保单日期</span>
+                <span className="text-gray-900 dark:text-white font-medium">{item.policyDate || '—'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">保单状况</span>
+                <span className={`text-sm font-medium ${item.policyStatus === '已生效' ? 'text-green-600 dark:text-green-400' : 'text-orange-600 dark:text-orange-400'}`}>
+                  {item.policyStatus || '—'}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">缴纳方式</span>
+                <span className="text-gray-900 dark:text-white font-medium">{item.paymentMethod || '—'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">货币单位</span>
+                <span className="text-gray-900 dark:text-white font-medium">{item.currency || '—'}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-3 mb-6">
+              <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">已交保费</div>
+                <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(paidAmount, item.currency)}</div>
+              </div>
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">现金价值</div>
+                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(cashValue, item.currency)}</div>
+              </div>
+              <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">累计分红额</div>
+                <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{formatCurrency(totalDividend, item.currency)}</div>
+              </div>
+              <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">累计分红收益率</div>
+                <div className="text-lg font-bold text-purple-600 dark:text-purple-400">{dividendRate}</div>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 dark:border-slate-700 pt-4 mb-6">
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-4">附件</h3>
+              
+              <div className="flex flex-wrap gap-2 mb-3">
+                {(item.attachments || []).map((file, index) => (
+                  <div key={index} className="flex items-center gap-2 bg-gray-100 dark:bg-slate-700 px-3 py-2 rounded-lg">
+                    <button onClick={() => window.open(file.url, '_blank')} className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
+                      {file.name}
+                    </button>
+                    <button onClick={() => handleDeleteAttachment(index)} className="p-1 text-gray-500 hover:text-red-600 transition-colors">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg cursor-pointer transition-colors">
+                <Upload className="w-4 h-4" />
+                <span>上传附件</span>
+                <input type="file" multiple onChange={handleAttachmentUpload} className="hidden" />
+              </label>
+              {(item.attachments || []).length > 0 && (
+                <button onClick={() => handleRunOCRFromAttachment()} className="ml-2 inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors">
+                  <FileText className="w-4 h-4" />
+                  <span>识别附件</span>
+                </button>
+              )}
+              <button onClick={() => handleCalculateProjection()} className="ml-2 inline-flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg transition-colors">
+                <Calculator className="w-4 h-4" />
+                <span>测算</span>
+              </button>
+            </div>
+
+            <div className="border-t border-gray-200 dark:border-slate-700 pt-4">
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-4">交易记录</h3>
+
+              {records.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 dark:bg-slate-700">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保单年度终结</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">年龄</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">缴付保费总额</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保证现金价值</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">复归红利</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">终期红利</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保证红利</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">非保证红利</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">预期红利</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">总额</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">分红额</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">日期</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">演示收益率</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">IRR收益率</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">实际收益额</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">实际收益率</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">分红实现率</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">是否达成</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">新增交易记录</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+                      {records
+                        .slice()
+                        .sort((a, b) => {
+                          const yearA = parseInt(a.year) || 0;
+                          const yearB = parseInt(b.year) || 0;
+                          if (yearA === 0 && yearB !== 0) return -1;
+                          if (yearA !== 0 && yearB === 0) return 1;
+                          if (yearA === 0 && yearB === 0) return 0;
+                          if (yearA === 1 && yearB !== 1) return -1;
+                          if (yearA !== 1 && yearB === 1) return 1;
+                          if (yearA === 1 && yearB === 1) return 0;
+                          return yearA - yearB;
+                        })
+                        .map((record, index) => {
+                        const guaranteedCashValue = parseFloat(record.guaranteedCashValue || 0);
+                        const bonusDividend = parseFloat(record.bonusDividend || 0);
+                        const midTermDividend = parseFloat(record.midTermDividend || 0);
+                        const totalAmount = guaranteedCashValue + bonusDividend + midTermDividend;
+                        const premiumPaid = parseFloat(record.premiumPaid || 0);
+                        
+                        const prevYear = parseInt(record.year) - 1;
+                        const prevRecord = records.find(r => parseInt(r.year) === prevYear);
+                        const prevGuaranteedCashValue = prevRecord ? parseFloat(prevRecord.guaranteedCashValue || 0) : 0;
+                        // 第一行（首年）保证红利默认为0，其余行按差额计算
+                        const guaranteedBonus = index === 0 ? 0 : (guaranteedCashValue - prevGuaranteedCashValue);
+                        const nonGuaranteedBonus = bonusDividend + midTermDividend;
+                        const expectedBonus = guaranteedBonus + nonGuaranteedBonus;
+                        
+                        const demoCashFlow = index === 0 ? premiumPaid : 0;
+                        
+                        const policyYear = parseInt(record.year) || 0;
+                        const age = item.insuredAge ? parseInt(item.insuredAge) + policyYear : '—';
+                        
+                        const date = record.date || (item.policyDate ? `${parseInt(item.policyDate.split('/')[0]) + policyYear}/${item.policyDate.split('/')[1]}/${item.policyDate.split('/')[2]}` : '—');
+                        
+                        const demoRate = premiumPaid > 0 ? ((totalAmount - premiumPaid) / premiumPaid) * 100 : 0;
+                        
+                        const totalPremium = records
+                          .filter(r => r.year || r.year === 0)
+                          .reduce((sum, r) => sum + parseFloat(r.premiumPaid || 0), 0);
+                        
+                        const sortedRecords = records
+                          .slice(0, index + 1)
+                          .filter(r => r.year || r.year === 0)
+                          .sort((a, b) => parseInt(a.year) - parseInt(b.year));
+                        
+                        const rDate0 = records.find(r => parseInt(r.year) === 0 || parseInt(r.year) === 1);
+                        const baseDateStr = rDate0?.date || item.policyDate || '';
+                        
+                        const irrReturn = (() => {
+                          if (!baseDateStr) return null;
+                          const startDate = new Date(baseDateStr);
+                          const endDateStr = record.date || (item.policyDate ? `${parseInt(item.policyDate.split('/')[0]) + policyYear}/${item.policyDate.split('/')[1]}/${item.policyDate.split('/')[2]}` : '');
+                          if (!endDateStr) return null;
+                          const endDate = new Date(endDateStr);
+                          return calculateXIRR([startDate, endDate], [-totalPremium, totalAmount]);
+                        })();
+                        
+                        const actualRate = (() => {
+                          if (!baseDateStr) return null;
+                          const actualProfitAmount = parseFloat(record.actualProfitAmount || 0);
+                          if (actualProfitAmount <= 0) return null;
+                          const startDate = new Date(baseDateStr);
+                          const endDateStr = record.date || (item.policyDate ? `${parseInt(item.policyDate.split('/')[0]) + policyYear}/${item.policyDate.split('/')[1]}/${item.policyDate.split('/')[2]}` : '');
+                          if (!endDateStr) return null;
+                          const endDate = new Date(endDateStr);
+                          return calculateXIRR([startDate, endDate], [-totalPremium, actualProfitAmount]);
+                        })();
+                        const status = !record.actualProfitRate ? '未开始' 
+                          : actualRate >= demoRate ? '达成' : '未达成';
+                        
+                        const statusColor = status === '达成' ? 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400'
+                          : status === '未达成' ? 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400'
+                          : 'bg-gray-100 text-gray-700 dark:bg-gray-700/50 dark:text-gray-400';
+                        
+                        return (
+                          <tr key={record.id || index} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{record.year || '—'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.age || ''} onChange={(e) => {
+                                const allRecords = selectedInsurance.transactionRecords || [];
+                                const sortedAllRecords = allRecords.slice().sort((a, b) => {
+                                  const yearA = parseInt(a.year) || 0;
+                                  const yearB = parseInt(b.year) || 0;
+                                  if (yearA === 0 && yearB !== 0) return -1;
+                                  if (yearA !== 0 && yearB === 0) return 1;
+                                  if (yearA === 0 && yearB === 0) return 0;
+                                  if (yearA === 1 && yearB !== 1) return -1;
+                                  if (yearA !== 1 && yearB === 1) return 1;
+                                  if (yearA === 1 && yearB === 1) return 0;
+                                  return yearA - yearB;
+                                });
+                                const currentIndex = sortedAllRecords.findIndex(r => r.id === record.id);
+                                const inputValue = e.target.value;
+                                const newAge = parseInt(inputValue);
+                                
+                                if (!isNaN(newAge) && currentIndex === 0) {
+                                  const newRecords = allRecords.map(r => {
+                                    const idx = sortedAllRecords.findIndex(sr => sr.id === r.id);
+                                    return { ...r, age: String(newAge + idx) };
+                                  });
+                                  handleUpdateTransactionField(newRecords);
+                                } else {
+                                  const newRecords = allRecords.map(r => {
+                                    if (r.id === record.id) {
+                                      return { ...r, age: inputValue };
+                                    }
+                                    return r;
+                                  });
+                                  handleUpdateTransactionField(newRecords);
+                                }
+                              }} className="w-16 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(record.premiumPaid, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(guaranteedCashValue, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(bonusDividend, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(midTermDividend, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(guaranteedBonus, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(nonGuaranteedBonus, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(expectedBonus, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">{formatCurrency(totalAmount, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(guaranteedCashValue - premiumPaid + bonusDividend + midTermDividend, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="date" value={record.date || ''} onChange={(e) => {
+                                const allRecords = selectedInsurance.transactionRecords || [];
+                                const sortedAllRecords = allRecords.slice().sort((a, b) => {
+                                  const yearA = parseInt(a.year) || 0;
+                                  const yearB = parseInt(b.year) || 0;
+                                  if (yearA === 0 && yearB !== 0) return -1;
+                                  if (yearA !== 0 && yearB === 0) return 1;
+                                  if (yearA === 0 && yearB === 0) return 0;
+                                  if (yearA === 1 && yearB !== 1) return -1;
+                                  if (yearA !== 1 && yearB === 1) return 1;
+                                  if (yearA === 1 && yearB === 1) return 0;
+                                  return yearA - yearB;
+                                });
+                                const currentIndex = sortedAllRecords.findIndex(r => r.id === record.id);
+                                const inputValue = e.target.value;
+                                
+                                if (inputValue && currentIndex === 0) {
+                                  const baseDate = new Date(inputValue);
+                                  const newRecords = allRecords.map(r => {
+                                    const idx = sortedAllRecords.findIndex(sr => sr.id === r.id);
+                                    const newDate = new Date(baseDate);
+                                    newDate.setFullYear(newDate.getFullYear() + idx);
+                                    const formattedDate = newDate.toISOString().split('T')[0];
+                                    return { ...r, date: formattedDate };
+                                  });
+                                  handleUpdateTransactionField(newRecords);
+                                } else {
+                                  const newRecords = allRecords.map(r => {
+                                    if (r.id === record.id) {
+                                      return { ...r, date: inputValue };
+                                    }
+                                    return r;
+                                  });
+                                  handleUpdateTransactionField(newRecords);
+                                }
+                              }} className="w-36 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{demoRate.toFixed(2)}%</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{irrReturn !== null ? irrReturn.toFixed(2) + '%' : '—'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.actualProfitAmount || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) {
+                                    return { ...r, actualProfitAmount: e.target.value };
+                                  }
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{actualRate !== null ? actualRate.toFixed(2) + '%' : '—'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatPercentage(record.dividendRealizationRate)}</td>
+                            <td className="px-4 py-3 text-sm">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
+                                {status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              <button onClick={() => handleAddInsuranceTransaction()} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
+                                <Plus className="w-4 h-4" />
+                              </button>
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => handleEditInsuranceTransaction(record)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDeleteInsuranceTransaction(record)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="text-sm text-gray-500 dark:text-gray-400 mb-4">暂无交易记录</div>
+                  <button onClick={() => handleAddInsuranceTransaction()} className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors">
+                    <Plus className="w-4 h-4" />
+                    <span>新增交易记录</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end">
+            <button onClick={() => setShowInsuranceDetailModal(false)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+              关闭
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCalculationModal = () => {
+    if (!showCalculationModal || !calculationData) return null;
+    const { policyName, policyNumber, insured, insuredAge, premium, currency, baseAmount, years } = calculationData;
+
+    const handleDownloadCSV = () => {
+      const headers = ['年份', '保证CV', '保证XIRR', '保守4%总额', '保守XIRR', '中性5%总额', '中性XIRR', '乐观6%总额', '乐观XIRR', '中性年增长率'];
+      const rows = years.map(y => [
+        y.year,
+        y.guaranteedCV.toFixed(2),
+        y.guaranteedXIRR !== null ? y.guaranteedXIRR.toFixed(2) + '%' : '—',
+        y.conservativeAmount.toFixed(2),
+        y.conservativeXIRR !== null ? y.conservativeXIRR.toFixed(2) + '%' : '—',
+        y.neutralAmount.toFixed(2),
+        y.neutralXIRR !== null ? y.neutralXIRR.toFixed(2) + '%' : '—',
+        y.optimisticAmount.toFixed(2),
+        y.optimisticXIRR !== null ? y.optimisticXIRR.toFixed(2) + '%' : '—',
+        y.neutralGrowthRate.toFixed(2) + '%',
+      ]);
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `测算表_${policyName || policyNumber || '保单'}.csv`;
+      link.click();
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-6xl max-h-[95vh] overflow-y-auto">
+          <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">「{policyName || '保单'}」— 预期总价值 XIRR 计算表</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                {insured ? `受保人 ${insured}${insuredAge ? `(${insuredAge}岁)` : ''}` : ''}
+                {policyNumber ? ` | 保单号 ${policyNumber}` : ''}
+                {premium ? ` | 保费 ${formatCurrency(premium, currency)}` : ''}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={handleDownloadCSV} className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg transition-colors">
+                <Download className="w-4 h-4" />
+                <span>下载CSV</span>
+              </button>
+              <button onClick={() => setShowCalculationModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
+                <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+              </button>
+            </div>
+          </div>
+
+          <div className="p-4">
+            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 mb-4 text-sm text-gray-700 dark:text-gray-300">
+              <p className="font-semibold mb-2">计算方法说明：</p>
+              <ol className="list-decimal list-inside space-y-1 text-xs">
+                <li>第1-6年预期总额 = 保险公司演示数据（含保证CV + 非保证红利）</li>
+                <li>第7年起 = 复利外推 FV(y) = {formatCurrency(baseAmount, currency)} × (1+r)^(y-6)，下限不低于保证现金价值</li>
+                <li>XIRR = 按实际现金流日期精确计算的年化内部收益率（非简单CAGR）</li>
+                <li>保守4% = 红利打折 / 中性5% = 公司演示实现(高亮列) / 乐观6% = 红利超预期</li>
+              </ol>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-indigo-900 text-white">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold">年份</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold">保证CV</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold">保证XIRR</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold bg-indigo-800">保守4%总额</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold bg-indigo-800">保守XIRR</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold bg-amber-100 text-amber-900">中性5%总额</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold bg-amber-100 text-amber-900">中性XIRR</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold bg-indigo-800">乐观6%总额</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold bg-indigo-800">乐观XIRR</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold">中性年增长率</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+                  {years.map((y, idx) => (
+                    <tr key={y.year} className={idx % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-gray-50 dark:bg-slate-700/50'}>
+                      <td className="px-3 py-2 text-gray-900 dark:text-white font-medium">{y.year}</td>
+                      <td className="px-3 py-2 text-right text-gray-900 dark:text-white">{formatCurrency(y.guaranteedCV, currency)}</td>
+                      <td className="px-3 py-2 text-right text-gray-900 dark:text-white">{y.guaranteedXIRR !== null ? y.guaranteedXIRR.toFixed(2) + '%' : '—'}</td>
+                      <td className="px-3 py-2 text-right text-gray-900 dark:text-white bg-indigo-50/50">{formatCurrency(y.conservativeAmount, currency)}</td>
+                      <td className="px-3 py-2 text-right text-gray-900 dark:text-white bg-indigo-50/50">{y.conservativeXIRR !== null ? y.conservativeXIRR.toFixed(2) + '%' : '—'}</td>
+                      <td className="px-3 py-2 text-right text-gray-900 dark:text-white bg-amber-50 font-medium">{formatCurrency(y.neutralAmount, currency)}</td>
+                      <td className="px-3 py-2 text-right text-gray-900 dark:text-white bg-amber-50 font-medium">{y.neutralXIRR !== null ? y.neutralXIRR.toFixed(2) + '%' : '—'}</td>
+                      <td className="px-3 py-2 text-right text-gray-900 dark:text-white bg-indigo-50/50">{formatCurrency(y.optimisticAmount, currency)}</td>
+                      <td className="px-3 py-2 text-right text-gray-900 dark:text-white bg-indigo-50/50">{y.optimisticXIRR !== null ? y.optimisticXIRR.toFixed(2) + '%' : '—'}</td>
+                      <td className="px-3 py-2 text-right text-gray-900 dark:text-white">
+                        {y.neutralGrowthRate > 0 ? '+' : ''}{y.neutralGrowthRate.toFixed(2)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end">
+            <button onClick={() => setShowCalculationModal(false)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+              关闭
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderInsuranceTransactionModal = () => {
+    if (!showInsuranceTransactionModal) return null;
+
+    const records = selectedInsurance?.transactionRecords || [];
+    const currentRecords = editingTransaction 
+      ? records.filter(r => r.id !== editingTransaction.id)
+      : records;
+    const newRecord = { ...transactionFormData };
+    const allRecords = [...currentRecords, newRecord];
+    
+    const guaranteedCashValue = parseFloat(newRecord.guaranteedCashValue || 0);
+    const bonusDividend = parseFloat(newRecord.bonusDividend || 0);
+    const midTermDividend = parseFloat(newRecord.midTermDividend || 0);
+    const totalAmount = guaranteedCashValue + bonusDividend + midTermDividend;
+    const premiumPaid = parseFloat(newRecord.premiumPaid || 0);
+
+    const demoRate = premiumPaid > 0 ? ((totalAmount - premiumPaid) / premiumPaid) * 100 : 0;
+
+    const sortedRecords = [...allRecords]
+      .filter(r => r.year || r.year === 0)
+      .sort((a, b) => parseInt(a.year) - parseInt(b.year));
+
+    const totalPremium = sortedRecords.reduce((sum, r) => sum + parseFloat(r.premiumPaid || 0), 0);
+    const currentYear = parseInt(newRecord.year || 0);
+    const annualizedReturn = totalPremium > 0 && currentYear > 0
+      ? (Math.pow(totalAmount / totalPremium, 1 / currentYear) - 1) * 100
+      : null;
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              {editingTransaction ? '编辑交易记录' : '新增交易记录'}
+            </h2>
+            <button onClick={() => setShowInsuranceTransactionModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
+              <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+            </button>
+          </div>
+
+          <div className="p-4">
+            {!editingTransaction && (
+              <div className="mb-6 p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg border border-dashed border-gray-300 dark:border-slate-600">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">图文识别（上传保单图片自动识别）</h3>
+                </div>
+
+                {!ocrImage ? (
+                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-slate-600 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                      <Upload className="w-8 h-8 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500 dark:text-gray-400">点击上传保单图片</p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500">支持 JPG、PNG 格式</p>
+                    </div>
+                    <input type="file" accept="image/*" onChange={handleOCRUpload} className="hidden" />
+                  </label>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <img src={ocrImage} alt="保单预览" className="max-h-48 mx-auto rounded-lg object-contain" />
+                      <button onClick={() => { setOcrImage(null); setOcrResult(null); }} className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {!ocrResult && !ocrLoading && (
+                      <button onClick={handleRunOCR} className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors">
+                        开始识别
+                      </button>
+                    )}
+
+                    {ocrLoading && (
+                      <div className="text-center py-2 text-sm text-gray-500">
+                        <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                        识别中...
+                      </div>
+                    )}
+
+                    {ocrResult && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm font-medium text-gray-700 dark:text-gray-300">识别结果（可编辑并选择多行数据）</div>
+                          {selectedOcrRecords.length > 0 && (
+                            <button onClick={handleApplySelectedOcrRecords} className="px-3 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors">
+                              应用选中的 {selectedOcrRecords.length} 条数据
+                            </button>
+                          )}
+                        </div>
+                        
+                        <div className="overflow-x-auto">
+                          <table className="w-full border border-gray-200 dark:border-slate-600 rounded-lg">
+                            <thead className="bg-gray-50 dark:bg-slate-700">
+                              <tr>
+                                <th className="px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-slate-600 w-10">
+                                  <input type="checkbox" checked={selectedOcrRecords.length === ocrResult.length} onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedOcrRecords(ocrResult.map((_, i) => i));
+                                    } else {
+                                      setSelectedOcrRecords([]);
+                                    }
+                                  }} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                                </th>
+                                <th className="px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-slate-600">保单年度</th>
+                                <th className="px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-slate-600">缴付保费</th>
+                                <th className="px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-slate-600">保证现金价值</th>
+                                <th className="px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-slate-600">复归红利</th>
+                                <th className="px-3 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-slate-600">终期红利</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 dark:divide-slate-600">
+                              {ocrResult.map((record, index) => (
+                                <tr key={index} className={`hover:bg-gray-50 dark:hover:bg-slate-700/50 ${selectedOcrRecords.includes(index) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+                                  <td className="px-3 py-2">
+                                    <input type="checkbox" checked={selectedOcrRecords.includes(index)} onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedOcrRecords([...selectedOcrRecords, index]);
+                                      } else {
+                                        setSelectedOcrRecords(selectedOcrRecords.filter(i => i !== index));
+                                      }
+                                    }} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input type="text" value={record.year || ''} onChange={(e) => {
+                                      const newResult = [...ocrResult];
+                                      newResult[index] = { ...newResult[index], year: e.target.value };
+                                      setOcrResult(newResult);
+                                    }} className="w-full px-2 py-1 text-sm border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input type="number" value={record.premiumPaid || ''} onChange={(e) => {
+                                      const newResult = [...ocrResult];
+                                      newResult[index] = { ...newResult[index], premiumPaid: e.target.value };
+                                      setOcrResult(newResult);
+                                    }} className="w-full px-2 py-1 text-sm border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input type="number" value={record.guaranteedCashValue || ''} onChange={(e) => {
+                                      const newResult = [...ocrResult];
+                                      newResult[index] = { ...newResult[index], guaranteedCashValue: e.target.value };
+                                      setOcrResult(newResult);
+                                    }} className="w-full px-2 py-1 text-sm border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input type="number" value={record.bonusDividend || ''} onChange={(e) => {
+                                      const newResult = [...ocrResult];
+                                      newResult[index] = { ...newResult[index], bonusDividend: e.target.value };
+                                      setOcrResult(newResult);
+                                    }} className="w-full px-2 py-1 text-sm border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input type="number" value={record.midTermDividend || ''} onChange={(e) => {
+                                      const newResult = [...ocrResult];
+                                      newResult[index] = { ...newResult[index], midTermDividend: e.target.value };
+                                      setOcrResult(newResult);
+                                    }} className="w-full px-2 py-1 text-sm border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <button onClick={() => { setOcrResult(null); setSelectedOcrRecords([]); }} className="w-full py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                          重新识别
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保单年度终结</label>
+                <input type="text" value={transactionFormData.year || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, year: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日期</label>
+                <input type="date" value={transactionFormData.date || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, date: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">缴付保费总额</label>
+                <input type="number" value={transactionFormData.premiumPaid || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, premiumPaid: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保证现金价值</label>
+                <input type="number" value={transactionFormData.guaranteedCashValue || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, guaranteedCashValue: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">复归红利</label>
+                <input type="number" value={transactionFormData.bonusDividend || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, bonusDividend: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">终期红利</label>
+                <input type="number" value={transactionFormData.midTermDividend || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, midTermDividend: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">总额</label>
+                <input type="number" readOnly value={totalAmount} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">演示现金流</label>
+                <input type="number" readOnly value={-(parseFloat(transactionFormData.premiumPaid || 0)) + totalAmount} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">演示收益率(%)</label>
+                <input type="number" readOnly value={demoRate.toFixed(2)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">年化收益率(%)</label>
+                <input type="number" readOnly value={annualizedReturn !== null ? annualizedReturn.toFixed(4) : ''} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+              </div>
+              {editingTransaction && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际收益额</label>
+                    <input type="number" value={transactionFormData.actualProfitAmount || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, actualProfitAmount: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际收益率(%)</label>
+                    <input type="number" value={transactionFormData.actualProfitRate || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, actualProfitRate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际现金流</label>
+                    <input type="number" readOnly value={-(parseFloat(transactionFormData.premiumPaid || 0)) + parseFloat(transactionFormData.actualProfitAmount || 0)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">内部收益率IRR(%)</label>
+                    <input type="number" value={transactionFormData.irr || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, irr: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">分红实现率(%)</label>
+                    <input type="number" value={transactionFormData.dividendRealizationRate || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, dividendRealizationRate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end gap-3">
+            <button onClick={() => setShowInsuranceTransactionModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 border border-gray-200 dark:border-slate-600 rounded-lg transition-colors">
+              取消
+            </button>
+            <button onClick={handleSaveInsuranceTransaction} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+              保存
             </button>
           </div>
         </div>
@@ -2549,6 +4749,57 @@ export default function IndependentAssets() {
               </div>
             </div>
 
+            {/* 累计收益 / 累计收益率 / IRR 收益率 */}
+            {(() => {
+              const cumulativeIncome = paymentRecords.reduce((sum, r) => {
+                if (r.status !== 'paid') return sum;
+                return sum + parseFloat(r.received || 0);
+              }, 0);
+              const holdingCost = parseFloat(item.holdingCost || 0);
+              const cumulativeYield = holdingCost > 0 && cumulativeIncome > 0
+                ? ((cumulativeIncome / holdingCost) * 100).toFixed(2) + '%'
+                : '—';
+
+              // 构建现金流数组用于 XIRR：综合持有成本为期初负现金流，已付款记录的实收租金为正现金流
+              const cashflows = [];
+              const dates = [];
+              if (holdingCost > 0 && startDate) {
+                cashflows.push(-holdingCost);
+                dates.push(new Date(startDate));
+              }
+              paymentRecords.forEach(r => {
+                if (r.status !== 'paid') return;
+                const received = parseFloat(r.received || 0);
+                if (received <= 0 || !r.dueDate) return;
+                const parts = r.dueDate.split('-').map(Number);
+                if (parts.length < 2) return;
+                const d = new Date(parts[0], parts[1] - 1, parts[2] || 1);
+                cashflows.push(received);
+                dates.push(d);
+              });
+              const irr = (cashflows.length >= 2 && cashflows.some(c => c > 0) && cashflows.some(c => c < 0))
+                ? calculateXIRR(cashflows, dates)
+                : null;
+              const irrDisplay = irr !== null ? `${(irr * 100).toFixed(2)}%` : '—';
+
+              return (
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">累计收益</div>
+                    <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{cumulativeIncome !== 0 ? formatCurrency(cumulativeIncome, item.currency) : '—'}</div>
+                  </div>
+                  <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">累计收益率</div>
+                    <div className="text-lg font-bold text-purple-600 dark:text-purple-400">{cumulativeYield}</div>
+                  </div>
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">IRR 收益率</div>
+                    <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{irrDisplay}</div>
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-500 dark:text-gray-400">出租方式</span>
@@ -2570,18 +4821,23 @@ export default function IndependentAssets() {
                 <span className="text-gray-500 dark:text-gray-400">到期时间</span>
                 <span className="text-gray-900 dark:text-white font-medium">{item.endDate || '—'}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <span className="text-gray-500 dark:text-gray-400">综合持有成本</span>
                 <input
                   type="number"
                   value={item.holdingCost || ''}
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const val = parseFloat(e.target.value) || 0;
                     const updated = { ...item, holdingCost: val };
                     setSelectedProperty(updated);
                     const allItems = getAssets('realestate');
                     const nextItems = allItems.map(i => i.id === item.id ? updated : i);
                     setStateData({ ...stateData, independentAssets: { ...stateData.independentAssets, realestate: nextItems } });
+                    try {
+                      await updateAssets('realestate', nextItems);
+                    } catch (err) {
+                      console.error('Failed to save holding cost:', err);
+                    }
                   }}
                   className="w-32 px-2 py-1 text-xs border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   placeholder="请输入"
@@ -2700,49 +4956,205 @@ export default function IndependentAssets() {
     const frequency = item.dividendFrequency || '每年';
     const currency = item.currency || 'CNY';
 
-    const currentYear = new Date().getFullYear();
-    const currentMonth = new Date().getMonth() + 1;
-    const monthOptions = [];
-    for (let y = currentYear + 10; y >= currentYear - 20; y--) {
-      for (let m = 12; m >= 1; m--) {
-        if (y === currentYear + 10 && m > currentMonth) continue;
-        monthOptions.push(`${y}-${String(m).padStart(2, '0')}`);
-      }
-    }
+    // 排序后的投资现金流记录（按日期倒序）
+    const sortedRecords = [...dividendRecords].sort((a, b) => {
+      return (b.dividendDate || b.month || '').localeCompare(a.dividendDate || a.month || '');
+    });
 
-    const formatMonth = (monthStr) => {
-      if (!monthStr) return '';
-      const [y, m] = monthStr.split('-');
-      return `${y}年${parseInt(m)}月`;
+    const getRecordEventType = (record) => {
+      if (record.eventType) return record.eventType;
+      const dividendAmount = parseFloat(record.dividendAmount || 0);
+      return dividendAmount > 0 ? '分红' : '投入本金';
     };
 
-    const calculateDividendRate = (record) => {
-      const cost = parseFloat(record.investmentCost || 0);
-      const contrib = parseFloat(record.annualContribution || 0);
-      const dividend = parseFloat(record.dividendAmount || 0);
-      const totalCost = cost + contrib;
-      if (totalCost <= 0 || dividend <= 0) return '—';
-      return ((dividend / totalCost) * 100).toFixed(2) + '%';
+    const getRecordCashflow = (record) => {
+      if (record.cashflow !== undefined) return parseFloat(record.cashflow || 0);
+      const eventType = getRecordEventType(record);
+      if (eventType === '分红') {
+        return Math.abs(parseFloat(record.dividendAmount || 0));
+      }
+      const outflow = parseFloat(record.investmentCost || record.buyCost || record.annualContribution || 0);
+      return outflow > 0 ? -outflow : 0;
+    };
+
+    const getRecordCostBasis = (record) => {
+      const eventType = getRecordEventType(record);
+      if (eventType === '分红') {
+        return parseFloat(record.buyCost || record.investmentCost || 0);
+      }
+      return Math.abs(getRecordCashflow(record));
+    };
+
+    // 投资现金流筛选
+    const filteredRecords = sortedRecords.filter(record => {
+      const dateStr = record.dividendDate || record.month || '';
+      if (fixedInvestmentCashflowStartDate && dateStr < fixedInvestmentCashflowStartDate) return false;
+      if (fixedInvestmentCashflowEndDate && dateStr > fixedInvestmentCashflowEndDate) return false;
+
+      const eventType = getRecordEventType(record);
+      if (fixedInvestmentCashflowEventType && eventType !== fixedInvestmentCashflowEventType) return false;
+
+      const cashflow = getRecordCashflow(record);
+      if (fixedInvestmentCashflowSign === 'positive' && cashflow <= 0) return false;
+      if (fixedInvestmentCashflowSign === 'negative' && cashflow >= 0) return false;
+
+      return true;
+    });
+
+    // 计算累计买入成本
+    const totalBuyCost = sortedRecords.reduce((sum, r) => sum + getRecordCostBasis(r), 0);
+
+    // 计算累计分红金额（仅现金流入）
+    const totalDividend = sortedRecords.reduce((sum, r) => {
+      const cf = getRecordCashflow(r);
+      return sum + (cf > 0 ? cf : 0);
+    }, 0);
+
+    // 累计分红率 = 累计分红金额 ÷ 累计买入总成本
+    const totalDividendRate = totalBuyCost > 0 && totalDividend > 0
+      ? ((totalDividend / totalBuyCost) * 100).toFixed(2) + '%'
+      : '—';
+
+    const totalRecords = sortedRecords.length;
+    const filteredTotalRecords = filteredRecords.length;
+
+    // 投资现金流分页
+    const FIXED_INVESTMENT_CASHFLOW_PAGE_SIZE = 10;
+    const totalPages = Math.max(1, Math.ceil(filteredTotalRecords / FIXED_INVESTMENT_CASHFLOW_PAGE_SIZE));
+    const safePage = Math.min(fixedInvestmentCashflowPage, totalPages);
+    const paginatedRecords = filteredRecords.slice(
+      (safePage - 1) * FIXED_INVESTMENT_CASHFLOW_PAGE_SIZE,
+      safePage * FIXED_INVESTMENT_CASHFLOW_PAGE_SIZE
+    );
+
+    // 计算每期分红率：当期分红率 = 本次分红金额 ÷ 期初持仓总成本
+    const calculateDividendRate = (record, index) => {
+      const eventType = getRecordEventType(record);
+      if (eventType !== '分红') return '—';
+      const dividend = getRecordCashflow(record);
+      if (dividend <= 0) return '—';
+
+      // 期初持仓总成本 = 到当期为止的累计买入成本
+      let periodStartCost = 0;
+      for (let i = index; i < sortedRecords.length; i++) {
+        periodStartCost += getRecordCostBasis(sortedRecords[i]);
+      }
+
+      if (periodStartCost <= 0) return '—';
+      return ((dividend / periodStartCost) * 100).toFixed(2) + '%';
+    };
+
+    // 从现金流记录中汇总的投入本金和持续投入
+    const sumDividendCost = sortedRecords.reduce((sum, r) => {
+      const eventType = getRecordEventType(r);
+      if (eventType === '投入本金' || eventType === '本金规划') {
+        return sum + Math.abs(getRecordCashflow(r));
+      }
+      return sum + parseFloat(r.investmentCost || 0);
+    }, 0);
+    const sumDividendAnnual = sortedRecords.reduce((sum, r) => {
+      const eventType = getRecordEventType(r);
+      if (eventType === '追加') {
+        return sum + Math.abs(getRecordCashflow(r));
+      }
+      return sum + parseFloat(r.annualContribution || 0);
+    }, 0);
+    const sumAdditionalCost = sumDividendAnnual;
+
+    // 对比校验：判断主表单投入与现金流明细汇总是否一致
+    const isCostMatched = Math.abs(investmentCost - sumDividendCost) < 0.01;
+    const isAnnualMatched = Math.abs(annualContribution - sumDividendAnnual) < 0.01;
+
+    // 计算投资年数
+    const calculateInvestmentYears = () => {
+      if (!item.startYear) return 0;
+      const start = parseInt(item.startYear);
+      if (item.endYear === '无期限') {
+        const current = new Date().getFullYear();
+        return Math.max(0, current - start + 1);
+      }
+      if (!item.endYear) return 0;
+      const end = parseInt(item.endYear);
+      return Math.max(0, end - start + 1);
+    };
+
+    const investmentYears = calculateInvestmentYears();
+    // 累计投入本金 = 投入本金 + 持续投入（不分年）
+    const totalInvested = investmentCost + annualContribution;
+    const profitAmount = totalDividend - totalInvested;
+
+    // 累计投入本金（从现金流记录计算）
+    const totalCashOutflow = sortedRecords.reduce((sum, r) => {
+      const cf = getRecordCashflow(r);
+      return sum + (cf < 0 ? Math.abs(cf) : 0);
+    }, 0);
+
+    // 回本进度 = 累计分红 ÷ 累计投入本金
+    const paybackProgress = totalCashOutflow > 0
+      ? ((totalDividend / totalCashOutflow) * 100).toFixed(2) + '%'
+      : '—';
+
+    // IRR 分红率：基于投资现金流记录的 XIRR
+    const calculateIRR = () => {
+      const cashflows = [];
+      const dates = [];
+
+      sortedRecords.forEach(record => {
+        const dateStr = record.dividendDate;
+        if (!dateStr) return;
+
+        const amount = getRecordCashflow(record);
+        if (amount === 0 || isNaN(amount)) return;
+
+        const parts = dateStr.split('-').map(Number);
+        let date;
+        if (parts.length === 3) {
+          date = new Date(parts[0], parts[1] - 1, parts[2]);
+        } else if (parts.length === 2) {
+          date = new Date(parts[0], parts[1] - 1, 1);
+        } else {
+          return;
+        }
+
+        cashflows.push(amount);
+        dates.push(date);
+      });
+
+      return calculateXIRR(cashflows, dates);
+    };
+
+    const irr = calculateIRR();
+    const irrDisplay = irr !== null ? `${(irr * 100).toFixed(2)}%` : '—';
+
+    const buildRecordFromForm = (formValues) => {
+      const eventType = formValues.eventType || '分红';
+      const absAmount = Math.abs(parseFloat(formValues.cashflow) || 0);
+      const signedAmount = FIXED_INVESTMENT_OUTFLOW_EVENTS.includes(eventType) ? -absAmount : absAmount;
+      return {
+        dividendDate: formValues.dividendDate,
+        month: formValues.dividendDate.slice(0, 7),
+        eventType,
+        cashflow: signedAmount,
+        dividendAmount: eventType === '分红' ? absAmount : 0,
+        investmentCost: eventType === '投入本金' ? absAmount : 0,
+        annualContribution: eventType === '追加' ? absAmount : 0,
+      };
     };
 
     const handleAddRecord = () => {
-      if (!newDividendRecord.month || !newDividendRecord.dividendAmount) return;
+      if (!newDividendRecord.dividendDate || !newDividendRecord.cashflow) return;
       const newRecords = [...dividendRecords, {
         id: `div-${Date.now()}`,
-        month: newDividendRecord.month,
-        investmentCost: parseFloat(newDividendRecord.investmentCost) || 0,
-        annualContribution: parseFloat(newDividendRecord.annualContribution) || 0,
-        dividendAmount: parseFloat(newDividendRecord.dividendAmount) || 0,
-      }].sort((a, b) => b.month.localeCompare(a.month));
+        ...buildRecordFromForm(newDividendRecord),
+      }];
       setDividendRecords(newRecords);
       saveDividendRecords(newRecords);
       const now = new Date();
-      const currMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       setNewDividendRecord({
-        month: currMonth,
-        investmentCost: item.investmentCost || '',
-        annualContribution: item.annualContribution || '',
-        dividendAmount: '',
+        dividendDate: currentDate,
+        eventType: '分红',
+        cashflow: '',
       });
       setShowDividendAddForm(false);
     };
@@ -2751,6 +5163,31 @@ export default function IndependentAssets() {
       const newRecords = dividendRecords.filter(r => r.id !== recordId);
       setDividendRecords(newRecords);
       saveDividendRecords(newRecords);
+    };
+
+    const handleStartEdit = (record) => {
+      setEditingDividendRecordId(record.id);
+      setEditDividendRecord({
+        dividendDate: record.dividendDate || '',
+        eventType: getRecordEventType(record),
+        cashflow: Math.abs(getRecordCashflow(record)).toString(),
+      });
+    };
+
+    const handleCancelEdit = () => {
+      setEditingDividendRecordId(null);
+    };
+
+    const handleSaveEdit = () => {
+      if (!editDividendRecord.dividendDate || !editDividendRecord.cashflow) return;
+      const newRecords = dividendRecords.map(r =>
+        r.id === editingDividendRecordId
+          ? { ...r, id: r.id, ...buildRecordFromForm(editDividendRecord) }
+          : r
+      );
+      setDividendRecords(newRecords);
+      saveDividendRecords(newRecords);
+      setEditingDividendRecordId(null);
     };
 
     const saveDividendRecords = async (updatedRecords) => {
@@ -2774,8 +5211,16 @@ export default function IndependentAssets() {
       }
     };
 
-    const totalDividend = dividendRecords.reduce((sum, r) => sum + parseFloat(r.dividendAmount || 0), 0);
-    const totalRecords = dividendRecords.length;
+    const formatDate = (dateStr) => {
+      if (!dateStr) return '';
+      const parts = dateStr.split('-').map(Number);
+      if (parts.length === 3) {
+        return `${parts[0]}年${parts[1]}月${parts[2]}日`;
+      } else if (parts.length === 2) {
+        return `${parts[0]}年${parts[1]}月`;
+      }
+      return dateStr;
+    };
 
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -2788,13 +5233,23 @@ export default function IndependentAssets() {
           </div>
           <div className="p-4 space-y-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center">
-                <div className="text-xs text-gray-500 dark:text-gray-400">投入本金</div>
+              <div className={`${isCostMatched ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-red-50 dark:bg-red-900/20 border-2 border-red-400'} rounded-lg p-3 text-center`}>
+                <div className="text-xs text-gray-500 dark:text-gray-400">投入本金 {isCostMatched ? '✓' : '⚠️'}</div>
                 <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(investmentCost, currency)}</div>
+                {!isCostMatched && dividendRecords.length > 0 && (
+                  <div className="text-xs text-red-500 dark:text-red-400 mt-1">
+                    分红汇总: {formatCurrency(sumDividendCost, currency)}
+                  </div>
+                )}
               </div>
-              <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-center">
-                <div className="text-xs text-gray-500 dark:text-gray-400">持续投入/年</div>
+              <div className={`${isAnnualMatched ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20 border-2 border-red-400'} rounded-lg p-3 text-center`}>
+                <div className="text-xs text-gray-500 dark:text-gray-400">持续投入 {isAnnualMatched ? '✓' : '⚠️'}</div>
                 <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(annualContribution, currency)}</div>
+                {!isAnnualMatched && dividendRecords.length > 0 && (
+                  <div className="text-xs text-red-500 dark:text-red-400 mt-1">
+                    追加汇总: {formatCurrency(sumAdditionalCost, currency)}
+                  </div>
+                )}
               </div>
               <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">分红频率</div>
@@ -2810,17 +5265,43 @@ export default function IndependentAssets() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">类型</span>
-                  <span className="text-gray-900 dark:text-white font-medium">{item.type || '—'}</span>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">累计投入本金</div>
+                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(totalInvested, currency)}</div>
+              </div>
+              <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">累计分红</div>
+                <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(totalDividend, currency)}</div>
+              </div>
+              <div className={`${profitAmount >= 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'} rounded-lg p-3 text-center`}>
+                <div className="text-xs text-gray-500 dark:text-gray-400">收益额</div>
+                <div className={`text-lg font-bold ${profitAmount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {profitAmount >= 0 ? '+' : ''}{formatCurrency(profitAmount, currency)}
+                </div>
+              </div>
+              <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">累计分红率</div>
+                <div className="text-lg font-bold text-purple-600 dark:text-purple-400">
+                  {totalInvested > 0 && totalDividend > 0 ? ((totalDividend / totalInvested) * 100).toFixed(2) + '%' : '—'}
+                </div>
+              </div>
+              <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">IRR 分红率</div>
+                <div className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
+                  {irrDisplay}
+                </div>
+              </div>
+              <div className="bg-cyan-50 dark:bg-cyan-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">回本进度</div>
+                <div className="text-lg font-bold text-cyan-600 dark:text-cyan-400">
+                  {paybackProgress}
                 </div>
               </div>
               <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">起始年份</span>
-                  <span className="text-gray-900 dark:text-white font-medium">{item.startYear ? `${item.startYear}年` : '—'}</span>
+                  <span className="text-gray-500 dark:text-gray-400">类型</span>
+                  <span className="text-gray-900 dark:text-white font-medium">{item.type || '—'}</span>
                 </div>
               </div>
               <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
@@ -2833,12 +5314,12 @@ export default function IndependentAssets() {
 
             <div>
               <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200 dark:border-slate-700">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">分红明细</h3>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">投资现金流</h3>
                 <div className="flex items-center gap-3">
                   <div className="text-xs text-gray-500 dark:text-gray-400">
                     累计分红: <span className="font-bold text-green-600 dark:text-green-400">{formatCurrency(totalDividend, currency)}</span>
                     <span className="mx-2">·</span>
-                    共 {totalRecords} 条
+                    共 {filteredTotalRecords} 条{filteredTotalRecords !== totalRecords && ` / 总计 ${totalRecords} 条`}
                   </div>
                   <button
                     onClick={() => setShowDividendAddForm(!showDividendAddForm)}
@@ -2854,42 +5335,33 @@ export default function IndependentAssets() {
                 <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-4 mb-4">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">年月</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">事件类型</label>
                       <select
-                        value={newDividendRecord.month}
-                        onChange={(e) => setNewDividendRecord({ ...newDividendRecord, month: e.target.value })}
+                        value={newDividendRecord.eventType}
+                        onChange={(e) => setNewDividendRecord({ ...newDividendRecord, eventType: e.target.value })}
                         className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
                       >
-                        {monthOptions.map(m => <option key={m} value={m}>{formatMonth(m)}</option>)}
+                        {FIXED_INVESTMENT_EVENT_TYPES.map(type => (
+                          <option key={type.value} value={type.value}>{type.label}</option>
+                        ))}
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">投入本金</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">日期</label>
                       <input
-                        type="number"
-                        value={newDividendRecord.investmentCost}
-                        onChange={(e) => setNewDividendRecord({ ...newDividendRecord, investmentCost: e.target.value })}
-                        placeholder="输入本金"
+                        type="date"
+                        value={newDividendRecord.dividendDate}
+                        onChange={(e) => setNewDividendRecord({ ...newDividendRecord, dividendDate: e.target.value })}
                         className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">持续投入/年</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">现金流金额（正数）</label>
                       <input
                         type="number"
-                        value={newDividendRecord.annualContribution}
-                        onChange={(e) => setNewDividendRecord({ ...newDividendRecord, annualContribution: e.target.value })}
-                        placeholder="持续投入"
-                        className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">分红金额</label>
-                      <input
-                        type="number"
-                        value={newDividendRecord.dividendAmount}
-                        onChange={(e) => setNewDividendRecord({ ...newDividendRecord, dividendAmount: e.target.value })}
-                        placeholder="分红金额"
+                        value={newDividendRecord.cashflow}
+                        onChange={(e) => setNewDividendRecord({ ...newDividendRecord, cashflow: e.target.value })}
+                        placeholder="输入正数"
                         className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
                       />
                     </div>
@@ -2911,45 +5383,233 @@ export default function IndependentAssets() {
                 </div>
               )}
 
+              <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-4 mb-4">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">开始日期</label>
+                    <input
+                      type="date"
+                      value={fixedInvestmentCashflowStartDate}
+                      onChange={(e) => setFixedInvestmentCashflowStartDate(e.target.value)}
+                      className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">结束日期</label>
+                    <input
+                      type="date"
+                      value={fixedInvestmentCashflowEndDate}
+                      onChange={(e) => setFixedInvestmentCashflowEndDate(e.target.value)}
+                      className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">事件类型</label>
+                    <select
+                      value={fixedInvestmentCashflowEventType}
+                      onChange={(e) => setFixedInvestmentCashflowEventType(e.target.value)}
+                      className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
+                    >
+                      <option value="">全部</option>
+                      {FIXED_INVESTMENT_EVENT_TYPES.map(type => (
+                        <option key={type.value} value={type.value}>{type.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">现金流方向</label>
+                    <select
+                      value={fixedInvestmentCashflowSign}
+                      onChange={(e) => setFixedInvestmentCashflowSign(e.target.value)}
+                      className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
+                    >
+                      <option value="all">全部</option>
+                      <option value="positive">正（流入）</option>
+                      <option value="negative">负（流出）</option>
+                    </select>
+                  </div>
+                  <div>
+                    <button
+                      onClick={() => {
+                        setFixedInvestmentCashflowStartDate('');
+                        setFixedInvestmentCashflowEndDate('');
+                        setFixedInvestmentCashflowEventType('');
+                        setFixedInvestmentCashflowSign('all');
+                      }}
+                      className="w-full px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-slate-600 rounded transition-colors border border-gray-200 dark:border-slate-600"
+                    >
+                      重置
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 dark:bg-slate-700">
                     <tr>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">年月</th>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">投入本金</th>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">持续投入/年</th>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">分红金额</th>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">分红率</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">日期</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">事件</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">现金流</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">现金流正负</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当期分红率</th>
                       <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-                    {dividendRecords.length === 0 ? (
+                    {filteredRecords.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无分红记录，点击上方"添加"按钮录入</td>
+                        <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                          {sortedRecords.length === 0 ? '暂无投资现金流记录，点击上方"添加"按钮录入' : '没有符合条件的记录'}
+                        </td>
                       </tr>
                     ) : (
-                      dividendRecords.map(record => (
-                        <tr key={record.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                          <td className="px-3 py-2 text-gray-900 dark:text-white font-medium">{formatMonth(record.month)}</td>
-                          <td className="px-3 py-2 text-gray-900 dark:text-white">{formatCurrency(record.investmentCost, currency)}</td>
-                          <td className="px-3 py-2 text-gray-900 dark:text-white">{formatCurrency(record.annualContribution, currency)}</td>
-                          <td className="px-3 py-2 text-green-600 dark:text-green-400 font-medium">{formatCurrency(record.dividendAmount, currency)}</td>
-                          <td className="px-3 py-2 text-gray-900 dark:text-white">{calculateDividendRate(record)}</td>
-                          <td className="px-3 py-2">
-                            <button
-                              onClick={() => handleDeleteRecord(record.id)}
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded text-xs transition-colors"
-                            >
-                              删除
-                            </button>
-                          </td>
-                        </tr>
-                      ))
+                      paginatedRecords.map((record, index) => {
+                        const isEditing = editingDividendRecordId === record.id;
+                        const eventType = getRecordEventType(record);
+                        const cashflow = getRecordCashflow(record);
+                        if (isEditing) {
+                          return (
+                            <tr key={`edit-${record.id}`} className="bg-blue-50/50 dark:bg-blue-900/10">
+                              <td colSpan={6} className="px-3 py-2">
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">日期</label>
+                                    <input
+                                      type="date"
+                                      value={editDividendRecord.dividendDate}
+                                      onChange={(e) => setEditDividendRecord({ ...editDividendRecord, dividendDate: e.target.value })}
+                                      className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">事件类型</label>
+                                    <select
+                                      value={editDividendRecord.eventType}
+                                      onChange={(e) => setEditDividendRecord({ ...editDividendRecord, eventType: e.target.value })}
+                                      className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
+                                    >
+                                      {FIXED_INVESTMENT_EVENT_TYPES.map(type => (
+                                        <option key={type.value} value={type.value}>{type.label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">现金流金额（正数）</label>
+                                    <input
+                                      type="number"
+                                      value={editDividendRecord.cashflow}
+                                      onChange={(e) => setEditDividendRecord({ ...editDividendRecord, cashflow: e.target.value })}
+                                      placeholder="输入正数"
+                                      className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
+                                    />
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={handleSaveEdit}
+                                      className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                                    >
+                                      保存
+                                    </button>
+                                    <button
+                                      onClick={handleCancelEdit}
+                                      className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-slate-600 rounded transition-colors"
+                                    >
+                                      取消
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return (
+                          <tr key={record.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                            <td className="px-3 py-2 text-gray-900 dark:text-white font-medium">{formatDate(record.dividendDate || record.month)}</td>
+                            <td className="px-3 py-2 text-gray-900 dark:text-white">{eventType}</td>
+                            <td className={`px-3 py-2 font-medium ${cashflow >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {formatCurrency(cashflow, currency)}
+                            </td>
+                            <td className={`px-3 py-2 ${cashflow >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {cashflow >= 0 ? '流入' : '流出'}
+                            </td>
+                            <td className="px-3 py-2 text-gray-900 dark:text-white">{calculateDividendRate(record, sortedRecords.indexOf(record))}</td>
+                            <td className="px-3 py-2 flex gap-2">
+                              <button
+                                onClick={() => handleStartEdit(record)}
+                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded text-xs transition-colors"
+                              >
+                                编辑
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRecord(record.id)}
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded text-xs transition-colors"
+                              >
+                                删除
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
               </div>
+
+              {filteredTotalRecords > FIXED_INVESTMENT_CASHFLOW_PAGE_SIZE && (
+                <div className="flex items-center justify-between mt-4 px-2">
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    共 {filteredTotalRecords} 条，{totalPages} 页
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setFixedInvestmentCashflowPage(p => Math.max(1, p - 1))}
+                      disabled={safePage <= 1}
+                      className="p-1.5 rounded border border-gray-200 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                    </button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                      <button
+                        key={page}
+                        onClick={() => setFixedInvestmentCashflowPage(page)}
+                        className={`min-w-[28px] h-7 px-1.5 text-xs rounded border transition-colors ${
+                          page === safePage
+                            ? 'bg-blue-600 border-blue-600 text-white'
+                            : 'border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setFixedInvestmentCashflowPage(p => Math.min(totalPages, p + 1))}
+                      disabled={safePage >= totalPages}
+                      className="p-1.5 rounded border border-gray-200 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <ChevronRight className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                    </button>
+                    <div className="flex items-center gap-1 ml-2">
+                      <span className="text-xs text-gray-500 dark:text-gray-400">跳至</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={totalPages}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const value = parseInt(e.target.value, 10);
+                            if (!isNaN(value)) {
+                              setFixedInvestmentCashflowPage(Math.max(1, Math.min(totalPages, value)));
+                            }
+                          }
+                        }}
+                        className="w-14 px-1.5 py-1 text-xs border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-center"
+                      />
+                      <span className="text-xs text-gray-500 dark:text-gray-400">页</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2986,6 +5646,7 @@ export default function IndependentAssets() {
     const monthlyRate = hasRate ? annualRate / 12 : null;
     const yearlyInterest = hasAmount && hasRate ? amount * (annualRate / 100) : null;
     const totalReturn = hasAmount && hasRate && hasYears ? amount * (annualRate / 100) * years : null;
+    const totalAmount = hasAmount && totalReturn !== null ? amount + totalReturn : null;
     const totalRate = hasRate && hasYears ? annualRate * years : null;
 
     return (
@@ -3034,12 +5695,19 @@ export default function IndependentAssets() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 text-center">
-                <div className="text-xs text-gray-500 dark:text-gray-400">到期总收益</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">到期总利息</div>
                 <div className="text-lg font-bold text-red-600 dark:text-red-400">{totalReturn !== null ? formatCurrency(totalReturn, item.currency) : '—'}</div>
               </div>
               <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">总利率</div>
                 <div className="text-lg font-bold text-red-600 dark:text-red-400">{totalRate !== null ? `${totalRate.toFixed(2)}%` : '—'}</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">到期总金额（本金+利息）</div>
+                <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{totalAmount !== null ? formatCurrency(totalAmount, item.currency) : '—'}</div>
               </div>
             </div>
 
@@ -3263,6 +5931,9 @@ export default function IndependentAssets() {
 
       {renderModal()}
       {renderVehicleDetailModal()}
+      {renderInsuranceDetailModal()}
+      {renderInsuranceTransactionModal()}
+      {renderCalculationModal()}
       {renderPropertyDetailModal()}
       {renderFixedDepositDetailModal()}
       {renderSelfUseDetailModal()}
