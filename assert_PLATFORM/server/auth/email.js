@@ -40,21 +40,59 @@ async function verifyEmailCode(email, code) {
 }
 
 async function deliverEmailCode(email, code) {
-  const webhook = process.env.EMAIL_WEBHOOK_URL;
-  if (!webhook) {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  const emailFrom = process.env.EMAIL_FROM || "onboarding@resend.dev";
+
+  // 如果没有配置 Resend API Key，使用开发模式
+  if (!resendApiKey) {
     console.log(`[EMAIL development] ${email}: ${code}`);
     return false;
   }
-  const response = await fetch(webhook, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(process.env.EMAIL_WEBHOOK_TOKEN ? { Authorization: `Bearer ${process.env.EMAIL_WEBHOOK_TOKEN}` } : {}),
-    },
-    body: JSON.stringify({ email, code, purpose: EMAIL_CODE_PURPOSE, expiresInMinutes: SMS_CODE_TTL_MINUTES }),
-  });
-  if (!response.ok) throw new Error("邮件服务发送失败，请稍后重试。");
-  return true;
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${resendApiKey}`,
+      },
+      body: JSON.stringify({
+        from: emailFrom,
+        to: email,
+        subject: "Wealth OS 邮箱验证码",
+        html: `
+          <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+            <div style="text-align: center; margin-bottom: 30px;">
+              <h1 style="color: #4F46E5; margin: 0;">Wealth OS</h1>
+              <p style="color: #6B7280; margin-top: 10px;">个人精细化资产管理平台</p>
+            </div>
+            <div style="background: #F9FAFB; border-radius: 12px; padding: 30px; text-align: center;">
+              <p style="color: #374151; margin-bottom: 20px;">您的邮箱验证码是：</p>
+              <div style="background: white; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                <span style="font-size: 32px; font-weight: bold; color: #4F46E5; letter-spacing: 8px;">${code}</span>
+              </div>
+              <p style="color: #9CA3AF; font-size: 14px;">验证码有效期为 ${SMS_CODE_TTL_MINUTES} 分钟，请尽快使用。</p>
+            </div>
+            <div style="text-align: center; margin-top: 30px; color: #9CA3AF; font-size: 12px;">
+              <p>如果这不是您的操作，请忽略此邮件。</p>
+            </div>
+          </div>
+        `,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("Resend API error:", error);
+      throw new Error("邮件发送失败，请稍后重试。");
+    }
+
+    console.log(`[EMAIL] Verification code sent to ${email}`);
+    return true;
+  } catch (error) {
+    console.error("Email delivery error:", error.message);
+    throw new Error("邮件发送失败，请稍后重试。");
+  }
 }
 
 export { createEmailCode, verifyEmailCode, deliverEmailCode, EMAIL_CODE_PURPOSE };
