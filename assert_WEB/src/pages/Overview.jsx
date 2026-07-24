@@ -631,20 +631,35 @@ export default function Overview() {
     { name: '独立资产', value: independentTotalValue, color: '#EC4899' },
   ].filter(d => d.value > 0);
 
-  const ALL_CATEGORIES = ['权益类', '债权类', '现金类', '商品类', '分红类', '固收类', '另类投资'];
-
-  const categoryGroups = assets.reduce((groups, asset) => {
-    if (!groups[asset.category]) {
-      groups[asset.category] = [];
+  // 资产分类排行：基于理财资产的实际品类（category）分组计算盈亏
+  const categoryGroups = (financeAssets || []).reduce((groups, asset) => {
+    const category = asset.category || '其他';
+    if (!groups[category]) {
+      groups[category] = [];
     }
-    groups[asset.category].push(asset);
+    groups[category].push(asset);
     return groups;
   }, {});
 
-  const categoryStats = ALL_CATEGORIES.map(category => {
-    const items = categoryGroups[category] || [];
-    const value = items.reduce((sum, item) => sum + item.rmbValue, 0);
-    const cost = items.reduce((sum, item) => sum + item.costValue, 0);
+  const categoryStats = Object.entries(categoryGroups).map(([category, items]) => {
+    const value = items.reduce((sum, a) => {
+      const _price = parseFloat(a.currentPrice) || parseFloat(a.costPrice) || parseFloat(a.cost) || 0;
+      const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
+      const val = _price * _qty;
+      const currency = a.currency || 'CNY';
+      const fromRate = exchangeRates[currency] ?? 1;
+      const toRate = exchangeRates['CNY'] ?? 1;
+      return sum + (currency === 'CNY' ? val : (val * fromRate) / toRate);
+    }, 0);
+    const cost = items.reduce((sum, a) => {
+      const _cost = parseFloat(a.cost) || parseFloat(a.costPrice) || 0;
+      const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
+      const c = _cost * _qty;
+      const currency = a.currency || 'CNY';
+      const fromRate = exchangeRates[currency] ?? 1;
+      const toRate = exchangeRates['CNY'] ?? 1;
+      return sum + (currency === 'CNY' ? c : (c * fromRate) / toRate);
+    }, 0);
     return {
       category,
       value,
@@ -1373,7 +1388,10 @@ export default function Overview() {
                 <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">资产分类排行</div>
                 <div className="space-y-3">
                   {(() => {
-                    const maxPnl = Math.max(...categoryStats.map((s) => Math.abs(s.pnl)));
+                    if (categoryStats.length === 0) {
+                      return <div className="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">暂无品类盈亏数据</div>;
+                    }
+                    const maxPnl = Math.max(0, ...categoryStats.map((s) => Math.abs(s.pnl)));
                     const totalAbsPnl = categoryStats.reduce((sum, s) => sum + Math.abs(s.pnl), 0);
                     return categoryStats.map((stat) => {
                       const isPositive = stat.pnl >= 0;
