@@ -246,33 +246,39 @@ export default function App() {
         </div>
       );
     }
+    if (currentPage === 'admin') {
+      return (
+        <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+          <AdminDashboard
+            onBack={() => setCurrentPage('login')}
+            onLogout={() => {
+              localStorage.removeItem('adminToken');
+              setCurrentPage('login');
+            }}
+          />
+        </div>
+      );
+    }
     return (
       <Login
         onLogin={handleLogin}
         onRegister={() => setCurrentPage('register')}
         onForgotPassword={() => setCurrentPage('forgot-password')}
+        onAdminLogin={() => setCurrentPage('admin')}
       />
-    );
-  }
-
-  if (currentPage === 'admin-login') {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
-        <AdminLogin
-          onLogin={() => setCurrentPage('admin')}
-          onBack={() => setCurrentPage('main')}
-        />
-      </div>
     );
   }
 
   if (currentPage === 'admin') {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
-        <AdminDashboard onBack={() => setCurrentPage('main')} onLogout={() => {
-          localStorage.removeItem('adminToken');
-          setCurrentPage('admin-login');
-        }} />
+        <AdminDashboard
+          onBack={() => setCurrentPage(loggedIn ? 'main' : 'login')}
+          onLogout={() => {
+            localStorage.removeItem('adminToken');
+            setCurrentPage(loggedIn ? 'main' : 'login');
+          }}
+        />
       </div>
     );
   }

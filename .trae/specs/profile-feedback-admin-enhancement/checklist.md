@@ -1,0 +1,18 @@
+- [x] Checkpoint 1: 用户编辑手机号保存后，后端数据库 user_profiles 表中手机号字段被更新
+- [x] Checkpoint 2: 管理后台用户列表显示最新的手机号信息
+- [x] Checkpoint 3: 个人中心页面主题颜色模块已删除
+- [x] Checkpoint 4: 个人中心页面显示问题反馈模块
+- [x] Checkpoint 5: 问题反馈模块包含问题标题输入框
+- [x] Checkpoint 6: 问题反馈模块包含问题详情文本域（支持图文）
+- [x] Checkpoint 7: 问题反馈模块包含附件上传功能（支持图片和视频）
+- [x] Checkpoint 8: 提交反馈后数据保存在数据库 feedback 表中，status 为 pending
+- [x] Checkpoint 9: 登录页面底部没有显示测试账号和密码信息
+- [x] Checkpoint 10: 系统启动后 admin_users 表中存在 username 为 SuperAdmin 的记录
+- [x] Checkpoint 11: 使用 SuperAdmin/Super12345 登录管理后台成功
+- [x] Checkpoint 12: 管理后台用户列表页显示筛选输入框（账号、昵称、手机号、邮箱）
+- [x] Checkpoint 13: 输入筛选条件后，用户列表正确过滤
+- [x] Checkpoint 14: 用户列表分页显示，每页10条
+- [x] Checkpoint 15: 后端接口支持 page 和 pageSize 参数，返回分页数据和总数
+- [x] Checkpoint 16: 用户列表显示操作列，包含编辑和删除按钮
+- [x] Checkpoint 17: 点击编辑按钮弹出编辑用户信息的模态框
+- [x] Checkpoint 18: 点击删除按钮并确认后，用户被删除且列表更新
