@@ -226,16 +226,6 @@ CREATE TABLE IF NOT EXISTS finance_tertiary_categories (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS record_tags_old (
-  user_id INTEGER NOT NULL,
-  category VARCHAR(255) NOT NULL,
-  tag VARCHAR(255) NOT NULL,
-  is_last TINYINT NOT NULL DEFAULT 0,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (user_id, category, tag),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
 CREATE TABLE IF NOT EXISTS record_tags (
   record_id VARCHAR(255) NOT NULL,
   tag_id INTEGER NOT NULL,
