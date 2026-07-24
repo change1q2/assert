@@ -54,8 +54,13 @@ export async function up(pool) {
   if (tables.length > 0) {
     const [columns] = await pool.query("SHOW COLUMNS FROM record_tags LIKE 'category'");
     if (columns.length > 0) {
-      await pool.query("RENAME TABLE record_tags TO record_tags_old");
-      console.log("  [004] Renamed old record_tags to record_tags_old");
+      const [oldTables] = await pool.query("SHOW TABLES LIKE 'record_tags_old'");
+      if (oldTables.length === 0) {
+        await pool.query("RENAME TABLE record_tags TO record_tags_old");
+        console.log("  [004] Renamed old record_tags to record_tags_old");
+      } else {
+        console.log("  [004] record_tags_old already exists, skipping rename");
+      }
     }
   }
   await tryCreateTable(pool, "record_tags", `
