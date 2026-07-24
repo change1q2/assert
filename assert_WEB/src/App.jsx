@@ -15,6 +15,9 @@ import {
   Briefcase,
 } from 'lucide-react';
 import Login from './pages/Login.jsx';
+import Register from './pages/Register.jsx';
+import AdminLogin from './pages/AdminLogin.jsx';
+import AdminDashboard from './pages/AdminDashboard.jsx';
 import Overview from './pages/Overview.jsx';
 import Records from './pages/Records.jsx';
 import Finance from './pages/Finance.jsx';
@@ -51,7 +54,9 @@ const menuItems = [
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('overview');
+  const [currentPage, setCurrentPage] = useState('login');
   const [loggedIn, setLoggedIn] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [userAvatar, setUserAvatar] = useState('');
   const [userName, setUserName] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -72,11 +77,12 @@ export default function App() {
         if (response.ok) {
           const data = await response.json();
           if (data.user) {
-            setLoggedIn(true);
-            setUserAvatar(data.user.avatar || '');
-            setUserName(data.user.name || '');
-            return;
-          }
+          setLoggedIn(true);
+          setIsAdmin(data.isAdmin || false);
+          setUserAvatar(data.user.avatar || '');
+          setUserName(data.user.name || '');
+          return;
+        }
         }
         localStorage.removeItem('token');
         localStorage.removeItem('state');
@@ -127,8 +133,10 @@ export default function App() {
     };
   }, [loggedIn]);
 
-  const handleLogin = () => {
+  const handleLogin = (data) => {
     setLoggedIn(true);
+    setIsAdmin(data?.isAdmin || false);
+    setCurrentPage('main');
     const savedState = localStorage.getItem('state');
     if (savedState) {
       try {
@@ -149,6 +157,8 @@ export default function App() {
     setUserAvatar('');
     setUserName('');
     setLoggedIn(false);
+    setIsAdmin(false);
+    setCurrentPage('login');
     setActiveMenu('overview');
     setSelectedCategory(null);
   };
@@ -196,7 +206,7 @@ export default function App() {
       case 'downloads':
         return <Downloads />;
       case 'profile':
-        return <UserProfile />;
+        return <UserProfile onAdmin={() => setCurrentPage('admin-login')} isAdmin={isAdmin} />;
       case 'premium-check':
         return <PremiumCheck />;
       case 'hk-ipo':
@@ -217,7 +227,54 @@ export default function App() {
   };
 
   if (!loggedIn) {
-    return <Login onLogin={handleLogin} />;
+    if (currentPage === 'register') {
+      return <Register onLogin={handleLogin} onBackToLogin={() => setCurrentPage('login')} />;
+    }
+    if (currentPage === 'forgot-password') {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100 dark:from-slate-950 dark:via-blue-950/20 dark:to-slate-900 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">忘记密码</h2>
+            <p className="text-gray-500 dark:text-gray-400 mb-6">请联系管理员重置密码。</p>
+            <button
+              onClick={() => setCurrentPage('login')}
+              className="w-full py-3 px-4 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-all duration-200"
+            >
+              返回登录
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <Login
+        onLogin={handleLogin}
+        onRegister={() => setCurrentPage('register')}
+        onForgotPassword={() => setCurrentPage('forgot-password')}
+      />
+    );
+  }
+
+  if (currentPage === 'admin-login') {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+        <AdminLogin
+          onLogin={() => setCurrentPage('admin')}
+          onBack={() => setCurrentPage('main')}
+        />
+      </div>
+    );
+  }
+
+  if (currentPage === 'admin') {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+        <AdminDashboard onBack={() => setCurrentPage('main')} onLogout={() => {
+          localStorage.removeItem('adminToken');
+          setCurrentPage('admin-login');
+        }} />
+      </div>
+    );
   }
 
   return (

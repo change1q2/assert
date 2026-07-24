@@ -24,7 +24,9 @@ import * as feedbackRoute from "./routes/feedback.js";
 
 const PUBLIC_AUTH_PATHS = new Set([
   "/api/auth/sms/send",
+  "/api/auth/email-code/send",
   "/api/auth/register",
+  "/api/auth/register-by-email",
   "/api/auth/login",
   "/api/auth/phone-login",
   "/api/auth/reset-password",

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { User, Lock, Eye, EyeOff } from 'lucide-react';
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, onRegister, onForgotPassword }) {
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -179,6 +179,23 @@ export default function Login({ onLogin }) {
               )}
             </button>
           </form>
+
+          <div className="mt-6 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={onRegister}
+              className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+            >
+              注册账号
+            </button>
+            <button
+              type="button"
+              onClick={onForgotPassword}
+              className="text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              忘记密码
+            </button>
+          </div>
 
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-500 dark:text-gray-400">

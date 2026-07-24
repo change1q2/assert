@@ -92,6 +92,16 @@ async function userByPhone(phone) {
   `, [phone]);
 }
 
+async function userByEmail(email) {
+  return sqlGet(pool, `
+    SELECT users.id, users.account, users.password_hash
+    FROM users JOIN user_profiles ON user_profiles.user_id = users.id
+    WHERE user_profiles.email = ?
+    ORDER BY users.id
+    LIMIT 1
+  `, [email]);
+}
+
 async function createUser({ account, password, name, phone, email, currency }) {
   const conn = await pool.getConnection();
   try {
@@ -147,6 +157,7 @@ export {
   defaultState,
   profileForUser,
   userByPhone,
+  userByEmail,
   createUser,
   authPayload,
   ensureDefaultAdmin,

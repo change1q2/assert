@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { User, Camera, Edit2, Save, Mail, Phone, Globe, Moon, Sun, Shield, AlertCircle, CheckCircle } from 'lucide-react';
+import { User, Camera, Edit2, Save, Mail, Phone, Globe, Moon, Sun, Shield, AlertCircle, CheckCircle, LayoutDashboard } from 'lucide-react';
 
-export default function UserProfile() {
+export default function UserProfile({ onAdmin, isAdmin }) {
   const [user, setUser] = useState({
     name: '管理员',
     phone: '',
@@ -358,6 +358,19 @@ export default function UserProfile() {
             </div>
           </div>
         </div>
+
+        {isAdmin && (
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6 mb-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">管理后台</h3>
+            <button
+              onClick={onAdmin}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+            >
+              <LayoutDashboard className="w-5 h-5" />
+              进入管理后台
+            </button>
+          </div>
+        )}
 
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6 mb-6">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t[language].changePassword}</h3>
