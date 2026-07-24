@@ -2551,6 +2551,16 @@ export default function Finance({ onAssetPenetration }) {
 
   // 资产类型自定义管理
   const DEFAULT_ASSET_TYPE_OPTIONS = ['股票', '基金', '债券', '现金', '期货', '期权', '外汇', '保险', '房产', '实体投资', '黄金', '白银', '原油', '数字货币', '银行理财', '其他'];
+  // 一级分类 → 资产类型 映射（选择一级分类后联动筛选资产类型）
+  const CATEGORY_L1_ASSET_TYPES = {
+    '权益类': ['股票', '基金', '虚拟货币', '期货', '期权'],
+    '债权类': ['债券基金', '混债基金', '固收+'],
+    '现金类': ['短融', '货币基金', '短期债', '银行理财'],
+    '商品类': ['黄金', '白银', '原油', '其他商品'],
+    '分红类': ['股票', '基金', 'REITs', '币息'],
+    '固收类': ['债券基金', '混债基金', '固收+', '银行理财'],
+    '另类投资': ['房产', '实体投资', '数字货币', '其他'],
+  };
   const [assetTypeOptions, setAssetTypeOptions] = useState(() => {
     const saved = localStorage.getItem('finance_asset_type_options');
     return saved ? JSON.parse(saved) : DEFAULT_ASSET_TYPE_OPTIONS;
@@ -4242,7 +4252,7 @@ export default function Finance({ onAssetPenetration }) {
                     </div>
                   </FormField>
 
-                  {/* Row 2: 资产种类 | 资产类型 | 所属账户 */}
+                  {/* Row 2: 资产种类 | 资产分类一级 */}
                   <FormField label="资产种类">
                     <div className="flex gap-2">
                       <select value={newAccount.assetKind} onChange={e => {
@@ -4265,13 +4275,39 @@ export default function Finance({ onAssetPenetration }) {
                     </div>
                   </FormField>
 
+                  <FormField label="资产分类一级" required>
+                    <div className="flex gap-2">
+                      <select value={newAccount.categoryL1} onChange={e => {
+                        const l1 = e.target.value;
+                        const cascade = CASCADE_OPTIONS[newAccount.assetType];
+                        if (newAccount.market === '国内市场' && cascade && cascade.l2Default[l1]) {
+                          const l2 = cascade.l2Default[l1];
+                          const l3 = cascade.l3Default[l1][l2];
+                          setNewAccount({ ...newAccount, categoryL1: l1, assetType: '', categoryL2: l2, categoryL3: l3, categoryL4: '' });
+                        } else {
+                          setNewAccount({ ...newAccount, categoryL1: l1, assetType: '', categoryL2: '', categoryL3: '' });
+                        }
+                      }}
+                        className={`${FORM_SELECT} flex-1`}>
+                        <option value="">请选择</option>
+                        {categoryL1Options.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                      <button onClick={() => setShowCategoryL1Modal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理一级分类">
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </FormField>
+
+                  {/* Row 3: 资产类型 | 所属账户 */}
                   <FormField label="资产类型" required>
                     <div className="flex gap-2">
                       <select value={newAccount.assetType} onChange={e => {
                         setNewAccount({ ...newAccount, assetType: e.target.value });
                       }}
-                        className={`${FORM_SELECT} flex-1`}>
-                        {assetTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                        disabled={!newAccount.categoryL1}
+                        className={`${FORM_SELECT} flex-1 ${!newAccount.categoryL1 ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        <option value="">{newAccount.categoryL1 ? '请选择资产类型' : '请先选择资产分类一级'}</option>
+                        {(CATEGORY_L1_ASSET_TYPES[newAccount.categoryL1] || assetTypeOptions).map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                       <button onClick={() => setShowAssetTypeModal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理资产类型">
                         <Settings className="w-4 h-4" />
@@ -4289,30 +4325,7 @@ export default function Finance({ onAssetPenetration }) {
                     </select>
                   </FormField>
 
-                  {/* Row 3: 资产分类一级 | 资产分类二级 */}
-                  <FormField label="资产分类一级" required>
-                    <div className="flex gap-2">
-                      <select value={newAccount.categoryL1} onChange={e => {
-                        const l1 = e.target.value;
-                        const cascade = CASCADE_OPTIONS[newAccount.assetType];
-                        if (newAccount.market === '国内市场' && cascade && cascade.l2Default[l1]) {
-                          const l2 = cascade.l2Default[l1];
-                          const l3 = cascade.l3Default[l1][l2];
-                          setNewAccount({ ...newAccount, categoryL1: l1, categoryL2: l2, categoryL3: l3, categoryL4: '' });
-                        } else {
-                          setNewAccount({ ...newAccount, categoryL1: l1, categoryL2: '', categoryL3: '' });
-                        }
-                      }}
-                        className={`${FORM_SELECT} flex-1`}>
-                        <option value="">请选择</option>
-                        {categoryL1Options.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                      <button onClick={() => setShowCategoryL1Modal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理一级分类">
-                        <Settings className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </FormField>
-
+                  {/* Row 4: 资产分类二级 */}
                   <FormField label="资产分类二级">
                     <div className="flex gap-2">
                       <select value={newAccount.categoryL2} onChange={e => {

@@ -29,6 +29,7 @@ import Downloads from './pages/Downloads.jsx';
 import UserProfile from './pages/UserProfile.jsx';
 import PremiumCheck from './pages/PremiumCheck.jsx';
 import HkIpo from './pages/HkIpo.jsx';
+import HkipoCalculator from './pages/HkipoCalculator.jsx';
 import BudgetManagement from './pages/BudgetManagement.jsx';
 import AssetPenetration from './pages/AssetPenetration.jsx';
 import IndependentAssets from './pages/IndependentAssets.jsx';
@@ -200,6 +201,8 @@ export default function App() {
         return <PremiumCheck />;
       case 'hk-ipo':
         return <HkIpo />;
+      case 'hkipo-calculator':
+        return <HkipoCalculator onBack={() => setActiveMenu('tools')} />;
       case 'budget':
         return <BudgetManagement onBack={() => setActiveMenu('records')} />;
       default:
