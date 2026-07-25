@@ -25,11 +25,83 @@ function formatCurrency(value) {
 
 const categoryIcons = {
   '银行': Building2,
-  '信用卡': CreditCard,
-  '储蓄': PiggyBank,
-  '投资': Wallet,
+  '券商': CreditCard,
+  '基金平台': PiggyBank,
+  '交易所': Wallet,
   '其他': Wallet,
 };
+
+const categories = [
+  { value: '银行', label: '银行' },
+  { value: '券商', label: '券商' },
+  { value: '基金平台', label: '基金平台' },
+  { value: '交易所', label: '交易所' },
+  { value: '其他', label: '其他' },
+];
+
+const subCategories = {
+  '银行': [
+    { value: '招商银行', label: '招商银行' },
+    { value: '工商银行', label: '工商银行' },
+    { value: '建设银行', label: '建设银行' },
+    { value: '农业银行', label: '农业银行' },
+    { value: '中国银行', label: '中国银行' },
+    { value: '交通银行', label: '交通银行' },
+    { value: '浦发银行', label: '浦发银行' },
+    { value: '中信银行', label: '中信银行' },
+    { value: '光大银行', label: '光大银行' },
+    { value: '民生银行', label: '民生银行' },
+    { value: '华夏银行', label: '华夏银行' },
+    { value: '兴业银行', label: '兴业银行' },
+    { value: '平安银行', label: '平安银行' },
+    { value: '广发银行', label: '广发银行' },
+    { value: '邮储银行', label: '邮储银行' },
+    { value: '其他银行', label: '其他银行' },
+  ],
+  '券商': [
+    { value: '东方财富', label: '东方财富' },
+    { value: '同花顺', label: '同花顺' },
+    { value: '太平洋证券', label: '太平洋证券' },
+    { value: '银河证券', label: '银河证券' },
+    { value: '中信证券', label: '中信证券' },
+    { value: '华泰证券', label: '华泰证券' },
+    { value: '海通证券', label: '海通证券' },
+    { value: '广发证券', label: '广发证券' },
+    { value: '招商证券', label: '招商证券' },
+    { value: '申万宏源', label: '申万宏源' },
+    { value: '其他券商', label: '其他券商' },
+  ],
+  '基金平台': [
+    { value: '天天基金', label: '天天基金' },
+    { value: '同花顺基金', label: '同花顺基金' },
+    { value: '东方财富基金', label: '东方财富基金' },
+    { value: '且慢', label: '且慢' },
+    { value: '支付宝基金', label: '支付宝基金' },
+    { value: '微信理财通', label: '微信理财通' },
+    { value: '其他基金平台', label: '其他基金平台' },
+  ],
+  '交易所': [
+    { value: '欧易', label: '欧易' },
+    { value: '币安', label: '币安' },
+    { value: 'AIDOG', label: 'AIDOG' },
+    { value: '其他交易所', label: '其他交易所' },
+  ],
+  '其他': [
+    { value: '支付宝', label: '支付宝' },
+    { value: '微信支付', label: '微信支付' },
+    { value: '信用卡', label: '信用卡' },
+    { value: '储蓄', label: '储蓄' },
+    { value: '其他', label: '其他' },
+  ],
+};
+
+const currencies = [
+  { value: 'CNY', label: '人民币 (¥)' },
+  { value: 'HKD', label: '港元 (HK$)' },
+  { value: 'USD', label: '美元 ($)' },
+  { value: 'EUR', label: '欧元 (€)' },
+  { value: 'JPY', label: '日元 (¥)' },
+];
 
 export default function Accounts() {
   const [stateData, setStateData] = useState(null);
@@ -40,6 +112,7 @@ export default function Accounts() {
   const [formData, setFormData] = useState({
     name: '',
     category: '银行',
+    subCategory: '招商银行',
     liability: false,
   });
   const [filters, setFilters] = useState({
@@ -74,10 +147,10 @@ export default function Accounts() {
       // 首次使用：既然后端和本地都没有账户，初始化测试数据
       if (!data.accounts || data.accounts.length === 0) {
         const demoAccounts = [
-          { id: 'demo-1', name: '招商银行', category: '银行', currency: 'CNY', liability: false },
-          { id: 'demo-2', name: '支付宝', category: '储蓄', currency: 'CNY', liability: false },
-          { id: 'demo-3', name: '微信支付', category: '储蓄', currency: 'CNY', liability: false },
-          { id: 'demo-4', name: '工商银行信用卡', category: '信用卡', currency: 'CNY', liability: true },
+          { id: 'demo-1', name: '招商银行', category: '银行', subCategory: '招商银行', currency: 'CNY', liability: false },
+          { id: 'demo-2', name: '支付宝', category: '其他', subCategory: '支付宝', currency: 'CNY', liability: false },
+          { id: 'demo-3', name: '微信支付', category: '其他', subCategory: '微信支付', currency: 'CNY', liability: false },
+          { id: 'demo-4', name: '工商银行信用卡', category: '银行', subCategory: '工商银行', currency: 'CNY', liability: true },
         ];
         data.accounts = demoAccounts;
         localStorage.setItem('wealth_os_accounts', JSON.stringify(demoAccounts));
@@ -168,9 +241,11 @@ export default function Accounts() {
 
   const handleAdd = () => {
     setEditingAccount(null);
+    const defaultSubCategory = (subCategories['银行'] || [])[0]?.value || '';
     setFormData({
       name: '',
       category: '银行',
+      subCategory: defaultSubCategory,
       currency: 'CNY',
       liability: false,
     });
@@ -179,9 +254,14 @@ export default function Accounts() {
 
   const handleEdit = (account) => {
     setEditingAccount(account);
+    const availableSubs = subCategories[account.category] || subCategories['其他'];
+    const subCat = availableSubs.find(s => s.value === account.subCategory)
+      ? account.subCategory
+      : availableSubs[0]?.value || '';
     setFormData({
       name: account.name,
       category: account.category || '银行',
+      subCategory: subCat,
       currency: account.currency || 'CNY',
       liability: account.liability || false,
     });
@@ -228,6 +308,7 @@ export default function Accounts() {
             id: Date.now().toString(),
             name: formData.name,
             category: formData.category,
+            subCategory: formData.subCategory,
             currency: formData.currency || 'CNY',
             liability: formData.liability,
           },
@@ -393,11 +474,9 @@ export default function Accounts() {
                 className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
               >
                 <option value="">全部分类</option>
-                <option value="银行">银行</option>
-                <option value="信用卡">信用卡</option>
-                <option value="储蓄">储蓄</option>
-                <option value="投资">投资</option>
-                <option value="其他">其他</option>
+                {categories.map(cat => (
+                  <option key={cat.value} value={cat.value}>{cat.label}</option>
+                ))}
               </select>
             </div>
             <div style={{ width: '100px' }}>
@@ -426,7 +505,8 @@ export default function Accounts() {
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">账户名称</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">分类</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">大类</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类名</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类型</th>
                   <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">余额</th>
                   <th className="text-center py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">操作</th>
@@ -453,6 +533,11 @@ export default function Accounts() {
                       <td className="py-3 px-3">
                         <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400">
                           {account.category || '其他'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                          {account.subCategory || '-'}
                         </span>
                       </td>
                       <td className="py-3 px-3">
@@ -563,35 +648,51 @@ export default function Accounts() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      分类
+                      大类
                     </label>
                     <select
                       value={formData.category}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                      onChange={(e) => {
+                        const newCategory = e.target.value;
+                        const availableSubs = subCategories[newCategory] || [];
+                        const defaultSub = availableSubs[0]?.value || '';
+                        setFormData({ ...formData, category: newCategory, subCategory: defaultSub });
+                      }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     >
-                      <option value="银行">银行</option>
-                      <option value="信用卡">信用卡</option>
-                      <option value="储蓄">储蓄</option>
-                      <option value="投资">投资</option>
-                      <option value="其他">其他</option>
+                      {categories.map(cat => (
+                        <option key={cat.value} value={cat.value}>{cat.label}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      货币
+                      类名
                     </label>
                     <select
-                      value={formData.currency || 'CNY'}
-                      onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                      value={formData.subCategory}
+                      onChange={(e) => setFormData({ ...formData, subCategory: e.target.value })}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     >
-                      <option value="CNY">人民币 (¥)</option>
-                      <option value="USD">美元 ($)</option>
-                      <option value="EUR">欧元 (€)</option>
-                      <option value="GBP">英镑 (£)</option>
+                      {(subCategories[formData.category] || []).map(sub => (
+                        <option key={sub.value} value={sub.value}>{sub.label}</option>
+                      ))}
                     </select>
                   </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    货币
+                  </label>
+                  <select
+                    value={formData.currency || 'CNY'}
+                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    {currencies.map(curr => (
+                      <option key={curr.value} value={curr.value}>{curr.label}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
