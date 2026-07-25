@@ -315,6 +315,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
   fee_config_json JSON,
   overview_goals_json JSON,
   hk_ipo_rules_json JSON,
+  independent_assets_json JSON,
+  account_categories_json JSON,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 

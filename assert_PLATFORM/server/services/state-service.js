@@ -125,7 +125,7 @@ async function loadUserState(userId) {
     allocation: maybeParseJson(row.allocation_json), debtLimit: row.debt_limit,
     annualReturn: row.annual_return, risk: row.risk,
   }));
-  const settings = await sqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json FROM user_settings WHERE user_id = ?", [userId]);
+  const settings = await sqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json FROM user_settings WHERE user_id = ?", [userId]);
   const yearlyRecords = (await sqlAll(pool, "SELECT year, opening_asset, closing_asset, target_profit, actual_profit FROM yearly_records WHERE user_id = ? ORDER BY year", [userId])).map((row) => ({
     year: row.year,
     openingAsset: row.opening_asset,
@@ -157,6 +157,7 @@ async function loadUserState(userId) {
     hkIpoRules: settings ? maybeParseJson(settings.hk_ipo_rules_json) : undefined,
     independentAssets: settings ? maybeParseJson(settings.independent_assets_json) || {} : {},
     yearlyRecords,
+    accountCategories: settings ? maybeParseJson(settings.account_categories_json) || {} : {},
   };
 }
 
@@ -323,10 +324,10 @@ async function saveUserState(conn, userId, state) {
       [userId, Number(row.id), text(row.name), row.active ? 1 : 0, text(row.target),
        JSON.stringify(row.allocation || []), number(row.debtLimit), number(row.annualReturn), text(row.risk)]);
   }
-  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json) VALUES (?, ?, ?, ?, ?, ?)",
+  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
     [userId, JSON.stringify(state.financeAssetDraft || {}), JSON.stringify(state.feeConfig || {}),
      JSON.stringify(state.overviewGoals || {}), previousSettings?.hk_ipo_rules_json || null,
-     JSON.stringify(state.independentAssets || {})]);
+     JSON.stringify(state.independentAssets || {}), JSON.stringify(state.accountCategories || {})]);
 
   for (const row of (state.yearlyRecords || [])) {
     await sqlRun(conn, `INSERT INTO yearly_records (user_id, year, opening_asset, closing_asset, target_profit, actual_profit)

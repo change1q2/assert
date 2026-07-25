@@ -13,6 +13,10 @@ import {
   Filter,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  Settings2,
+  FolderPlus,
+  FolderMinus,
 } from 'lucide-react';
 
 function formatCurrency(value) {
@@ -31,68 +35,12 @@ const categoryIcons = {
   '其他': Wallet,
 };
 
-const categories = [
-  { value: '银行', label: '银行' },
-  { value: '券商', label: '券商' },
-  { value: '基金平台', label: '基金平台' },
-  { value: '交易所', label: '交易所' },
-  { value: '其他', label: '其他' },
-];
-
-const subCategories = {
-  '银行': [
-    { value: '招商银行', label: '招商银行' },
-    { value: '工商银行', label: '工商银行' },
-    { value: '建设银行', label: '建设银行' },
-    { value: '农业银行', label: '农业银行' },
-    { value: '中国银行', label: '中国银行' },
-    { value: '交通银行', label: '交通银行' },
-    { value: '浦发银行', label: '浦发银行' },
-    { value: '中信银行', label: '中信银行' },
-    { value: '光大银行', label: '光大银行' },
-    { value: '民生银行', label: '民生银行' },
-    { value: '华夏银行', label: '华夏银行' },
-    { value: '兴业银行', label: '兴业银行' },
-    { value: '平安银行', label: '平安银行' },
-    { value: '广发银行', label: '广发银行' },
-    { value: '邮储银行', label: '邮储银行' },
-    { value: '其他银行', label: '其他银行' },
-  ],
-  '券商': [
-    { value: '东方财富', label: '东方财富' },
-    { value: '同花顺', label: '同花顺' },
-    { value: '太平洋证券', label: '太平洋证券' },
-    { value: '银河证券', label: '银河证券' },
-    { value: '中信证券', label: '中信证券' },
-    { value: '华泰证券', label: '华泰证券' },
-    { value: '海通证券', label: '海通证券' },
-    { value: '广发证券', label: '广发证券' },
-    { value: '招商证券', label: '招商证券' },
-    { value: '申万宏源', label: '申万宏源' },
-    { value: '其他券商', label: '其他券商' },
-  ],
-  '基金平台': [
-    { value: '天天基金', label: '天天基金' },
-    { value: '同花顺基金', label: '同花顺基金' },
-    { value: '东方财富基金', label: '东方财富基金' },
-    { value: '且慢', label: '且慢' },
-    { value: '支付宝基金', label: '支付宝基金' },
-    { value: '微信理财通', label: '微信理财通' },
-    { value: '其他基金平台', label: '其他基金平台' },
-  ],
-  '交易所': [
-    { value: '欧易', label: '欧易' },
-    { value: '币安', label: '币安' },
-    { value: 'AIDOG', label: 'AIDOG' },
-    { value: '其他交易所', label: '其他交易所' },
-  ],
-  '其他': [
-    { value: '支付宝', label: '支付宝' },
-    { value: '微信支付', label: '微信支付' },
-    { value: '信用卡', label: '信用卡' },
-    { value: '储蓄', label: '储蓄' },
-    { value: '其他', label: '其他' },
-  ],
+const defaultCategories = {
+  '银行': ['招商银行', '工商银行', '建设银行', '农业银行', '中国银行', '交通银行', '浦发银行', '中信银行', '光大银行', '民生银行', '华夏银行', '兴业银行', '平安银行', '广发银行', '邮储银行', '其他银行'],
+  '券商': ['东方财富', '同花顺', '太平洋证券', '银河证券', '中信证券', '华泰证券', '海通证券', '广发证券', '招商证券', '申万宏源', '其他券商'],
+  '基金平台': ['天天基金', '同花顺基金', '东方财富基金', '且慢', '支付宝基金', '微信理财通', '其他基金平台'],
+  '交易所': ['欧易', '币安', 'AIDOG', '其他交易所'],
+  '其他': ['支付宝', '微信支付', '信用卡', '储蓄', '其他'],
 };
 
 const currencies = [
@@ -122,8 +70,35 @@ export default function Accounts() {
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [categoryForm, setCategoryForm] = useState({ name: '' });
+  const [editingSubCategory, setEditingSubCategory] = useState({ main: '', index: -1, name: '' });
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const [showSubDropdown, setShowSubDropdown] = useState(false);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCatName, setEditingCatName] = useState({ value: '', name: '' });
+  const [addingSub, setAddingSub] = useState(false);
+  const [newSubName, setNewSubName] = useState('');
+  const [editingSubName, setEditingSubName] = useState({ index: -1, name: '' });
 
-  const { accounts = [], records = [], finance = {}, debts = [] } = stateData || {};
+  const { accounts = [], records = [], finance = {}, debts = [], accountCategories = {} } = stateData || {};
+
+  const accountCatConfig = useMemo(() => {
+    if (Object.keys(accountCategories).length === 0) {
+      return defaultCategories;
+    }
+    return accountCategories;
+  }, [accountCategories]);
+
+  const categoryList = useMemo(() => {
+    return Object.keys(accountCatConfig).map(key => ({ value: key, label: key }));
+  }, [accountCatConfig]);
+
+  const getSubCategories = (mainCategory) => {
+    return (accountCatConfig[mainCategory] || []).map(name => ({ value: name, label: name }));
+  };
 
   useEffect(() => {
     loadData();
@@ -134,7 +109,6 @@ export default function Accounts() {
     setError(null);
     try {
       const data = await fetchState();
-      // 后端账户为空时，尝试从 localStorage 读取缓存
       const cachedAccounts = localStorage.getItem('wealth_os_accounts');
       if ((!data.accounts || data.accounts.length === 0) && cachedAccounts) {
         try {
@@ -144,7 +118,6 @@ export default function Accounts() {
           /* ignore parse error */
         }
       }
-      // 首次使用：既然后端和本地都没有账户，初始化测试数据
       if (!data.accounts || data.accounts.length === 0) {
         const demoAccounts = [
           { id: 'demo-1', name: '招商银行', category: '银行', subCategory: '招商银行', currency: 'CNY', liability: false },
@@ -158,7 +131,6 @@ export default function Accounts() {
       setStateData(data);
     } catch (err) {
       console.error('Failed to load accounts data:', err);
-      // 后端完全不可用，从本地缓存加载
       const cachedAccounts = localStorage.getItem('wealth_os_accounts');
       if (cachedAccounts) {
         try {
@@ -241,11 +213,12 @@ export default function Accounts() {
 
   const handleAdd = () => {
     setEditingAccount(null);
-    const defaultSubCategory = (subCategories['银行'] || [])[0]?.value || '';
+    const firstCategory = categoryList[0]?.value || '银行';
+    const defaultSub = (accountCatConfig[firstCategory] || [])[0] || '';
     setFormData({
       name: '',
-      category: '银行',
-      subCategory: defaultSubCategory,
+      category: firstCategory,
+      subCategory: defaultSub,
       currency: 'CNY',
       liability: false,
     });
@@ -254,13 +227,14 @@ export default function Accounts() {
 
   const handleEdit = (account) => {
     setEditingAccount(account);
-    const availableSubs = subCategories[account.category] || subCategories['其他'];
-    const subCat = availableSubs.find(s => s.value === account.subCategory)
+    const cat = account.category || categoryList[0]?.value || '银行';
+    const subs = getSubCategories(cat);
+    const subCat = subs.find(s => s.value === account.subCategory)
       ? account.subCategory
-      : availableSubs[0]?.value || '';
+      : subs[0]?.value || '';
     setFormData({
       name: account.name,
-      category: account.category || '银行',
+      category: cat,
       subCategory: subCat,
       currency: account.currency || 'CNY',
       liability: account.liability || false,
@@ -317,7 +291,6 @@ export default function Accounts() {
 
       const newState = { ...stateData, accounts: newAccounts };
 
-      // 本地缓存兜底：无论后端是否成功，都先写 localStorage
       localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
 
       const result = await saveState(newState);
@@ -337,6 +310,270 @@ export default function Accounts() {
 
   const getCategoryIcon = (category) => {
     return categoryIcons[category] || Wallet;
+  };
+
+  const handleAddCategoryInModal = async () => {
+    const name = newCategoryName.trim();
+    if (!name || accountCatConfig[name]) return;
+
+    const newCategories = { ...accountCatConfig, [name]: ['其他'] };
+    const newState = { ...stateData, accountCategories: newCategories };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      setFormData({ ...formData, category: name, subCategory: '其他' });
+    }
+    setNewCategoryName('');
+    setAddingCategory(false);
+  };
+
+  const handleEditCategoryInModal = async () => {
+    const { value, name } = editingCatName;
+    const newName = name.trim();
+    if (!newName || !value || newName === value) {
+      setEditingCatName({ value: '', name: '' });
+      return;
+    }
+    if (accountCatConfig[newName]) {
+      alert('该大类名称已存在');
+      return;
+    }
+
+    const newCategories = {};
+    Object.keys(accountCatConfig).forEach(key => {
+      if (key === value) {
+        newCategories[newName] = accountCatConfig[key];
+      } else {
+        newCategories[key] = accountCatConfig[key];
+      }
+    });
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === value ? { ...acc, category: newName } : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      if (formData.category === value) {
+        setFormData({ ...formData, category: newName });
+      }
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+    setEditingCatName({ value: '', name: '' });
+  };
+
+  const handleDeleteCategoryInModal = async (catName) => {
+    if (!confirm(`确定要删除大类「${catName}」吗？`)) return;
+
+    const newCategories = { ...accountCatConfig };
+    delete newCategories[catName];
+    const firstCat = Object.keys(newCategories)[0] || '其他';
+    const firstSub = newCategories[firstCat]?.[0] || '';
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === catName ? { ...acc, category: firstCat, subCategory: firstSub } : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      if (formData.category === catName) {
+        setFormData({ ...formData, category: firstCat, subCategory: firstSub });
+      }
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+  };
+
+  const handleAddSubInModal = async () => {
+    const name = newSubName.trim();
+    if (!name) return;
+
+    const subs = accountCatConfig[formData.category] || [];
+    if (subs.includes(name)) {
+      alert('该类名已存在');
+      return;
+    }
+    const newSubs = [...subs, name];
+    const newCategories = { ...accountCatConfig, [formData.category]: newSubs };
+    const newState = { ...stateData, accountCategories: newCategories };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      setFormData({ ...formData, subCategory: name });
+    }
+    setNewSubName('');
+    setAddingSub(false);
+  };
+
+  const handleEditSubInModal = async () => {
+    const { index, name } = editingSubName;
+    const newName = name.trim();
+    if (index < 0 || !newName) {
+      setEditingSubName({ index: -1, name: '' });
+      return;
+    }
+    const subs = accountCatConfig[formData.category] || [];
+    if (subs.includes(newName) && subs[index] !== newName) {
+      alert('该类名已存在');
+      return;
+    }
+    const oldName = subs[index];
+    const newSubs = [...subs];
+    newSubs[index] = newName;
+    const newCategories = { ...accountCatConfig, [formData.category]: newSubs };
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === formData.category && acc.subCategory === oldName
+        ? { ...acc, subCategory: newName }
+        : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      if (formData.subCategory === oldName) {
+        setFormData({ ...formData, subCategory: newName });
+      }
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+    setEditingSubName({ index: -1, name: '' });
+  };
+
+  const handleDeleteSubInModal = async (index) => {
+    const subs = accountCatConfig[formData.category] || [];
+    const subName = subs[index];
+    if (!subName) return;
+    if (!confirm(`确定要删除类名「${subName}」吗？`)) return;
+
+    const newSubs = subs.filter((_, i) => i !== index);
+    const newCategories = { ...accountCatConfig, [formData.category]: newSubs };
+    const firstSub = newSubs[0] || '';
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === formData.category && acc.subCategory === subName
+        ? { ...acc, subCategory: firstSub }
+        : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      if (formData.subCategory === subName) {
+        setFormData({ ...formData, subCategory: firstSub });
+      }
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+  };
+
+  const handleOpenCategoryModal = () => {
+    setEditingCategory(null);
+    setCategoryForm({ name: '' });
+    setEditingSubCategory({ main: '', index: -1, name: '' });
+    setShowCategoryModal(true);
+  };
+
+  const handleAddCategory = async () => {
+    const name = categoryForm.name.trim();
+    if (!name || accountCatConfig[name]) return;
+
+    const newCategories = { ...accountCatConfig, [name]: ['其他'] };
+    const newState = { ...stateData, accountCategories: newCategories };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      setCategoryForm({ name: '' });
+    }
+  };
+
+  const handleDeleteCategory = async (catName) => {
+    if (!confirm(`确定要删除大类「${catName}」吗？删除后相关账户的大类将变为「其他」。`)) return;
+
+    const newCategories = { ...accountCatConfig };
+    delete newCategories[catName];
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === catName ? { ...acc, category: '其他' } : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+  };
+
+  const handleAddSubCategory = async (mainCategory) => {
+    const subName = editingSubCategory.name.trim();
+    if (!subName) return;
+
+    const newSubs = [...(accountCatConfig[mainCategory] || [])];
+    if (!newSubs.includes(subName)) {
+      newSubs.push(subName);
+      const newCategories = { ...accountCatConfig, [mainCategory]: newSubs };
+      const newState = { ...stateData, accountCategories: newCategories };
+      const result = await saveState(newState);
+      if (result.success !== false) {
+        setStateData(newState);
+      }
+    }
+    setEditingSubCategory({ main: '', index: -1, name: '' });
+  };
+
+  const handleEditSubCategory = (mainCategory, index, name) => {
+    setEditingSubCategory({ main: mainCategory, index, name });
+  };
+
+  const handleSaveSubCategory = async () => {
+    const { main, index, name } = editingSubCategory;
+    const newName = name.trim();
+    if (!newName || !main || index < 0) return;
+
+    const newSubs = [...(accountCatConfig[main] || [])];
+    newSubs[index] = newName;
+    const newCategories = { ...accountCatConfig, [main]: newSubs };
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === main && acc.subCategory === accountCatConfig[main][index]
+        ? { ...acc, subCategory: newName }
+        : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+    setEditingSubCategory({ main: '', index: -1, name: '' });
+  };
+
+  const handleDeleteSubCategory = async (mainCategory, index) => {
+    const subName = accountCatConfig[mainCategory]?.[index];
+    if (!subName) return;
+
+    if (!confirm(`确定要删除类名「${subName}」吗？删除后相关账户的类名将变为空。`)) return;
+
+    const newSubs = accountCatConfig[mainCategory].filter((_, i) => i !== index);
+    const newCategories = { ...accountCatConfig, [mainCategory]: newSubs };
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === mainCategory && acc.subCategory === subName
+        ? { ...acc, subCategory: '' }
+        : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
   };
 
   if (loading) {
@@ -389,6 +626,13 @@ export default function Accounts() {
               >
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                 刷新数据
+              </button>
+              <button
+                onClick={handleOpenCategoryModal}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                <Settings2 className="w-4 h-4" />
+                分类管理
               </button>
               <button
                 onClick={handleAdd}
@@ -474,7 +718,7 @@ export default function Accounts() {
                 className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
               >
                 <option value="">全部分类</option>
-                {categories.map(cat => (
+                {categoryList.map(cat => (
                   <option key={cat.value} value={cat.value}>{cat.label}</option>
                 ))}
               </select>
@@ -618,7 +862,17 @@ export default function Accounts() {
         </section>
 
         {showModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={() => {
+              setShowCategoryDropdown(false);
+              setShowSubDropdown(false);
+              setAddingCategory(false);
+              setAddingSub(false);
+              setEditingCatName({ value: '', name: '' });
+              setEditingSubName({ index: -1, name: '' });
+            }}
+          >
             <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-xl">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -646,38 +900,239 @@ export default function Accounts() {
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
+                  <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       大类
                     </label>
-                    <select
-                      value={formData.category}
-                      onChange={(e) => {
-                        const newCategory = e.target.value;
-                        const availableSubs = subCategories[newCategory] || [];
-                        const defaultSub = availableSubs[0]?.value || '';
-                        setFormData({ ...formData, category: newCategory, subCategory: defaultSub });
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowCategoryDropdown(!showCategoryDropdown);
+                        setShowSubDropdown(false);
                       }}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-left flex items-center justify-between hover:border-primary-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     >
-                      {categories.map(cat => (
-                        <option key={cat.value} value={cat.value}>{cat.label}</option>
-                      ))}
-                    </select>
+                      <span className="truncate">{formData.category}</span>
+                      <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showCategoryDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showCategoryDropdown && (
+                      <div className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}>
+                        {categoryList.map(cat => (
+                          <div key={cat.value} className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-slate-600">
+                            {editingCatName.value === cat.value ? (
+                              <input
+                                type="text"
+                                value={editingCatName.name}
+                                onChange={(e) => setEditingCatName({ ...editingCatName, name: e.target.value })}
+                                autoFocus
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleEditCategoryInModal();
+                                  if (e.key === 'Escape') setEditingCatName({ value: '', name: '' });
+                                }}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const availableSubs = getSubCategories(cat.value);
+                                  const defaultSub = availableSubs[0]?.value || '';
+                                  setFormData({ ...formData, category: cat.value, subCategory: defaultSub });
+                                  setShowCategoryDropdown(false);
+                                }}
+                                className={`flex-1 text-left text-sm ${formData.category === cat.value ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+                              >
+                                {cat.label}
+                              </button>
+                            )}
+                            {editingCatName.value === cat.value ? (
+                              <button
+                                type="button"
+                                onClick={handleEditCategoryInModal}
+                                className="p-1 text-green-500 hover:text-green-600"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingCatName({ value: cat.value, name: cat.label });
+                                  }}
+                                  className="p-1 text-gray-400 hover:text-primary-500"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteCategoryInModal(cat.value);
+                                  }}
+                                  className="p-1 text-gray-400 hover:text-red-500"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <div className="border-t border-gray-100 dark:border-slate-600">
+                          {addingCategory ? (
+                            <div className="flex items-center gap-2 px-3 py-2">
+                              <input
+                                type="text"
+                                value={newCategoryName}
+                                onChange={(e) => setNewCategoryName(e.target.value)}
+                                placeholder="输入大类名称"
+                                autoFocus
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleAddCategoryInModal();
+                                  if (e.key === 'Escape') { setAddingCategory(false); setNewCategoryName(''); }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={handleAddCategoryInModal}
+                                className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600"
+                              >
+                                添加
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => { setAddingCategory(true); setNewCategoryName(''); }}
+                              className="w-full px-3 py-2 text-sm text-primary-600 dark:text-primary-400 hover:bg-gray-50 dark:hover:bg-slate-600 flex items-center justify-center gap-1"
+                            >
+                              <Plus className="w-4 h-4" />
+                              添加大类
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div>
+                  <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       类名
                     </label>
-                    <select
-                      value={formData.subCategory}
-                      onChange={(e) => setFormData({ ...formData, subCategory: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowSubDropdown(!showSubDropdown);
+                        setShowCategoryDropdown(false);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-left flex items-center justify-between hover:border-primary-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     >
-                      {(subCategories[formData.category] || []).map(sub => (
-                        <option key={sub.value} value={sub.value}>{sub.label}</option>
-                      ))}
-                    </select>
+                      <span className="truncate">{formData.subCategory || '-'}</span>
+                      <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showSubDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showSubDropdown && (
+                      <div className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}>
+                        {getSubCategories(formData.category).map((sub, index) => (
+                          <div key={sub.value} className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-slate-600">
+                            {editingSubName.index === index ? (
+                              <input
+                                type="text"
+                                value={editingSubName.name}
+                                onChange={(e) => setEditingSubName({ ...editingSubName, name: e.target.value })}
+                                autoFocus
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleEditSubInModal();
+                                  if (e.key === 'Escape') setEditingSubName({ index: -1, name: '' });
+                                }}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFormData({ ...formData, subCategory: sub.value });
+                                  setShowSubDropdown(false);
+                                }}
+                                className={`flex-1 text-left text-sm ${formData.subCategory === sub.value ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+                              >
+                                {sub.label}
+                              </button>
+                            )}
+                            {editingSubName.index === index ? (
+                              <button
+                                type="button"
+                                onClick={handleEditSubInModal}
+                                className="p-1 text-green-500 hover:text-green-600"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingSubName({ index, name: sub.label });
+                                  }}
+                                  className="p-1 text-gray-400 hover:text-primary-500"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteSubInModal(index);
+                                  }}
+                                  className="p-1 text-gray-400 hover:text-red-500"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <div className="border-t border-gray-100 dark:border-slate-600">
+                          {addingSub ? (
+                            <div className="flex items-center gap-2 px-3 py-2">
+                              <input
+                                type="text"
+                                value={newSubName}
+                                onChange={(e) => setNewSubName(e.target.value)}
+                                placeholder="输入类名"
+                                autoFocus
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleAddSubInModal();
+                                  if (e.key === 'Escape') { setAddingSub(false); setNewSubName(''); }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={handleAddSubInModal}
+                                className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600"
+                              >
+                                添加
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => { setAddingSub(true); setNewSubName(''); }}
+                              className="w-full px-3 py-2 text-sm text-primary-600 dark:text-primary-400 hover:bg-gray-50 dark:hover:bg-slate-600 flex items-center justify-center gap-1"
+                            >
+                              <Plus className="w-4 h-4" />
+                              添加类名
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -721,6 +1176,147 @@ export default function Accounts() {
                   className="px-4 py-2 rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   保存
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCategoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">分类管理</h3>
+                <button
+                  onClick={() => setShowCategoryModal(false)}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 mb-4">
+                <input
+                  type="text"
+                  value={categoryForm.name}
+                  onChange={(e) => setCategoryForm({ name: e.target.value })}
+                  placeholder="输入新大类名称"
+                  className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <button
+                  onClick={handleAddCategory}
+                  disabled={!categoryForm.name.trim() || accountCatConfig[categoryForm.name]}
+                  className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  添加大类
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-4">
+                {Object.entries(accountCatConfig).map(([mainCategory, subs]) => (
+                  <div key={mainCategory} className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-semibold text-gray-900 dark:text-white">{mainCategory}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setEditingSubCategory({ main: mainCategory, index: -1, name: '' });
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1 text-xs rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+                        >
+                          <Plus className="w-3 h-3" />
+                          添加类名
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCategory(mainCategory)}
+                          className="inline-flex items-center gap-1 px-3 py-1 text-xs rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors"
+                        >
+                          <FolderMinus className="w-3 h-3" />
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {subs.map((subName, index) => (
+                        <div key={index} className="flex items-center gap-1 bg-white dark:bg-slate-600 rounded-lg px-3 py-1.5 border border-gray-200 dark:border-slate-500">
+                          {editingSubCategory.main === mainCategory && editingSubCategory.index === index ? (
+                            <input
+                              type="text"
+                              value={editingSubCategory.name}
+                              onChange={(e) => setEditingSubCategory({ ...editingSubCategory, name: e.target.value })}
+                              autoFocus
+                              className="w-24 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveSubCategory();
+                                if (e.key === 'Escape') setEditingSubCategory({ main: '', index: -1, name: '' });
+                              }}
+                            />
+                          ) : (
+                            <span className="text-sm text-gray-700 dark:text-gray-300">{subName}</span>
+                          )}
+                          {editingSubCategory.main === mainCategory && editingSubCategory.index === index ? (
+                            <button
+                              onClick={handleSaveSubCategory}
+                              className="p-1 text-green-500 hover:text-green-600"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => handleEditSubCategory(mainCategory, index, subName)}
+                                className="p-1 text-gray-400 hover:text-primary-500"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteSubCategory(mainCategory, index)}
+                                className="p-1 text-gray-400 hover:text-red-500"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {editingSubCategory.main === mainCategory && editingSubCategory.index === -1 && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editingSubCategory.name}
+                          onChange={(e) => setEditingSubCategory({ ...editingSubCategory, name: e.target.value })}
+                          placeholder="输入类名"
+                          autoFocus
+                          className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleAddSubCategory(mainCategory);
+                            }
+                            if (e.key === 'Escape') {
+                              setEditingSubCategory({ main: '', index: -1, name: '' });
+                            }
+                          }}
+                        />
+                        <button
+                          onClick={() => handleAddSubCategory(mainCategory)}
+                          className="px-3 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600"
+                        >
+                          添加
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
+                <button
+                  onClick={() => setShowCategoryModal(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+                >
+                  关闭
                 </button>
               </div>
             </div>
