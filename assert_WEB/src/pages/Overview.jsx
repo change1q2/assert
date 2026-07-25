@@ -647,24 +647,26 @@ export default function Overview() {
       const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
       const val = _price * _qty;
       const currency = a.currency || 'CNY';
-      const fromRate = exchangeRates[currency] ?? 1;
-      const toRate = exchangeRates['CNY'] ?? 1;
-      return sum + (currency === 'CNY' ? val : (val * fromRate) / toRate);
+      const fromRate = exchangeRates && exchangeRates[currency] ? exchangeRates[currency] : 1;
+      const toRate = exchangeRates && exchangeRates['CNY'] ? exchangeRates['CNY'] : 1;
+      const rate = currency === 'CNY' ? 1 : (fromRate / toRate);
+      return sum + (isNaN(val) ? 0 : val) * rate;
     }, 0);
     const cost = items.reduce((sum, a) => {
       const _cost = parseFloat(a.cost) || parseFloat(a.costPrice) || 0;
       const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
       const c = _cost * _qty;
       const currency = a.currency || 'CNY';
-      const fromRate = exchangeRates[currency] ?? 1;
-      const toRate = exchangeRates['CNY'] ?? 1;
-      return sum + (currency === 'CNY' ? c : (c * fromRate) / toRate);
+      const fromRate = exchangeRates && exchangeRates[currency] ? exchangeRates[currency] : 1;
+      const toRate = exchangeRates && exchangeRates['CNY'] ? exchangeRates['CNY'] : 1;
+      const rate = currency === 'CNY' ? 1 : (fromRate / toRate);
+      return sum + (isNaN(c) ? 0 : c) * rate;
     }, 0);
     return {
       category,
-      value,
-      cost,
-      pnl: value - cost,
+      value: isNaN(value) ? 0 : value,
+      cost: isNaN(cost) ? 0 : cost,
+      pnl: isNaN(value - cost) ? 0 : value - cost,
       count: items.length,
     };
   }).sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
@@ -1391,12 +1393,13 @@ export default function Overview() {
                     if (categoryStats.length === 0) {
                       return <div className="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">暂无品类盈亏数据</div>;
                     }
-                    const maxPnl = Math.max(0, ...categoryStats.map((s) => Math.abs(s.pnl)));
-                    const totalAbsPnl = categoryStats.reduce((sum, s) => sum + Math.abs(s.pnl), 0);
+                    const maxPnl = Math.max(0, ...categoryStats.map((s) => Math.abs(isNaN(s.pnl) ? 0 : s.pnl)));
+                    const totalAbsPnl = categoryStats.reduce((sum, s) => sum + Math.abs(isNaN(s.pnl) ? 0 : s.pnl), 0);
                     return categoryStats.map((stat) => {
-                      const isPositive = stat.pnl >= 0;
-                      const barWidth = maxPnl > 0 ? (Math.abs(stat.pnl) / maxPnl) * 100 : 0;
-                      const percentage = totalAbsPnl > 0 ? (Math.abs(stat.pnl) / totalAbsPnl * 100).toFixed(1) : 0;
+                      const pnl = isNaN(stat.pnl) ? 0 : stat.pnl;
+                      const isPositive = pnl >= 0;
+                      const barWidth = maxPnl > 0 ? (Math.abs(pnl) / maxPnl) * 100 : 0;
+                      const percentage = totalAbsPnl > 0 ? (Math.abs(pnl) / totalAbsPnl * 100).toFixed(1) : 0;
                       return (
                         <div key={stat.category}>
                           <div className="flex items-center justify-between text-sm mb-1">
@@ -1404,7 +1407,7 @@ export default function Overview() {
                             <div className="flex items-center gap-2">
                               <span className={`font-mono tabular-nums font-medium truncate ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
                                 {isPositive ? '+' : ''}
-                                {formatCurrency(stat.pnl)}
+                                {formatCurrency(pnl)}
                               </span>
                               <span className="text-xs text-gray-400 dark:text-gray-500 w-12 text-right">
                                 {percentage}%

@@ -245,8 +245,13 @@ export default function IndependentAssets() {
   };
 
   const saveData = async (data) => {
-    await saveState({ ...stateData, ...data });
-    await loadData();
+    const newState = { ...stateData, ...data };
+    const result = await saveState(newState);
+    localStorage.setItem('wealth_os_independent_assets', JSON.stringify(newState.independentAssets || {}));
+    setStateData(newState);
+    if (!result.cached) {
+      await loadData();
+    }
   };
 
   const getAssets = (type) => {
@@ -500,8 +505,25 @@ export default function IndependentAssets() {
       return;
     }
     const items = getAssets(activeTab);
+    let itemData = { ...formData };
+    
+    if (activeTab === 'fixeddeposit') {
+      const amount = parseFloat(formData.amount || 0);
+      const rate = parseFloat(formData.interestRate || 0);
+      const startDate = formData.startDate;
+      const endDate = formData.endDate;
+      if (amount > 0 && rate > 0 && startDate && endDate) {
+        const s = new Date(startDate);
+        const e = new Date(endDate);
+        if (e > s) {
+          const years = (e - s) / (1000 * 60 * 60 * 24 * 365);
+          itemData.expectedReturn = (amount * rate / 100 * years).toFixed(2);
+        }
+      }
+    }
+    
     const newItem = {
-      ...formData,
+      ...itemData,
       id: editingItem?.id || Date.now().toString(),
       createdAt: editingItem?.createdAt || new Date().toISOString(),
     };
@@ -658,7 +680,7 @@ export default function IndependentAssets() {
       if (usedAccountIds.size > 0 && !usedAccountIds.has(account.id)) return false;
       if (filters.accountName && !account.name.includes(filters.accountName)) return false;
       if (filters.accountCategory && account.category !== filters.accountCategory) return false;
-      return true;
+      return usedAccountIds.size === 0 || usedAccountIds.has(account.id);
     });
 
     const totalBalance = filteredAccounts.reduce((s, a) => s + (a.balance || 0), 0);
@@ -696,10 +718,10 @@ export default function IndependentAssets() {
               let fees = 0;
               let actualValue = 0;
 
-              Object.values(independentAssets).forEach(items => {
+              Object.entries(independentAssets).forEach(([assetType, items]) => {
                 items.forEach(item => {
                   if (item.accountId === account.id) {
-                    if (item.type === 'realestate') {
+                    if (assetType === 'realestate') {
                       if (item.usage === '出租') {
                         const purchasePrice = parseFloat(item.purchasePrice || 0);
                         marketValue += purchasePrice;
@@ -718,34 +740,36 @@ export default function IndependentAssets() {
                         fees += tax + agency;
                         actualValue += mv > 0 ? (mv - tax - agency) : pp;
                       }
-                    } else if (item.type === 'vehicle') {
+                    } else if (assetType === 'vehicle') {
                       const { residualValue } = calculateVehicleResidualValue(item);
                       const pp = parseFloat(item.purchasePrice || 0);
                       marketValue += residualValue;
                       purchaseCost += pp;
                       profitLoss += residualValue - pp;
                       actualValue += residualValue;
-                    } else if (item.type === 'insurance') {
+                    } else if (assetType === 'insurance') {
                       const premium = parseFloat(item.premiumTotal || 0);
                       marketValue += premium;
                       purchaseCost += premium;
                       actualValue += premium;
-                    } else if (item.type === 'fixedinvestment') {
+                    } else if (assetType === 'fixedinvestment') {
                       const cost = parseFloat(item.investmentCost || 0);
                       marketValue += cost;
                       purchaseCost += cost;
                       actualValue += cost;
-                    } else if (item.type === 'equity') {
+                    } else if (assetType === 'equity') {
                       const mv = parseFloat(item.marketValue || 0);
                       marketValue += mv;
                       purchaseCost += parseFloat(item.cost || item.marketValue || 0);
                       profitLoss += parseFloat(item.pnl || 0);
                       actualValue += mv;
-                    } else if (item.type === 'fixeddeposit') {
+                    } else if (assetType === 'fixeddeposit') {
                       const amount = parseFloat(item.amount || 0);
-                      marketValue += amount;
+                      const actualReturn = parseFloat(item.actualReturn || 0);
+                      marketValue += amount + actualReturn;
                       purchaseCost += amount;
-                      actualValue += amount;
+                      profitLoss += actualReturn;
+                      actualValue += amount + actualReturn;
                     }
                   }
                 });
@@ -1281,7 +1305,9 @@ export default function IndependentAssets() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">开始时间</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">结束时间</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">预期收益</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">预期收益率</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">实际收益</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">实际收益率</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
@@ -1298,7 +1324,17 @@ export default function IndependentAssets() {
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.startDate || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.endDate || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.expectedReturn ? formatCurrency(item.expectedReturn, item.currency) : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                    {item.amount && item.expectedReturn
+                      ? `${((parseFloat(item.expectedReturn) / parseFloat(item.amount)) * 100).toFixed(2)}%`
+                      : '—'}
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.actualReturn ? formatCurrency(item.actualReturn, item.currency) : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                    {item.amount && item.actualReturn
+                      ? `${((parseFloat(item.actualReturn) / parseFloat(item.amount)) * 100).toFixed(2)}%`
+                      : '—'}
+                  </td>
                   <td className="px-4 py-3 text-sm">
                     <div className="flex items-center gap-2">
                       <button onClick={() => { setSelectedFixedDeposit(item); setShowFixedDepositDetailModal(true); }} className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded transition-colors" title="明细">
@@ -1316,7 +1352,7 @@ export default function IndependentAssets() {
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无定期资产数据</td>
+                  <td colSpan={14} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无定期资产数据</td>
                 </tr>
               )}
             </tbody>

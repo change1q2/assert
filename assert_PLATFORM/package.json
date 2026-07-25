@@ -5,12 +5,22 @@
   "type": "module",
   "scripts": {
     "api": "node --env-file=../.env server/server.js",
-    "start": "node --env-file=../.env server/server.js"
+    "start": "node --env-file=../.env server/server.js",
+    "test:api": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/api --verbose",
+    "test:api:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/api --verbose --coverage",
+    "test:perf": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/perf --verbose"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
     "iconv-lite": "^0.6.3",
     "mysql2": "^3.22.5",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/supertest": "^7.2.1",
+    "jest": "^30.4.2",
+    "k6": "^0.0.0",
+    "supertest": "^7.2.2"
   }
 }
