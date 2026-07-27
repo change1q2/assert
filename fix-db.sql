@@ -1,2 +1,1 @@
-DROP TABLE IF EXISTS record_tags_old;
-INSERT INTO migrations (name) VALUES ('004_add_books_tags_tables.js') ON DUPLICATE KEY UPDATE name=name;
+ALTER TABLE finance_assets ADD COLUMN asset_kind VARCHAR(100) NOT NULL DEFAULT '' AFTER kind;

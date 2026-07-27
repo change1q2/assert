@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.resolve(path.dirname(__filename), "..");
 
-const publicRoot = path.resolve(__dirname, "..", "..", "assert_WEB");
+const publicRoot = path.resolve(__dirname, "..", "..", "assert_WEB", "dist");
 const releasesRoot = process.env.RELEASES_ROOT
   ? path.resolve(process.env.RELEASES_ROOT)
   : path.resolve(__dirname, "..", "releases");
