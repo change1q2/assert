@@ -2954,6 +2954,7 @@ export default function Finance({ onAssetPenetration }) {
         currentValue: _currentPrice * _quantity,
         positionWeight: 0,
         totalFees: 0,
+        tags: newAccount.tags || '',
       };
 
       // 获取当前的 financeAssets 数组

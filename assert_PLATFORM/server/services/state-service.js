@@ -69,6 +69,7 @@ async function loadUserState(userId) {
     pnlPercent: row.pnl_percent, avgBuyPrice: row.avg_buy_price, holdingDays: row.holding_days,
     positionWeight: row.position_weight, totalFees: row.total_fees, todayPnl: row.today_pnl,
     todayPnlPercent: row.today_pnl_percent, prevPrice: row.prev_price, priceDate: row.price_date,
+    tags: row.tags,
     transactions: transactionsByAsset.get(String(row.id)) || [],
   }));
   const customRecords = { income: [], expense: [], transfer: [] };
@@ -220,14 +221,14 @@ async function saveUserState(conn, userId, state) {
 
   for (const [index, row] of (state.financeAssets || []).entries()) {
     await sqlRun(conn, `INSERT INTO finance_assets
-      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, sort_order, tags)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, text(row.id), text(row.kind), text(row.assetKind), text(row.accountId), text(row.category),
        text(row.subcategory), text(row.tertiaryCategory), text(row.market), text(row.currency),
        text(row.name), text(row.code), text(row.positionGroup), text(row.positionCategory),
        number(row.costPrice), number(row.shares), number(row.availableShares), number(row.currentPrice),
        number(row.pnl), number(row.pnlPercent), number(row.avgBuyPrice), number(row.holdingDays),
-       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), number(row.prevPrice), text(row.priceDate), index]);
+       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), number(row.prevPrice), text(row.priceDate), index, text(row.tags)]);
 
     const isOutdoor = (row.market === '国内市场') && (row.tertiaryCategory === '场外' || row.categoryL3 === '场外');
 
