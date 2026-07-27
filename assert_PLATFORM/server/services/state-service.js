@@ -12,6 +12,7 @@ async function loadUserState(userId) {
   const accounts = (await sqlAll(pool, "SELECT * FROM accounts WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, owner: row.owner, currency: row.currency, type: row.type,
     balance: row.balance, liability: row.liability, enabled: Boolean(row.enabled), default: Boolean(row.is_default),
+    category: row.category, subCategory: row.sub_category,
   }));
   const assetClasses = (await sqlAll(pool, "SELECT * FROM asset_classes WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, children: maybeParseJson(row.children_json), visible: Boolean(row.visible),
@@ -185,11 +186,11 @@ async function saveUserState(conn, userId, state) {
   }
 
   for (const row of (state.accounts || [])) {
-    await sqlRun(conn, `INSERT INTO accounts (user_id, id, name, owner, currency, type, balance, liability, enabled, is_default, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    await sqlRun(conn, `INSERT INTO accounts (user_id, id, name, owner, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, text(row.id), text(row.name), text(row.owner), text(row.currency), text(row.type),
        number(row.balance), number(row.liability), row.enabled === false ? 0 : 1, row.default ? 1 : 0,
-       (state.accounts || []).indexOf(row)]);
+       (state.accounts || []).indexOf(row), text(row.category), text(row.subCategory)]);
   }
 
   for (const [index, row] of (state.assetClasses || []).entries()) {
