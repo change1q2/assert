@@ -117,7 +117,30 @@ function computeIndependentAssetsPie(independentAssets) {
   INDEPENDENT_ASSET_TYPES.forEach((type) => {
     const typeAssets = assets[type.id] || [];
     const value = typeAssets.reduce((sum, asset) => {
-      return sum + parseFloat(asset.currentValue || asset.balance || 0);
+      const assetType = asset.type || asset.category || type.id;
+      let val = 0;
+      if (assetType === 'insurance') {
+        val = parseFloat(asset.premiumTotal || 0);
+      } else if (assetType === 'realestate') {
+        const marketValue = parseFloat(asset.marketValue || 0);
+        const taxAmount = parseFloat(asset.taxAmount || 0);
+        const agencyFee = parseFloat(asset.agencyFee || 0);
+        val = marketValue > 0 ? (marketValue - taxAmount - agencyFee) : parseFloat(asset.purchasePrice || 0);
+      } else if (assetType === 'vehicle') {
+        const purchasePrice = parseFloat(asset.purchasePrice || 0);
+        const depreciationRate = parseFloat(asset.depreciationRate || 0);
+        const years = parseFloat(asset.ownershipYears || 0);
+        val = purchasePrice * Math.pow(1 - depreciationRate / 100, years);
+      } else if (assetType === 'fixedinvestment') {
+        val = parseFloat(asset.investmentCost || 0);
+      } else if (assetType === 'equity') {
+        val = parseFloat(asset.marketValue || asset.investmentCost || 0);
+      } else if (assetType === 'fixeddeposit') {
+        val = parseFloat(asset.amount || 0);
+      } else {
+        val = parseFloat(asset.currentValue || asset.balance || 0);
+      }
+      return sum + (isNaN(val) ? 0 : val);
     }, 0);
     if (value > 0) {
       result.push({

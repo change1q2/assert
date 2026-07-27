@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { ArrowLeft, Plus, Trash2, Settings } from 'lucide-react';
 import { fetchState, saveState } from '../api';
 
@@ -143,6 +143,40 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
     return data;
   }, [monthRecords, totalBudget, today]);
 
+  const yearBudgetData = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const monthlyBudget = budgets.reduce((sum, b) => sum + b.amount, 0);
+    const annualBudget = monthlyBudget * 12;
+    
+    const yearRecords = records.filter(r => {
+      const rYear = new Date(r.date).getFullYear();
+      return rYear === currentYear && r.type === 'expense';
+    });
+    const yearUsed = yearRecords.reduce((sum, r) => sum + Math.abs(r.amount), 0);
+    
+    const months = [];
+    for (let i = 0; i < 12; i++) {
+      const monthStr = `${currentYear}-${String(i + 1).padStart(2, '0')}`;
+      const monthExpense = yearRecords
+        .filter(r => r.date.startsWith(monthStr))
+        .reduce((sum, r) => sum + Math.abs(r.amount), 0);
+      months.push({
+        month: `${i + 1}月`,
+        budget: monthlyBudget,
+        expense: monthExpense,
+        cumulativeBudget: monthlyBudget * (i + 1),
+        cumulativeExpense: months.reduce((s, m) => s + m.expense, 0) + monthExpense,
+      });
+    }
+    
+    return {
+      annualBudget,
+      yearUsed,
+      monthlyBudget,
+      months,
+    };
+  }, [budgets, records]);
+
   const handleEditBudget = (budget) => {
     setEditBudgetId(budget.id);
     setEditAmount(budget.amount.toString());
@@ -281,6 +315,48 @@ export default function BudgetManagement({ stateData, onBack, onUpdateBudgets })
                   dot={{ r: 3 }}
                 />
               </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">年度预算进度</h3>
+          <div className="mb-4 flex items-center justify-between">
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              年度预算: <span className="font-bold text-gray-900 dark:text-white">{yearBudgetData.annualBudget.toLocaleString()}</span>
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              当年支出: <span className={`font-bold ${yearBudgetData.yearUsed > yearBudgetData.annualBudget ? 'text-red-500' : 'text-gray-900 dark:text-white'}`}>{yearBudgetData.yearUsed.toLocaleString()}</span>
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              完成度: <span className={`font-bold ${(yearBudgetData.yearUsed / yearBudgetData.annualBudget * 100) > 100 ? 'text-red-500' : 'text-blue-600'}`}>{Math.min((yearBudgetData.yearUsed / yearBudgetData.annualBudget * 100).toFixed(1), 100)}%</span>
+            </div>
+          </div>
+          <div className="w-full bg-gray-100 dark:bg-slate-700 rounded-full h-3 mb-6">
+            <div 
+              className={`h-3 rounded-full transition-all duration-300 ${(yearBudgetData.yearUsed / yearBudgetData.annualBudget * 100) > 100 ? 'bg-red-500' : 'bg-blue-600'}`}
+              style={{ width: `${Math.min((yearBudgetData.yearUsed / yearBudgetData.annualBudget) * 100, 100)}%` }}
+            />
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={yearBudgetData.months} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  formatter={(value, name) => [`${value.toLocaleString()}`, name]}
+                  contentStyle={{
+                    backgroundColor: '#fff',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                  }}
+                />
+                <Legend />
+                <Bar dataKey="budget" name="月预算" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="expense" name="月支出" fill="#EF4444" radius={[4, 4, 0, 0]} />
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>

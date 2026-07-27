@@ -1242,7 +1242,7 @@ export default function Records({ onNavigate }) {
               <XAxis dataKey="month" className="dark:text-gray-400" />
               <YAxis className="dark:text-gray-400" tickFormatter={(value) => `${symbol}${value.toLocaleString()}`} />
               <Tooltip
-                formatter={(value) => [`${symbol}${value.toLocaleString()}`, value > 0 ? '收入' : '支出']}
+                formatter={(value, name) => [`${symbol}${value.toLocaleString()}`, name]}
                 contentStyle={{ backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: '8px' }}
               />
               <Legend />
@@ -1794,40 +1794,65 @@ export default function Records({ onNavigate }) {
             </div>
           </div>
 
-          <div 
-            onClick={() => onNavigate && onNavigate('budget')}
-            className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 cursor-pointer hover:shadow-md transition-shadow"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-500 dark:text-gray-400">本月预算</span>
-              <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-full p-2">
-                <Wallet className="w-5 h-5" />
+          {(() => {
+            const monthlyBudget = budgets.reduce((sum, b) => sum + b.amount, 0);
+            let budgetLabel = '全部预算';
+            let budgetAmount = monthlyBudget;
+            let budgetUsed = budgets.reduce((sum, b) => sum + b.used, 0);
+            switch (timePeriod) {
+              case '日常':
+                budgetLabel = '本日预算';
+                budgetAmount = monthlyBudget / (new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() || 30);
+                break;
+              case '月统计':
+                budgetLabel = '本月预算';
+                budgetAmount = monthlyBudget;
+                break;
+              case '年统计':
+                budgetLabel = '本年预算';
+                budgetAmount = monthlyBudget * 12;
+                break;
+              default:
+                budgetLabel = '全部预算';
+                budgetAmount = monthlyBudget;
+            }
+            return (
+              <div
+                onClick={() => onNavigate && onNavigate('budget')}
+                className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 cursor-pointer hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">{budgetLabel}</span>
+                  <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-full p-2">
+                    <Wallet className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="text-3xl font-bold text-blue-600 tabular-nums whitespace-nowrap">
+                  {formatCurrency(budgetAmount, selectedCurrencyFilter)}
+                </div>
+                <div className="mt-1 flex items-center justify-between text-xs">
+                  <span className="text-gray-500 dark:text-gray-400">
+                    已用 {formatCurrency(budgetUsed, selectedCurrencyFilter)}
+                  </span>
+                  <span className="text-blue-600">
+                    剩余 {formatCurrency(Math.max(0, budgetAmount - budgetUsed), selectedCurrencyFilter)}
+                  </span>
+                </div>
+                <div className="mt-2 w-full bg-gray-100 dark:bg-slate-700 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(
+                        (budgetUsed /
+                          (budgetAmount || 1)) * 100,
+                        100
+                      )}%`
+                    }}
+                  />
+                </div>
               </div>
-            </div>
-            <div className="text-3xl font-bold text-blue-600 tabular-nums whitespace-nowrap">
-              {formatCurrency(budgets.reduce((sum, b) => sum + b.amount, 0), selectedCurrencyFilter)}
-            </div>
-            <div className="mt-1 flex items-center justify-between text-xs">
-              <span className="text-gray-500 dark:text-gray-400">
-                已用 {formatCurrency(budgets.reduce((sum, b) => sum + b.used, 0), selectedCurrencyFilter)}
-              </span>
-              <span className="text-blue-600">
-                剩余 {formatCurrency(budgets.reduce((sum, b) => sum + (b.amount - b.used), 0), selectedCurrencyFilter)}
-              </span>
-            </div>
-            <div className="mt-2 w-full bg-gray-100 dark:bg-slate-700 rounded-full h-2">
-              <div 
-                className="bg-blue-600 h-2 rounded-full transition-all"
-                style={{ 
-                  width: `${Math.min(
-                    (budgets.reduce((sum, b) => sum + b.used, 0) / 
-                    (budgets.reduce((sum, b) => sum + b.amount, 0) || 1)) * 100, 
-                    100
-                  )}%` 
-                }}
-              />
-            </div>
-          </div>
+            );
+          })()}
               </>
             );
           })()}

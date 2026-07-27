@@ -77,7 +77,7 @@ async function loadUserState(userId) {
   (await sqlAll(pool, "SELECT scope, name FROM finance_tertiary_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
     .forEach((row) => (tertiaryByScope[row.scope] ||= []).push(row.name));
   const books = (await sqlAll(pool, "SELECT * FROM books WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
-    id: row.id, name: row.name, icon: row.icon, color: row.color, createdAt: row.created_at,
+    id: row.id, name: row.name, icon: row.icon, color: row.color, tags: maybeParseJson(row.tags_json) || [], createdAt: row.created_at,
   }));
   const tags = (await sqlAll(pool, "SELECT * FROM tags WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, color: row.color, createdAt: row.created_at,
@@ -269,9 +269,9 @@ async function saveUserState(conn, userId, state) {
   }
 
   for (const [index, row] of (state.books || []).entries()) {
-    await sqlRun(conn, `INSERT INTO books (user_id, id, name, icon, color, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?)`,
-      [userId, text(row.id), text(row.name), text(row.icon || ''), text(row.color || ''), index]);
+    await sqlRun(conn, `INSERT INTO books (user_id, id, name, icon, color, tags_json, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [userId, text(row.id), text(row.name), text(row.icon || ''), text(row.color || ''), JSON.stringify(row.tags || []), index]);
   }
 
   for (const [index, row] of (state.tags || []).entries()) {
