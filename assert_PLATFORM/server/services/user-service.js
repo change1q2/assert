@@ -92,6 +92,16 @@ async function userByPhone(phone) {
   `, [phone]);
 }
 
+async function userByEmail(email) {
+  return sqlGet(pool, `
+    SELECT users.id, users.account, users.password_hash
+    FROM users JOIN user_profiles ON user_profiles.user_id = users.id
+    WHERE user_profiles.email = ?
+    ORDER BY users.id
+    LIMIT 1
+  `, [email]);
+}
+
 async function createUser({ account, password, name, phone, email, currency }) {
   const conn = await pool.getConnection();
   try {
@@ -124,22 +134,23 @@ async function authPayload(userId) {
 }
 
 async function ensureDefaultAdmin() {
-  const existing = await sqlGet(pool, "SELECT id FROM admin_users WHERE username = ?", ["admin"]);
+  const existing = await sqlGet(pool, "SELECT id FROM admin_users WHERE username = ?", ["SuperAdmin"]);
   if (!existing) {
-    const password = process.env.ADMIN_PASSWORD || "admin123";
+    const password = process.env.ADMIN_PASSWORD || "Super12345";
     const hash = hashPassword(password);
-    const userExists = await sqlGet(pool, "SELECT id FROM users WHERE account = ?", ["admin"]);
+    const userExists = await sqlGet(pool, "SELECT id FROM users WHERE account = ?", ["SuperAdmin"]);
     let userId;
     if (!userExists) {
-      const result = await sqlRun(pool, "INSERT INTO users (account, password_hash) VALUES (?, ?)", ["admin", hash]);
+      const result = await sqlRun(pool, "INSERT INTO users (account, password_hash) VALUES (?, ?)", ["SuperAdmin", hash]);
       userId = result.insertId;
-      await sqlRun(pool, "INSERT INTO user_profiles (user_id, name, phone) VALUES (?, ?, ?)", [userId, "管理员", ""]);
-      console.log("Default admin user account created (account: admin)");
+      await sqlRun(pool, "INSERT INTO user_profiles (user_id, name, phone) VALUES (?, ?, ?)", [userId, "超级管理员", ""]);
+      console.log("Default admin user account created (account: SuperAdmin)");
     } else {
       userId = userExists.id;
+      await sqlRun(pool, "UPDATE users SET password_hash = ? WHERE id = ?", [hash, userId]);
     }
-    await sqlRun(pool, "INSERT INTO admin_users (username, password_hash) VALUES (?, ?)", ["admin", hash]);
-    console.log("Default admin entry created (username: admin)");
+    await sqlRun(pool, "INSERT INTO admin_users (username, password_hash) VALUES (?, ?)", ["SuperAdmin", hash]);
+    console.log("Default admin entry created (username: SuperAdmin)");
   }
 }
 
@@ -147,6 +158,7 @@ export {
   defaultState,
   profileForUser,
   userByPhone,
+  userByEmail,
   createUser,
   authPayload,
   ensureDefaultAdmin,

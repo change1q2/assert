@@ -67,9 +67,12 @@ function formatAmountChinese(value) {
 
 const DEFAULT_CLASSES = [
   { name: '权益类', color: '#6366F1' },
-  { name: '商品类', color: '#F59E0B' },
   { name: '债权类', color: '#10B981' },
   { name: '现金类', color: '#06B6D4' },
+  { name: '商品类', color: '#F59E0B' },
+  { name: '分红类', color: '#EC4899' },
+  { name: '固收类', color: '#8B5CF6' },
+  { name: '另类投资', color: '#EF4444' },
 ];
 
 const PRESET_COLORS = [
@@ -83,18 +86,50 @@ const PRESET_COLORS = [
   '#14B8A6',
 ];
 
-const CATEGORY_L1_OPTIONS = ['权益类', '固收类', '现金类', '另类投资', '商品'];
+const CATEGORY_L1_OPTIONS = ['权益类', '债权类', '现金类', '商品类', '分红类', '固收类', '另类投资'];
 const CATEGORY_COLORS = {
   '权益类': '#6366F1',
-  '固收类': '#10B981',
+  '债权类': '#10B981',
   '现金类': '#06B6D4',
-  '另类投资': '#8B5CF6',
-  '商品': '#F59E0B',
+  '商品类': '#F59E0B',
+  '分红类': '#EC4899',
+  '固收类': '#8B5CF6',
+  '另类投资': '#EF4444',
 };
 const ASSET_TYPE_OPTIONS = ['股票', '基金', '债券', '期货', '期权', '外汇', '数字货币', '银行理财', '保险', '房产', '其他'];
 const DOMESTIC_MARKET = '国内市场';
 const OVERSEAS_MARKET = '海外市场';
 const EXCHANGE_RATE = 7.2;
+
+const INDEPENDENT_ASSET_TYPES = [
+  { id: 'insurance', name: '保险', color: '#6366F1' },
+  { id: 'realestate', name: '房产', color: '#10B981' },
+  { id: 'vehicle', name: '车辆', color: '#F59E0B' },
+  { id: 'fixedinvestment', name: '固定投资', color: '#EC4899' },
+  { id: 'equity', name: '股权', color: '#8B5CF6' },
+  { id: 'fixeddeposit', name: '定期资产', color: '#06B6D4' },
+];
+
+function computeIndependentAssetsPie(independentAssets) {
+  const assets = independentAssets || {};
+  const result = [];
+  
+  INDEPENDENT_ASSET_TYPES.forEach((type) => {
+    const typeAssets = assets[type.id] || [];
+    const value = typeAssets.reduce((sum, asset) => {
+      return sum + parseFloat(asset.currentValue || asset.balance || 0);
+    }, 0);
+    if (value > 0) {
+      result.push({
+        name: type.name,
+        value,
+        color: type.color,
+      });
+    }
+  });
+  
+  return result;
+}
 
 function createDefaultClass({ name, color }) {
   return {
@@ -241,12 +276,14 @@ function computeDomesticOverseasPie(financeAccounts) {
     }
   });
 
+  const total = domestic + hk + us + other;
+
   return [
-    { name: DOMESTIC_MARKET, value: domestic, color: '#3B82F6' },
-    { name: '港股市场', value: hk, color: '#F97316' },
-    { name: '美股市场', value: us, color: '#EF4444' },
-    { name: '其他市场', value: other, color: '#8B5CF6' },
-  ];
+    { name: DOMESTIC_MARKET, value: domestic, color: '#3B82F6', percent: total > 0 ? (domestic / total) * 100 : 0 },
+    { name: '港股市场', value: hk, color: '#F97316', percent: total > 0 ? (hk / total) * 100 : 0 },
+    { name: '美股市场', value: us, color: '#EF4444', percent: total > 0 ? (us / total) * 100 : 0 },
+    { name: '其他市场', value: other, color: '#8B5CF6', percent: total > 0 ? (other / total) * 100 : 0 },
+  ].filter((item) => item.value > 0);
 }
 
 function computeAssetTypeBreakdown(financeAccounts, categoryName) {
@@ -281,42 +318,34 @@ function computeAssetTypeBreakdown(financeAccounts, categoryName) {
 function computeCategoryL1Amounts(financeAccounts) {
   const accounts = financeAccounts || [];
   const categoryMap = {};
-  const order = [];
+  
   accounts.forEach((account) => {
     const categoryL1 = account.categoryL1 || account.category || '其他';
     const value = parseFloat(account.currentValue || account.balance || account.currentPrice * account.shares || 0);
     if (!categoryMap[categoryL1]) {
       categoryMap[categoryL1] = 0;
-      order.push(categoryL1);
     }
     categoryMap[categoryL1] += value;
   });
-  return order
-    .map((name, index) => ({
-      name,
-      value: categoryMap[name],
-      color: CATEGORY_COLORS[name] || PRESET_COLORS[index % PRESET_COLORS.length],
-    }))
-    .sort((a, b) => b.value - a.value);
+  
+  return DEFAULT_CLASSES.map((cls, index) => ({
+    name: cls.name,
+    value: categoryMap[cls.name] || 0,
+    color: CATEGORY_COLORS[cls.name] || cls.color || PRESET_COLORS[index % PRESET_COLORS.length],
+  }));
 }
 
 function generateTrendData(financeAccounts, classes) {
   const accounts = financeAccounts || [];
   const classList = classes || [];
 
-  if (accounts.length === 0) {
-    return { trendData: [], categories: [], colorMap: {} };
-  }
-
   // 按一级分类聚合当前金额
   const categoryValueMap = {};
-  const categoryOrder = [];
   accounts.forEach((account) => {
     const categoryL1 = account.categoryL1 || account.category || '其他';
     const value = parseFloat(account.currentValue || account.balance || account.currentPrice * account.shares || 0);
     if (!categoryValueMap[categoryL1]) {
       categoryValueMap[categoryL1] = 0;
-      categoryOrder.push(categoryL1);
     }
     categoryValueMap[categoryL1] += value;
   });
@@ -329,14 +358,14 @@ function generateTrendData(financeAccounts, classes) {
     }
   });
 
-  const categories = categoryOrder.filter(
-    (name) => (categoryValueMap[name] || 0) > 0
-  );
+  // 确保包含所有DEFAULT_CLASSES中的分类
+  const categories = DEFAULT_CLASSES.map((c) => c.name);
   const colorMap = {};
   categories.forEach((name, index) => {
     colorMap[name] =
       classColorMap[name] ||
       CATEGORY_COLORS[name] ||
+      DEFAULT_CLASSES.find((c) => c.name === name)?.color ||
       PRESET_COLORS[index % PRESET_COLORS.length];
   });
 
@@ -344,7 +373,6 @@ function generateTrendData(financeAccounts, classes) {
     return { trendData: [], categories: [], colorMap: {} };
   }
 
-  // 生成最近 30 天趋势数据
   const DAYS = 30;
   const trendData = [];
   const today = new Date();
@@ -352,7 +380,6 @@ function generateTrendData(financeAccounts, classes) {
   for (let i = DAYS - 1; i >= 0; i--) {
     const date = new Date(today);
     date.setDate(today.getDate() - i);
-    // dayIndex: 0 = 最早一天, DAYS-1 = 今天
     const dayIndex = DAYS - 1 - i;
     const dateLabel = `${String(date.getMonth() + 1).padStart(2, '0')}-${String(
       date.getDate()
@@ -361,9 +388,7 @@ function generateTrendData(financeAccounts, classes) {
     const point = { date: dateLabel };
     categories.forEach((name) => {
       const currentValue = categoryValueMap[name] || 0;
-      // 线性递增：起始约 85%，递增到 100%（今天）
       const ramp = 0.85 + 0.15 * (dayIndex / (DAYS - 1));
-      // 基于分类名 + 日期索引的确定性伪随机噪声（Math.sin）
       let hash = 0;
       for (let j = 0; j < name.length; j++) {
         hash = (hash * 31 + name.charCodeAt(j)) | 0;
@@ -380,10 +405,12 @@ function generateTrendData(financeAccounts, classes) {
 
 function computeStatsForClasses(assetClasses, stateData) {
   const financeAccounts = stateData?.financeAssets || [];
+  const independentAssets = stateData?.independentAssets || {};
   const hasFinanceData = financeAccounts.length > 0;
 
   let classes;
   let domesticOverseasData = [];
+  let independentAssetsData = [];
   let financeAccountsRef = financeAccounts;
 
   if (hasFinanceData) {
@@ -394,6 +421,8 @@ function computeStatsForClasses(assetClasses, stateData) {
     domesticOverseasData = [];
     financeAccountsRef = [];
   }
+
+  independentAssetsData = computeIndependentAssetsPie(independentAssets);
 
   const classesWithPnl = classes.map((cls) => {
     const pnl = (cls.value || 0) - (cls.openingValue || 0);
@@ -463,6 +492,7 @@ function computeStatsForClasses(assetClasses, stateData) {
     totalExpense,
     avgExpectedReturn,
     domesticOverseasData,
+    independentAssetsData,
     financeAccounts: financeAccountsRef,
     assetTypeBreakdownMap,
   };
@@ -533,6 +563,13 @@ export default function AssetClasses({ onCategorySelect }) {
   });
   const [selectedClass, setSelectedClass] = useState(null);
   const [selectedCurrency, setSelectedCurrency] = useState('CNY');
+  const [labelSize, setLabelSize] = useState('small');
+
+  const LABEL_SIZE_MAP = {
+    small: '10px',
+    medium: '12px',
+    large: '14px',
+  };
 
   const { assetClasses = [] } = stateData || {};
 
@@ -601,13 +638,14 @@ export default function AssetClasses({ onCategorySelect }) {
     totalExpense = 0,
     avgExpectedReturn = 0,
     domesticOverseasData = [],
+    independentAssetsData = [],
     financeAccounts = [],
     assetTypeBreakdownMap = {},
   } = stats || {};
 
   const hasFinanceData = financeAccounts.length > 0;
 
-  const chartData = classes.filter((c) => c.visible !== false);
+  const chartData = classes.filter((c) => c.visible !== false && (c.value || 0) > 0);
 
   const visibleChartData = chartData.length > 0;
 
@@ -1245,10 +1283,45 @@ export default function AssetClasses({ onCategorySelect }) {
 
             {/* Charts */}
             <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500 dark:text-gray-400">标签大小</span>
+                <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-700 rounded-lg p-1">
+                  <button
+                    onClick={() => setLabelSize('small')}
+                    className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                      labelSize === 'small'
+                        ? 'bg-white dark:bg-slate-600 text-gray-900 dark:text-white shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    小
+                  </button>
+                  <button
+                    onClick={() => setLabelSize('medium')}
+                    className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                      labelSize === 'medium'
+                        ? 'bg-white dark:bg-slate-600 text-gray-900 dark:text-white shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    中
+                  </button>
+                  <button
+                    onClick={() => setLabelSize('large')}
+                    className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                      labelSize === 'large'
+                        ? 'bg-white dark:bg-slate-600 text-gray-900 dark:text-white shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    大
+                  </button>
+                </div>
+              </div>
               {/* Pie Charts Row */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* Asset Classification Pie Chart */}
-                <div className={`bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border transition-all duration-300 ${
+                <div className={`bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border transition-all duration-300 overflow-visible ${
                   selectedClass
                     ? 'border-primary-400 dark:border-primary-500 shadow-md shadow-primary-100 dark:shadow-primary-900/20'
                     : 'border-gray-100 dark:border-slate-700'
@@ -1275,29 +1348,23 @@ export default function AssetClasses({ onCategorySelect }) {
                     {selectedClass ? (
                       hasDrilldownData ? (
                         <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
+                          <PieChart padding={{ top: 30, right: 30, bottom: 30, left: 30 }}>
                             <Pie
                               data={drilldownData}
                               dataKey="value"
                               nameKey="name"
                               innerRadius="40%"
-                              outerRadius="70%"
+                              outerRadius="65%"
                               paddingAngle={2}
                               label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
-                              labelLine={false}
+                              labelLine={{ strokeWidth: 1, stroke: '#ccc' }}
+                              labelStyle={{ fontSize: LABEL_SIZE_MAP[labelSize] }}
                             >
                               {drilldownData.map((entry, index) => (
                                 <Cell key={`cell-dd-${index}`} fill={entry.color} />
                               ))}
                             </Pie>
                             <ReTooltip content={<CustomPieTooltip />} />
-                            <Legend
-                              layout="vertical"
-                              align="right"
-                              verticalAlign="middle"
-                              iconType="circle"
-                              wrapperStyle={{ fontSize: '12px' }}
-                            />
                           </PieChart>
                         </ResponsiveContainer>
                       ) : (
@@ -1307,18 +1374,19 @@ export default function AssetClasses({ onCategorySelect }) {
                       )
                     ) : visibleChartData ? (
                       <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
+                        <PieChart padding={{ top: 30, right: 30, bottom: 30, left: 30 }}>
                           <Pie
-                            data={chartData}
-                            dataKey="value"
-                            nameKey="name"
-                            innerRadius="40%"
-                            outerRadius="70%"
-                            paddingAngle={2}
-                            label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
-                            labelLine={false}
-                            style={{ cursor: 'pointer' }}
-                          >
+                              data={chartData}
+                              dataKey="value"
+                              nameKey="name"
+                              innerRadius="40%"
+                              outerRadius="65%"
+                              paddingAngle={2}
+                              label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
+                              labelLine={{ strokeWidth: 1, stroke: '#ccc' }}
+                              labelStyle={{ fontSize: LABEL_SIZE_MAP[labelSize] }}
+                              style={{ cursor: 'pointer' }}
+                            >
                             {chartData.map((entry, index) => (
                               <Cell
                                 key={`cell-${index}`}
@@ -1331,13 +1399,6 @@ export default function AssetClasses({ onCategorySelect }) {
                             ))}
                           </Pie>
                           <ReTooltip content={<CustomPieTooltip />} />
-                          <Legend
-                            layout="vertical"
-                            align="right"
-                            verticalAlign="middle"
-                            iconType="circle"
-                            wrapperStyle={{ fontSize: '12px' }}
-                          />
                         </PieChart>
                       </ResponsiveContainer>
                     ) : (
@@ -1345,30 +1406,11 @@ export default function AssetClasses({ onCategorySelect }) {
                         暂无数据
                       </div>
                     )}
-                    {(selectedClass ? hasDrilldownData : visibleChartData) && (
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="text-center">
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
-                            {selectedClass ? selectedClass : '总资产'}
-                          </div>
-                          <div className="text-sm font-bold text-gray-900 dark:text-white">
-                            {selectedClass
-                              ? formatCurrency(selectedClassInfo?.value || 0)
-                              : formatCurrency(totalValue)}
-                          </div>
-                          <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                            {selectedClass
-                              ? `${drilldownData.length} 种类型`
-                              : `${chartData.length} 个分类`}
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
 
-                {/* Domestic/Overseas Pie Chart */}
-                <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
+                {/* Independent Assets Pie Chart */}
+                <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 overflow-visible">
                   <div className="flex items-center gap-2 mb-3">
                     <Globe className="w-4 h-4 text-primary-500" />
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-white">海内外资产占比</h3>
@@ -1376,29 +1418,23 @@ export default function AssetClasses({ onCategorySelect }) {
                   <div className="h-64 relative">
                     {hasDomesticOverseasData ? (
                       <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
+                        <PieChart padding={{ top: 40, right: 20, bottom: 40, left: 60 }}>
                           <Pie
                             data={domesticOverseasData}
                             dataKey="value"
                             nameKey="name"
-                            innerRadius="40%"
-                            outerRadius="70%"
-                            paddingAngle={2}
+                            innerRadius="35%"
+                            outerRadius="55%"
+                            paddingAngle={3}
                             label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
-                            labelLine={false}
+                            labelLine={{ strokeWidth: 1, stroke: '#ccc' }}
+                            labelStyle={{ fontSize: LABEL_SIZE_MAP[labelSize], whiteSpace: 'nowrap' }}
                           >
                             {domesticOverseasData.map((entry, index) => (
                               <Cell key={`cell-do-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
                           <ReTooltip content={<CustomPieTooltip />} />
-                          <Legend
-                            layout="vertical"
-                            align="right"
-                            verticalAlign="middle"
-                            iconType="circle"
-                            wrapperStyle={{ fontSize: '12px' }}
-                          />
                         </PieChart>
                       </ResponsiveContainer>
                     ) : (
@@ -1406,14 +1442,40 @@ export default function AssetClasses({ onCategorySelect }) {
                         暂无数据
                       </div>
                     )}
-                    {hasDomesticOverseasData && (
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="text-center">
-                          <div className="text-xs text-gray-500 dark:text-gray-400">总资产</div>
-                          <div className="text-sm font-bold text-gray-900 dark:text-white">
-                            {formatCurrency(totalValue)}
-                          </div>
-                        </div>
+                  </div>
+                </div>
+
+                {/* Independent Assets Pie Chart */}
+                <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 overflow-visible">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Briefcase className="w-4 h-4 text-primary-500" />
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">独立资产占比</h3>
+                  </div>
+                  <div className="h-64 relative">
+                    {independentAssetsData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart padding={{ top: 30, right: 30, bottom: 30, left: 30 }}>
+                          <Pie
+                            data={independentAssetsData}
+                            dataKey="value"
+                            nameKey="name"
+                            innerRadius="40%"
+                            outerRadius="65%"
+                            paddingAngle={2}
+                            label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
+                            labelLine={{ strokeWidth: 1, stroke: '#ccc' }}
+                            labelStyle={{ fontSize: LABEL_SIZE_MAP[labelSize] }}
+                          >
+                            {independentAssetsData.map((entry, index) => (
+                              <Cell key={`cell-ia-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <ReTooltip content={<CustomPieTooltip />} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-500 text-sm">
+                        暂无数据
                       </div>
                     )}
                   </div>

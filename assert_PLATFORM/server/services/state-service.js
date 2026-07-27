@@ -125,7 +125,14 @@ async function loadUserState(userId) {
     allocation: maybeParseJson(row.allocation_json), debtLimit: row.debt_limit,
     annualReturn: row.annual_return, risk: row.risk,
   }));
-  const settings = await sqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json FROM user_settings WHERE user_id = ?", [userId]);
+  const settings = await sqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json FROM user_settings WHERE user_id = ?", [userId]);
+  const yearlyRecords = (await sqlAll(pool, "SELECT year, opening_asset, closing_asset, target_profit, actual_profit FROM yearly_records WHERE user_id = ? ORDER BY year", [userId])).map((row) => ({
+    year: row.year,
+    openingAsset: row.opening_asset,
+    closingAsset: row.closing_asset,
+    targetProfit: row.target_profit,
+    actualProfit: row.actual_profit,
+  }));
   return {
     user: profile,
     rates,
@@ -148,6 +155,9 @@ async function loadUserState(userId) {
     feeConfig: settings ? maybeParseJson(settings.fee_config_json) : undefined,
     overviewGoals: settings ? maybeParseJson(settings.overview_goals_json) : undefined,
     hkIpoRules: settings ? maybeParseJson(settings.hk_ipo_rules_json) : undefined,
+    independentAssets: settings ? maybeParseJson(settings.independent_assets_json) || {} : {},
+    yearlyRecords,
+    accountCategories: settings ? maybeParseJson(settings.account_categories_json) || {} : {},
   };
 }
 
@@ -164,7 +174,7 @@ async function saveUserState(conn, userId, state) {
   const tables = [
     "exchange_rates", "accounts", "asset_classes", "records", "budgets", "finance_asset_transactions", "finance_asset_indoor_transactions", "finance_asset_outdoor_transactions", "finance_assets",
     "custom_record_categories", "finance_tertiary_categories", "record_tags", "recorders",
-    "reminders", "debt_payments", "debts", "debt_categories", "strategies", "user_settings", "books", "tags",
+    "reminders", "debt_payments", "debts", "debt_categories", "strategies", "user_settings", "books", "tags", "yearly_records",
   ];
   for (const table of tables) {
     await sqlRun(conn, `DELETE FROM ${table} WHERE user_id = ?`, [userId]);
@@ -314,9 +324,17 @@ async function saveUserState(conn, userId, state) {
       [userId, Number(row.id), text(row.name), row.active ? 1 : 0, text(row.target),
        JSON.stringify(row.allocation || []), number(row.debtLimit), number(row.annualReturn), text(row.risk)]);
   }
-  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json) VALUES (?, ?, ?, ?, ?)",
+  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
     [userId, JSON.stringify(state.financeAssetDraft || {}), JSON.stringify(state.feeConfig || {}),
-     JSON.stringify(state.overviewGoals || {}), previousSettings?.hk_ipo_rules_json || null]);
+     JSON.stringify(state.overviewGoals || {}), previousSettings?.hk_ipo_rules_json || null,
+     JSON.stringify(state.independentAssets || {}), JSON.stringify(state.accountCategories || {})]);
+
+  for (const row of (state.yearlyRecords || [])) {
+    await sqlRun(conn, `INSERT INTO yearly_records (user_id, year, opening_asset, closing_asset, target_profit, actual_profit)
+      VALUES (?, ?, ?, ?, ?, ?)`,
+      [userId, Number(row.year), number(row.openingAsset), number(row.closingAsset),
+       number(row.targetProfit), number(row.actualProfit)]);
+  }
 }
 
 export { loadUserState, saveUserState };

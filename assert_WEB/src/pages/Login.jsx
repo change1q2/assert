@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { User, Lock, Eye, EyeOff } from 'lucide-react';
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, onRegister, onForgotPassword, onAdminLogin }) {
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -14,6 +14,23 @@ export default function Login({ onLogin }) {
     setLoading(true);
 
     try {
+      // 管理员账号走管理员登录接口
+      if (account === 'SuperAdmin') {
+        const adminResponse = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: account, password }),
+        });
+        const adminData = await adminResponse.json();
+        if (adminResponse.ok && adminData.token) {
+          localStorage.setItem('adminToken', adminData.token);
+          onAdminLogin();
+        } else {
+          setError(adminData.message || '管理员登录失败');
+        }
+        return;
+      }
+
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -180,13 +197,24 @@ export default function Login({ onLogin }) {
             </button>
           </form>
 
-          <div className="mt-6 text-center">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              默认账号: <code className="bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded text-blue-600 dark:text-blue-400">admin</code>
-              {' '}
-              默认密码: <code className="bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded text-blue-600 dark:text-blue-400">admin123</code>
-            </p>
+          <div className="mt-6 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={onRegister}
+              className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+            >
+              注册账号
+            </button>
+            <button
+              type="button"
+              onClick={onForgotPassword}
+              className="text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              忘记密码
+            </button>
           </div>
+
+          
         </div>
       </div>
     </div>

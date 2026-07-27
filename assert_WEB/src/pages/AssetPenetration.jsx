@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { fetchState, saveState, fetchFinanceQuotes, fetchFundNav } from '../api';
 import {
   ArrowLeft,
@@ -28,6 +28,18 @@ function formatCurrency(value) {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
   }).format(value);
+}
+
+function getTimePnlRatio(range) {
+  switch (range) {
+    case 'day': return null;
+    case 'month': return 0.18;
+    case 'quarter': return 0.42;
+    case 'year': return 0.78;
+    case 'all': return 1.0;
+    case 'custom': return 0.55;
+    default: return 1.0;
+  }
 }
 
 function formatNum(value) {
@@ -238,9 +250,8 @@ export default function AssetPenetration({ onBack }) {
       return [];
     }
   });
-  const [chartType, setChartType] = useState('curve');
   const [analysisView, setAnalysisView] = useState('rate');
-  const [selectedAnalysis, setSelectedAnalysis] = useState('');
+  const [selectedAnalysis, setSelectedAnalysis] = useState('position');
 
   const [calendarView, setCalendarView] = useState('day');
   const [calendarChartType, setCalendarChartType] = useState('calendar');
@@ -253,6 +264,7 @@ export default function AssetPenetration({ onBack }) {
   const [indexHistoryData, setIndexHistoryData] = useState(null);
   const [indexPeriodReturns, setIndexPeriodReturns] = useState({});
   const [tooltip, setTooltip] = useState(null);
+  const [showOpFormulas, setShowOpFormulas] = useState(false);
 
   const [positionLevel, setPositionLevel] = useState(1);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -285,13 +297,13 @@ export default function AssetPenetration({ onBack }) {
   // 内置指数：etfCode 为对应的 ETF 代码（用于实际拉取行情），code 为业务标识（selectedIndex）
   const indexOptions = [
     { code: 'sh000001', name: '上证', color: '#3B82F6', etfCode: 'sh530060' },
-    { code: 'sz399001', name: '深证', color: '#EF4444', etfCode: 'sz159943' },
+    { code: 'sz399001', name: '深证', color: '#6366F1', etfCode: 'sz159943' },
     { code: 'sz399006', name: '创业板', color: '#F59E0B', etfCode: 'sz159247' },
     { code: 'sh000016', name: '上证50', color: '#8B5CF6', etfCode: 'sh510100' },
     { code: 'sh000300', name: '沪深300', color: '#EC4899', etfCode: 'sh510360' },
     { code: 'sh000905', name: '中证500', color: '#10B981', etfCode: 'sh510580' },
     { code: 'IXIC', name: '纳斯达克', color: '#0071C5', etfCode: 'sz159660' },
-    { code: 'SPX', name: '标普500', color: '#EE3233', etfCode: 'sh513650' },
+    { code: 'SPX', name: '标普500', color: '#06B6D4', etfCode: 'sh513650' },
   ];
 
   // 合并内置与自定义指数（用于展示与联动）。自定义指数自身代码即作为 etfCode 使用
@@ -311,6 +323,20 @@ export default function AssetPenetration({ onBack }) {
     const option = allIndexOptions.find(o => o.code === selectedIndex);
     return option ? (option.etfCode || option.code) : selectedIndex;
   }, [allIndexOptions, selectedIndex]);
+
+  // 当前选中指数的颜色
+  const selectedIndexColor = useMemo(() => {
+    const option = allIndexOptions.find(o => o.code === selectedIndex);
+    return option?.color || '#3B82F6';
+  }, [allIndexOptions, selectedIndex]);
+
+  // hex 颜色转 rgba
+  function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
 
   // 添加自定义指数：rawCode 必填，name 可选（默认 rawCode）；规范化代码、避免重复、加入后选中
   const addCustomIndex = (rawCode, name) => {
@@ -529,7 +555,15 @@ export default function AssetPenetration({ onBack }) {
         const data = await fetchState();
         setStateData(data || {});
         const assets = data?.financeAssets || [];
-        const codes = assets.map(a => a.code).filter(Boolean);
+        // 与 Finance.jsx 保持一致：传入 { code, market } 对象数组，并排除场外基金
+        const codes = assets
+          .filter(a => {
+            if (!a.code) return false;
+            const catL3 = a.categoryL3 || a.tertiaryCategory;
+            if (catL3 === '场外' || (!catL3 && a.market === '场外基金')) return false;
+            return true;
+          })
+          .map(a => ({ code: a.code, market: a.market || '国内市场' }));
         if (codes.length > 0) {
           const quotes = await fetchFinanceQuotes(codes);
           const map = {};
@@ -622,8 +656,6 @@ export default function AssetPenetration({ onBack }) {
         const result = await response.json();
         if (result.history && result.history.length > 0) {
           setIndexHistoryData(result);
-          const periodReturn = getIndexPeriodReturn(result.history, timeRange);
-          setIndexPeriodReturns(prev => ({ ...prev, [selectedIndex]: periodReturn }));
         }
       } catch (err) {
         console.error('Failed to fetch index history:', err);
@@ -632,6 +664,43 @@ export default function AssetPenetration({ onBack }) {
     };
     fetchIndexHistory();
   }, [selectedEtfCode, timeRange]);
+
+  // 切换时间范围时，为所有指数计算区间涨跌幅
+  useEffect(() => {
+    if (timeRange === 'day') {
+      setIndexPeriodReturns({});
+      return;
+    }
+    const fetchAllPeriodReturns = async () => {
+      const returns = {};
+      await Promise.all(allIndexOptions.map(async (option) => {
+        try {
+          const etfCode = option.etfCode || option.code;
+          const code = etfCode.startsWith('sh') || etfCode.startsWith('sz')
+            ? etfCode.slice(2)
+            : etfCode;
+          let count;
+          switch (timeRange) {
+            case 'week': count = 10; break;
+            case 'month': count = 50; break;
+            case 'quarter': count = 120; break;
+            case 'halfyear': count = 200; break;
+            case 'year': count = 400; break;
+            case 'all': count = 1000; break;
+            case 'custom': count = 1000; break;
+            default: count = 50;
+          }
+          const response = await fetch(`/api/finance/index-history?code=${code}&count=${count}`);
+          const result = await response.json();
+          if (result.history && result.history.length > 0) {
+            returns[option.code] = getIndexPeriodReturn(result.history, timeRange);
+          }
+        } catch (_) {}
+      }));
+      setIndexPeriodReturns(returns);
+    };
+    fetchAllPeriodReturns();
+  }, [timeRange, allIndexOptions]);
 
   const getDisplayDays = () => {
     switch (timeRange) {
@@ -819,10 +888,13 @@ export default function AssetPenetration({ onBack }) {
 
   function getYAxisStep(range) {
     const absRange = Math.abs(range);
-    if (absRange <= 10) return 1;
-    if (absRange <= 20) return 5;
-    if (absRange <= 40) return 10;
-    if (absRange <= 100) return 20;
+    if (absRange <= 1) return 0.2;
+    if (absRange <= 2.5) return 0.5;
+    if (absRange <= 6) return 1;
+    if (absRange <= 15) return 2;
+    if (absRange <= 30) return 5;
+    if (absRange <= 60) return 10;
+    if (absRange <= 150) return 20;
     return 50;
   }
 
@@ -850,6 +922,7 @@ export default function AssetPenetration({ onBack }) {
 
   function getIndexPeriodReturn(history, timeRange) {
     if (!history || history.length === 0) return 0;
+    if (timeRange === 'day') return 0;
     const now = new Date();
     let startDate;
     switch (timeRange) {
@@ -877,16 +950,23 @@ export default function AssetPenetration({ onBack }) {
       const _price = parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0;
       const _cost = parseFloat(a.costPrice || a.cost) || 0;
       const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
-      const _unitPnl = _price - _cost;
-      const _holdingPnl = _unitPnl * _qty;
+      // currentValue：优先实时价格计算，价格无效时回退到原始 currentValue
+      const _currentValue = _price > 0 && _qty > 0
+        ? _price * _qty
+        : (parseFloat(a.currentValue) || parseFloat(a.balance) || 0);
+      const _unitPnl = _price > 0 ? (_price - _cost) : ((_currentValue - (_cost * _qty)) / (_qty || 1));
+      const _holdingPnl = _price > 0 ? (_unitPnl * _qty) : (_currentValue - (_cost * _qty));
       // 当日盈亏：与 Finance.jsx 的 getDailyPnl 保持一致
       // 1) 优先使用实时行情 (price - prevClose) * qty
       // 2) 其次使用资产自身存储的 prevPrice/currentPrice 计算（场外基金）
       // 3) 最后回退到资产字段 todayPnl / dailyPnl
       let _dailyPnl = 0;
       const _quote = quotesMap[a.code];
-      if (_quote && _quote.price != null && _quote.prevClose != null) {
+      if (_quote && _quote.price != null && _quote.prevClose != null && _quote.prevClose !== 0) {
         _dailyPnl = (parseFloat(_quote.price) - parseFloat(_quote.prevClose)) * _qty;
+      } else if (_quote && _quote.price != null && _quote.changePct != null) {
+        const _prevClose = parseFloat(_quote.price) / (1 + parseFloat(_quote.changePct) / 100);
+        _dailyPnl = (parseFloat(_quote.price) - _prevClose) * _qty;
       } else {
         const _prevPrice = parseFloat(a.prevPrice) || 0;
         const _currPrice = parseFloat(a.currentPrice) || 0;
@@ -908,9 +988,9 @@ export default function AssetPenetration({ onBack }) {
         cost: _cost,
         quantity: _qty,
         currentPrice: _price,
-        currentValue: _price * _qty,
+        currentValue: _currentValue,
         holdingPnl: _holdingPnl,
-        holdingPnlRate: _cost > 0 ? (_unitPnl / _cost) * 100 : 0,
+        holdingPnlRate: _cost > 0 ? (_holdingPnl / (_cost * _qty)) * 100 : 0,
         dailyPnl: _dailyPnl,
         dailyPnlRate: _dailyPnlRate,
       };
@@ -933,17 +1013,24 @@ export default function AssetPenetration({ onBack }) {
   // 仓位分析三级钻取数据计算
   // 路径: 0级=全部  1级=按categoryL1一级分类  2级=按assetType资产类型  3级=按资产名称
   const drilldownPieData = useMemo(() => {
-    if (drillDownPath.length >= 3) return [];
+    if (drillDownPath.length >= 4) return [];
     const filtered = filterAccountsByPath(financeAccounts, drillDownPath);
+    // 内部计算所需的盈亏值
+    const _totalPnl = financeAccounts.reduce((sum, item) => {
+      return sum + (parseFloat(item.holdingPnl) || 0);
+    }, 0);
+    const _totalDailyPnl = financeAccounts.reduce((sum, item) => {
+      return sum + (parseFloat(item.dailyPnl) || 0);
+    }, 0);
     // 盈亏按时间范围缩放（市值不变，仅盈亏变）
     const pnlRatio = timeRange === 'day'
-      ? (totalPnl !== 0 ? totalDailyPnl / totalPnl : 0)
-      : getTimePnlRatio();
+      ? (_totalPnl !== 0 ? _totalDailyPnl / _totalPnl : 0)
+      : getTimePnlRatio(timeRange);
     const scalePnl = (holdingPnl, cost) => {
       if (timeRange === 'day') {
         // 当日模式：按持仓市值比例分配当日总盈亏
-        const pct = cost > 0 ? holdingPnl / (totalPnl || 1) : 0;
-        return totalDailyPnl * pct;
+        const pct = cost > 0 ? holdingPnl / (_totalPnl || 1) : 0;
+        return _totalDailyPnl * pct;
       }
       return holdingPnl * pnlRatio;
     };
@@ -1015,13 +1102,14 @@ export default function AssetPenetration({ onBack }) {
         }))
         .sort((a, b) => b.value - a.value);
     }
-  }, [financeAccounts, drillDownPath, timeRange, totalPnl, totalDailyPnl, getTimePnlRatio]);
+  }, [financeAccounts, drillDownPath, timeRange]);
 
   // 按路径过滤持仓明细
   function filterAccountsByPath(accounts, path) {
     return accounts.filter(a => {
       if (path.length >= 1 && (a.categoryL1 || a.category || '未分类') !== path[0]) return false;
       if (path.length >= 2 && (a.assetType || a.kind || '其他') !== path[1]) return false;
+      if (path.length >= 3 && (a.name || a.code || '未命名') !== path[2]) return false;
       return true;
     });
   }
@@ -1167,38 +1255,70 @@ export default function AssetPenetration({ onBack }) {
     custom: '自定义',
   };
 
-  // 按时间范围估算盈亏比例（相对于总持仓盈亏 totalPnl）
-  // 当日使用真实计算，其他时间段按比例估算
-  const getTimePnlRatio = useCallback(() => {
-    switch (timeRange) {
-      case 'day':
-        return null; // 当日使用 totalDailyPnl 单独计算
-      case 'month':
-        return 0.18;
-      case 'quarter':
-        return 0.42;
-      case 'year':
-        return 0.78;
-      case 'all':
-        return 1.0;
-      case 'custom':
-        return 0.55;
-      default:
-        return 1.0;
-    }
-  }, [timeRange]);
-
   const currentPnl = useMemo(() => {
     if (timeRange === 'day') return totalDailyPnl;
-    const ratio = getTimePnlRatio();
+    const ratio = getTimePnlRatio(timeRange);
     return totalPnl * ratio;
-  }, [timeRange, totalDailyPnl, totalPnl, getTimePnlRatio]);
+  }, [timeRange, totalDailyPnl, totalPnl]);
 
   const currentPnlRate = useMemo(() => {
     if (timeRange === 'day') return totalDailyPnlRate;
-    const ratio = getTimePnlRatio();
+    const ratio = getTimePnlRatio(timeRange);
     return totalPnlRate * ratio;
-  }, [timeRange, totalDailyPnlRate, totalPnlRate, getTimePnlRatio]);
+  }, [timeRange, totalDailyPnlRate, totalPnlRate]);
+
+  const yieldCurveData = useMemo(() => {
+    const history = indexHistoryData?.history || [];
+    const { data: displayData } = getYieldCurveData(history);
+
+    const baseRate = currentPnlRate;
+    const userData = [];
+    const indexDataPoints = [];
+
+    if (displayData.length > 0) {
+      const firstClose = timeRange === 'day'
+        ? (parseFloat(displayData[0]?.open) || parseFloat(displayData[0]?.close) || 1)
+        : (parseFloat(displayData[0]?.close) || 1);
+
+      const rawIndexRates = [];
+      displayData.forEach(item => {
+        const closeVal = parseFloat(item.close);
+        if (closeVal && firstClose) {
+          const idxRate = ((closeVal - firstClose) / firstClose) * 100;
+          rawIndexRates.push(idxRate);
+        }
+      });
+      indexDataPoints.push(...rawIndexRates);
+
+      if (rawIndexRates.length > 0) {
+        const lastIndexRate = rawIndexRates[rawIndexRates.length - 1];
+        const scaleFactor = lastIndexRate !== 0 ? baseRate / lastIndexRate : 1;
+
+        displayData.forEach((item, idx) => {
+          const idxRate = rawIndexRates[idx] || 0;
+          const userRate = idxRate * scaleFactor;
+          userData.push(userRate);
+        });
+      } else {
+        displayData.forEach((item, idx) => {
+          const ratio = displayData.length > 1 ? idx / (displayData.length - 1) : 0;
+          const userRate = baseRate * ratio;
+          userData.push(userRate);
+        });
+      }
+    } else {
+      const indexRate = indexData?.changeRate || 0;
+      for (let i = 0; i < 7; i++) {
+        const ratio = i / 6;
+        const idxRate = indexRate * ratio;
+        const scaleFactor = indexRate !== 0 ? baseRate / indexRate : 1;
+        userData.push(idxRate * scaleFactor);
+        indexDataPoints.push(idxRate);
+      }
+    }
+
+    return { userData, indexDataPoints, displayData };
+  }, [indexHistoryData, currentPnlRate, indexData, timeRange]);
 
   const generateCalendarData = useMemo(() => {
     const year = calendarDate.getFullYear();
@@ -1398,6 +1518,113 @@ export default function AssetPenetration({ onBack }) {
     }).length;
   }, [financeAccounts]);
 
+  const operationStats = useMemo(() => {
+    let totalBuyCount = 0;
+    let totalSellCount = 0;
+    let totalHoldDays = 0;
+    let profitableSells = 0;
+    let totalSellRecords = 0;
+    let totalBuyAmount = 0;
+    let totalSellAmount = 0;
+    let activeAccountCount = 0;
+
+    financeAccounts.forEach(account => {
+      const transactions = account.transactions || [];
+      if (transactions.length > 0) {
+        activeAccountCount++;
+        let earliestDate = null;
+        let buyCostForAccount = 0;
+        let sellProceedsForAccount = 0;
+
+        transactions.forEach(t => {
+          const type = t.type || '';
+          const direction = t.direction || '';
+          const dateStr = t.transaction_date || t.date || '';
+          const price = parseFloat(t.price) || 0;
+          const qty = parseFloat(t.quantity) || 0;
+          const amount = parseFloat(t.amount) || (price * qty);
+
+          if (type === '买入' || type === '建仓' || direction === 'buy') {
+            totalBuyCount++;
+            totalBuyAmount += amount;
+            buyCostForAccount += amount;
+            if (dateStr) {
+              const d = new Date(dateStr);
+              if (!isNaN(d.getTime()) && (!earliestDate || d < earliestDate)) {
+                earliestDate = d;
+              }
+            }
+          } else if (type === '卖出' || type === '清仓' || direction === 'sell') {
+            totalSellCount++;
+            totalSellAmount += amount;
+            sellProceedsForAccount += amount;
+            totalSellRecords++;
+          }
+        });
+
+        if (earliestDate) {
+          const now = new Date();
+          const days = Math.max(1, Math.floor((now - earliestDate) / (1000 * 60 * 60 * 24)));
+          totalHoldDays += days;
+        }
+
+        const hasSell = transactions.some(t => t.type === '卖出' || t.type === '清仓' || t.direction === 'sell');
+        if (hasSell) {
+          if (account.holdingPnl >= 0) {
+            profitableSells++;
+          }
+        }
+      }
+    });
+
+    const avgHoldDays = activeAccountCount > 0 ? Math.round(totalHoldDays / activeAccountCount) : 0;
+    const successRate = activeAccountCount > 0 ? (profitableSells / activeAccountCount * 100) : 0;
+    const totalCurrentValue = financeAccounts.reduce((sum, a) => sum + (a.currentValue || 0), 0);
+    const totalCostValue = financeAccounts.reduce((sum, a) => sum + (parseFloat(a.cost) || 0) * (parseFloat(a.quantity) || 0), 0);
+    const avgPosition = totalBuyAmount > 0 ? (totalCurrentValue / totalBuyAmount * 100) : 0;
+    const turnoverRate = totalCurrentValue > 0 ? (totalSellAmount / totalCurrentValue) : 0;
+
+    // 雷达图评分（基于真实数据计算，0~100）
+    const totalTrades = totalBuyCount + totalSellCount;
+    const overallPnlRate = totalCostValue > 0 ? ((totalCurrentValue - totalCostValue) / totalCostValue) * 100 : 0;
+    // 经验值：交易次数越多越高，50次满分
+    const expScore = Math.min(100, (totalTrades / 50) * 100);
+    // 收益率：正收益满分，负收益按比例扣分
+    const returnScore = Math.max(0, Math.min(100, 50 + overallPnlRate * 2));
+    // 抗风险：波动率越小越高（用日收益率标准差近似）
+    const dailyReturns = financeAccounts.map(a => (a.dailyPnlRate || 0));
+    const meanReturn = dailyReturns.length > 0 ? dailyReturns.reduce((s, r) => s + r, 0) / dailyReturns.length : 0;
+    const variance = dailyReturns.length > 0
+      ? dailyReturns.reduce((s, r) => s + Math.pow(r - meanReturn, 2), 0) / dailyReturns.length
+      : 0;
+    const stdDev = Math.sqrt(variance);
+    const riskScore = Math.max(0, Math.min(100, 100 - stdDev * 10));
+    // 稳定性：平均持仓天数越长越稳定，365天满分
+    const stabilityScore = Math.min(100, (avgHoldDays / 365) * 100);
+    // 择时能力：交易成功率
+    const timingScore = Math.min(100, successRate);
+
+    const radarScores = [
+      { name: '经验值', value: parseFloat(expScore.toFixed(2)) },
+      { name: '收益率', value: parseFloat(returnScore.toFixed(2)) },
+      { name: '抗风险', value: parseFloat(riskScore.toFixed(2)) },
+      { name: '稳定性', value: parseFloat(stabilityScore.toFixed(2)) },
+      { name: '择时能力', value: parseFloat(timingScore.toFixed(2)) },
+    ];
+
+    return {
+      tradeStockCount: financeAccounts.length,
+      avgHoldDays,
+      buyCount: totalBuyCount,
+      sellCount: totalSellCount,
+      successRate,
+      avgPosition,
+      turnoverRate,
+      radarScores,
+      overallScore: parseFloat((radarScores.reduce((s, d) => s + d.value, 0) / radarScores.length).toFixed(2)),
+    };
+  }, [financeAccounts]);
+
   const bestPerformer = useMemo(() => {
     if (financeAccounts.length === 0) return null;
     return financeAccounts.reduce((best, item) => {
@@ -1552,27 +1779,45 @@ export default function AssetPenetration({ onBack }) {
             </div>
           </div>
           
-          <div className="flex items-center justify-center gap-2">
-            <button
-              onClick={() => setChartType('curve')}
-              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                chartType === 'curve'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
-              }`}
-            >
-              曲线
-            </button>
-            <button
-              onClick={() => setChartType('candle')}
-              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                chartType === 'candle'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700'
-              }`}
-            >
-              K线
-            </button>
+          <div className="flex items-center justify-end w-full">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#EF4444' }}></span>
+                <span className="text-sm text-gray-600 dark:text-gray-300">当前账户</span>
+                <span className="text-sm font-medium" style={{ color: '#EF4444' }}>
+                  {currentPnlRate >= 0 ? '+' : ''}{currentPnlRate.toFixed(2)}%
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: selectedIndexColor }}></span>
+                <span className="text-sm text-gray-600 dark:text-gray-300">
+                  {getIndexName(selectedIndex)}
+                </span>
+                <span className="text-sm font-medium" style={{ color: selectedIndexColor }}>
+                  {(() => {
+                    const idxData = allIndexData[selectedIndex];
+                    const rate = timeRange === 'day'
+                      ? (idxData?.changeRate || indexPeriodReturns[selectedIndex] || 0)
+                      : (indexPeriodReturns[selectedIndex] || idxData?.changeRate || 0);
+                    return `${rate >= 0 ? '+' : ''}${rate.toFixed(2)}%`;
+                  })()}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-sm text-gray-500">对比</span>
+                <select
+                  value={selectedIndex}
+                  onChange={(e) => setSelectedIndex(e.target.value)}
+                  className="text-sm px-2 py-1 border border-gray-200 rounded-lg bg-white dark:bg-slate-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {allIndexOptions.map(opt => (
+                    <option key={opt.code} value={opt.code}>
+                      {opt.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1590,7 +1835,7 @@ export default function AssetPenetration({ onBack }) {
                 <span className="text-gray-600 dark:text-gray-300">用户收益</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-blue-500"></span>
+                <span className="w-3 h-0.5" style={{ backgroundColor: selectedIndexColor }}></span>
                 <span className="text-gray-600 dark:text-gray-300">
                   {getIndexName(selectedIndex)}
                 </span>
@@ -1598,387 +1843,296 @@ export default function AssetPenetration({ onBack }) {
             </div>
           </div>
           <div className="relative">
-            {chartType === 'curve' ? (
-              <svg viewBox="0 0 800 260" className="w-full h-auto">
-                <defs>
-                  <linearGradient id="userGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="rgba(239, 68, 68, 0.3)" />
-                    <stop offset="100%" stopColor="rgba(239, 68, 68, 0)" />
-                  </linearGradient>
-                  <linearGradient id="indexGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="rgba(59, 130, 246, 0.3)" />
-                    <stop offset="100%" stopColor="rgba(59, 130, 246, 0)" />
-                  </linearGradient>
-                </defs>
-                {(() => {
-                  const history = indexHistoryData?.history || [];
-                  const { data: displayData } = getYieldCurveData(history);
+            <svg viewBox="0 0 800 260" className="w-full h-auto">
+              <defs>
+                <linearGradient id="userGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="rgba(239, 68, 68, 0.3)" />
+                  <stop offset="100%" stopColor="rgba(239, 68, 68, 0)" />
+                </linearGradient>
+                <linearGradient id="indexGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor={hexToRgba(selectedIndexColor, 0.3)} />
+                  <stop offset="100%" stopColor={hexToRgba(selectedIndexColor, 0)} />
+                </linearGradient>
+              </defs>
+              {(() => {
+                const history = indexHistoryData?.history || [];
+                const { data: displayData } = getYieldCurveData(history);
 
-                  const baseRate = currentPnlRate;
-                  const userData = [];
-                  const indexDataPoints = [];
+                const baseRate = currentPnlRate;
+                const userData = [];
+                const indexDataPoints = [];
 
-                  if (displayData.length > 0) {
-                    // 计算指数真实涨跌幅度
-                    const firstClose = timeRange === 'day'
-                      ? (parseFloat(displayData[0]?.open) || parseFloat(displayData[0]?.close) || 1)
-                      : (parseFloat(displayData[0]?.close) || 1);
-                    displayData.forEach(item => {
-                      const closeVal = parseFloat(item.close);
-                      if (closeVal && firstClose) {
-                        const idxRate = ((closeVal - firstClose) / firstClose) * 100;
-                        indexDataPoints.push(idxRate);
-                      }
-                    });
-
-                    // 用户收益线：从0%到currentPnlRate线性缩放
-                    displayData.forEach((item, idx) => {
-                      const ratio = displayData.length > 1 ? idx / (displayData.length - 1) : 0;
-                      const userRate = baseRate * ratio;
-                      userData.push(userRate);
-                    });
-                  } else {
-                    // 无历史数据时的回退逻辑
-                    const indexRate = indexData?.changeRate || 0;
-                    for (let i = 0; i < 7; i++) {
-                      const ratio = i / 6;
-                      const userRate = baseRate * ratio;
-                      const idxRate = indexRate * ratio;
-                      userData.push(userRate);
+                if (displayData.length > 0) {
+                  const firstClose = timeRange === 'day'
+                    ? (parseFloat(displayData[0]?.open) || parseFloat(displayData[0]?.close) || 1)
+                    : (parseFloat(displayData[0]?.close) || 1);
+                  displayData.forEach(item => {
+                    const closeVal = parseFloat(item.close);
+                    if (closeVal && firstClose) {
+                      const idxRate = ((closeVal - firstClose) / firstClose) * 100;
                       indexDataPoints.push(idxRate);
                     }
-                  }
-
-                  // Y轴范围包含用户收益率和指数收益率的最值
-                  const allData = [...userData, ...indexDataPoints];
-                  const maxVal = Math.max(...allData, 5);
-                  const minVal = Math.min(...allData, -10);
-                  const range = maxVal - minVal;
-                  const padding = range * 0.1;
-                  const yMax = maxVal + padding;
-                  const yMin = minVal - padding;
-
-                  const ticks = getYAxisTicks(yMin, yMax);
-
-                  return ticks.map((val, i) => {
-                    const y = 30 + ((yMax - val) / (yMax - yMin)) * 180;
-                    return (
-                      <g key={val}>
-                        <line
-                          x1="60"
-                          y1={y}
-                          x2="740"
-                          y2={y}
-                          stroke="#E5E7EB"
-                          strokeDasharray="4"
-                        />
-                        <text
-                          x="750"
-                          y={y + 4}
-                          textAnchor="start"
-                          className="text-xs fill-gray-400"
-                        >
-                          {val}%
-                        </text>
-                      </g>
-                    );
                   });
-                })()}
-                {(() => {
-                  const history = indexHistoryData?.history || [];
-                  const { data: displayData, labels } = getYieldCurveData(history);
-                  if (displayData.length === 0) {
-                    return (
-                      <text x="400" y="230" textAnchor="middle" className="text-xs fill-gray-400">
-                        暂无数据
-                      </text>
-                    );
+
+                  displayData.forEach((item, idx) => {
+                    const ratio = displayData.length > 1 ? idx / (displayData.length - 1) : 0;
+                    const userRate = baseRate * ratio;
+                    userData.push(userRate);
+                  });
+                } else {
+                  const indexRate = indexData?.changeRate || 0;
+                  for (let i = 0; i < 7; i++) {
+                    const ratio = i / 6;
+                    const userRate = baseRate * ratio;
+                    const idxRate = indexRate * ratio;
+                    userData.push(userRate);
+                    indexDataPoints.push(idxRate);
                   }
-                  const dataLength = displayData.length;
-                  const step = dataLength > 1 ? (740 - 60) / (dataLength - 1) : 340;
-                  return labels.map(({ index, label }) => (
-                    <text
-                      key={index}
-                      x={60 + index * step}
-                      y="230"
-                      textAnchor="middle"
-                      className="text-xs fill-gray-400"
-                    >
-                      {label}
+                }
+
+                const allData = [...userData, ...indexDataPoints];
+                const rawMax = Math.max(...allData);
+                const rawMin = Math.min(...allData);
+                const rawRange = rawMax - rawMin;
+                const padding = Math.max(rawRange * 0.2, 1);
+                const yMax = rawMax + padding;
+                const yMin = rawMin - padding;
+
+                const ticks = getYAxisTicks(yMin, yMax);
+
+                return ticks.map((val, i) => {
+                  const y = 30 + ((yMax - val) / (yMax - yMin)) * 180;
+                  return (
+                    <g key={val}>
+                      <line
+                        x1="60"
+                        y1={y}
+                        x2="740"
+                        y2={y}
+                        stroke="#E5E7EB"
+                        strokeDasharray="4"
+                      />
+                      <text
+                        x="50"
+                        y={y + 4}
+                        textAnchor="end"
+                        className="text-xs fill-gray-400"
+                      >
+                        {val}%
+                      </text>
+                    </g>
+                  );
+                });
+              })()}
+              {(() => {
+                const history = indexHistoryData?.history || [];
+                const { data: displayData, labels } = getYieldCurveData(history);
+                if (displayData.length === 0) {
+                  return (
+                    <text x="400" y="230" textAnchor="middle" className="text-xs fill-gray-400">
+                      暂无数据
                     </text>
-                  ));
-                })()}
-                {(() => {
-                  const history = indexHistoryData?.history || [];
-                  const { data: displayData } = getYieldCurveData(history);
+                  );
+                }
+                const dataLength = displayData.length;
+                const step = dataLength > 1 ? (740 - 60) / (dataLength - 1) : 340;
+                return labels.map(({ index, label }) => (
+                  <text
+                    key={index}
+                    x={60 + index * step}
+                    y="230"
+                    textAnchor="middle"
+                    className="text-xs fill-gray-400"
+                  >
+                    {label}
+                  </text>
+                ));
+              })()}
+              {(() => {
+                const history = indexHistoryData?.history || [];
+                const { data: displayData } = getYieldCurveData(history);
+                
+                const baseRate = currentPnlRate;
+                const userData = [];
+                const indexDataPoints = [];
+                
+                if (displayData.length > 0) {
+                  const firstClose = timeRange === 'day'
+                    ? (parseFloat(displayData[0]?.open) || parseFloat(displayData[0]?.close) || 1)
+                    : (parseFloat(displayData[0]?.close) || 1);
                   
-                  const baseRate = currentPnlRate;
-                  const userData = [];
-                  const indexDataPoints = [];
+                  const rawIndexRates = [];
+                  displayData.forEach(item => {
+                    const closeVal = parseFloat(item.close);
+                    if (closeVal && firstClose) {
+                      const idxRate = ((closeVal - firstClose) / firstClose) * 100;
+                      rawIndexRates.push(idxRate);
+                    }
+                  });
+                  indexDataPoints.push(...rawIndexRates);
                   
-                  if (displayData.length > 0) {
-                    const firstClose = timeRange === 'day'
-                      ? (parseFloat(displayData[0]?.open) || parseFloat(displayData[0]?.close) || 1)
-                      : (parseFloat(displayData[0]?.close) || 1);
-                    displayData.forEach(item => {
-                      const closeVal = parseFloat(item.close);
-                      if (closeVal && firstClose) {
-                        // 指数收益率：真实涨跌幅度
-                        const idxRate = ((closeVal - firstClose) / firstClose) * 100;
-                        indexDataPoints.push(idxRate);
-                      }
+                  if (rawIndexRates.length > 0) {
+                    const lastIndexRate = rawIndexRates[rawIndexRates.length - 1];
+                    const scaleFactor = lastIndexRate !== 0 ? baseRate / lastIndexRate : 1;
+                    
+                    displayData.forEach((item, idx) => {
+                      const idxRate = rawIndexRates[idx] || 0;
+                      const userRate = idxRate * scaleFactor;
+                      userData.push(userRate);
                     });
-                    // 用户收益线：从0%到currentPnlRate线性缩放
+                  } else {
                     displayData.forEach((item, idx) => {
                       const ratio = displayData.length > 1 ? idx / (displayData.length - 1) : 0;
                       const userRate = baseRate * ratio;
                       userData.push(userRate);
                     });
-                  } else {
-                    // 无历史数据时的回退逻辑：线性缩放
-                    const indexRate = indexData?.changeRate || 0;
-                    for (let i = 0; i < 7; i++) {
-                      const ratio = i / 6;
-                      userData.push(baseRate * ratio);
-                      indexDataPoints.push(indexRate * ratio);
-                    }
                   }
-                  
-                  const dataLength = userData.length;
-                  const step = dataLength > 1 ? (740 - 60) / (dataLength - 1) : 113;
-                  
-                  const yMax = Math.max(...userData, ...indexDataPoints, 5);
-                  const yMin = Math.min(...userData, ...indexDataPoints, -10);
-                  const range = yMax - yMin || 15;
-                  const padding = range * 0.1;
-                  const chartYMax = yMax + padding;
-                  const chartYMin = yMin - padding;
-                  
-                  const userPath = userData
-                    .map((val, i) => {
-                      const x = 60 + i * step;
-                      const y = 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180;
-                      return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
-                    })
-                    .join(' ');
-                  const indexPath = indexDataPoints
-                    .map((val, i) => {
-                      const x = 60 + i * step;
-                      const y = 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180;
-                      return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
-                    })
-                    .join(' ');
-                  return (
-                    <g>
-                      <path
-                        d={`${userPath} L ${60 + (dataLength - 1) * step} 210 L 60 210 Z`}
-                        fill="url(#userGradient)"
+                } else {
+                  const indexRate = indexData?.changeRate || 0;
+                  for (let i = 0; i < 7; i++) {
+                    const ratio = i / 6;
+                    const idxRate = indexRate * ratio;
+                    const scaleFactor = indexRate !== 0 ? baseRate / indexRate : 1;
+                    userData.push(idxRate * scaleFactor);
+                    indexDataPoints.push(idxRate);
+                  }
+                }
+                
+                const dataLength = userData.length;
+                const step = dataLength > 1 ? (740 - 60) / (dataLength - 1) : 113;
+                
+                const rawMax2 = Math.max(...userData, ...indexDataPoints);
+                const rawMin2 = Math.min(...userData, ...indexDataPoints);
+                const rawRange2 = rawMax2 - rawMin2;
+                const padding2 = Math.max(rawRange2 * 0.2, 1);
+                const chartYMax = rawMax2 + padding2;
+                const chartYMin = rawMin2 - padding2;
+                const zeroY = 30 + ((chartYMax - 0) / (chartYMax - chartYMin)) * 180;
+                
+                const userPath = userData
+                  .map((val, i) => {
+                    const x = 60 + i * step;
+                    const y = 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180;
+                    return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+                  })
+                  .join(' ');
+                const indexPath = indexDataPoints
+                  .map((val, i) => {
+                    const x = 60 + i * step;
+                    const y = 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180;
+                    return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+                  })
+                  .join(' ');
+                return (
+                  <g>
+                    <path
+                      d={`${userPath} L ${60 + (dataLength - 1) * step} ${zeroY} L 60 ${zeroY} Z`}
+                      fill="url(#userGradient)"
+                    />
+                    <path
+                      d={`${indexPath} L ${60 + (dataLength - 1) * step} ${zeroY} L 60 ${zeroY} Z`}
+                      fill="url(#indexGradient)"
+                    />
+                    <line
+                      x1="60"
+                      y1={zeroY}
+                      x2="740"
+                      y2={zeroY}
+                      stroke="#10B981"
+                      strokeWidth="1.5"
+                      strokeDasharray="4"
+                    />
+                    <path
+                      d={userPath}
+                      fill="none"
+                      stroke="#EF4444"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d={indexPath}
+                      fill="none"
+                      stroke={selectedIndexColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    {userData.map((val, i) => (
+                      <circle
+                        key={`user-${i}`}
+                        cx={60 + i * step}
+                        cy={30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180}
+                        r="3"
+                        fill="#EF4444"
+                        className="opacity-0 hover:opacity-100"
+                        onMouseEnter={() => setTooltip({
+                          x: 60 + i * step,
+                          y: 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180,
+                          date: timeRange === 'day' ? displayData[i]?.time : displayData[i]?.date,
+                          userRate: val,
+                          indexRate: indexDataPoints[i],
+                        })}
+                        onMouseLeave={() => setTooltip(null)}
                       />
-                      <path
-                        d={`${indexPath} L ${60 + (dataLength - 1) * step} 210 L 60 210 Z`}
-                        fill="url(#indexGradient)"
+                    ))}
+                    {indexDataPoints.map((val, i) => (
+                      <circle
+                        key={`index-${i}`}
+                        cx={60 + i * step}
+                        cy={30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180}
+                        r="3"
+                        fill={selectedIndexColor}
+                        className="opacity-0 hover:opacity-100"
+                        onMouseEnter={() => setTooltip({
+                          x: 60 + i * step,
+                          y: 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180,
+                          date: timeRange === 'day' ? displayData[i]?.time : displayData[i]?.date,
+                          userRate: userData[i],
+                          indexRate: val,
+                        })}
+                        onMouseLeave={() => setTooltip(null)}
                       />
-                      <path
-                        d={userPath}
-                        fill="none"
-                        stroke="#EF4444"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d={indexPath}
-                        fill="none"
-                        stroke="#3B82F6"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      {userData.map((val, i) => (
-                        <circle
-                          key={`user-${i}`}
-                          cx={60 + i * step}
-                          cy={30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180}
-                          r="3"
-                          fill="#EF4444"
-                          className="opacity-0 hover:opacity-100"
-                          onMouseEnter={() => setTooltip({
-                            x: 60 + i * step,
-                            y: 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180,
-                            date: timeRange === 'day' ? displayData[i]?.time : displayData[i]?.date,
-                            userRate: val,
-                            indexRate: indexDataPoints[i],
-                          })}
-                          onMouseLeave={() => setTooltip(null)}
-                        />
-                      ))}
-                      {indexDataPoints.map((val, i) => (
-                        <circle
-                          key={`index-${i}`}
-                          cx={60 + i * step}
-                          cy={30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180}
-                          r="3"
-                          fill="#3B82F6"
-                          className="opacity-0 hover:opacity-100"
-                          onMouseEnter={() => setTooltip({
-                            x: 60 + i * step,
-                            y: 30 + ((chartYMax - val) / (chartYMax - chartYMin)) * 180,
-                            date: timeRange === 'day' ? displayData[i]?.time : displayData[i]?.date,
-                            userRate: userData[i],
-                            indexRate: val,
-                          })}
-                          onMouseLeave={() => setTooltip(null)}
-                        />
-                      ))}
+                    ))}
 
-                      {tooltip && (
-                        <g>
-                          <rect
-                            x={tooltip.x + 10}
-                            y={tooltip.y - 75}
-                            width="160"
-                            height="60"
-                            rx="4"
-                            fill="rgba(0,0,0,0.8)"
-                          />
-                          <text
-                            x={tooltip.x + 20}
-                            y={tooltip.y - 55}
-                            className="text-xs fill-white"
-                          >
-                            {tooltip.date}
-                          </text>
-                          <text
-                            x={tooltip.x + 20}
-                            y={tooltip.y - 40}
-                            className="text-xs fill-red-400"
-                          >
-                            用户: {tooltip.userRate?.toFixed?.(2) || '—'}%
-                          </text>
-                          <text
-                            x={tooltip.x + 20}
-                            y={tooltip.y - 25}
-                            className="text-xs fill-blue-400"
-                          >
-                            指数: {tooltip.indexRate?.toFixed?.(2) || '—'}%
-                          </text>
-                        </g>
-                      )}
-                    </g>
-                  );
-                })()}
-              </svg>
-            ) : (
-              <svg viewBox="0 0 800 300" className="w-full h-auto">
-                {(() => {
-                  const history = indexHistoryData?.history || [];
-                  const { data: displayData, labels } = getYieldCurveData(history);
-                  
-                  if (displayData.length === 0) {
-                    return (
-                      <text x="400" y="150" textAnchor="middle" className="text-gray-400">
-                        暂无K线数据
-                      </text>
-                    );
-                  }
-                  
-                  const closes = displayData.map(item => parseFloat(item.close)).filter(Boolean);
-                  const highs = displayData.map(item => parseFloat(item.high)).filter(Boolean);
-                  const lows = displayData.map(item => parseFloat(item.low)).filter(Boolean);
-                  
-                  const minVal = Math.min(...lows) * 0.99;
-                  const maxVal = Math.max(...highs) * 1.01;
-                  const range = maxVal - minVal || 1;
-                  
-                  const dataLength = displayData.length;
-                  const step = (740 - 60) / (dataLength - 1);
-                  const candleWidth = Math.max(8, step * 0.6);
-                  
-                  const yScale = (val) => 40 + ((maxVal - val) / range) * 230;
-                  
-                  return (
-                    <g>
-                      {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
-                        const val = maxVal - ratio * range;
-                        const y = yScale(val);
-                        return (
-                          <g key={ratio}>
-                            <line
-                              x1="60"
-                              y1={y}
-                              x2="740"
-                              y2={y}
-                              stroke="#E5E7EB"
-                              strokeDasharray="4"
-                            />
-                            <text
-                              x="750"
-                              y={y + 4}
-                              textAnchor="start"
-                              className="text-xs fill-gray-400"
-                            >
-                              {val.toFixed(2)}
-                            </text>
-                          </g>
-                        );
-                      })}
-                      {displayData.map((item, i) => {
-                        const x = 60 + i * step;
-                        const isUp = item.close >= (item.open || item.close);
-                        const color = isUp ? '#EF4444' : '#10B981';
-                        
-                        const open = item.open || item.close;
-                        const close = item.close;
-                        const high = item.high || close;
-                        const low = item.low || close;
-                        
-                        const bodyTop = yScale(Math.max(open, close));
-                        const bodyBottom = yScale(Math.min(open, close));
-                        const bodyHeight = bodyBottom - bodyTop;
-                        const highY = yScale(high);
-                        const lowY = yScale(low);
-                        
-                        return (
-                          <g key={i}>
-                            <line
-                              x1={x}
-                              y1={highY}
-                              x2={x}
-                              y2={lowY}
-                              stroke={color}
-                              strokeWidth="1"
-                            />
-                            <rect
-                              x={x - candleWidth / 2}
-                              y={bodyTop}
-                              width={candleWidth}
-                              height={Math.max(1, bodyHeight)}
-                              fill={isUp ? color : 'none'}
-                              stroke={color}
-                              strokeWidth="1"
-                            />
-                          </g>
-                        );
-                      })}
-                      {labels.map(({ index, label }) => {
-                        const x = 60 + index * step;
-                        return (
-                          <text
-                            key={`date-${index}`}
-                            x={x}
-                            y={290}
-                            textAnchor="middle"
-                            className="text-xs fill-gray-400"
-                          >
-                            {label}
-                          </text>
-                        );
-                      })}
-                    </g>
-                  );
-                })()}
-              </svg>
-            )}
+                    {tooltip && (
+                      <g>
+                        <rect
+                          x={tooltip.x + 10}
+                          y={tooltip.y - 75}
+                          width="160"
+                          height="60"
+                          rx="4"
+                          fill="rgba(0,0,0,0.8)"
+                        />
+                        <text
+                          x={tooltip.x + 20}
+                          y={tooltip.y - 55}
+                          className="text-xs fill-white"
+                        >
+                          {tooltip.date}
+                        </text>
+                        <text
+                          x={tooltip.x + 20}
+                          y={tooltip.y - 40}
+                          className="text-xs fill-red-400"
+                        >
+                          用户: {tooltip.userRate?.toFixed?.(2) || '—'}%
+                        </text>
+                        <text
+                          x={tooltip.x + 20}
+                          y={tooltip.y - 25}
+                          className="text-xs"
+                          fill={selectedIndexColor}
+                        >
+                          指数: {tooltip.indexRate?.toFixed?.(2) || '—'}%
+                        </text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })()}
+            </svg>
           </div>
         </div>
 
@@ -1992,7 +2146,6 @@ export default function AssetPenetration({ onBack }) {
               {[
                 { key: 'rate', label: '收益率' },
                 { key: 'amount', label: '盈亏金额' },
-                { key: 'asset', label: '总资产' },
               ].map((item) => (
                 <button
                   key={item.key}
@@ -2103,25 +2256,80 @@ export default function AssetPenetration({ onBack }) {
                               'Z'
                             ].join(' ');
                             const isHovered = drillHoverIndex === index;
-                            const canDrill = drillDownPath.length < 2;
+                            const canDrill = drillDownPath.length < 3;
+                            const midAngle = startAngle + sliceAngle / 2;
+                            const labelR = r * 0.55;
+                            const labelX = cx + labelR * Math.cos(midAngle);
+                            const labelY = cy + labelR * Math.sin(midAngle);
                             startAngle = endAngle;
+                            const isFullCircle = sliceAngle >= 2 * Math.PI - 0.001;
                             return (
                               <g key={index}>
-                                <path
-                                  d={pathData}
-                                  fill={colors[index % colors.length]}
-                                  className={`transition-opacity duration-200 ${canDrill ? 'cursor-pointer' : 'cursor-default'}`}
-                                  style={{ opacity: isHovered ? 1 : 0.85 }}
-                                  onMouseEnter={() => setDrillHoverIndex(index)}
-                                  onMouseLeave={() => setDrillHoverIndex(null)}
-                                  onClick={() => {
-                                    if (canDrill) {
-                                      setDrillDownPath([...drillDownPath, item.name]);
-                                      setDrillHoverIndex(null);
-                                    }
-                                  }}
-                                />
-                                <title>{item.name}: {item.percent.toFixed(2)}% (¥{formatCurrency(item.value)})</title>
+                                {isFullCircle ? (
+                                  <circle
+                                    cx={cx}
+                                    cy={cy}
+                                    r={r}
+                                    fill={colors[index % colors.length]}
+                                    className={`transition-opacity duration-200 ${canDrill ? 'cursor-pointer' : 'cursor-default'}`}
+                                    style={{ opacity: isHovered ? 1 : 0.85 }}
+                                    onMouseEnter={() => setDrillHoverIndex(index)}
+                                    onMouseLeave={() => setDrillHoverIndex(null)}
+                                    onClick={() => {
+                                      if (canDrill) {
+                                        setDrillDownPath([...drillDownPath, item.name]);
+                                        setDrillHoverIndex(null);
+                                      }
+                                    }}
+                                  >
+                                    <title>
+                                      {analysisView === 'rate'
+                                        ? `${item.name}: ${item.percent.toFixed(2)}% (${formatPercentage(item.pnlRate)})`
+                                        : `${item.name}: ${item.percent.toFixed(2)}% (¥${formatCurrency(item.pnl)})`}
+                                    </title>
+                                  </circle>
+                                ) : (
+                                  <path
+                                    d={pathData}
+                                    fill={colors[index % colors.length]}
+                                    className={`transition-opacity duration-200 ${canDrill ? 'cursor-pointer' : 'cursor-default'}`}
+                                    style={{ opacity: isHovered ? 1 : 0.85 }}
+                                    onMouseEnter={() => setDrillHoverIndex(index)}
+                                    onMouseLeave={() => setDrillHoverIndex(null)}
+                                    onClick={() => {
+                                      if (canDrill) {
+                                        setDrillDownPath([...drillDownPath, item.name]);
+                                        setDrillHoverIndex(null);
+                                      }
+                                    }}
+                                  >
+                                    <title>
+                                      {analysisView === 'rate'
+                                        ? `${item.name}: ${item.percent.toFixed(2)}% (${formatPercentage(item.pnlRate)})`
+                                        : `${item.name}: ${item.percent.toFixed(2)}% (¥${formatCurrency(item.pnl)})`}
+                                    </title>
+                                  </path>
+                                )}
+                                <text
+                                  x={labelX}
+                                  y={labelY}
+                                  textAnchor="middle"
+                                  dominantBaseline="middle"
+                                  className="text-xs font-bold fill-white"
+                                  style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+                                >
+                                  {item.name}
+                                </text>
+                                <text
+                                  x={labelX}
+                                  y={labelY + 12}
+                                  textAnchor="middle"
+                                  dominantBaseline="middle"
+                                  className="text-xs font-medium fill-white"
+                                  style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+                                >
+                                  {item.percent.toFixed(1)}%
+                                </text>
                               </g>
                             );
                           });
@@ -2132,7 +2340,7 @@ export default function AssetPenetration({ onBack }) {
                       {drilldownPieData.map((item, index) => {
                         const colors = ['#3B82F6', '#EF4444', '#F59E0B', '#10B981', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'];
                         const isHovered = drillHoverIndex === index;
-                        const canDrill = drillDownPath.length < 2;
+                        const canDrill = drillDownPath.length < 3;
                         return (
                           <div
                             key={index}
@@ -2164,12 +2372,15 @@ export default function AssetPenetration({ onBack }) {
                               <div className="text-sm font-medium text-gray-900 dark:text-white">
                                 {item.percent.toFixed(2)}%
                               </div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">
-                                ¥{formatCurrency(item.value)}
-                              </div>
-                              <div className={`text-xs ${pnlClass(item.pnlRate)}`}>
-                                {formatPercentage(item.pnlRate)}
-                              </div>
+                              {analysisView === 'rate' ? (
+                                <div className={`text-xs ${pnlClass(item.pnlRate)}`}>
+                                  {formatPercentage(item.pnlRate)}
+                                </div>
+                              ) : (
+                                <div className={`text-xs ${pnlClass(item.pnl)}`}>
+                                  ¥{formatCurrency(item.pnl)}
+                                </div>
+                              )}
                             </div>
                             {canDrill && (
                               <ChevronRight className="w-4 h-4 text-gray-400" />
@@ -2197,10 +2408,20 @@ export default function AssetPenetration({ onBack }) {
                     });
                   }
                   const maxVal = userData.length > 0 ? Math.max(...userData) : 0;
+                  const minVal = userData.length > 0 ? Math.min(...userData) : 0;
                   return (
-                    <p className="text-sm text-green-600 dark:text-green-400 mb-4">
-                      最大收益率: +{maxVal.toFixed(2)}%
-                    </p>
+                    <div className="flex justify-between mb-4">
+                      <p className="text-sm text-green-600 dark:text-green-400">
+                        {analysisView === 'rate'
+                          ? `最大收益率: +${maxVal.toFixed(2)}%`
+                          : `最大盈亏: +¥${formatCurrency(maxVal)}`}
+                      </p>
+                      <p className="text-sm text-red-600 dark:text-red-400">
+                        {analysisView === 'rate'
+                          ? `最差收益率: ${minVal.toFixed(2)}%`
+                          : `最差盈亏: ¥${formatCurrency(minVal)}`}
+                      </p>
+                    </div>
                   );
                 })()}
                 <svg viewBox="0 0 800 240" className="w-full h-auto">
@@ -2214,16 +2435,16 @@ export default function AssetPenetration({ onBack }) {
                         </text>
                       );
                     }
-                    const baseRate = currentPnlRate;
+                    const baseValue = analysisView === 'rate' ? currentPnlRate : currentPnl;
                     const userData = [];
                     displayData.forEach((item, idx) => {
                       const ratio = displayData.length > 1 ? idx / (displayData.length - 1) : 0;
-                      userData.push(baseRate * ratio);
+                      userData.push(baseValue * ratio);
                     });
                     const dataLength = userData.length;
                     const step = dataLength > 1 ? (740 - 60) / (dataLength - 1) : 340;
-                    const yMax = Math.max(...userData, 5);
-                    const yMin = Math.min(...userData, -5);
+                    const yMax = Math.max(...userData, analysisView === 'rate' ? 5 : 1000);
+                    const yMin = Math.min(...userData, analysisView === 'rate' ? -5 : -1000);
                     const range = yMax - yMin || 10;
                     const padding = range * 0.1;
                     const chartYMax = yMax + padding;
@@ -2238,6 +2459,10 @@ export default function AssetPenetration({ onBack }) {
                     const maxVal = userData[maxIdx];
                     const maxX = 60 + maxIdx * step;
                     const maxY = 30 + ((chartYMax - maxVal) / (chartYMax - chartYMin)) * 160;
+                    const minIdx = userData.indexOf(Math.min(...userData));
+                    const minVal = userData[minIdx];
+                    const minX = 60 + minIdx * step;
+                    const minY = 30 + ((chartYMax - minVal) / (chartYMax - chartYMin)) * 160;
                     return (
                       <g>
                         {ticks.map((val) => {
@@ -2245,7 +2470,9 @@ export default function AssetPenetration({ onBack }) {
                           return (
                             <g key={val}>
                               <line x1="60" y1={y} x2="740" y2={y} stroke="#E5E7EB" strokeDasharray="4" />
-                              <text x="750" y={y + 4} textAnchor="start" className="text-xs fill-gray-400">{val}%</text>
+                              <text x="750" y={y + 4} textAnchor="start" className="text-xs fill-gray-400">
+                                {analysisView === 'rate' ? `${val}%` : `¥${formatCurrency(val)}`}
+                              </text>
                             </g>
                           );
                         })}
@@ -2257,12 +2484,65 @@ export default function AssetPenetration({ onBack }) {
                         <path d={userPath} fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                         <circle cx={maxX} cy={maxY} r="6" fill="#22C55E" />
                         <text x={maxX} y={maxY - 12} textAnchor="middle" className="text-xs fill-green-600 font-medium">
-                          最大收益 {maxVal.toFixed(2)}%
+                          {analysisView === 'rate' ? `最大收益 ${maxVal.toFixed(2)}%` : `最大盈亏 ¥${formatCurrency(maxVal)}`}
+                        </text>
+                        <circle cx={minX} cy={minY} r="6" fill="#EF4444" />
+                        <text x={minX} y={minY + 18} textAnchor="middle" className="text-xs fill-red-600 font-medium">
+                          {analysisView === 'rate' ? `最差收益 ${minVal.toFixed(2)}%` : `最差盈亏 ¥${formatCurrency(minVal)}`}
                         </text>
                       </g>
                     );
                   })()}
                 </svg>
+                <div className="mt-4 space-y-2">
+                  {analysisView === 'rate' ? (
+                    <>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">{timeRangeLabels[timeRange]}收益率</span>
+                        <span className={`font-medium ${pnlClass(currentPnlRate)}`}>{formatPercentage(currentPnlRate)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">日收益率</span>
+                        <span className={`font-medium ${pnlClass(totalDailyPnlRate)}`}>{formatPercentage(totalDailyPnlRate)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">最佳收益率</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
+                          +{formatPercentage(bestPerformer?.holdingPnlRate || 0)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">最差收益率</span>
+                        <span className="text-red-600 dark:text-red-400 font-medium">
+                          {formatPercentage(worstPerformer?.holdingPnlRate || 0)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">{timeRangeLabels[timeRange]}盈亏</span>
+                        <span className={`font-medium ${pnlClass(currentPnl)}`}>¥{formatCurrency(currentPnl)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">日盈亏</span>
+                        <span className={`font-medium ${pnlClass(totalDailyPnl)}`}>¥{formatCurrency(totalDailyPnl)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">最佳盈亏</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
+                          +¥{formatCurrency(bestPerformer?.holdingPnl || 0)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">最差盈亏</span>
+                        <span className="text-red-600 dark:text-red-400 font-medium">
+                          ¥{formatCurrency(worstPerformer?.holdingPnl || 0)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             )}
             {selectedAnalysis === 'drawdown' && (
@@ -2288,7 +2568,9 @@ export default function AssetPenetration({ onBack }) {
                   }
                   return (
                     <p className="text-sm text-red-600 dark:text-red-400 mb-4">
-                      最大回撤: -{maxDrawdown.toFixed(2)}%
+                      {analysisView === 'rate'
+                        ? `最大回撤: -${maxDrawdown.toFixed(2)}%`
+                        : `最大回撤金额: -¥${formatCurrency(maxDrawdown)}`}
                     </p>
                   );
                 })()}
@@ -2303,16 +2585,16 @@ export default function AssetPenetration({ onBack }) {
                         </text>
                       );
                     }
-                    const baseRate = currentPnlRate;
+                    const baseValue = analysisView === 'rate' ? currentPnlRate : currentPnl;
                     const userData = [];
                     displayData.forEach((item, idx) => {
                       const ratio = displayData.length > 1 ? idx / (displayData.length - 1) : 0;
-                      userData.push(baseRate * ratio);
+                      userData.push(baseValue * ratio);
                     });
                     const dataLength = userData.length;
                     const step = dataLength > 1 ? (740 - 60) / (dataLength - 1) : 340;
-                    const yMax = Math.max(...userData, 5);
-                    const yMin = Math.min(...userData, -5);
+                    const yMax = Math.max(...userData, analysisView === 'rate' ? 5 : 1000);
+                    const yMin = Math.min(...userData, analysisView === 'rate' ? -5 : -1000);
                     const range = yMax - yMin || 10;
                     const padding = range * 0.1;
                     const chartYMax = yMax + padding;
@@ -2350,6 +2632,7 @@ export default function AssetPenetration({ onBack }) {
                     }
                     shadowPoints.push(`${endX},${peakY}`);
                     shadowPoints.push(`${peakX},${peakY}`);
+                    const fmtLabel = (v) => analysisView === 'rate' ? `${v.toFixed(2)}%` : `¥${formatCurrency(v)}`;
                     return (
                       <g>
                         {ticks.map((val) => {
@@ -2357,7 +2640,9 @@ export default function AssetPenetration({ onBack }) {
                           return (
                             <g key={val}>
                               <line x1="60" y1={y} x2="740" y2={y} stroke="#E5E7EB" strokeDasharray="4" />
-                              <text x="750" y={y + 4} textAnchor="start" className="text-xs fill-gray-400">{val}%</text>
+                              <text x="750" y={y + 4} textAnchor="start" className="text-xs fill-gray-400">
+                                {analysisView === 'rate' ? `${val}%` : `¥${formatCurrency(val)}`}
+                              </text>
                             </g>
                           );
                         })}
@@ -2370,16 +2655,65 @@ export default function AssetPenetration({ onBack }) {
                         <path d={userPath} fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                         <circle cx={peakX} cy={peakY} r="5" fill="#EF4444" />
                         <text x={peakX} y={peakY - 10} textAnchor="middle" className="text-xs fill-red-500 font-medium">
-                          峰值 {peakVal.toFixed(2)}%
+                          峰值 {fmtLabel(peakVal)}
                         </text>
                         <circle cx={endX} cy={endY} r="5" fill="#EF4444" />
                         <text x={endX} y={endY + 18} textAnchor="middle" className="text-xs fill-red-500 font-medium">
-                          谷值 {userData[drawdownEndIdx].toFixed(2)}%
+                          谷值 {fmtLabel(userData[drawdownEndIdx])}
                         </text>
                       </g>
                     );
                   })()}
                 </svg>
+                <div className="mt-4 space-y-2">
+                  {analysisView === 'rate' ? (
+                    <>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">{timeRangeLabels[timeRange]}收益率</span>
+                        <span className={`font-medium ${pnlClass(currentPnlRate)}`}>{formatPercentage(currentPnlRate)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">日收益率</span>
+                        <span className={`font-medium ${pnlClass(totalDailyPnlRate)}`}>{formatPercentage(totalDailyPnlRate)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">最佳收益率</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
+                          +{formatPercentage(bestPerformer?.holdingPnlRate || 0)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">最差收益率</span>
+                        <span className="text-red-600 dark:text-red-400 font-medium">
+                          {formatPercentage(worstPerformer?.holdingPnlRate || 0)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">{timeRangeLabels[timeRange]}盈亏</span>
+                        <span className={`font-medium ${pnlClass(currentPnl)}`}>¥{formatCurrency(currentPnl)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">日盈亏</span>
+                        <span className={`font-medium ${pnlClass(totalDailyPnl)}`}>¥{formatCurrency(totalDailyPnl)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">最佳盈亏</span>
+                        <span className="text-green-600 dark:text-green-400 font-medium">
+                          +¥{formatCurrency(bestPerformer?.holdingPnl || 0)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">最差盈亏</span>
+                        <span className="text-red-600 dark:text-red-400 font-medium">
+                          ¥{formatCurrency(worstPerformer?.holdingPnl || 0)}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             )}
             <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
@@ -2428,7 +2762,7 @@ export default function AssetPenetration({ onBack }) {
                         </div>
                       </div>
                     );
-                  } else if (analysisView === 'amount') {
+                  } else {
                     return (
                       <div className="space-y-3">
                         <div className="flex justify-between items-center">
@@ -2446,27 +2780,6 @@ export default function AssetPenetration({ onBack }) {
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600 dark:text-gray-400">亏损数量</span>
                           <span className="text-red-600 dark:text-red-400 font-medium">{selLossCount}</span>
-                        </div>
-                      </div>
-                    );
-                  } else {
-                    return (
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-600 dark:text-gray-400">{selectedPositionItem.name}总资产</span>
-                          <span className="font-medium text-gray-900 dark:text-white">¥{formatCurrency(selTotalValue)}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-600 dark:text-gray-400">总成本</span>
-                          <span className="font-medium text-gray-900 dark:text-white">¥{formatCurrency(selTotalCost)}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-600 dark:text-gray-400">持仓数量</span>
-                          <span className="font-medium text-gray-900 dark:text-white">{filtered.length}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-600 dark:text-gray-400">账户数量</span>
-                          <span className="font-medium text-gray-900 dark:text-white">{new Set(filtered.map(a => a.account)).size}</span>
                         </div>
                       </div>
                     );
@@ -2553,7 +2866,9 @@ export default function AssetPenetration({ onBack }) {
           </div>
           <div className="text-center mb-6">
             <p className={`text-sm ${(() => {
-              const idxRate = indexPeriodReturns[selectedIndex] || allIndexData[selectedIndex]?.changeRate || 0;
+              const idxRate = timeRange === 'day'
+                ? (allIndexData[selectedIndex]?.changeRate || indexPeriodReturns[selectedIndex] || 0)
+                : (indexPeriodReturns[selectedIndex] || allIndexData[selectedIndex]?.changeRate || 0);
               const diff = currentPnlRate - idxRate;
               return diff >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
             })()}`}>
@@ -2562,40 +2877,55 @@ export default function AssetPenetration({ onBack }) {
                 return map[timeRange] || '本月';
               })()}
               {(() => {
-                const idxRate = indexPeriodReturns[selectedIndex] || allIndexData[selectedIndex]?.changeRate || 0;
+                const idxRate = timeRange === 'day'
+                ? (allIndexData[selectedIndex]?.changeRate || indexPeriodReturns[selectedIndex] || 0)
+                : (indexPeriodReturns[selectedIndex] || allIndexData[selectedIndex]?.changeRate || 0);
                 const diff = currentPnlRate - idxRate;
                 return diff >= 0 ? '跑赢' : '跑输';
               })()}
               {getIndexName(selectedIndex)}
             </p>
             <p className={`text-4xl font-bold mt-2 ${(() => {
-              const idxRate = indexPeriodReturns[selectedIndex] || allIndexData[selectedIndex]?.changeRate || 0;
+              const idxRate = timeRange === 'day'
+                ? (allIndexData[selectedIndex]?.changeRate || indexPeriodReturns[selectedIndex] || 0)
+                : (indexPeriodReturns[selectedIndex] || allIndexData[selectedIndex]?.changeRate || 0);
               const diff = currentPnlRate - idxRate;
               return diff >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
             })()}`}>
               {(() => {
-                const idxRate = indexPeriodReturns[selectedIndex] || allIndexData[selectedIndex]?.changeRate || 0;
+                const idxRate = timeRange === 'day'
+                ? (allIndexData[selectedIndex]?.changeRate || indexPeriodReturns[selectedIndex] || 0)
+                : (indexPeriodReturns[selectedIndex] || allIndexData[selectedIndex]?.changeRate || 0);
                 const diff = currentPnlRate - idxRate;
                 return `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%`;
               })()}
             </p>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 px-2">
+              <span className="w-14 text-sm text-gray-500 dark:text-gray-400">名称</span>
+              <div className="flex-1" />
+              <span className="w-24 text-right text-sm text-gray-500 dark:text-gray-400">涨跌幅</span>
+              <span className="w-24 text-right text-sm text-gray-500 dark:text-gray-400">用户跑输赢率</span>
+            </div>
             <div className="flex items-center gap-3">
               <span className="w-14 text-sm text-gray-700 dark:text-gray-300">用户</span>
               <div className="flex-1 h-6 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                  className="h-full bg-red-500 rounded-full transition-all duration-500"
                   style={{ width: `${Math.max(0, Math.min(100, Math.abs(currentPnlRate) * 5))}%`, justifyContent: currentPnlRate >= 0 ? 'flex-start' : 'flex-end' }}
                 />
               </div>
               <span className={`w-24 text-right text-sm font-medium ${pnlClass(currentPnlRate)}`}>
                 {formatPercentage(currentPnlRate)}
               </span>
+              <span className="w-24 text-right text-sm text-gray-500 dark:text-gray-400">--</span>
             </div>
             {allIndexOptions.map((option) => {
               const idxData = allIndexData[option.code];
-              const rate = indexPeriodReturns[option.code] || idxData?.changeRate || 0;
+              const rate = timeRange === 'day'
+                ? (idxData?.changeRate || indexPeriodReturns[option.code] || 0)
+                : (indexPeriodReturns[option.code] || idxData?.changeRate || 0);
               const price = idxData?.price || 0;
               const isSelected = selectedIndex === option.code;
               return (
@@ -2616,11 +2946,17 @@ export default function AssetPenetration({ onBack }) {
                       }}
                     />
                   </div>
-                  <span className="w-24 text-right text-sm">
-                    <span className="text-gray-700 dark:text-gray-300">{price > 0 ? price.toFixed(2) : '--'}</span>
-                    <span className={`ml-1 font-medium ${rate >= 0 ? POS_CLASS : NEG_CLASS}`}>
-                      {formatPercentage(rate)}
-                    </span>
+                  <span className={`w-24 text-right text-sm font-medium ${rate >= 0 ? POS_CLASS : NEG_CLASS}`}>
+                    {formatPercentage(rate)}
+                  </span>
+                  <span className={`w-24 text-right text-sm font-medium ${(() => {
+                    const diff = currentPnlRate - rate;
+                    return diff >= 0 ? POS_CLASS : NEG_CLASS;
+                  })()}`}>
+                    {(() => {
+                      const diff = currentPnlRate - rate;
+                      return `${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%`;
+                    })()}
                   </span>
                 </div>
               );
@@ -3319,15 +3655,38 @@ export default function AssetPenetration({ onBack }) {
         </div>
 
         <div className="bg-white dark:bg-slate-800 rounded-xl p-5 shadow-sm border border-gray-100 dark:border-slate-700">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 relative">
             <div className="flex items-center gap-2">
               <Activity className="w-5 h-5 text-blue-500" />
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">操作分析</h2>
             </div>
-            <div className="flex items-center gap-2">
-              <button className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg">操作统计</button>
-              <button className="px-3 py-1.5 text-sm font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">账户表现</button>
-            </div>
+            <button
+              onClick={() => setShowOpFormulas(v => !v)}
+              className="p-1.5 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-slate-700 dark:hover:text-gray-300"
+              title="公式说明"
+            >
+              <HelpCircle className="w-5 h-5" />
+            </button>
+            {showOpFormulas && (
+              <div className="absolute right-0 top-full mt-2 z-20 w-80 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-gray-200 dark:border-slate-700 p-4 text-sm text-gray-700 dark:text-gray-300">
+                <div className="font-medium mb-2 text-gray-900 dark:text-white">操作分析指标计算公式：</div>
+                <ul className="space-y-1 list-disc list-inside">
+                  <li>交易股票数 = 当前持仓资产总数</li>
+                  <li>平均持仓天数 = 各资产首次交易日期到当前日期的天数之和 / 资产总数</li>
+                  <li>建仓次数 = 所有 type='买入' 或 '建仓' 的交易记录数</li>
+                  <li>清仓次数 = 所有 type='卖出' 或 '清仓' 的交易记录数</li>
+                  <li>交易成功率 = 有卖出记录且当前持仓盈亏 ≥ 0 的资产数 / 有卖出记录的资产总数 × 100%</li>
+                  <li>平均仓位 = 当前持仓总市值 / 累计买入金额 × 100%</li>
+                  <li>资金周转率 = 累计卖出金额 / 当前持仓总市值</li>
+                  <li>经验值 = (交易总次数 / 50) × 100，上限100</li>
+                  <li>收益率评分 = 50 + 整体收益率 × 2，范围0~100</li>
+                  <li>抗风险评分 = 100 - 日收益率标准差 × 10，范围0~100</li>
+                  <li>稳定性评分 = (平均持仓天数 / 365) × 100，上限100</li>
+                  <li>择时能力 = 交易成功率，上限100</li>
+                  <li>综合评分 = 五项评分的平均值</li>
+                </ul>
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="grid grid-cols-2 gap-4">
@@ -3336,59 +3695,55 @@ export default function AssetPenetration({ onBack }) {
                   <Target className="w-4 h-4 text-blue-500" />
                   <span className="text-sm text-gray-500 dark:text-gray-400">交易股票数</span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">{financeAccounts.length}</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{operationStats.tradeStockCount}</p>
               </div>
               <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
                   <Clock className="w-4 h-4 text-blue-500" />
                   <span className="text-sm text-gray-500 dark:text-gray-400">平均持仓天数</span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">15</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{operationStats.avgHoldDays}</p>
               </div>
               <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
                   <RefreshCw className="w-4 h-4 text-blue-500" />
                   <span className="text-sm text-gray-500 dark:text-gray-400">建清仓次数</span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">8</p>
+                <div className="space-y-0.5">
+                  <p className="text-base font-bold text-gray-900 dark:text-white">建仓 {operationStats.buyCount} 次</p>
+                  <p className="text-base font-bold text-gray-900 dark:text-white">清仓 {operationStats.sellCount} 次</p>
+                </div>
               </div>
               <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
                   <TrendingUp className="w-4 h-4 text-green-500" />
                   <span className="text-sm text-gray-500 dark:text-gray-400">交易成功率</span>
                 </div>
-                <p className="text-2xl font-bold text-green-600 dark:text-green-400">62.5%</p>
+                <p className="text-2xl font-bold text-green-600 dark:text-green-400">{Number.isFinite(operationStats.successRate) ? operationStats.successRate.toFixed(1) : '0.0'}%</p>
               </div>
               <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
                   <Wallet className="w-4 h-4 text-blue-500" />
                   <span className="text-sm text-gray-500 dark:text-gray-400">平均仓位</span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">75%</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{Number.isFinite(operationStats.avgPosition) ? operationStats.avgPosition.toFixed(1) : '0.0'}%</p>
               </div>
               <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
                   <RefreshCw className="w-4 h-4 text-blue-500" />
                   <span className="text-sm text-gray-500 dark:text-gray-400">资金周转率</span>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">2.3</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{Number.isFinite(operationStats.turnoverRate) ? operationStats.turnoverRate.toFixed(2) : '0.00'}</p>
               </div>
             </div>
             <div className="p-4 bg-gray-50 dark:bg-slate-700/50 rounded-lg flex flex-col items-center justify-center">
               <div className="flex items-center gap-2 mb-4">
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300">业绩评分</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">i</span>
               </div>
-              <svg viewBox="0 0 200 200" className="w-full max-w-[200px] h-auto">
+              <svg viewBox="0 0 240 240" className="w-full max-w-[220px] h-auto">
                 {(() => {
-                  const dimensions = [
-                    { name: '经验值', value: 99.30 },
-                    { name: '收益率', value: 76.80 },
-                    { name: '抗风险', value: 72.60 },
-                    { name: '稳定性', value: 84.90 },
-                    { name: '择时能力', value: 63.20 },
-                  ];
-                  const centerX = 100, centerY = 100;
+                  const dimensions = operationStats.radarScores;
+                  const centerX = 120, centerY = 120;
                   const radius = 70;
                   const sides = dimensions.length;
                   const angleStep = (Math.PI * 2) / sides;
@@ -3400,7 +3755,7 @@ export default function AssetPenetration({ onBack }) {
                     const x = centerX + r * Math.cos(angle);
                     const y = centerY + r * Math.sin(angle);
                     dataPoints.push({ x, y });
-                    const labelR = radius + 20;
+                    const labelR = radius + 30;
                     const labelX = centerX + labelR * Math.cos(angle);
                     const labelY = centerY + labelR * Math.sin(angle);
                     labels.push({ x: labelX, y: labelY, name: dim.name, value: dim.value });
@@ -3448,8 +3803,8 @@ export default function AssetPenetration({ onBack }) {
                       })}
                       <polygon
                         points={dataPoints.map(p => `${p.x},${p.y}`).join(' ')}
-                        fill="rgba(239, 68, 68, 0.2)"
-                        stroke="#EF4444"
+                        fill="rgba(59, 130, 246, 0.2)"
+                        stroke="#3B82F6"
                         strokeWidth={2}
                       />
                       {dataPoints.map((p, i) => (
@@ -3458,35 +3813,47 @@ export default function AssetPenetration({ onBack }) {
                           cx={p.x}
                           cy={p.y}
                           r="4"
-                          fill="#EF4444"
+                          fill="#3B82F6"
                         />
                       ))}
                       <text x={centerX} y={centerY - 8} textAnchor="middle" className="text-sm font-bold fill-gray-900 dark:fill-white">
-                        76.92
+                        {operationStats.overallScore.toFixed(2)}
                       </text>
                       <text x={centerX} y={centerY + 8} textAnchor="middle" className="text-xs fill-gray-500 dark:fill-gray-400">
                         综合评分
                       </text>
-                      {labels.map((label, i) => (
-                        <g key={`label-${i}`}>
-                          <text
-                            x={label.x}
-                            y={label.y - 4}
-                            textAnchor="middle"
-                            className="text-xs fill-gray-600 dark:fill-gray-400"
-                          >
-                            {label.name}
-                          </text>
-                          <text
-                            x={label.x}
-                            y={label.y + 10}
-                            textAnchor="middle"
-                            className="text-xs font-bold fill-orange-500"
-                          >
-                            {label.value}
-                          </text>
-                        </g>
-                      ))}
+                      {labels.map((label, i) => {
+                        const angle = -Math.PI / 2 + i * angleStep;
+                        let textAnchor = 'middle';
+                        let offsetX = 0;
+                        if (angle > -Math.PI / 2 && angle < Math.PI / 2) {
+                          textAnchor = 'start';
+                          offsetX = 5;
+                        } else if (angle < -Math.PI / 2 || angle > Math.PI / 2) {
+                          textAnchor = 'end';
+                          offsetX = -5;
+                        }
+                        return (
+                          <g key={`label-${i}`}>
+                            <text
+                              x={label.x + offsetX}
+                              y={label.y - 2}
+                              textAnchor={textAnchor}
+                              className="text-xs fill-gray-600 dark:fill-gray-400"
+                            >
+                              {label.name}
+                            </text>
+                            <text
+                              x={label.x + offsetX}
+                              y={label.y + 12}
+                              textAnchor={textAnchor}
+                              className="text-xs font-bold fill-blue-500"
+                            >
+                              {label.value}
+                            </text>
+                          </g>
+                        );
+                      })}
                     </g>
                   );
                 })()}

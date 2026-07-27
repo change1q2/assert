@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { fetchState } from '../api';
 import { getCurrencySymbol, DEFAULT_BASE_CURRENCY, convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency';
+import FinanceAnalysis from '../components/FinanceAnalysis';
+import DebtAnalysis from '../components/DebtAnalysis';
+import IndependentAssetAnalysis from '../components/IndependentAssetAnalysis';
 import {
   PieChart, Pie, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, AreaChart, Area, Sankey,
 } from 'recharts';
@@ -63,7 +66,7 @@ export default function Analysis({ onNavigate }) {
   const [expandedBudgetCategory, setExpandedBudgetCategory] = useState(null);
   const [analysisTab, setAnalysisTab] = useState('income-expense');
 
-  const { records = [], accounts = [], debts = [], tags = [], budgets = [] } = stateData || {};
+  const { records = [], accounts = [], debts = [], tags = [], budgets = [], financeAssets = [], independentAssets = {}, debtCategories = [] } = stateData || {};
 
   useEffect(() => {
     loadData();
@@ -313,6 +316,71 @@ export default function Analysis({ onNavigate }) {
       tagData,
     };
   }, [records, filterRecordsByTime, selectedCurrency, monthDays]);
+
+  const assetCategoryData = useMemo(() => {
+    const financeTotalValue = financeAssets.reduce((sum, a) => sum + (parseFloat(a.currentValue) || 0), 0);
+    const financeTotalCost = financeAssets.reduce((sum, a) => sum + (parseFloat(a.cost) || 0), 0);
+
+    let independentTotalValue = 0;
+    let independentTotalCost = 0;
+    Object.keys(independentAssets).forEach(type => {
+      const items = independentAssets[type] || [];
+      items.forEach(item => {
+        if (type === 'insurance') {
+          independentTotalValue += parseFloat(item.premiumTotal || 0);
+          independentTotalCost += parseFloat(item.premiumTotal || 0);
+        } else if (type === 'realestate') {
+          if (item.usage === '出租') {
+            independentTotalValue += parseFloat(item.purchasePrice || 0);
+          } else {
+            const marketValue = parseFloat(item.marketValue || 0);
+            const taxAmount = parseFloat(item.taxAmount || 0);
+            const agencyFeeAmount = parseFloat(item.agencyFeeAmount || 0);
+            const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFeeAmount) : parseFloat(item.purchasePrice || 0);
+            independentTotalValue += actualValue;
+          }
+          independentTotalCost += parseFloat(item.purchasePrice || 0);
+        } else if (type === 'vehicle') {
+          const purchasePrice = parseFloat(item.purchasePrice || 0);
+          const purchaseDate = item.purchaseDate;
+          if (purchasePrice > 0 && purchaseDate) {
+            const months = Math.floor((new Date() - new Date(purchaseDate)) / (1000 * 60 * 60 * 24 * 30));
+            const depreciationRate = Math.max(0, 1 - months * 0.0067);
+            independentTotalValue += purchasePrice * depreciationRate;
+          } else {
+            independentTotalValue += purchasePrice;
+          }
+          independentTotalCost += purchasePrice;
+        } else if (type === 'fixedinvestment') {
+          independentTotalValue += parseFloat(item.investmentCost || 0);
+          independentTotalCost += parseFloat(item.investmentCost || 0);
+        } else if (type === 'equity') {
+          independentTotalValue += parseFloat(item.marketValue || 0);
+          independentTotalCost += parseFloat(item.investmentCost || 0);
+        } else if (type === 'fixeddeposit') {
+          independentTotalValue += parseFloat(item.amount || 0);
+          independentTotalCost += parseFloat(item.amount || 0);
+        }
+      });
+    });
+
+    const totalValue = financeTotalValue + independentTotalValue;
+    const totalCost = financeTotalCost + independentTotalCost;
+
+    return {
+      finance: { value: financeTotalValue, cost: financeTotalCost },
+      independent: { value: independentTotalValue, cost: independentTotalCost },
+      total: { value: totalValue, cost: totalCost },
+      valuePieData: [
+        { name: '理财资产', value: financeTotalValue, fill: '#3B82F6' },
+        { name: '独立资产', value: independentTotalValue, fill: '#EC4899' },
+      ],
+      costPieData: [
+        { name: '理财资产', value: financeTotalCost, fill: '#3B82F6' },
+        { name: '独立资产', value: independentTotalCost, fill: '#EC4899' },
+      ],
+    };
+  }, [financeAssets, independentAssets]);
 
   const assetTrend = useMemo(() => {
     const trendData = [];
@@ -2021,7 +2089,7 @@ export default function Analysis({ onNavigate }) {
                 key={tab.value}
                 onClick={() => {
                   setAnalysisTab(tab.value);
-                  if (tab.value !== 'income-expense' && onNavigate) {
+                  if (tab.value !== 'income-expense' && tab.value !== 'finance' && tab.value !== 'debts' && tab.value !== 'independent-assets' && onNavigate) {
                     onNavigate(tab.value);
                   }
                 }}
@@ -2037,6 +2105,21 @@ export default function Analysis({ onNavigate }) {
           </div>
         </div>
 
+        {analysisTab === 'finance' ? (
+          <FinanceAnalysis
+            stateData={stateData}
+            timeMode={timeMode}
+            startDate={startDate}
+            endDate={endDate}
+            selectedYear={selectedYear}
+            selectedMonth={selectedMonth}
+          />
+        ) : analysisTab === 'debts' ? (
+          <DebtAnalysis debts={debts} debtCategories={debtCategories} />
+        ) : analysisTab === 'independent-assets' ? (
+          <IndependentAssetAnalysis independentAssets={independentAssets} />
+        ) : (
+          <>
         <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/60 dark:border-slate-800 mb-6">
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex bg-gray-100 dark:bg-slate-700 rounded-xl p-1">
@@ -2573,6 +2656,8 @@ export default function Analysis({ onNavigate }) {
         </div>
         </div>
         )}
+        </>
+      )}
       </div>
     </div>
   );

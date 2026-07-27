@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { User, Camera, Edit2, Save, Mail, Phone, Globe, Moon, Sun, Shield, AlertCircle, CheckCircle } from 'lucide-react';
+import { User, Camera, Edit2, Save, Mail, Phone, Globe, Shield, AlertCircle, CheckCircle, LayoutDashboard, Send, Image, Video, Paperclip } from 'lucide-react';
 
-export default function UserProfile() {
+export default function UserProfile({ onAdmin, isAdmin }) {
   const [user, setUser] = useState({
     name: '管理员',
     phone: '',
@@ -17,8 +17,11 @@ export default function UserProfile() {
   const [passwordSuccess, setPasswordSuccess] = useState('');
   const [avatarPreview, setAvatarPreview] = useState('');
   const [language, setLanguage] = useState('zh');
-  const [theme, setTheme] = useState('light');
   const [saveSuccess, setSaveSuccess] = useState('');
+  const [feedback, setFeedback] = useState({ title: '', content: '' });
+  const [feedbackAttachments, setFeedbackAttachments] = useState([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState('');
 
   useEffect(() => {
     const savedState = localStorage.getItem('state');
@@ -84,7 +87,37 @@ export default function UserProfile() {
     setEditData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const savedState = localStorage.getItem('state');
+    let stateData = {};
+    if (savedState) {
+      try {
+        stateData = JSON.parse(savedState);
+      } catch (e) {
+        console.error('Failed to parse state');
+      }
+    }
+    const updatedState = { ...stateData, user: editData };
+    
+    try {
+      const token = localStorage.getItem('token');
+      if (token) {
+        const response = await fetch('/api/state', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ state: updatedState })
+        });
+        if (!response.ok) {
+          throw new Error('保存失败');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to sync user info to server:', error);
+    }
+    
     setUser(editData);
     setEditing(false);
     saveUserToStorage(editData);
@@ -136,11 +169,72 @@ export default function UserProfile() {
     localStorage.setItem('language', lang);
   };
 
-  const handleThemeToggle = () => {
-    const newTheme = theme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
-    document.documentElement.classList.toggle('dark', newTheme === 'dark');
+  const handleFeedbackSubmit = async () => {
+    if (!feedback.title.trim() || !feedback.content.trim()) {
+      alert('请填写问题标题和问题详情');
+      return;
+    }
+    
+    setFeedbackLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          type: '问题反馈',
+          title: feedback.title,
+          content: feedback.content,
+          attachments: feedbackAttachments
+        })
+      });
+      
+      if (response.ok) {
+        setFeedbackSuccess('反馈提交成功，我们会尽快处理');
+        setFeedback({ title: '', content: '' });
+        setFeedbackAttachments([]);
+        setTimeout(() => setFeedbackSuccess(''), 3000);
+      } else {
+        const data = await response.json();
+        alert(data.message || '提交失败');
+      }
+    } catch (error) {
+      console.error('Feedback submit error:', error);
+      alert('提交失败，请稍后重试');
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+
+  const handleAttachmentChange = (e) => {
+    const files = Array.from(e.target.files);
+    const maxSize = 10 * 1024 * 1024;
+    
+    for (const file of files) {
+      if (file.size > maxSize) {
+        alert(`文件 ${file.name} 超过10MB限制`);
+        return;
+      }
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+        alert(`文件 ${file.name} 格式不支持，仅支持图片和视频`);
+        return;
+      }
+    }
+    
+    const newAttachments = files.map(file => ({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      data: ''
+    }));
+    setFeedbackAttachments(prev => [...prev, ...newAttachments]);
+  };
+
+  const removeAttachment = (index) => {
+    setFeedbackAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
   const getInitial = (name) => {
@@ -164,13 +258,17 @@ export default function UserProfile() {
       language: '语言',
       chinese: '中文',
       english: 'English',
-      theme: '主题',
-      light: '浅色',
-      dark: '深色',
       oldPassword: '旧密码',
       newPassword: '新密码',
       confirmPassword: '确认新密码',
       updateSuccess: '更新成功',
+      feedback: '问题反馈',
+      feedbackTitle: '问题标题',
+      feedbackContent: '问题详情',
+      feedbackAttachments: '附件上传',
+      feedbackSubmit: '提交反馈',
+      feedbackSuccess: '反馈提交成功',
+      selectImageVideo: '选择图片或视频',
     },
     en: {
       title: 'Profile',
@@ -188,13 +286,17 @@ export default function UserProfile() {
       language: 'Language',
       chinese: '中文',
       english: 'English',
-      theme: 'Theme',
-      light: 'Light',
-      dark: 'Dark',
       oldPassword: 'Old Password',
       newPassword: 'New Password',
       confirmPassword: 'Confirm Password',
       updateSuccess: 'Updated successfully',
+      feedback: 'Feedback',
+      feedbackTitle: 'Title',
+      feedbackContent: 'Content',
+      feedbackAttachments: 'Attachments',
+      feedbackSubmit: 'Submit',
+      feedbackSuccess: 'Feedback submitted',
+      selectImageVideo: 'Select image or video',
     },
   };
 
@@ -359,6 +461,19 @@ export default function UserProfile() {
           </div>
         </div>
 
+        {isAdmin && (
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6 mb-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">管理后台</h3>
+            <button
+              onClick={onAdmin}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+            >
+              <LayoutDashboard className="w-5 h-5" />
+              进入管理后台
+            </button>
+          </div>
+        )}
+
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6 mb-6">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t[language].changePassword}</h3>
           <button
@@ -399,31 +514,98 @@ export default function UserProfile() {
         </div>
 
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6 mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t[language].theme}</h3>
-          <button
-            onClick={handleThemeToggle}
-            className="w-full flex items-center justify-between px-4 py-3 bg-gray-100 dark:bg-gray-700 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              {theme === 'dark' ? (
-                <Moon className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              ) : (
-                <Sun className="w-5 h-5 text-yellow-500" />
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t[language].feedback}</h3>
+          
+          {feedbackSuccess && (
+            <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-2 text-green-600 dark:text-green-400">
+              <CheckCircle className="w-5 h-5" />
+              <span>{feedbackSuccess}</span>
+            </div>
+          )}
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                {t[language].feedbackTitle}
+              </label>
+              <input
+                type="text"
+                value={feedback.title}
+                onChange={(e) => setFeedback(prev => ({ ...prev, title: e.target.value }))}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="请输入问题标题"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                {t[language].feedbackContent}
+              </label>
+              <textarea
+                value={feedback.content}
+                onChange={(e) => setFeedback(prev => ({ ...prev, content: e.target.value }))}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                rows={4}
+                placeholder="请详细描述您遇到的问题，支持图文描述"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                {t[language].feedbackAttachments}
+              </label>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors cursor-pointer">
+                  <Paperclip className="w-4 h-4" />
+                  <span>{t[language].selectImageVideo}</span>
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    onChange={handleAttachmentChange}
+                    className="hidden"
+                  />
+                </label>
+                <span className="text-xs text-gray-500 dark:text-gray-400">支持图片和视频，单文件不超过10MB</span>
+              </div>
+              
+              {feedbackAttachments.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {feedbackAttachments.map((attachment, index) => (
+                    <div key={index} className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                      {attachment.type.startsWith('image/') ? (
+                        <Image className="w-4 h-4 text-green-600" />
+                      ) : (
+                        <Video className="w-4 h-4 text-blue-600" />
+                      )}
+                      <span className="text-sm text-gray-700 dark:text-gray-300 truncate max-w-[150px]">{attachment.name}</span>
+                      <button
+                        onClick={() => removeAttachment(index)}
+                        className="text-gray-500 hover:text-red-500 transition-colors"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
-              <span className="text-gray-700 dark:text-gray-300">
-                {theme === 'dark' ? t[language].dark : t[language].light}
-              </span>
             </div>
-            <div className={`w-12 h-6 rounded-full transition-colors ${theme === 'dark' ? 'bg-indigo-600' : 'bg-gray-300'}`}>
-              <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${theme === 'dark' ? 'translate-x-6' : 'translate-x-0.5'}`} />
-            </div>
-          </button>
+            
+            <button
+              onClick={handleFeedbackSubmit}
+              disabled={feedbackLoading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Send className="w-5 h-5" />
+              {feedbackLoading ? '提交中...' : t[language].feedbackSubmit}
+            </button>
+          </div>
         </div>
 
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
           <div className="flex items-center justify-between">
             <span className="text-gray-500 dark:text-gray-400">{t[language].version}</span>
-            <span className="font-medium text-gray-700 dark:text-gray-300">V1.0.6</span>
+            <span className="font-medium text-gray-700 dark:text-gray-300">V1.0.7</span>
           </div>
         </div>
       </div>

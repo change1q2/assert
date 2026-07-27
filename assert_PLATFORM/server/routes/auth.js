@@ -5,9 +5,11 @@ import { sqlGet, sqlRun } from "../utils/db.js";
 import { text } from "../utils/validators.js";
 import { verifyPassword, hashPassword } from "../utils/crypto.js";
 import { createSmsCode, verifySmsCode, deliverSmsCode, issueToken } from "../auth/index.js";
+import { createEmailCode, verifyEmailCode, deliverEmailCode } from "../auth/email.js";
 import {
   defaultState,
   userByPhone,
+  userByEmail,
   createUser,
   authPayload,
   profileForUser,
@@ -40,6 +42,76 @@ async function handler(req, res, body, origin, pathname, url) {
       message: delivered ? "验证码已发送。" : "测试验证码已生成。",
       ...(delivered ? {} : { debugCode: code }),
     }, origin);
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/auth/email-code/send") {
+    const email = text(body.email).trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      json(res, 400, { message: "请输入正确的邮箱地址。" }, origin);
+      return;
+    }
+    try {
+      const code = await createEmailCode(email);
+      const delivered = await deliverEmailCode(email, code);
+      json(res, 200, {
+        ok: true,
+        expiresIn: SMS_CODE_TTL_MINUTES * 60,
+        message: delivered ? "验证码已发送。" : "测试验证码已生成。",
+        ...(delivered ? {} : { debugCode: code }),
+      }, origin);
+    } catch (error) {
+      json(res, 429, { message: error.message || "验证码发送过于频繁。" }, origin);
+    }
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/auth/register-by-email") {
+    const email = text(body.email).trim();
+    const password = text(body.password);
+    const confirmPassword = text(body.confirmPassword);
+    const name = text(body.name || "新用户").trim();
+    const currency = text(body.currency || "CNY");
+    const code = text(body.code).trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      json(res, 400, { message: "请输入正确的邮箱地址。" }, origin);
+      return;
+    }
+    if (password.length < 6) {
+      json(res, 400, { message: "密码至少 6 位。" }, origin);
+      return;
+    }
+    if (password !== confirmPassword) {
+      json(res, 400, { message: "两次输入的密码不一致。" }, origin);
+      return;
+    }
+    if (await userByEmail(email)) {
+      json(res, 409, { message: "这个邮箱已经注册，请直接登录。" }, origin);
+      return;
+    }
+    if (!(await verifyEmailCode(email, code))) {
+      json(res, 400, { message: "邮箱验证码不正确或已过期。" }, origin);
+      return;
+    }
+    const account = text(body.account).trim() || email.split("@")[0];
+    if (await sqlGet(pool, "SELECT id FROM users WHERE account = ?", [account])) {
+      json(res, 409, { message: "这个账号已经存在，请自定义其他账号。" }, origin);
+      return;
+    }
+    const userId = await createUser({ account, password, name, phone: "", email, currency });
+    const initialState = defaultState({ account, name, phone: "", email, currency });
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await saveUserState(conn, userId, initialState);
+      await conn.commit();
+    } catch (error) {
+      await conn.rollback();
+      throw error;
+    } finally {
+      conn.release();
+    }
+    json(res, 201, await authPayload(userId), origin);
     return;
   }
 

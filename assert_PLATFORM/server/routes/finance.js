@@ -126,6 +126,17 @@ async function handler(req, res, body, origin, pathname, url) {
     }
     return;
   }
+
+  if (req.method === "GET" && pathname === "/api/finance/cpi") {
+    const year = parseInt(url.searchParams.get("year") || new Date().getFullYear(), 10);
+    try {
+      const result = await getCpiData(year);
+      json(res, 200, result, origin);
+    } catch (err) {
+      json(res, 502, { error: "CPI data unavailable", detail: err.message }, origin);
+    }
+    return;
+  }
 }
 
 export { handler };

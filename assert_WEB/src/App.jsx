@@ -15,6 +15,9 @@ import {
   Briefcase,
 } from 'lucide-react';
 import Login from './pages/Login.jsx';
+import Register from './pages/Register.jsx';
+import AdminLogin from './pages/AdminLogin.jsx';
+import AdminDashboard from './pages/AdminDashboard.jsx';
 import Overview from './pages/Overview.jsx';
 import Records from './pages/Records.jsx';
 import Finance from './pages/Finance.jsx';
@@ -29,9 +32,11 @@ import Downloads from './pages/Downloads.jsx';
 import UserProfile from './pages/UserProfile.jsx';
 import PremiumCheck from './pages/PremiumCheck.jsx';
 import HkIpo from './pages/HkIpo.jsx';
+import HkipoCalculator from './pages/HkipoCalculator.jsx';
 import BudgetManagement from './pages/BudgetManagement.jsx';
 import AssetPenetration from './pages/AssetPenetration.jsx';
 import IndependentAssets from './pages/IndependentAssets.jsx';
+import { checkAndSync, getPendingSyncs } from './api/index.js';
 
 const menuItems = [
   { id: 'overview', label: '资产总览', icon: LayoutDashboard },
@@ -49,11 +54,14 @@ const menuItems = [
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('overview');
+  const [currentPage, setCurrentPage] = useState('login');
   const [loggedIn, setLoggedIn] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [userAvatar, setUserAvatar] = useState('');
   const [userName, setUserName] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [showAssetPenetration, setShowAssetPenetration] = useState(false);
+  const [syncStatus, setSyncStatus] = useState({ pending: 0, lastSync: null });
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -69,11 +77,12 @@ export default function App() {
         if (response.ok) {
           const data = await response.json();
           if (data.user) {
-            setLoggedIn(true);
-            setUserAvatar(data.user.avatar || '');
-            setUserName(data.user.name || '');
-            return;
-          }
+          setLoggedIn(true);
+          setIsAdmin(data.isAdmin || false);
+          setUserAvatar(data.user.avatar || '');
+          setUserName(data.user.name || '');
+          return;
+        }
         }
         localStorage.removeItem('token');
         localStorage.removeItem('state');
@@ -91,8 +100,43 @@ export default function App() {
     return () => window.removeEventListener('storage', checkAuth);
   }, []);
 
-  const handleLogin = () => {
+  // 自动同步逻辑
+  useEffect(() => {
+    if (!loggedIn) return;
+
+    const doSync = async () => {
+      const pending = getPendingSyncs();
+      const pendingCount = Object.keys(pending).length;
+      setSyncStatus(prev => ({ ...prev, pending: pendingCount }));
+
+      if (pendingCount > 0) {
+        console.log(`🔄 检测到 ${pendingCount} 条待同步数据，正在同步...`);
+        const result = await checkAndSync();
+        if (result.synced > 0) {
+          setSyncStatus({ pending: 0, lastSync: new Date() });
+        }
+      }
+    };
+
+    doSync();
+
+    const interval = setInterval(doSync, 30000);
+    const handleOnline = () => {
+      console.log('📶 网络已恢复，检查待同步数据...');
+      doSync();
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [loggedIn]);
+
+  const handleLogin = (data) => {
     setLoggedIn(true);
+    setIsAdmin(data?.isAdmin || false);
+    setCurrentPage('main');
     const savedState = localStorage.getItem('state');
     if (savedState) {
       try {
@@ -113,6 +157,8 @@ export default function App() {
     setUserAvatar('');
     setUserName('');
     setLoggedIn(false);
+    setIsAdmin(false);
+    setCurrentPage('login');
     setActiveMenu('overview');
     setSelectedCategory(null);
   };
@@ -160,11 +206,13 @@ export default function App() {
       case 'downloads':
         return <Downloads />;
       case 'profile':
-        return <UserProfile />;
+        return <UserProfile onAdmin={() => setCurrentPage('admin-login')} isAdmin={isAdmin} />;
       case 'premium-check':
         return <PremiumCheck />;
       case 'hk-ipo':
         return <HkIpo />;
+      case 'hkipo-calculator':
+        return <HkipoCalculator onBack={() => setActiveMenu('tools')} />;
       case 'budget':
         return <BudgetManagement onBack={() => setActiveMenu('records')} />;
       default:
@@ -179,7 +227,60 @@ export default function App() {
   };
 
   if (!loggedIn) {
-    return <Login onLogin={handleLogin} />;
+    if (currentPage === 'register') {
+      return <Register onLogin={handleLogin} onBackToLogin={() => setCurrentPage('login')} />;
+    }
+    if (currentPage === 'forgot-password') {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-100 dark:from-slate-950 dark:via-blue-950/20 dark:to-slate-900 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">忘记密码</h2>
+            <p className="text-gray-500 dark:text-gray-400 mb-6">请联系管理员重置密码。</p>
+            <button
+              onClick={() => setCurrentPage('login')}
+              className="w-full py-3 px-4 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-all duration-200"
+            >
+              返回登录
+            </button>
+          </div>
+        </div>
+      );
+    }
+    if (currentPage === 'admin') {
+      return (
+        <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+          <AdminDashboard
+            onBack={() => setCurrentPage('login')}
+            onLogout={() => {
+              localStorage.removeItem('adminToken');
+              setCurrentPage('login');
+            }}
+          />
+        </div>
+      );
+    }
+    return (
+      <Login
+        onLogin={handleLogin}
+        onRegister={() => setCurrentPage('register')}
+        onForgotPassword={() => setCurrentPage('forgot-password')}
+        onAdminLogin={() => setCurrentPage('admin')}
+      />
+    );
+  }
+
+  if (currentPage === 'admin') {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+        <AdminDashboard
+          onBack={() => setCurrentPage(loggedIn ? 'main' : 'login')}
+          onLogout={() => {
+            localStorage.removeItem('adminToken');
+            setCurrentPage(loggedIn ? 'main' : 'login');
+          }}
+        />
+      </div>
+    );
   }
 
   return (
@@ -255,6 +356,11 @@ export default function App() {
           />
         ) : (
           <span className="text-sm font-bold">{getInitial(userName)}</span>
+        )}
+        {syncStatus.pending > 0 && (
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-orange-500 text-white text-xs rounded-full flex items-center justify-center animate-pulse" title={`${syncStatus.pending} 条数据待同步`}>
+            {syncStatus.pending}
+          </span>
         )}
       </button>
     </div>

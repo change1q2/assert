@@ -315,8 +315,13 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   const isStock = latestData.kind === '股票' || latestData.assetType === '股票';
   const isDomesticIndoor = (latestData.market === '国内市场') && (latestData.tertiaryCategory === '场内' || latestData.categoryL3 === '场内');
   const isDomesticOutdoor = (latestData.market === '国内市场') && (latestData.tertiaryCategory === '场外' || latestData.categoryL3 === '场外');
-  const prevPrice = parseFloat(latestData.prevPrice) || 0;
-  const currentPrice = parseFloat(latestData.currentPrice || costPrice) || 0;
+  const _quote = quotesMap && latestData.code ? quotesMap[latestData.code] : null;
+  const _quotePrice = _quote && _quote.price != null ? parseFloat(_quote.price) : null;
+  const _quotePrevClose = _quote && _quote.prevClose != null ? parseFloat(_quote.prevClose) : null;
+  const _quoteChangePct = _quote && _quote.changePct != null ? parseFloat(_quote.changePct) : null;
+
+  const prevPrice = _quotePrevClose != null ? _quotePrevClose : (parseFloat(latestData.prevPrice) || 0);
+  const currentPrice = _quotePrice != null ? _quotePrice : (parseFloat(latestData.currentPrice || costPrice) || 0);
   const priceDate = latestData.priceDate || '';
 
   const savedCostTotal = parseFloat(latestData.cost) || 0;
@@ -331,19 +336,19 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   const floatPnlRate = costTotal > 0 ? (floatPnl / costTotal) * 100 : 0;
 
   // 当日盈亏：优先使用实时行情（与列表保持一致），其次使用 stateData 中存储的 prevPrice/currentPrice，最后回退到 todayPnl/dailyPnl
-  const _quote = quotesMap && latestData.code ? quotesMap[latestData.code] : null;
-  const _quotePrice = _quote && _quote.price != null ? parseFloat(_quote.price) : null;
-  const _quotePrevClose = _quote && _quote.prevClose != null ? parseFloat(_quote.prevClose) : null;
-  const _quoteChangePct = _quote && _quote.changePct != null ? parseFloat(_quote.changePct) : null;
   let computedDailyPnl = 0;
-  if (_quotePrice != null && _quotePrevClose != null && quantity > 0) {
+  if (_quotePrice != null && _quotePrevClose != null && _quotePrevClose !== 0 && quantity > 0) {
     computedDailyPnl = Math.round((_quotePrice - _quotePrevClose) * quantity * 100) / 100;
+  } else if (_quotePrice != null && _quoteChangePct != null && quantity > 0) {
+    // prevClose为0但changePct可用时，用changePct反推prevClose
+    const _prevClose = _quotePrice / (1 + _quoteChangePct / 100);
+    computedDailyPnl = Math.round((_quotePrice - _prevClose) * quantity * 100) / 100;
   } else if (prevPrice > 0 && currentPrice > 0 && quantity > 0) {
     computedDailyPnl = Math.round((currentPrice - prevPrice) * quantity * 100) / 100;
   } else {
     computedDailyPnl = parseFloat(latestData.todayPnl) || 0;
   }
-  const dailyPnl = parseFloat(latestData.dailyPnl) || computedDailyPnl;
+  const dailyPnl = (_quotePrice != null && (_quotePrevClose != null || _quoteChangePct != null)) ? computedDailyPnl : (parseFloat(latestData.dailyPnl) || computedDailyPnl);
 
   let computedDailyPnlRate = 0;
   if (_quoteChangePct != null) {
@@ -355,7 +360,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   } else {
     computedDailyPnlRate = parseFloat(latestData.todayPnlPercent) || parseFloat(latestData.dailyPnlRate) || 0;
   }
-  const dailyPnlRate = parseFloat(latestData.dailyPnlRate) || computedDailyPnlRate;
+  const dailyPnlRate = _quoteChangePct != null ? computedDailyPnlRate : (parseFloat(latestData.dailyPnlRate) || computedDailyPnlRate);
 
   const computedHoldingReturnRate = floatPnlRate;
 
@@ -659,7 +664,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
               {(() => {
                 const computedCost = tradeStats.buyTotalAmount - tradeStats.sellTotalAmount;
                 const listCost = costTotal;
-                const diff = Math.round((computedCost - listCost) * 100) / 100;
+                const fee = tradeStats.totalFee || 0;
+                const diff = Math.round((computedCost - listCost + fee) * 100) / 100;
                 const isMatch = Math.abs(diff) < 0.01;
                 return (
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isMatch ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400'}`}>
@@ -668,11 +674,12 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                 );
               })()}
             </div>
-            <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="grid grid-cols-4 gap-2 text-xs">
               {(() => {
                 const computedCost = tradeStats.buyTotalAmount - tradeStats.sellTotalAmount;
                 const listCost = costTotal;
-                const diff = Math.round((computedCost - listCost) * 100) / 100;
+                const fee = tradeStats.totalFee || 0;
+                const diff = Math.round((computedCost - listCost + fee) * 100) / 100;
                 return (
                   <>
                     <div className="text-center">
@@ -682,6 +689,10 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                     <div className="text-center">
                       <p className="text-gray-500 dark:text-gray-400 mb-0.5">列表持仓成本</p>
                       <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatNum(listCost)}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-gray-500 dark:text-gray-400 mb-0.5">交易税费</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatNum(fee)}</p>
                     </div>
                     <div className="text-center">
                       <p className="text-gray-500 dark:text-gray-400 mb-0.5">差异</p>
@@ -2540,6 +2551,16 @@ export default function Finance({ onAssetPenetration }) {
 
   // 资产类型自定义管理
   const DEFAULT_ASSET_TYPE_OPTIONS = ['股票', '基金', '债券', '现金', '期货', '期权', '外汇', '保险', '房产', '实体投资', '黄金', '白银', '原油', '数字货币', '银行理财', '其他'];
+  // 一级分类 → 资产类型 映射（选择一级分类后联动筛选资产类型）
+  const CATEGORY_L1_ASSET_TYPES = {
+    '权益类': ['股票', '基金', '虚拟货币', '期货', '期权'],
+    '债权类': ['债券基金', '混债基金', '固收+'],
+    '现金类': ['短融', '货币基金', '短期债', '银行理财'],
+    '商品类': ['黄金', '白银', '原油', '其他商品'],
+    '分红类': ['股票', '基金', 'REITs', '币息'],
+    '固收类': ['债券基金', '混债基金', '固收+', '银行理财'],
+    '另类投资': ['房产', '实体投资', '数字货币', '其他'],
+  };
   const [assetTypeOptions, setAssetTypeOptions] = useState(() => {
     const saved = localStorage.getItem('finance_asset_type_options');
     return saved ? JSON.parse(saved) : DEFAULT_ASSET_TYPE_OPTIONS;
@@ -3647,9 +3668,16 @@ export default function Finance({ onAssetPenetration }) {
   // ══════════════════════════════════════
   const computed = useMemo(() => {
     const getDailyPnl = (a) => {
-      if (a.code && quotesMap[a.code] && quotesMap[a.code].price != null && quotesMap[a.code].prevClose != null) {
+      const q = a.code && quotesMap[a.code] ? quotesMap[a.code] : null;
+      if (q && q.price != null && q.prevClose != null && q.prevClose !== 0) {
         const qty = parseFloat(a.shares || a.quantity) || 0;
-        return (quotesMap[a.code].price - quotesMap[a.code].prevClose) * qty;
+        return (q.price - q.prevClose) * qty;
+      }
+      // prevClose为0但changePct可用时，用changePct反推prevClose
+      if (q && q.price != null && q.changePct != null) {
+        const qty = parseFloat(a.shares || a.quantity) || 0;
+        const prevClose = q.price / (1 + q.changePct / 100);
+        return (q.price - prevClose) * qty;
       }
       // 其次使用资产自身存储的 prevPrice + currentPrice 计算（适用于场外基金）
       const _prevPrice = parseFloat(a.prevPrice) || 0;
@@ -4224,7 +4252,7 @@ export default function Finance({ onAssetPenetration }) {
                     </div>
                   </FormField>
 
-                  {/* Row 2: 资产种类 | 资产类型 | 所属账户 */}
+                  {/* Row 2: 资产种类 | 资产分类一级 */}
                   <FormField label="资产种类">
                     <div className="flex gap-2">
                       <select value={newAccount.assetKind} onChange={e => {
@@ -4247,13 +4275,39 @@ export default function Finance({ onAssetPenetration }) {
                     </div>
                   </FormField>
 
+                  <FormField label="资产分类一级" required>
+                    <div className="flex gap-2">
+                      <select value={newAccount.categoryL1} onChange={e => {
+                        const l1 = e.target.value;
+                        const cascade = CASCADE_OPTIONS[newAccount.assetType];
+                        if (newAccount.market === '国内市场' && cascade && cascade.l2Default[l1]) {
+                          const l2 = cascade.l2Default[l1];
+                          const l3 = cascade.l3Default[l1][l2];
+                          setNewAccount({ ...newAccount, categoryL1: l1, assetType: '', categoryL2: l2, categoryL3: l3, categoryL4: '' });
+                        } else {
+                          setNewAccount({ ...newAccount, categoryL1: l1, assetType: '', categoryL2: '', categoryL3: '' });
+                        }
+                      }}
+                        className={`${FORM_SELECT} flex-1`}>
+                        <option value="">请选择</option>
+                        {categoryL1Options.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                      <button onClick={() => setShowCategoryL1Modal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理一级分类">
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </FormField>
+
+                  {/* Row 3: 资产类型 | 所属账户 */}
                   <FormField label="资产类型" required>
                     <div className="flex gap-2">
                       <select value={newAccount.assetType} onChange={e => {
                         setNewAccount({ ...newAccount, assetType: e.target.value });
                       }}
-                        className={`${FORM_SELECT} flex-1`}>
-                        {assetTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                        disabled={!newAccount.categoryL1}
+                        className={`${FORM_SELECT} flex-1 ${!newAccount.categoryL1 ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        <option value="">{newAccount.categoryL1 ? '请选择资产类型' : '请先选择资产分类一级'}</option>
+                        {(CATEGORY_L1_ASSET_TYPES[newAccount.categoryL1] || assetTypeOptions).map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                       <button onClick={() => setShowAssetTypeModal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理资产类型">
                         <Settings className="w-4 h-4" />
@@ -4271,30 +4325,7 @@ export default function Finance({ onAssetPenetration }) {
                     </select>
                   </FormField>
 
-                  {/* Row 3: 资产分类一级 | 资产分类二级 */}
-                  <FormField label="资产分类一级" required>
-                    <div className="flex gap-2">
-                      <select value={newAccount.categoryL1} onChange={e => {
-                        const l1 = e.target.value;
-                        const cascade = CASCADE_OPTIONS[newAccount.assetType];
-                        if (newAccount.market === '国内市场' && cascade && cascade.l2Default[l1]) {
-                          const l2 = cascade.l2Default[l1];
-                          const l3 = cascade.l3Default[l1][l2];
-                          setNewAccount({ ...newAccount, categoryL1: l1, categoryL2: l2, categoryL3: l3, categoryL4: '' });
-                        } else {
-                          setNewAccount({ ...newAccount, categoryL1: l1, categoryL2: '', categoryL3: '' });
-                        }
-                      }}
-                        className={`${FORM_SELECT} flex-1`}>
-                        <option value="">请选择</option>
-                        {categoryL1Options.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                      <button onClick={() => setShowCategoryL1Modal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理一级分类">
-                        <Settings className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </FormField>
-
+                  {/* Row 4: 资产分类二级 */}
                   <FormField label="资产分类二级">
                     <div className="flex gap-2">
                       <select value={newAccount.categoryL2} onChange={e => {

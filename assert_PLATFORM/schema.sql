@@ -226,16 +226,6 @@ CREATE TABLE IF NOT EXISTS finance_tertiary_categories (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS record_tags_old (
-  user_id INTEGER NOT NULL,
-  category VARCHAR(255) NOT NULL,
-  tag VARCHAR(255) NOT NULL,
-  is_last TINYINT NOT NULL DEFAULT 0,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (user_id, category, tag),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
 CREATE TABLE IF NOT EXISTS record_tags (
   record_id VARCHAR(255) NOT NULL,
   tag_id INTEGER NOT NULL,
@@ -325,6 +315,19 @@ CREATE TABLE IF NOT EXISTS user_settings (
   fee_config_json JSON,
   overview_goals_json JSON,
   hk_ipo_rules_json JSON,
+  independent_assets_json JSON,
+  account_categories_json JSON,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS yearly_records (
+  user_id INTEGER NOT NULL,
+  year INTEGER NOT NULL,
+  opening_asset DOUBLE NOT NULL DEFAULT 0,
+  closing_asset DOUBLE NOT NULL DEFAULT 0,
+  target_profit DOUBLE NOT NULL DEFAULT 0,
+  actual_profit DOUBLE NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, year),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -336,7 +339,8 @@ CREATE TABLE IF NOT EXISTS feedback (
   content TEXT NOT NULL,
   attachments_json JSON,
   status VARCHAR(50) NOT NULL DEFAULT 'pending',
-  admin_reply TEXT NOT NULL,
+  reviewed TINYINT NOT NULL DEFAULT 0,
+  admin_reply VARCHAR(4096) NOT NULL DEFAULT '',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   replied_at DATETIME,
   INDEX idx_feedback_user (user_id),

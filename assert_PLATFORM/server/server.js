@@ -24,7 +24,9 @@ import * as feedbackRoute from "./routes/feedback.js";
 
 const PUBLIC_AUTH_PATHS = new Set([
   "/api/auth/sms/send",
+  "/api/auth/email-code/send",
   "/api/auth/register",
+  "/api/auth/register-by-email",
   "/api/auth/login",
   "/api/auth/phone-login",
   "/api/auth/reset-password",
@@ -78,7 +80,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if ((req.method === "GET" || req.method === "POST") && (pathname === "/api/finance/fund-nav" || pathname === "/api/finance/fund-nav-history" || pathname === "/api/finance/quotes" || pathname === "/api/finance/kline" || pathname === "/api/finance/lookup" || pathname === "/api/finance/index" || pathname === "/api/finance/index-history")) {
+    if ((req.method === "GET" || req.method === "POST") && (pathname === "/api/finance/fund-nav" || pathname === "/api/finance/fund-nav-history" || pathname === "/api/finance/quotes" || pathname === "/api/finance/kline" || pathname === "/api/finance/lookup" || pathname === "/api/finance/index" || pathname === "/api/finance/index-history" || pathname === "/api/finance/cpi")) {
       if (req.method !== "GET") {
         body = await readBody(req);
       }

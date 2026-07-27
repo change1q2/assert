@@ -477,8 +477,13 @@ export default function IndependentAssets() {
   };
 
   const saveData = async (data) => {
-    await saveState({ ...stateData, ...data });
-    await loadData();
+    const newState = { ...stateData, ...data };
+    const result = await saveState(newState);
+    localStorage.setItem('wealth_os_independent_assets', JSON.stringify(newState.independentAssets || {}));
+    setStateData(newState);
+    if (!result.cached) {
+      await loadData();
+    }
   };
 
   const calculateXIRR = (dates, cashflows, guess = 0.1) => {
@@ -1396,8 +1401,25 @@ export default function IndependentAssets() {
       return;
     }
     const items = getAssets(activeTab);
+    let itemData = { ...formData };
+    
+    if (activeTab === 'fixeddeposit') {
+      const amount = parseFloat(formData.amount || 0);
+      const rate = parseFloat(formData.interestRate || 0);
+      const startDate = formData.startDate;
+      const endDate = formData.endDate;
+      if (amount > 0 && rate > 0 && startDate && endDate) {
+        const s = new Date(startDate);
+        const e = new Date(endDate);
+        if (e > s) {
+          const years = (e - s) / (1000 * 60 * 60 * 24 * 365);
+          itemData.expectedReturn = (amount * rate / 100 * years).toFixed(2);
+        }
+      }
+    }
+    
     const newItem = {
-      ...formData,
+      ...itemData,
       id: editingItem?.id || Date.now().toString(),
       createdAt: editingItem?.createdAt || new Date().toISOString(),
     };
@@ -1435,6 +1457,7 @@ export default function IndependentAssets() {
 
   const summaryData = useMemo(() => {
     let totalValue = 0;
+    let totalCost = 0;
     let demoProfit = 0;
     let actualProfit = 0;
 
@@ -1443,6 +1466,9 @@ export default function IndependentAssets() {
       items.forEach(item => {
         if (type === 'insurance') {
           totalValue += parseFloat(item.paidAmount || 0);
+          totalCost += parseFloat(item.paidAmount || 0);
+          demoProfit += parseFloat(item.demoProfitAmount || 0);
+          actualProfit += parseFloat(item.actualProfitAmount || 0);
         } else if (type === 'realestate') {
           if (item.usage === '出租') {
             totalValue += parseFloat(item.purchasePrice || 0);
@@ -1453,11 +1479,14 @@ export default function IndependentAssets() {
             const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFeeAmount) : parseFloat(item.purchasePrice || 0);
             totalValue += actualValue;
           }
+          totalCost += parseFloat(item.purchasePrice || 0);
         } else if (type === 'vehicle') {
           const { residualValue } = calculateVehicleResidualValue(item);
           totalValue += residualValue;
+          totalCost += parseFloat(item.purchasePrice || 0);
         } else if (type === 'fixedinvestment') {
           totalValue += parseFloat(item.investmentCost || 0);
+          totalCost += parseFloat(item.investmentCost || 0);
           if (item.dividendRecords && Array.isArray(item.dividendRecords)) {
             actualProfit += item.dividendRecords.reduce((sum, r) => sum + parseFloat(r.dividendAmount || 0), 0);
           } else {
@@ -1471,19 +1500,21 @@ export default function IndependentAssets() {
           }
         } else if (type === 'equity') {
           totalValue += parseFloat(item.marketValue || 0);
+          totalCost += parseFloat(item.investmentCost || 0);
           actualProfit += parseFloat(item.pnl || 0);
         } else if (type === 'fixeddeposit') {
           totalValue += parseFloat(item.amount || 0);
+          totalCost += parseFloat(item.amount || 0);
           actualProfit += parseFloat(item.actualReturn || 0);
         }
       });
     });
 
-    return { totalValue, demoProfit, actualProfit };
+    return { totalValue, totalCost, demoProfit, actualProfit };
   }, [independentAssets]);
 
   const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white shadow-lg shadow-blue-500/20">
         <div className="flex items-center justify-between">
           <div>
@@ -1492,6 +1523,17 @@ export default function IndependentAssets() {
           </div>
           <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
             <Wallet className="w-6 h-6" />
+          </div>
+        </div>
+      </div>
+      <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-5 text-white shadow-lg shadow-orange-500/20">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-orange-100 text-sm">总成本</p>
+            <p className="text-2xl font-bold mt-1">{formatCurrency(summaryData.totalCost)}</p>
+          </div>
+          <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+            <DollarSign className="w-6 h-6" />
           </div>
         </div>
       </div>
@@ -1534,7 +1576,7 @@ export default function IndependentAssets() {
       if (usedAccountIds.size > 0 && !usedAccountIds.has(account.id)) return false;
       if (filters.accountName && !account.name.includes(filters.accountName)) return false;
       if (filters.accountCategory && account.category !== filters.accountCategory) return false;
-      return true;
+      return usedAccountIds.size === 0 || usedAccountIds.has(account.id);
     });
 
     const totalBalance = filteredAccounts.reduce((s, a) => s + (a.balance || 0), 0);
@@ -1572,10 +1614,10 @@ export default function IndependentAssets() {
               let fees = 0;
               let actualValue = 0;
 
-              Object.values(independentAssets).forEach(items => {
+              Object.entries(independentAssets).forEach(([assetType, items]) => {
                 items.forEach(item => {
                   if (item.accountId === account.id) {
-                    if (item.type === 'realestate') {
+                    if (assetType === 'realestate') {
                       if (item.usage === '出租') {
                         const purchasePrice = parseFloat(item.purchasePrice || 0);
                         marketValue += purchasePrice;
@@ -1594,34 +1636,36 @@ export default function IndependentAssets() {
                         fees += tax + agency;
                         actualValue += mv > 0 ? (mv - tax - agency) : pp;
                       }
-                    } else if (item.type === 'vehicle') {
+                    } else if (assetType === 'vehicle') {
                       const { residualValue } = calculateVehicleResidualValue(item);
                       const pp = parseFloat(item.purchasePrice || 0);
                       marketValue += residualValue;
                       purchaseCost += pp;
                       profitLoss += residualValue - pp;
                       actualValue += residualValue;
-                    } else if (item.type === 'insurance') {
+                    } else if (assetType === 'insurance') {
                       const paid = parseFloat(item.paidAmount || 0);
                       marketValue += paid;
                       purchaseCost += paid;
                       actualValue += paid;
-                    } else if (item.type === 'fixedinvestment') {
+                    } else if (assetType === 'fixedinvestment') {
                       const cost = parseFloat(item.investmentCost || 0);
                       marketValue += cost;
                       purchaseCost += cost;
                       actualValue += cost;
-                    } else if (item.type === 'equity') {
+                    } else if (assetType === 'equity') {
                       const mv = parseFloat(item.marketValue || 0);
                       marketValue += mv;
                       purchaseCost += parseFloat(item.cost || item.marketValue || 0);
                       profitLoss += parseFloat(item.pnl || 0);
                       actualValue += mv;
-                    } else if (item.type === 'fixeddeposit') {
+                    } else if (assetType === 'fixeddeposit') {
                       const amount = parseFloat(item.amount || 0);
-                      marketValue += amount;
+                      const actualReturn = parseFloat(item.actualReturn || 0);
+                      marketValue += amount + actualReturn;
                       purchaseCost += amount;
-                      actualValue += amount;
+                      profitLoss += actualReturn;
+                      actualValue += amount + actualReturn;
                     }
                   }
                 });
