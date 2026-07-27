@@ -1,3 +1,12 @@
+// 同花顺代码转换：仅支持 A 股 sh/sz
+function thsCodeFor(code) {
+  code = String(code || "").trim().replace(/^(sh|sz)/i, "");
+  if (!/^\d{6}$/.test(code)) return null;
+  if (/^[013]/.test(code)) return "sz" + code;
+  if (/^[569]/.test(code)) return "sh" + code;
+  return null;
+}
+
 function tencentCodeFor(code, market) {
   code = String(code || "").trim();
   if (!code) return null;
@@ -201,6 +210,83 @@ async function lookupSecurities(q) {
       } catch (_) { }
     }
 
+    // 同花顺(10jqka) fallback：当东方财富搜索结果不足且为纯6位代码时，用同花顺接口补充名称和价格
+    if (items.length < 3 && /^\d{6}$/.test(trimmedQ)) {
+      try {
+        const thsCode = thsCodeFor(trimmedQ);
+        if (thsCode) {
+          const thsUrl = `http://d.10jqka.com.cn/v6/time/hs_${thsCode}/today`;
+          const thsRes = await fetch(thsUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Referer": "http://stockpage.10jqka.com.cn/",
+            },
+            signal: AbortSignal.timeout(6000),
+          });
+          const thsText = await thsRes.text();
+          const match = thsText.match(/quotebridge_v6_time_\w+\((.*)\)/);
+          if (match && match[1]) {
+            const data = JSON.parse(match[1]);
+            const points = data.data ? data.data.split(";") : [];
+            if (points.length) {
+              const last = points[points.length - 1].split(",");
+              const price = last.length >= 3 ? parseFloat(last[1]) || null : null;
+              if (!items.some((entry) => entry.code === trimmedQ)) {
+                items.push({
+                  code: trimmedQ,
+                  name: data.name || trimmedQ,
+                  classify: "AStock",
+                  typeName: "A股",
+                  marketType: thsCode.startsWith("sh") ? "1" : "2",
+                  mktNum: "",
+                  jys: thsCode.startsWith("sh") ? "SH" : "SZ",
+                  price,
+                  changePct: data.prePrice && price ? ((price - data.prePrice) / data.prePrice * 100) : null,
+                });
+              }
+            }
+          }
+        }
+      } catch (_) { }
+    }
+
+    // Ashare/akshare style fallback：当东方财富搜索无结果时，尝试新浪行情接口验证 A 股代码
+    if (items.length === 0 && /^\d{6}$/.test(trimmedQ)) {
+      try {
+        const tencentSearchCodes = [`sh${trimmedQ}`, `sz${trimmedQ}`];
+        const akUrl = `http://qt.gtimg.cn/q=${tencentSearchCodes.join(",")}`;
+        const akRes = await fetch(akUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          signal: AbortSignal.timeout(6000),
+        });
+        const akBuf = Buffer.from(await akRes.arrayBuffer());
+        const akText = new TextDecoder("gbk").decode(akBuf);
+        const akSegments = akText.split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
+        for (const segment of akSegments) {
+          const match = segment.match(/v_(\w+)="(.*)"/);
+          if (!match || !match[2]) continue;
+          const fullCode = match[1];
+          const parts = match[2].split("~");
+          if (parts.length > 32 && parts[1]) {
+            const code = fullCode.replace(/^(sh|sz)/, "");
+            const prefix = fullCode.startsWith("sh") ? "sh" : "sz";
+            items.push({
+              code,
+              name: parts[1],
+              classify: "AStock",
+              typeName: "A股",
+              marketType: prefix === "sh" ? "1" : "2",
+              mktNum: "",
+              jys: prefix === "sh" ? "SH" : "SZ",
+              price: parseFloat(parts[3]) || null,
+              changePct: parseFloat(parts[32]) || null,
+              changeAmt: parseFloat(parts[31]) || null,
+            });
+          }
+        }
+      } catch (_) { }
+    }
+
     return { items: items.slice(0, 10) };
   } catch (err) {
     return { items: localItems, error: err.message };
@@ -325,6 +411,71 @@ async function getQuotes(codes) {
           low: lowMatch ? parseFloat(lowMatch[1]) : null,
         };
       }
+    } catch (_) { }
+  }));
+
+  // 同花顺(10jqka) fallback - A股实时行情
+  const thsFallbackItems = queryItems.filter(({ index }) => results[index].price == null);
+  await Promise.all(thsFallbackItems.map(async ({ tencentCode, index }) => {
+    const prefix = tencentCode.slice(0, 2);
+    if (!["sh", "sz"].includes(prefix)) return;
+    try {
+      const thsUrl = `http://d.10jqka.com.cn/v6/time/hs_${tencentCode}/today`;
+      const thsRes = await fetch(thsUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": "http://stockpage.10jqka.com.cn/",
+        },
+        signal: AbortSignal.timeout(6000),
+      });
+      const thsText = await thsRes.text();
+      const match = thsText.match(/quotebridge_v6_time_\w+\((.*)\)/);
+      if (!match || !match[1]) return;
+      const data = JSON.parse(match[1]);
+      const points = data.data ? data.data.split(";") : [];
+      if (!points.length) return;
+      const last = points[points.length - 1].split(",");
+      if (last.length < 3) return;
+      const price = parseFloat(last[1]) || null;
+      const prevClose = parseFloat(data.prePrice) || null;
+      if (price != null) {
+        results[index] = {
+          ...results[index],
+          price,
+          prevClose,
+          changePct: prevClose ? ((price - prevClose) / prevClose * 100) : null,
+          name: data.name || results[index].name,
+        };
+      }
+    } catch (_) { }
+  }));
+
+  // Ashare/akshare style fallback - 东方财富行情接口（更完整字段）
+  const akshareFallbackItems = queryItems.filter(({ index }) => results[index].price == null);
+  await Promise.all(akshareFallbackItems.map(async ({ tencentCode, index }) => {
+    const prefix = tencentCode.slice(0, 2);
+    if (!["sh", "sz"].includes(prefix)) return;
+    const secid = `${prefix === "sh" ? "1" : "0"}.${tencentCode.slice(2)}`;
+    try {
+      const emUrl = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f169,f170`;
+      const emRes = await fetch(emUrl, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(6000),
+      });
+      const data = (await emRes.json())?.data;
+      if (!data || !Number.isFinite(Number(data.f43))) return;
+      const scaled = (value) => Number.isFinite(Number(value)) ? Number(value) / 100 : null;
+      results[index] = {
+        ...results[index],
+        name: data.f58 || results[index].name,
+        price: scaled(data.f43),
+        prevClose: scaled(data.f60),
+        changeAmt: scaled(data.f169),
+        changePct: scaled(data.f170),
+        high: scaled(data.f44),
+        low: scaled(data.f45),
+        volume: Number.isFinite(Number(data.f47)) ? Number(data.f47) : null,
+      };
     } catch (_) { }
   }));
 
