@@ -3791,7 +3791,7 @@ export default function IndependentAssets() {
     const records = item.transactionRecords || [];
 
     const totalDividend = records.reduce((sum, r) => {
-      return sum + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0);
+      return sum + parseFloat(r.actualProfitAmount || 0);
     }, 0);
 
     const dividendRate = paidAmount > 0 && totalDividend > 0
@@ -3846,7 +3846,7 @@ export default function IndependentAssets() {
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-5 gap-3 mb-6">
               <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">已交保费</div>
                 <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(paidAmount, item.currency)}</div>
@@ -3862,6 +3862,10 @@ export default function IndependentAssets() {
               <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">累计分红收益率</div>
                 <div className="text-lg font-bold text-purple-600 dark:text-purple-400">{dividendRate}</div>
+              </div>
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">回本进度</div>
+                <div className="text-lg font-bold text-yellow-600 dark:text-yellow-400">{paidAmount > 0 ? ((cashValue + totalDividend) / paidAmount * 100).toFixed(2) + '%' : '—'}</div>
               </div>
             </div>
 
@@ -3899,7 +3903,13 @@ export default function IndependentAssets() {
             </div>
 
             <div className="border-t border-gray-200 dark:border-slate-700 pt-4">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-4">交易记录</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900 dark:text-white">交易记录</h3>
+                <button onClick={() => handleAddInsuranceTransaction()} className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors">
+                  <Plus className="w-4 h-4" />
+                  <span>新增交易记录</span>
+                </button>
+              </div>
 
               {records.length > 0 ? (
                 <div className="overflow-x-auto">
@@ -3913,18 +3923,18 @@ export default function IndependentAssets() {
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">终期红利</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">总额</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">分红额</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">年龄</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保证红利</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">非保证红利</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">预期红利</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">日期</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">演示收益率</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">IRR收益率</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">实际收益额</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">实际收益率</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">年化收益率</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">日期</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">年龄</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">实际分红额</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">现金流量额</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">XIPRR收益率</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">分红实现率</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">是否达成</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">新增交易记录</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">操作</th>
                       </tr>
                     </thead>
@@ -3934,13 +3944,10 @@ export default function IndependentAssets() {
                         .sort((a, b) => {
                           const yearA = parseInt(a.year) || 0;
                           const yearB = parseInt(b.year) || 0;
-                          if (yearA === 0 && yearB !== 0) return -1;
-                          if (yearA !== 0 && yearB === 0) return 1;
+                          if (yearA === 0 && yearB !== 0) return 1;
+                          if (yearA !== 0 && yearB === 0) return -1;
                           if (yearA === 0 && yearB === 0) return 0;
-                          if (yearA === 1 && yearB !== 1) return -1;
-                          if (yearA !== 1 && yearB === 1) return 1;
-                          if (yearA === 1 && yearB === 1) return 0;
-                          return yearA - yearB;
+                          return yearB - yearA;
                         })
                         .map((record, index) => {
                         const guaranteedCashValue = parseFloat(record.guaranteedCashValue || 0);
@@ -3956,6 +3963,9 @@ export default function IndependentAssets() {
                         const guaranteedBonus = index === 0 ? 0 : (guaranteedCashValue - prevGuaranteedCashValue);
                         const nonGuaranteedBonus = bonusDividend + midTermDividend;
                         const expectedBonus = guaranteedBonus + nonGuaranteedBonus;
+                        
+                        const actualProfitAmount = parseFloat(record.actualProfitAmount || 0);
+                        const dividendRealizationRate = nonGuaranteedBonus > 0 ? (actualProfitAmount / nonGuaranteedBonus * 100) : 0;
                         
                         const demoCashFlow = index === 0 ? premiumPaid : 0;
                         
@@ -3975,7 +3985,7 @@ export default function IndependentAssets() {
                           .filter(r => r.year || r.year === 0)
                           .sort((a, b) => parseInt(a.year) - parseInt(b.year));
                         
-                        const rDate0 = records.find(r => parseInt(r.year) === 0 || parseInt(r.year) === 1);
+                        const rDate0 = records.find(r => parseInt(r.year) === 0) || records.find(r => parseInt(r.year) === 1) || records[0];
                         const baseDateStr = rDate0?.date || item.policyDate || '';
                         
                         const irrReturn = (() => {
@@ -3984,25 +3994,37 @@ export default function IndependentAssets() {
                           const endDateStr = record.date || (item.policyDate ? `${parseInt(item.policyDate.split('/')[0]) + policyYear}/${item.policyDate.split('/')[1]}/${item.policyDate.split('/')[2]}` : '');
                           if (!endDateStr) return null;
                           const endDate = new Date(endDateStr);
-                          return calculateXIRR([startDate, endDate], [-totalPremium, totalAmount]);
+                          const holdingDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+                          if (holdingDays <= 0 || premiumPaid <= 0) return null;
+                          const dividendAmount = guaranteedCashValue - premiumPaid + bonusDividend + midTermDividend;
+                          return (dividendAmount / premiumPaid) * (365 / holdingDays) * 100;
                         })();
                         
                         const actualRate = (() => {
                           if (!baseDateStr) return null;
-                          const actualProfitAmount = parseFloat(record.actualProfitAmount || 0);
-                          if (actualProfitAmount <= 0) return null;
+                          const cashFlowAmount = parseFloat(record.cashFlowAmount || 0);
                           const startDate = new Date(baseDateStr);
                           const endDateStr = record.date || (item.policyDate ? `${parseInt(item.policyDate.split('/')[0]) + policyYear}/${item.policyDate.split('/')[1]}/${item.policyDate.split('/')[2]}` : '');
                           if (!endDateStr) return null;
                           const endDate = new Date(endDateStr);
-                          return calculateXIRR([startDate, endDate], [-totalPremium, actualProfitAmount]);
+                          return calculateXIRR([startDate, endDate], [-totalPremium, cashFlowAmount]);
                         })();
-                        const status = !record.actualProfitRate ? '未开始' 
-                          : actualRate >= demoRate ? '达成' : '未达成';
+                        const status = record.status || (dividendRealizationRate >= 100 ? '达成' : (record.actualProfitAmount ? '未达成' : '未开始'));
                         
                         const statusColor = status === '达成' ? 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400'
                           : status === '未达成' ? 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400'
                           : 'bg-gray-100 text-gray-700 dark:bg-gray-700/50 dark:text-gray-400';
+                        
+                        const toggleStatus = () => {
+                          const newStatus = status === '达成' ? '未达成' : (status === '未达成' ? '未开始' : '达成');
+                          const newRecords = selectedInsurance.transactionRecords.map(r => {
+                            if (r.id === record.id) {
+                              return { ...r, status: newStatus };
+                            }
+                            return r;
+                          });
+                          handleUpdateTransactionField(newRecords);
+                        };
                         
                         return (
                           <tr key={record.id || index} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
@@ -4013,6 +4035,50 @@ export default function IndependentAssets() {
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(midTermDividend, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">{formatCurrency(totalAmount, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(guaranteedCashValue - premiumPaid + bonusDividend + midTermDividend, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(guaranteedBonus, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(nonGuaranteedBonus, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(expectedBonus, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{demoRate.toFixed(2)}%</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{irrReturn !== null ? irrReturn.toFixed(2) + '%' : '—'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="date" value={record.date || ''} onChange={(e) => {
+                                const allRecords = selectedInsurance.transactionRecords || [];
+                                const sortedAllRecords = allRecords.slice().sort((a, b) => {
+                                  const yearA = parseInt(a.year) || 0;
+                                  const yearB = parseInt(b.year) || 0;
+                                  if (yearA === 0 && yearB !== 0) return -1;
+                                  if (yearA !== 0 && yearB === 0) return 1;
+                                  if (yearA === 0 && yearB === 0) return 0;
+                                  if (yearA === 1 && yearB !== 1) return -1;
+                                  if (yearA !== 1 && yearB === 1) return 1;
+                                  if (yearA === 1 && yearB === 1) return 0;
+                                  return yearA - yearB;
+                                });
+                                const currentIndex = sortedAllRecords.findIndex(r => r.id === record.id);
+                                const inputValue = e.target.value;
+                                
+                                if (inputValue) {
+                                  const baseDate = new Date(inputValue);
+                                  const newRecords = allRecords.map(r => {
+                                    const idx = sortedAllRecords.findIndex(sr => sr.id === r.id);
+                                    const yearDiff = idx - currentIndex;
+                                    const newDate = new Date(baseDate);
+                                    newDate.setFullYear(newDate.getFullYear() + yearDiff);
+                                    const formattedDate = newDate.toISOString().split('T')[0];
+                                    return { ...r, date: formattedDate };
+                                  });
+                                  handleUpdateTransactionField(newRecords);
+                                } else {
+                                  const newRecords = allRecords.map(r => {
+                                    if (r.id === record.id) {
+                                      return { ...r, date: inputValue };
+                                    }
+                                    return r;
+                                  });
+                                  handleUpdateTransactionField(newRecords);
+                                }
+                              }} className="w-36 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.age || ''} onChange={(e) => {
                                 const allRecords = selectedInsurance.transactionRecords || [];
@@ -4048,49 +4114,6 @@ export default function IndependentAssets() {
                                 }
                               }} className="w-16 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(guaranteedBonus, item.currency)}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(nonGuaranteedBonus, item.currency)}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(expectedBonus, item.currency)}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                              <input type="date" value={record.date || ''} onChange={(e) => {
-                                const allRecords = selectedInsurance.transactionRecords || [];
-                                const sortedAllRecords = allRecords.slice().sort((a, b) => {
-                                  const yearA = parseInt(a.year) || 0;
-                                  const yearB = parseInt(b.year) || 0;
-                                  if (yearA === 0 && yearB !== 0) return -1;
-                                  if (yearA !== 0 && yearB === 0) return 1;
-                                  if (yearA === 0 && yearB === 0) return 0;
-                                  if (yearA === 1 && yearB !== 1) return -1;
-                                  if (yearA !== 1 && yearB === 1) return 1;
-                                  if (yearA === 1 && yearB === 1) return 0;
-                                  return yearA - yearB;
-                                });
-                                const currentIndex = sortedAllRecords.findIndex(r => r.id === record.id);
-                                const inputValue = e.target.value;
-                                
-                                if (inputValue && currentIndex === 0) {
-                                  const baseDate = new Date(inputValue);
-                                  const newRecords = allRecords.map(r => {
-                                    const idx = sortedAllRecords.findIndex(sr => sr.id === r.id);
-                                    const newDate = new Date(baseDate);
-                                    newDate.setFullYear(newDate.getFullYear() + idx);
-                                    const formattedDate = newDate.toISOString().split('T')[0];
-                                    return { ...r, date: formattedDate };
-                                  });
-                                  handleUpdateTransactionField(newRecords);
-                                } else {
-                                  const newRecords = allRecords.map(r => {
-                                    if (r.id === record.id) {
-                                      return { ...r, date: inputValue };
-                                    }
-                                    return r;
-                                  });
-                                  handleUpdateTransactionField(newRecords);
-                                }
-                              }} className="w-36 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{demoRate.toFixed(2)}%</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{irrReturn !== null ? irrReturn.toFixed(2) + '%' : '—'}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.actualProfitAmount || ''} onChange={(e) => {
                                 const newRecords = selectedInsurance.transactionRecords.map(r => {
@@ -4102,16 +4125,22 @@ export default function IndependentAssets() {
                                 handleUpdateTransactionField(newRecords);
                               }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{actualRate !== null ? actualRate.toFixed(2) + '%' : '—'}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatPercentage(record.dividendRealizationRate)}</td>
-                            <td className="px-4 py-3 text-sm">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
-                                {status}
-                              </span>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.cashFlowAmount || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) {
+                                    return { ...r, cashFlowAmount: e.target.value };
+                                  }
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
                             </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{actualRate !== null ? actualRate.toFixed(2) + '%' : '—'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{dividendRealizationRate.toFixed(2)}%</td>
                             <td className="px-4 py-3 text-sm">
-                              <button onClick={() => handleAddInsuranceTransaction()} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
-                                <Plus className="w-4 h-4" />
+                              <button onClick={toggleStatus} className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor} cursor-pointer hover:opacity-80 transition-opacity`}>
+                                {status}
                               </button>
                             </td>
                             <td className="px-4 py-3 text-sm">
@@ -4132,11 +4161,7 @@ export default function IndependentAssets() {
                 </div>
               ) : (
                 <div className="text-center py-8">
-                  <div className="text-sm text-gray-500 dark:text-gray-400 mb-4">暂无交易记录</div>
-                  <button onClick={() => handleAddInsuranceTransaction()} className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors">
-                    <Plus className="w-4 h-4" />
-                    <span>新增交易记录</span>
-                  </button>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">暂无交易记录</div>
                 </div>
               )}
             </div>
@@ -4491,10 +4516,7 @@ export default function IndependentAssets() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">内部收益率IRR(%)</label>
                     <input type="number" value={transactionFormData.irr || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, irr: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">分红实现率(%)</label>
-                    <input type="number" value={transactionFormData.dividendRealizationRate || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, dividendRealizationRate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
+
                 </>
               )}
             </div>
