@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { fetchState, saveState } from '../api';
+import { fetchState, saveState, fetchRealTimeExchangeRates } from '../api';
+import { getCurrencySymbol } from '../utils/currency';
 import {
   Wallet,
   Plus,
@@ -23,12 +24,20 @@ import {
   TrendingDown,
 } from 'lucide-react';
 
-function formatCurrency(value) {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    minimumFractionDigits: 0,
-  }).format(value);
+function convertCurrency(value, fromCurrency, toCurrency, rates) {
+  if (fromCurrency === toCurrency) return value;
+  const fromRate = rates[fromCurrency] || 1;
+  const toRate = rates[toCurrency] || 1;
+  return value * (fromRate / toRate);
+}
+
+function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
+  const converted = convertCurrency(value, currency, targetCurrency, rates);
+  const symbol = getCurrencySymbol(targetCurrency);
+  return `${symbol}${new Intl.NumberFormat('zh-CN', {
+    minimumFractionDigits: targetCurrency === 'JPY' ? 0 : 2,
+    maximumFractionDigits: targetCurrency === 'JPY' ? 0 : 2,
+  }).format(converted)}`;
 }
 
 const categoryIcons = {
@@ -97,6 +106,7 @@ export default function Accounts() {
   const [addingSub, setAddingSub] = useState(false);
   const [newSubName, setNewSubName] = useState('');
   const [editingSubName, setEditingSubName] = useState({ index: -1, name: '' });
+  // 来自 origin/main：账户类型管理与余额映射
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
   const [addingType, setAddingType] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
@@ -115,6 +125,9 @@ export default function Accounts() {
     localStorage.setItem('wealth_os_account_balance_mapping', JSON.stringify(newMapping));
   };
   const [balanceCardExpanded, setBalanceCardExpanded] = useState(true);
+  // 来自暂存：跨币种显示
+  const [selectedCurrency, setSelectedCurrency] = useState('CNY');
+  const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.2, JPY: 0.048, HKD: 0.92, EUR: 7.8 });
 
   const { accounts = [], records = [], finance = {}, debts = [], accountCategories = {}, independentAssets = {}, accountTypes = [], financeAssets = [] } = stateData || {};
 
@@ -261,7 +274,17 @@ export default function Accounts() {
 
   useEffect(() => {
     loadData();
+    loadExchangeRates();
   }, []);
+
+  const loadExchangeRates = async () => {
+    try {
+      const rates = await fetchRealTimeExchangeRates();
+      setExchangeRates({ CNY: 1, ...rates });
+    } catch (err) {
+      console.error('Failed to load exchange rates:', err);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -279,10 +302,10 @@ export default function Accounts() {
       }
       if (!data.accounts || data.accounts.length === 0) {
         const demoAccounts = [
-          { id: 'demo-1', name: '招商银行', category: '银行', subCategory: '招商银行', currency: 'CNY', liability: false },
-          { id: 'demo-2', name: '支付宝', category: '其他', subCategory: '支付宝', currency: 'CNY', liability: false },
-          { id: 'demo-3', name: '微信支付', category: '其他', subCategory: '微信支付', currency: 'CNY', liability: false },
-          { id: 'demo-4', name: '工商银行信用卡', category: '银行', subCategory: '工商银行', currency: 'CNY', liability: true },
+          { id: 'demo-1', name: '招商银行', category: '银行', subCategory: '招商银行', currency: 'CNY', liability: false, balance: 10000 },
+          { id: 'demo-2', name: '支付宝', category: '其他', subCategory: '支付宝', currency: 'CNY', liability: false, balance: 5000 },
+          { id: 'demo-3', name: '微信支付', category: '其他', subCategory: '微信支付', currency: 'CNY', liability: false, balance: 2000 },
+          { id: 'demo-4', name: '工商银行信用卡', category: '银行', subCategory: '工商银行', currency: 'CNY', liability: true, balance: 3000 },
         ];
         data.accounts = demoAccounts;
         localStorage.setItem('wealth_os_accounts', JSON.stringify(demoAccounts));
@@ -310,10 +333,15 @@ export default function Accounts() {
     const balanceMap = {};
     accounts.forEach(account => {
       const stats = accountStats[account.id] || { marketValue: 0, holdingCost: 0 };
-      balanceMap[account.id] = stats.marketValue - stats.holdingCost;
+      // 余额映射优先：用户手动配置的覆盖自动计算
+      if (balanceMapping && balanceMapping[account.id] != null && balanceMapping[account.id] !== '') {
+        balanceMap[account.id] = parseFloat(balanceMapping[account.id]) || 0;
+      } else {
+        balanceMap[account.id] = stats.marketValue;
+      }
     });
     return balanceMap;
-  }, [accounts, accountStats]);
+  }, [accounts, accountStats, balanceMapping]);
 
   const computeStats = () => {
     const accountList = accounts || [];
@@ -321,12 +349,12 @@ export default function Accounts() {
     const liabilityAccounts = accountList.filter(a => getEffectiveType(a) === '负债');
 
     const totalAssets = assetAccounts.reduce((sum, a) => {
-      const s = accountStats[a.id] || { marketValue: 0, holdingCost: 0 };
-      return sum + s.marketValue;
+      const balance = calculateAccountBalance[a.id] != null ? calculateAccountBalance[a.id] : 0;
+      return sum + convertCurrency(balance, a.currency || 'CNY', selectedCurrency, exchangeRates);
     }, 0);
     const totalLiabilities = liabilityAccounts.reduce((sum, a) => {
-      const s = accountStats[a.id] || { marketValue: 0, holdingCost: 0 };
-      return sum + s.marketValue;
+      const balance = calculateAccountBalance[a.id] != null ? calculateAccountBalance[a.id] : 0;
+      return sum + convertCurrency(Math.abs(balance), a.currency || 'CNY', selectedCurrency, exchangeRates);
     }, 0);
     const netWorth = totalAssets - totalLiabilities;
 
@@ -1246,6 +1274,15 @@ export default function Accounts() {
               <p className="text-sm text-gray-600 mt-1">管理所有资产和负债账户</p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
+              <select
+                value={selectedCurrency}
+                onChange={(e) => setSelectedCurrency(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-sm font-medium bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              >
+                {currencies.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
               <button
                 onClick={loadData}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary-500 text-primary-500 text-sm font-medium hover:bg-primary-500 hover:text-white transition-colors"
@@ -1284,7 +1321,7 @@ export default function Accounts() {
               <span className="text-sm text-gray-500 dark:text-gray-400">总资产</span>
             </div>
             <div className="text-2xl font-bold text-green-600 tabular-nums whitespace-nowrap">
-              {formatCurrency(totalAssets)}
+              {formatCurrencyWithRate(totalAssets, 'CNY', selectedCurrency, exchangeRates)}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               {assetAccounts.length} 个账户
@@ -1299,7 +1336,7 @@ export default function Accounts() {
               <span className="text-sm text-gray-500 dark:text-gray-400">总负债</span>
             </div>
             <div className="text-2xl font-bold text-red-500 tabular-nums whitespace-nowrap">
-              {formatCurrency(totalLiabilities)}
+              {formatCurrencyWithRate(totalLiabilities, 'CNY', selectedCurrency, exchangeRates)}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               {liabilityAccounts.length} 个账户
@@ -1316,7 +1353,7 @@ export default function Accounts() {
             <div className={`text-2xl font-bold tabular-nums whitespace-nowrap ${
               netWorth >= 0 ? 'text-green-600' : 'text-red-500'
             }`}>
-              {formatCurrency(netWorth)}
+              {formatCurrencyWithRate(netWorth, 'CNY', selectedCurrency, exchangeRates)}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               资产 - 负债
@@ -1461,7 +1498,7 @@ export default function Accounts() {
                       <td className={`py-3 px-3 text-right font-medium tabular-nums ${
                         balance < 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'
                       }`}>
-                        {formatCurrency(balance)}
+                        {formatCurrencyWithRate(balance, account.currency || 'CNY', selectedCurrency, exchangeRates)}
                       </td>
                       <td className="py-3 px-3">
                         <div className="flex items-center justify-center gap-1">

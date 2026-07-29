@@ -26,6 +26,8 @@ import {
   Trash2,
   Eye,
   Check,
+  Save,
+  Archive,
 } from 'lucide-react';
 
 // ── 工具函数 ──
@@ -180,9 +182,35 @@ function AccountCard({ name, totalValue, totalCost, totalPnl, totalPnlRate, tota
   );
 }
 
-function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, setStateData, onRefresh, selectedCurrency = 'CNY', exchangeRates = {}, quotesMap = {} }) {
-  const latestData = stateData?.financeAssets?.find(item => String(item.id) === String(data?.id)) || data;
+function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, setStateData, onRefresh, selectedCurrency = 'CNY', exchangeRates = {}, quotesMap = {}, readOnly = false }) {
+  const latestData = data?.isArchived
+    ? data
+    : (stateData?.financeAssets?.find(item => String(item.id) === String(data?.id)) || data);
   if (!latestData) return null;
+
+  // 归档模式下：根据交易明细实时计算最终盈亏/收益率
+  // 公式：最终盈亏 = 卖出总金额 - 买入总金额 - 交易税费
+  //      最终收益率 = 最终盈亏 / 买入总金额 × 100%
+  const computedArchive = (() => {
+    if (!latestData.isArchived) return null;
+    const txs = latestData.transactions || [];
+    let buyTotalAmount = 0;
+    let sellTotalAmount = 0;
+    let totalFees = 0;
+    txs.forEach(t => {
+      const amount = parseFloat(t.amount) || 0;
+      const fee = parseFloat(t.commission || t.fee) || 0;
+      if (!isNaN(fee)) totalFees += fee;
+      if (t.type === '建仓' || t.type === '买入') {
+        buyTotalAmount += amount;
+      } else if (t.type === '卖出' || t.type === '清仓') {
+        sellTotalAmount += Math.abs(amount);
+      }
+    });
+    const finalPnl = sellTotalAmount - buyTotalAmount - totalFees;
+    const finalPnlPercent = buyTotalAmount > 0 ? (finalPnl / buyTotalAmount) * 100 : 0;
+    return { finalPnl, finalPnlPercent, buyTotalAmount, sellTotalAmount, totalFees };
+  })();
   const [uploadedImages, setUploadedImages] = useState([]);
   const [showAddRecord, setShowAddRecord] = useState(false);
   const [tradeRecords, setTradeRecords] = useState(() => {
@@ -230,7 +258,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     }
   }, [stateData?.financeAssets, data?.id]);
 
-  const saveTradeRecords = async (records) => {
+  const saveTradeRecords = async (records, updatedAccounts) => {
     if (!saveState || !stateData) return;
     try {
       const currentFinanceAssets = stateData?.financeAssets || [];
@@ -240,18 +268,15 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
         }
         return item;
       });
-      // 同步更新父组件 stateData，使 DetailModal 能立即看到最新数据
-      if (typeof window !== 'undefined' && setStateData) {
-        setStateData({
-          ...stateData,
-          financeAssets: updatedFinanceAssets,
-        });
-      }
-      await saveState({
+      const newState = {
         ...stateData,
         financeAssets: updatedFinanceAssets,
-      });
-      // 通知父组件刷新数据
+        accounts: updatedAccounts || stateData.accounts,
+      };
+      if (typeof window !== 'undefined' && setStateData) {
+        setStateData(newState);
+      }
+      await saveState(newState);
       if (onRefresh) await onRefresh();
     } catch (err) {
       console.error('Failed to save trade records:', err);
@@ -451,7 +476,141 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     setUploadedImages(prev => prev.filter(img => img.id !== id));
   };
 
-  const handleAddRecord = () => {
+  const handleLiquidateArchive = async (asset, updatedRecords, updatedAccounts) => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const archiveDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+    // 从交易明细统计最终盈亏
+    let buyTotalAmount = 0;
+    let sellTotalAmount = 0;
+    let totalFees = 0;
+    (updatedRecords || []).forEach(t => {
+      const amount = parseFloat(t.amount) || 0;
+      const fee = parseFloat(t.commission || t.fee) || 0;
+      if (!isNaN(fee)) totalFees += fee;
+      if (t.type === '建仓' || t.type === '买入') {
+        buyTotalAmount += amount;
+      } else if (t.type === '卖出' || t.type === '清仓') {
+        sellTotalAmount += Math.abs(amount);
+      }
+    });
+    const finalPnl = sellTotalAmount - buyTotalAmount - totalFees;
+    const finalPnlPercent = buyTotalAmount > 0 ? Math.round((finalPnl / buyTotalAmount) * 100 * 100) / 100 : 0;
+
+    const archiveRecord = {
+      originalAssetId: asset.id,
+      name: asset.name,
+      code: asset.code,
+      market: asset.market,
+      currency: asset.currency,
+      kind: asset.kind || asset.assetType,
+      category: asset.category,
+      subcategory: asset.subcategory,
+      tertiaryCategory: asset.tertiaryCategory,
+      accountId: asset.accountId || asset.account,
+      costPrice: asset.costPrice,
+      shares: asset.shares,
+      finalPnl,
+      finalPnlPercent,
+      archiveDate,
+      status: 'archived',
+      transactions: updatedRecords,
+    };
+
+    const newState = {
+      ...stateData,
+      accounts: updatedAccounts || stateData.accounts,
+      financeAssets: stateData.financeAssets.map(a =>
+        a.id === asset.id ? { ...a, status: 'archived', archiveDate, transactions: updatedRecords } : a
+      ),
+      financeAssetArchives: [...(stateData.financeAssetArchives || []), archiveRecord],
+    };
+
+    await saveState(newState);
+    setStateData(newState);
+    if (onRefresh) await onRefresh();
+  };
+
+  const updateCashAccount = (asset, record) => {
+    const accountName = record.accountId || record.account || asset.accountId || asset.account;
+    const cashAccountName = `${accountName} 现金账户`;
+    const accounts = JSON.parse(JSON.stringify(stateData.accounts || []));
+
+    let cashAccount = accounts.find(acc =>
+      acc.name === cashAccountName && (acc.type === 'cash' || acc.type === 'wallet' || acc.type === 'bank')
+    );
+
+    if (!cashAccount) {
+      const newCashAccount = {
+        id: `cash-${Date.now()}`,
+        name: cashAccountName,
+        type: 'cash',
+        currency: record.currency || asset.currency || 'CNY',
+        balance: 0,
+        liability: false,
+        enabled: true,
+      };
+      cashAccount = newCashAccount;
+      accounts.push(newCashAccount);
+    }
+
+    const amount = Math.abs(parseFloat(record.amount) || 0);
+    const fee = parseFloat(record.fee) || parseFloat(record.commission) || 0;
+
+    if (record.type === '建仓' || record.type === '买入') {
+      cashAccount.balance = (parseFloat(cashAccount.balance) || 0) - amount - fee;
+    } else if (record.type === '卖出' || record.type === '清仓') {
+      cashAccount.balance = (parseFloat(cashAccount.balance) || 0) + amount - fee;
+    }
+
+    record.cashAccountId = cashAccount.id;
+    record.cashAccountName = cashAccount.name;
+
+    return accounts;
+  };
+
+  // 交易本金与所属账户（accountId 所指账户）余额联动
+  const updateAccountBalance = (asset, record, accounts) => {
+    const accountId = record.accountId || record.account || asset.accountId || asset.account;
+    if (!accountId) return accounts;
+
+    const accountsCopy = Array.isArray(accounts)
+      ? JSON.parse(JSON.stringify(accounts))
+      : JSON.parse(JSON.stringify(stateData.accounts || []));
+
+    // 定位所属账户：id 或 name 匹配，排除现金账户
+    let targetAccount = accountsCopy.find(acc =>
+      acc &&
+      !['cash', 'wallet', 'bank'].includes(acc.type) &&
+      (acc.id === accountId || acc.name === accountId)
+    );
+    if (!targetAccount) return accountsCopy;
+
+    // 货币单位不一致时跳过更新
+    const tradeCurrency = record.currency || asset.currency || 'CNY';
+    if (targetAccount.currency && targetAccount.currency !== tradeCurrency) {
+      console.info('[updateAccountBalance] 货币单位不一致，跳过所属账户余额更新', {
+        accountCurrency: targetAccount.currency,
+        tradeCurrency,
+      });
+      return accountsCopy;
+    }
+
+    const amount = Math.abs(parseFloat(record.amount) || 0);
+    const fee = parseFloat(record.fee) || parseFloat(record.commission) || 0;
+
+    if (record.type === '建仓' || record.type === '买入') {
+      targetAccount.balance = (parseFloat(targetAccount.balance) || 0) - amount - fee;
+    } else if (record.type === '卖出' || record.type === '清仓') {
+      targetAccount.balance = (parseFloat(targetAccount.balance) || 0) + amount - fee;
+    }
+    // 分红交易：不调整所属账户余额
+
+    return accountsCopy;
+  };
+
+  const handleAddRecord = async () => {
     const record = {
       id: editingRecord ? editingRecord.id : Date.now(),
       direction: newRecord.type,
@@ -466,17 +625,46 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       amount: parseFloat(newRecord.amount) || 0,
       commission: newRecord.type === '分红' ? '-' : parseFloat(newRecord.fee) || 0,
       fee: newRecord.type === '分红' ? '-' : parseFloat(newRecord.fee) || 0,
+      accountId: latestData.accountId || latestData.account,
+      currency: latestData.currency,
     };
-    setTradeRecords(prev => {
-      let newRecords;
-      if (editingRecord) {
-        newRecords = prev.map(r => r.id === editingRecord.id ? record : r);
-      } else {
-        newRecords = [...prev, record];
-      }
-      saveTradeRecords(newRecords);
-      return newRecords;
-    });
+
+    let newRecords;
+    if (editingRecord) {
+      newRecords = tradeRecords.map(r => r.id === editingRecord.id ? record : r);
+    } else {
+      newRecords = [...tradeRecords, record];
+    }
+
+    setTradeRecords(newRecords);
+
+    // 计算可用份额（从交易历史推算）
+    const totalShares = parseFloat(latestData.shares || latestData.quantity || 0);
+    const soldShares = tradeRecords
+      .filter(r => r.type === '卖出' || r.type === '清仓')
+      .reduce((sum, r) => sum + (Math.abs(parseFloat(r.quantity) || 0)), 0);
+    const availableAfterTrade = totalShares - soldShares - Math.abs(parseFloat(record.quantity) || 0);
+
+    // 清仓判断：显式选清仓 或 卖出后份额归零
+    const isLiquidation = record.type === '清仓' ||
+      (record.type === '卖出' && availableAfterTrade <= 0);
+
+    if (isLiquidation) {
+      record.type = '清仓';
+      record.direction = '清仓';
+      newRecords = newRecords.map(r => r.id === record.id ? { ...r, type: '清仓', direction: '清仓' } : r);
+      setTradeRecords(newRecords);
+    }
+
+    let updatedAccounts = updateCashAccount(latestData, record);
+    updatedAccounts = updateAccountBalance(latestData, record, updatedAccounts);
+
+    if (isLiquidation) {
+      await handleLiquidateArchive(latestData, newRecords, updatedAccounts);
+    } else {
+      await saveTradeRecords(newRecords, updatedAccounts);
+    }
+
     setNewRecord({
       type: '买入',
       date: new Date().toISOString().split('T')[0],
@@ -513,6 +701,39 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
             </svg>
           </button>
         </div>
+
+        {readOnly && (
+          <div className="mx-4 mt-3 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl">
+            <div className="flex items-center gap-2 text-orange-600 dark:text-orange-400 mb-2">
+              <Archive className="w-4 h-4" />
+              <span className="text-sm font-medium">已归档持仓</span>
+            </div>
+            <div className="grid grid-cols-3 gap-4 text-xs">
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">归档日期</span>
+                <p className="text-gray-900 dark:text-white font-medium">{latestData.archiveDate || '-'}</p>
+              </div>
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">最终盈亏</span>
+                <p className={`font-medium ${(computedArchive?.finalPnl ?? latestData.holdingPnl ?? 0) >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                  {(() => {
+                    const v = computedArchive ? computedArchive.finalPnl : (latestData.holdingPnl || 0);
+                    return `${v >= 0 ? '+' : ''}${formatCurrencyWithRate(v, latestData.currency || 'CNY', selectedCurrency, exchangeRates)}`;
+                  })()}
+                </p>
+              </div>
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">最终收益率</span>
+                <p className={`font-medium ${(computedArchive?.finalPnlPercent ?? latestData.holdingPnlRate ?? 0) >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                  {(() => {
+                    const v = computedArchive ? computedArchive.finalPnlPercent : (latestData.holdingPnlRate || 0);
+                    return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+                  })()}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="p-4 overflow-y-auto max-h-[calc(90vh-80px)]">
           {isDomesticOutdoor ? (
@@ -719,6 +940,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                   <option value="建仓">建仓</option>
                   <option value="买入">买入</option>
                   <option value="卖出">卖出</option>
+                  <option value="清仓">清仓</option>
                   <option value="分红">分红</option>
                 </select>
                 <button
@@ -728,22 +950,26 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                   <Plus className="w-3.5 h-3.5" />
                   新增记录
                 </button>
-                <label className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 flex items-center gap-1 cursor-pointer">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  图片识别上传
-                  <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
-                </label>
-                <button
-                  onClick={() => setShowDcaModal(true)}
-                  className="text-xs text-purple-600 dark:text-purple-400 hover:text-purple-700 flex items-center gap-1"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                  </svg>
-                  定投设置
-                </button>
+                {!readOnly && (
+                  <label className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 flex items-center gap-1 cursor-pointer">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    图片识别上传
+                    <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
+                  </label>
+                )}
+                {!readOnly && (
+                  <button
+                    onClick={() => setShowDcaModal(true)}
+                    className="text-xs text-purple-600 dark:text-purple-400 hover:text-purple-700 flex items-center gap-1"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                    </svg>
+                    定投设置
+                  </button>
+                )}
               </div>
             </div>
 
@@ -754,12 +980,23 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                     <label className="text-gray-500 dark:text-gray-400 block mb-0.5">类型</label>
                     <select
                       value={newRecord.type}
-                      onChange={e => setNewRecord(prev => ({ ...prev, type: e.target.value }))}
+                      onChange={e => {
+                        const type = e.target.value;
+                        if (type === '清仓') {
+                          const qty = latestData.availableShares || latestData.shares || latestData.quantity || 0;
+                          const price = latestData.currentPrice || latestData.costPrice || 0;
+                          const amount = price && qty ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
+                          setNewRecord(prev => ({ ...prev, type, quantity: String(qty), price: String(price), amount }));
+                        } else {
+                          setNewRecord(prev => ({ ...prev, type }));
+                        }
+                      }}
                       className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
                     >
                       <option value="建仓">建仓</option>
                       <option value="买入">买入</option>
                       <option value="卖出">卖出</option>
+                      <option value="清仓">清仓</option>
                       <option value="分红">分红</option>
                     </select>
                   </div>
@@ -792,7 +1029,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           onChange={e => {
                             const price = e.target.value;
                             const qty = newRecord.quantity;
-                            const amount = price && qty ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
+                            const fee = newRecord.fee;
+                            const amount = price && qty && fee !== '' ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
                             setNewRecord(prev => ({ ...prev, price, amount }));
                           }}
                           className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
@@ -808,11 +1046,29 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           onChange={e => {
                             const qty = e.target.value;
                             const price = newRecord.price;
-                            const amount = price && qty ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
+                            const fee = newRecord.fee;
+                            const amount = price && qty && fee !== '' ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
                             setNewRecord(prev => ({ ...prev, quantity: qty, amount }));
                           }}
                           className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
                           placeholder="数量"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">费用</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={newRecord.fee}
+                          onChange={e => {
+                            const fee = e.target.value;
+                            const price = newRecord.price;
+                            const qty = newRecord.quantity;
+                            const amount = price && qty && fee !== '' ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
+                            setNewRecord(prev => ({ ...prev, fee, amount }));
+                          }}
+                          className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                          placeholder="费用"
                         />
                       </div>
                       <div className="col-span-2">
@@ -823,18 +1079,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           value={newRecord.amount}
                           readOnly
                           className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-gray-100 dark:bg-slate-600 cursor-not-allowed"
-                          placeholder="自动计算"
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">费用</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={newRecord.fee}
-                          onChange={e => setNewRecord(prev => ({ ...prev, fee: e.target.value }))}
-                          className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                          placeholder="费用"
+                          placeholder={newRecord.price && newRecord.quantity && newRecord.fee !== '' ? '自动计算' : '请填写价格、数量和费用'}
                         />
                       </div>
                     </>
@@ -849,7 +1094,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           onChange={e => {
                             const price = e.target.value;
                             const qty = newRecord.quantity;
-                            const amount = price && qty ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
+                            const fee = newRecord.fee;
+                            const amount = price && qty && fee !== '' ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
                             setNewRecord(prev => ({ ...prev, price, amount }));
                           }}
                           className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
@@ -865,11 +1111,29 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           onChange={e => {
                             const qty = e.target.value;
                             const price = newRecord.price;
-                            const amount = price && qty ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
+                            const fee = newRecord.fee;
+                            const amount = price && qty && fee !== '' ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
                             setNewRecord(prev => ({ ...prev, quantity: qty, amount }));
                           }}
                           className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
                           placeholder="份额"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">费用</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={newRecord.fee}
+                          onChange={e => {
+                            const fee = e.target.value;
+                            const price = newRecord.price;
+                            const qty = newRecord.quantity;
+                            const amount = price && qty && fee !== '' ? (parseFloat(price) * parseFloat(qty)).toFixed(2) : '';
+                            setNewRecord(prev => ({ ...prev, fee, amount }));
+                          }}
+                          className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
+                          placeholder="费用"
                         />
                       </div>
                       <div className="col-span-2">
@@ -880,18 +1144,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           value={newRecord.amount}
                           readOnly
                           className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-gray-100 dark:bg-slate-600 cursor-not-allowed"
-                          placeholder="自动计算"
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <label className="text-gray-500 dark:text-gray-400 block mb-0.5">费用</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={newRecord.fee}
-                          onChange={e => setNewRecord(prev => ({ ...prev, fee: e.target.value }))}
-                          className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
-                          placeholder="费用"
+                          placeholder={newRecord.price && newRecord.quantity && newRecord.fee !== '' ? '自动计算' : '请填写净值、份额和费用'}
                         />
                       </div>
                     </>
@@ -932,11 +1185,17 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
               {paginatedRecords.map((record) => (
                 <div key={record.id} className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3 text-sm">
                   <div className="flex items-center justify-between mb-2">
-                    <span className={`font-medium ${record.type === '建仓' ? 'text-blue-600' : record.type === '买入' ? 'text-green-600' : record.type === '卖出' ? 'text-red-500' : 'text-blue-600'}`}>
+                    <span className={`font-medium ${record.type === '建仓' ? 'text-blue-600' : record.type === '买入' ? 'text-green-600' : record.type === '卖出' ? 'text-red-500' : record.type === '清仓' ? 'text-orange-500' : 'text-blue-600'}`}>
                       {record.type}
                     </span>
                     <span className="text-gray-500 dark:text-gray-400 text-xs">{record.date} {record.time}</span>
                   </div>
+                  {record.cashAccountName && (
+                    <div className="mb-2 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                      <Wallet className="w-3 h-3" />
+                      <span>关联账户: {record.cashAccountName}</span>
+                    </div>
+                  )}
                   {isDomesticOutdoor ? (
                     <div className="grid grid-cols-4 gap-2 text-xs">
                       <div>
@@ -955,37 +1214,41 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                         <span className="text-gray-500 dark:text-gray-400">费用</span>
                         <div className="flex items-center gap-1 justify-end flex-1">
                           <span className="text-gray-900 dark:text-white">{record.fee}</span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingRecord(record);
-                              setNewRecord({
-                                type: record.type,
-                                date: record.date,
-                                time: record.time,
-                                price: record.price === '-' ? '' : String(record.price),
-                                quantity: String(record.quantity),
-                                amount: String(record.amount),
-                                fee: record.fee === '-' ? '' : String(record.fee),
-                              });
-                              setShowAddRecord(true);
-                            }}
-                            className="p-1.5 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded transition-colors"
-                            title="修改"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => setTradeRecords(prev => {
-                              const newRecords = prev.filter(r => r.id !== record.id);
-                              saveTradeRecords(newRecords);
-                              return newRecords;
-                            })}
-                            className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                            title="删除"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {!readOnly && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingRecord(record);
+                                setNewRecord({
+                                  type: record.type,
+                                  date: record.date,
+                                  time: record.time,
+                                  price: record.price === '-' ? '' : String(record.price),
+                                  quantity: String(record.quantity),
+                                  amount: String(record.amount),
+                                  fee: record.fee === '-' ? '' : String(record.fee),
+                                });
+                                setShowAddRecord(true);
+                              }}
+                              className="p-1.5 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded transition-colors"
+                              title="修改"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {!readOnly && (
+                            <button
+                              onClick={() => setTradeRecords(prev => {
+                                const newRecords = prev.filter(r => r.id !== record.id);
+                                saveTradeRecords(newRecords);
+                                return newRecords;
+                              })}
+                              className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                              title="删除"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1007,37 +1270,41 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                         <span className="text-gray-500 dark:text-gray-400">费用</span>
                         <div className="flex items-center gap-1 justify-end flex-1">
                           <span className="text-gray-900 dark:text-white">{record.fee}</span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingRecord(record);
-                              setNewRecord({
-                                type: record.type,
-                                date: record.date,
-                                time: record.time,
-                                price: record.price === '-' ? '' : String(record.price),
-                                quantity: String(record.quantity),
-                                amount: String(record.amount),
-                                fee: record.fee === '-' ? '' : String(record.fee),
-                              });
-                              setShowAddRecord(true);
-                            }}
-                            className="p-1.5 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded transition-colors"
-                            title="修改"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => setTradeRecords(prev => {
-                              const newRecords = prev.filter(r => r.id !== record.id);
-                              saveTradeRecords(newRecords);
-                              return newRecords;
-                            })}
-                            className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                            title="删除"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {!readOnly && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingRecord(record);
+                                setNewRecord({
+                                  type: record.type,
+                                  date: record.date,
+                                  time: record.time,
+                                  price: record.price === '-' ? '' : String(record.price),
+                                  quantity: String(record.quantity),
+                                  amount: String(record.amount),
+                                  fee: record.fee === '-' ? '' : String(record.fee),
+                                });
+                                setShowAddRecord(true);
+                              }}
+                              className="p-1.5 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded transition-colors"
+                              title="修改"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {!readOnly && (
+                            <button
+                              onClick={() => setTradeRecords(prev => {
+                                const newRecords = prev.filter(r => r.id !== record.id);
+                                saveTradeRecords(newRecords);
+                                return newRecords;
+                              })}
+                              className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                              title="删除"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1261,7 +1528,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                   <div key={record.id} className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-xs text-gray-500 dark:text-gray-400">记录 {idx + 1}</span>
-                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${record.type === '建仓' ? 'bg-blue-100 text-blue-600' : record.type === '买入' ? 'bg-green-100 text-green-600' : record.type === '卖出' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${record.type === '建仓' ? 'bg-blue-100 text-blue-600' : record.type === '买入' ? 'bg-green-100 text-green-600' : record.type === '卖出' ? 'bg-red-100 text-red-600' : record.type === '清仓' ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
                         {record.type}
                       </span>
                     </div>
@@ -1425,7 +1692,35 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   );
 }
 
-function HoldingsSummaryCard({ summary, selectedCurrency = 'CNY', exchangeRates = {} }) {
+function HoldingsSummaryCard({ summary, selectedCurrency = 'CNY', exchangeRates = {}, categoryName = 'active' }) {
+  if (categoryName === 'archived') {
+    const isFinalPos = summary.totalFinalPnl >= 0;
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 mb-4">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full p-1.5">
+            <PieChart className="w-4 h-4" />
+          </div>
+          <span className="font-semibold text-gray-900 dark:text-white text-sm">筛选汇总</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-center">
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">最终总盈亏</p>
+            <p className={`text-sm font-bold tabular-nums ${isFinalPos ? 'text-green-600' : 'text-red-500'}`}>
+              {pnlSign(summary.totalFinalPnl)}{formatCurrencyWithRate(summary.totalFinalPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">最终总收益率</p>
+            <p className={`text-sm font-bold tabular-nums ${isFinalPos ? 'text-green-600' : 'text-red-500'}`}>
+              {formatPercentage(summary.totalFinalPnlRate)}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const isPos = summary.totalPnl >= 0;
   const isDayPos = summary.totalDailyPnl >= 0;
   return (
@@ -1570,6 +1865,23 @@ const DEFAULT_COLUMNS = [
   { key: 'tags', label: '标签', visible: false, align: 'left' },
 ];
 
+// 归档持仓专用列定义
+const ARCHIVED_COLUMNS = [
+  { key: 'market', label: '市场', visible: true, align: 'left' },
+  { key: 'currency', label: '货币', visible: true, align: 'left' },
+  { key: 'assetKind', label: '资产种类', visible: true, align: 'left' },
+  { key: 'name', label: '资产名称', visible: true, align: 'left' },
+  { key: 'code', label: '代码', visible: true, align: 'left' },
+  { key: 'cost', label: '持仓成本', visible: true, align: 'right' },
+  { key: 'avgCost', label: '平均买入成本', visible: true, align: 'right' },
+  { key: 'quantity', label: '数量', visible: true, align: 'right' },
+  { key: 'holdingDays', label: '天数', visible: true, align: 'right' },
+  { key: 'archiveDate', label: '清仓日期', visible: true, align: 'right' },
+  { key: 'finalPnl', label: '最终盈亏', visible: true, align: 'right', bold: true, pnl: true },
+  { key: 'finalPnlPercent', label: '最终收益率', visible: true, align: 'right', pnl: true },
+  { key: 'account', label: '所属账户', visible: true, align: 'left' },
+];
+
 // ── 分类表格子组件（含筛选+分页）──
 function CategoryTable({
   categoryName,
@@ -1593,6 +1905,7 @@ function CategoryTable({
   categoryL4Options = [],
   selectedCurrency = 'CNY',
   exchangeRates = {},
+  financeAccounts = [],
 }) {
   const [filterText, setFilterText] = useState('');
   const [page, setPage] = useState(1);
@@ -1630,6 +1943,15 @@ function CategoryTable({
   const filterSettingsRef = useRef(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showBatchEdit, setShowBatchEdit] = useState(false);
+  const [savedFilters, setSavedFilters] = useState(() => {
+    try {
+      const saved = localStorage.getItem('finance_saved_filters');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [showSavedFilters, setShowSavedFilters] = useState(false);
 
   const DEFAULT_FILTERS = [
     { key: 'market', label: '市场', visible: true },
@@ -1645,14 +1967,24 @@ function CategoryTable({
     { key: 'account', label: '所属账户', visible: true },
   ];
 
+  // 归档持仓专用筛选条件：仅保留与归档列表字段（市场/货币/资产种类/所属账户）对应的筛选项
+  const ARCHIVED_FILTERS = [
+    { key: 'market', label: '市场', visible: true },
+    { key: 'currency', label: '货币', visible: false },
+    { key: 'assetKind', label: '资产种类', visible: true },
+    { key: 'account', label: '所属账户', visible: true },
+  ];
+
+  const defaultFilters = categoryName === 'archived' ? ARCHIVED_FILTERS : DEFAULT_FILTERS;
+  const defaultColumns = categoryName === 'archived' ? ARCHIVED_COLUMNS : DEFAULT_COLUMNS;
+
   const [filterSettings, setFilterSettings] = useState(() => {
     try {
       const saved = localStorage.getItem(`finance_filter_settings_${categoryName}`);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          // Merge saved settings with defaults to include any new fields
-          const merged = DEFAULT_FILTERS.map(defaultFilter => {
+          const merged = defaultFilters.map(defaultFilter => {
             const savedFilter = parsed.find(f => f.key === defaultFilter.key);
             return savedFilter ? { ...defaultFilter, visible: savedFilter.visible } : defaultFilter;
           });
@@ -1660,7 +1992,7 @@ function CategoryTable({
         }
       }
     } catch (e) { console.error(e); }
-    return DEFAULT_FILTERS;
+    return defaultFilters;
   });
 
   useEffect(() => {
@@ -1676,7 +2008,7 @@ function CategoryTable({
   };
 
   const resetFiltersSettings = () => {
-    setFilterSettings([...DEFAULT_FILTERS]);
+    setFilterSettings([...defaultFilters]);
   };
 
   const getFilteredCurrencies = (market) => {
@@ -1695,7 +2027,7 @@ function CategoryTable({
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const filtered = parsed.filter(c => c.key !== 'avgBuyPrice');
-          const merged = DEFAULT_COLUMNS.map(def => {
+          const merged = defaultColumns.map(def => {
             const savedCol = filtered.find(c => c.key === def.key);
             return savedCol || def;
           });
@@ -1705,7 +2037,7 @@ function CategoryTable({
     } catch (e) {
       console.error('Failed to load column settings:', e);
     }
-    return [...DEFAULT_COLUMNS];
+    return [...defaultColumns];
   });
 
   useEffect(() => {
@@ -1789,6 +2121,7 @@ function CategoryTable({
         return <span className="px-1.5 py-0.5 rounded text-[10px] bg-gray-100 dark:bg-slate-700 text-gray-500">{val || '-'}</span>;
       case 'currency':
         return val || '-';
+      case 'assetKind':
       case 'assetType':
       case 'categoryL1':
       case 'categoryL2':
@@ -1823,9 +2156,13 @@ function CategoryTable({
         return <span className={colorClass}>{formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates).replace(getCurrencySymbol(h.currency || 'CNY'), '')}</span>;
       case 'holdingDays':
         return computeHoldingDays(h) || '-';
+      case 'archiveDate':
+        return val || '-';
+      case 'finalPnl':
       case 'holdingPnl':
       case 'dailyPnl':
         return <span className={pnlClass(val)}>{pnlSign(parseFloat(val))}{formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates).replace(getCurrencySymbol(h.currency || 'CNY'), '')}</span>;
+      case 'finalPnlPercent':
       case 'holdingPnlRate':
       case 'dailyPnlRate':
         return <span className={pnlClass(val)}>{formatPercentage(val)}</span>;
@@ -1964,41 +2301,62 @@ function CategoryTable({
 
   // 筛选汇总（基于 filtered 数据）
   const filteredSummary = useMemo(() => {
-    const totalCost = filtered.reduce((sum, a) => {
-      const cost = parseFloat(a.cost) || 0;
-      const currency = a.currency || 'CNY';
-      return sum + convertCurrency(cost, currency, 'CNY', exchangeRates);
-    }, 0);
-    const totalMarketValue = filtered.reduce((sum, a) => {
-      const value = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
-      const currency = a.currency || 'CNY';
-      return sum + convertCurrency(value, currency, 'CNY', exchangeRates);
-    }, 0);
-    const totalPnl = filtered.reduce((sum, a) => {
-      const pnl = parseFloat(a.holdingPnl) || 0;
-      const currency = a.currency || 'CNY';
-      return sum + convertCurrency(pnl, currency, 'CNY', exchangeRates);
-    }, 0);
-    const totalDailyPnl = filtered.reduce((sum, a) => {
-      const dailyPnl = parseFloat(a.dailyPnl) || 0;
-      const currency = a.currency || 'CNY';
-      return sum + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
-    }, 0);
-    return {
-      totalCost,
-      totalMarketValue,
-      totalPnl,
-      totalPnlRate: totalCost > 0 ? (totalMarketValue - totalCost) / totalCost * 100 : 0,
-      totalDailyPnl,
-      totalDailyPnlRate: totalMarketValue > 0 ? (totalDailyPnl / totalMarketValue) * 100 : 0,
-    };
-  }, [filtered, exchangeRates]);
+    if (categoryName === 'archived') {
+      // 最终总盈亏 = 筛选结果归档持仓的 finalPnl 之和（按汇率换算为 CNY）
+      const totalFinalPnl = filtered.reduce((sum, a) => {
+        const pnl = parseFloat(a.finalPnl) || 0;
+        const currency = a.currency || 'CNY';
+        return sum + convertCurrency(pnl, currency, 'CNY', exchangeRates);
+      }, 0);
+      // 理财模块总成本 = 所有未归档持仓的 cost 之和（按汇率换算为 CNY）
+      const totalCostAll = financeAccounts.reduce((sum, a) => {
+        if (a.isArchived) return sum;
+        const cost = parseFloat(a.cost) || 0;
+        const currency = a.currency || 'CNY';
+        return sum + convertCurrency(cost, currency, 'CNY', exchangeRates);
+      }, 0);
+      return {
+        totalCost: totalCostAll,
+        totalFinalPnl,
+        totalFinalPnlRate: totalCostAll > 0 ? (totalFinalPnl / totalCostAll) * 100 : 0,
+      };
+    } else {
+      const totalCost = filtered.reduce((sum, a) => {
+        const cost = parseFloat(a.cost) || 0;
+        const currency = a.currency || 'CNY';
+        return sum + convertCurrency(cost, currency, 'CNY', exchangeRates);
+      }, 0);
+      const totalMarketValue = filtered.reduce((sum, a) => {
+        const value = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
+        const currency = a.currency || 'CNY';
+        return sum + convertCurrency(value, currency, 'CNY', exchangeRates);
+      }, 0);
+      const totalPnl = filtered.reduce((sum, a) => {
+        const pnl = parseFloat(a.holdingPnl) || 0;
+        const currency = a.currency || 'CNY';
+        return sum + convertCurrency(pnl, currency, 'CNY', exchangeRates);
+      }, 0);
+      const totalDailyPnl = filtered.reduce((sum, a) => {
+        const dailyPnl = parseFloat(a.dailyPnl) || 0;
+        const currency = a.currency || 'CNY';
+        return sum + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
+      }, 0);
+      return {
+        totalCost,
+        totalMarketValue,
+        totalPnl,
+        totalPnlRate: totalCost > 0 ? (totalMarketValue - totalCost) / totalCost * 100 : 0,
+        totalDailyPnl,
+        totalDailyPnlRate: totalMarketValue > 0 ? (totalDailyPnl / totalMarketValue) * 100 : 0,
+      };
+    }
+  }, [filtered, exchangeRates, categoryName, financeAccounts]);
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700">
       {/* 筛选汇总卡片 */}
       {filtered.length > 0 && (
-        <HoldingsSummaryCard summary={filteredSummary} selectedCurrency={selectedCurrency} exchangeRates={exchangeRates} />
+        <HoldingsSummaryCard summary={filteredSummary} selectedCurrency={selectedCurrency} exchangeRates={exchangeRates} categoryName={categoryName} />
       )}
 
       {/* 筛选栏 */}
@@ -2206,6 +2564,105 @@ function CategoryTable({
             )}
           </div>
 
+          {/* 保存筛选条件按钮 */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                setShowSavedFilters(!showSavedFilters);
+                setShowFilterSettings(false);
+                setShowColumnSettings(false);
+              }}
+              className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs border rounded-lg transition-colors ${
+                showSavedFilters
+                  ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400'
+                  : 'border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              <Save className="w-3.5 h-3.5" />
+              筛选组合
+            </button>
+
+            {/* 保存筛选条件面板 */}
+            {showSavedFilters && (
+              <div className={`absolute right-0 mt-1 z-50 w-64 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg ${
+                columnSettingsPosition === 'bottom' ? 'top-full' : 'bottom-full'
+              }`}>
+                <div className="p-3 border-b border-gray-100 dark:border-slate-700">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-gray-900 dark:text-white">筛选组合</span>
+                    <button onClick={() => {
+                      const name = prompt('请输入筛选组合名称：');
+                      if (name && name.trim()) {
+                        const currentFilters = {
+                          name: name.trim(),
+                          account: filterAccount,
+                          market: filterMarket,
+                          currency: filterCurrency,
+                          assetKind: filterAssetKind,
+                          assetType: filterAssetType,
+                          categoryL1: filterCategoryL1,
+                          categoryL2: filterCategoryL2,
+                          categoryL3: filterCategoryL3,
+                          categoryL4: filterCategoryL4,
+                          positionGroup: filterPositionGroup,
+                          positionType: filterPositionType,
+                          tag: filterTag,
+                          text: filterText,
+                        };
+                        const newSavedFilters = [...savedFilters, currentFilters];
+                        setSavedFilters(newSavedFilters);
+                        localStorage.setItem('finance_saved_filters', JSON.stringify(newSavedFilters));
+                      }
+                    }} className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400">保存当前</button>
+                  </div>
+                </div>
+                <div className="p-2 space-y-1 max-h-[40vh] overflow-y-auto">
+                  {savedFilters.length > 0 ? (
+                    savedFilters.map((f, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-slate-700/50 rounded cursor-pointer">
+                        <button
+                          onClick={() => {
+                            setFilterAccount(f.account);
+                            setFilterMarket(f.market);
+                            setFilterCurrency(f.currency);
+                            setFilterAssetKind(f.assetKind);
+                            setFilterAssetType(f.assetType);
+                            setFilterCategoryL1(f.categoryL1);
+                            setFilterCategoryL2(f.categoryL2);
+                            setFilterCategoryL3(f.categoryL3);
+                            setFilterCategoryL4(f.categoryL4);
+                            setFilterPositionGroup(f.positionGroup);
+                            setFilterPositionType(f.positionType);
+                            setFilterTag(f.tag);
+                            setFilterText(f.text || '');
+                            setPage(1);
+                            setShowSavedFilters(false);
+                          }}
+                          className="flex-1 text-left text-xs text-gray-700 dark:text-gray-300"
+                        >
+                          {f.name}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const newSavedFilters = savedFilters.filter((_, i) => i !== idx);
+                            setSavedFilters(newSavedFilters);
+                            localStorage.setItem('finance_saved_filters', JSON.stringify(newSavedFilters));
+                          }}
+                          className="p-1 text-red-500 hover:text-red-600"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-4 text-xs text-gray-400">暂无保存的筛选组合</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* 列设置按钮 */}
           <div className="relative" ref={columnSettingsRef}>
             <button
@@ -2362,9 +2819,12 @@ function CategoryTable({
           </thead>
           <tbody>
             {paged.map((h, i) => (
-              <tr key={h.id || i} className="border-b border-gray-50 dark:border-slate-700/30 hover:bg-gray-50/80 dark:hover:bg-slate-700/20">
+              <tr
+                key={h.id || i}
+                onClick={() => onDetail && onDetail(h)}
+                className="border-b border-gray-50 dark:border-slate-700/30 hover:bg-gray-50/80 dark:hover:bg-slate-700/20 cursor-pointer">
                 {showBatchEdit && (
-                  <td className="py-2 px-1.5 text-center">
+                  <td className="py-2 px-1.5 text-center" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center justify-center gap-1">
                       <input
                         type="checkbox"
@@ -2397,15 +2857,17 @@ function CategoryTable({
                       : renderCell(h, col)}
                   </td>
                 ))}
-                <td className="py-2 px-1.5">
+                <td className="py-2 px-1.5" onClick={e => e.stopPropagation()}>
                   <div className="flex items-center justify-center gap-1">
-                    <button
-                      onClick={() => onEdit && onEdit(h)}
-                      className="p-1 rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                      title="编辑"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                    {onEdit && (
+                      <button
+                        onClick={() => onEdit && onEdit(h)}
+                        className="p-1 rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                        title="编辑"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
                       onClick={() => onDetail && onDetail(h)}
                       className="px-1.5 py-0.5 text-xs rounded text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
@@ -2522,6 +2984,7 @@ export default function Finance({ onAssetPenetration }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [detailData, setDetailData] = useState(null);
+  const [holdingsTab, setHoldingsTab] = useState('active');
   const [editMode, setEditMode] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [quotesMap, setQuotesMap] = useState({});
@@ -2553,13 +3016,13 @@ export default function Finance({ onAssetPenetration }) {
   const DEFAULT_ASSET_TYPE_OPTIONS = ['股票', '基金', '债券', '现金', '期货', '期权', '外汇', '保险', '房产', '实体投资', '黄金', '白银', '原油', '数字货币', '银行理财', '其他'];
   // 一级分类 → 资产类型 映射（选择一级分类后联动筛选资产类型）
   const CATEGORY_L1_ASSET_TYPES = {
-    '权益类': ['股票', '基金', '虚拟货币', '期货', '期权'],
-    '债权类': ['债券基金', '混债基金', '固收+'],
-    '现金类': ['短融', '货币基金', '短期债', '银行理财'],
-    '商品类': ['黄金', '白银', '原油', '其他商品'],
-    '分红类': ['股票', '基金', 'REITs', '币息'],
-    '固收类': ['债券基金', '混债基金', '固收+', '银行理财'],
+    '权益类': ['股票', '基金', '期货', '期权', '外汇'],
+    '固收类': ['债券', '银行理财'],
+    '现金类': ['现金', '银行理财'],
     '另类投资': ['房产', '实体投资', '数字货币', '其他'],
+    '商品': ['黄金', '白银', '原油'],
+    '债权类': ['债券'],
+    '分红类': ['股票', '基金'],
   };
   const [assetTypeOptions, setAssetTypeOptions] = useState(() => {
     const saved = localStorage.getItem('finance_asset_type_options');
@@ -2735,6 +3198,12 @@ export default function Finance({ onAssetPenetration }) {
   };
 
   useEffect(() => {
+    if (accounts && accounts.length > 0) {
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(accounts));
+    }
+  }, [accounts]);
+
+  useEffect(() => {
     localStorage.setItem('finance_categoryL3_options', JSON.stringify(categoryL3CustomOptions));
   }, [categoryL3CustomOptions]);
 
@@ -2795,6 +3264,97 @@ export default function Finance({ onAssetPenetration }) {
     setError(null);
     try {
       const data = await fetchState();
+      // 补充账户数据：如果 state 中 accounts 为空，从 localStorage 缓存中读取
+      if (!data.accounts || data.accounts.length === 0) {
+        const cachedAccounts = localStorage.getItem('wealth_os_accounts');
+        if (cachedAccounts) {
+          try {
+            const parsed = JSON.parse(cachedAccounts);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              data.accounts = parsed;
+            }
+          } catch {
+            /* ignore parse error */
+          }
+        }
+        // 如果缓存也为空，使用默认账户
+        if (!data.accounts || data.accounts.length === 0) {
+          data.accounts = [
+            { id: '1', name: '工商银行储蓄卡', owner: '本人', currency: 'CNY', type: 'bank', balance: 10000, liability: 0, enabled: true, is_default: true, sort_order: 0 },
+            { id: '2', name: '支付宝余额', owner: '本人', currency: 'CNY', type: 'wallet', balance: 5000, liability: 0, enabled: true, is_default: false, sort_order: 1 },
+            { id: '3', name: '微信零钱', owner: '本人', currency: 'CNY', type: 'wallet', balance: 2000, liability: 0, enabled: true, is_default: false, sort_order: 2 },
+          ];
+        }
+      }
+      // 为老数据补建仓交易记录
+      if (data?.financeAssets && data.financeAssets.length > 0) {
+        let needsUpdate = false;
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const _date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+        const _time = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+        data.financeAssets = data.financeAssets.map(asset => {
+          if (!asset.transactions || asset.transactions.length === 0) {
+            needsUpdate = true;
+            const _costPrice = parseFloat(asset.costPrice) || 0;
+            const _qty = parseFloat(asset.shares) || 0;
+            const isOutdoor = asset.tertiaryCategory === '场外' || asset.categoryL3 === '场外';
+            return {
+              ...asset,
+              transactions: [{
+                id: Date.now() + Math.random(),
+                direction: '建仓',
+                type: '建仓',
+                transaction_date: `${_date} ${_time}`,
+                date: _date,
+                time: _time,
+                shares: _qty,
+                quantity: _qty,
+                price: _costPrice,
+                net_value: isOutdoor ? _costPrice : undefined,
+                amount: _costPrice * _qty,
+                commission: 0,
+                fee: 0,
+              }],
+            };
+          }
+          return asset;
+        });
+        // 如果有数据被补充，异步保存
+        if (needsUpdate) {
+          saveState({ ...data }).catch(err => console.error('Failed to backfill transactions:', err));
+        }
+      }
+      // 解析交易记录中的现金账户名称
+      if (data?.financeAssets && data.financeAssets.length > 0) {
+        const accountsMap = {};
+        (data.accounts || []).forEach(acc => { accountsMap[acc.id] = acc.name; });
+        data.financeAssets = data.financeAssets.map(asset => {
+          if (!asset.transactions || asset.transactions.length === 0) return asset;
+          return {
+            ...asset,
+            transactions: asset.transactions.map(t => ({
+              ...t,
+              cashAccountName: t.cashAccountName || accountsMap[t.cashAccountId] || '',
+            })),
+          };
+        });
+      }
+      // 解析归档交易记录中的现金账户名称
+      if (data?.financeAssetArchives && data.financeAssetArchives.length > 0) {
+        const accountsMap = {};
+        (data.accounts || []).forEach(acc => { accountsMap[acc.id] = acc.name; });
+        data.financeAssetArchives = data.financeAssetArchives.map(archive => {
+          if (!archive.transactions || archive.transactions.length === 0) return archive;
+          return {
+            ...archive,
+            transactions: archive.transactions.map(t => ({
+              ...t,
+              cashAccountName: t.cashAccountName || accountsMap[t.cashAccountId] || '',
+            })),
+          };
+        });
+      }
       setStateData(data);
       const financeAssetsData = data?.financeAssets || [];
       if (financeAssetsData.length > 0) {
@@ -2908,8 +3468,8 @@ export default function Finance({ onAssetPenetration }) {
     if (!newAccount.name) return;
     setSaving(true);
     try {
-      const _costPrice = parseFloat(newAccount.cost) || 0;
-      const _quantity = parseFloat(newAccount.quantity) || 0;
+      const _costPrice = parseFloat(newAccount.costPrice) || 0;
+      const _quantity = parseFloat(newAccount.shares) || 0;
       const _currentPrice = parseFloat(newAccount.currentPrice) || 0;
       const _prevPrice = parseFloat(newAccount.prevPrice) || 0;
       const _unitPnl = _currentPrice - _costPrice;
@@ -2961,21 +3521,78 @@ export default function Finance({ onAssetPenetration }) {
       const currentFinanceAssets = stateData?.financeAssets || [];
       let updatedFinanceAssets;
 
-      if (editMode && editingId) {
-        // 编辑：替换对应 id 的项
+      const isEditMode = editMode && editingId;
+      let updatedAccounts = null;
+
+      if (isEditMode) {
+        // 编辑：保留已有交易记录
+        const existingItem = currentFinanceAssets.find(item => String(item.id) === String(editingId));
+        const existingTransactions = existingItem?.transactions || [];
+        payload.transactions = existingTransactions;
         updatedFinanceAssets = currentFinanceAssets.map(item =>
           String(item.id) === String(editingId) ? payload : item
         );
       } else {
-        // 新增：push 到数组
+        // 新增：自动创建一条建仓交易记录
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const _date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+        const _time = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+        const isDomesticOutdoor = newAccount.market === '国内市场' && newAccount.categoryL3 === '场外';
+        const buildRecord = {
+          id: Date.now(),
+          direction: '建仓',
+          type: '建仓',
+          transaction_date: `${_date} ${_time}`,
+          date: _date,
+          time: _time,
+          shares: _quantity,
+          quantity: _quantity,
+          price: _costPrice,
+          net_value: isDomesticOutdoor ? _costPrice : undefined,
+          amount: _costPrice * _quantity,
+          commission: 0,
+          fee: 0,
+          accountId: payload.accountId,
+          currency: payload.currency,
+        };
+        payload.transactions = [buildRecord];
         updatedFinanceAssets = [...currentFinanceAssets, payload];
+
+        // 现金账户联动：建仓扣减现金
+        const accountName = payload.accountId || '';
+        const cashAccountName = `${accountName} 现金账户`;
+        const accountsForUpdate = JSON.parse(JSON.stringify(stateData.accounts || []));
+        let cashAcct = accountsForUpdate.find(acc =>
+          acc.name === cashAccountName && (acc.type === 'cash' || acc.type === 'wallet' || acc.type === 'bank')
+        );
+        if (!cashAcct) {
+          cashAcct = {
+            id: `cash-${Date.now()}`,
+            name: cashAccountName,
+            type: 'cash',
+            currency: payload.currency || 'CNY',
+            balance: 0,
+            liability: false,
+            enabled: true,
+          };
+          accountsForUpdate.push(cashAcct);
+        }
+        const _amount = Math.abs(parseFloat(buildRecord.amount) || 0);
+        const _fee = parseFloat(buildRecord.fee) || 0;
+        cashAcct.balance = (parseFloat(cashAcct.balance) || 0) - _amount - _fee;
+        buildRecord.cashAccountId = cashAcct.id;
+        buildRecord.cashAccountName = cashAcct.name;
+
+        // 交易本金与所属账户余额联动
+        updatedAccounts = updateAccountBalance(payload, buildRecord, accountsForUpdate);
       }
 
-      // 使用 saveState 整体保存
-      await saveState({
-        ...stateData,
-        financeAssets: updatedFinanceAssets,
-      });
+      // 统一保存
+      const finalState = updatedAccounts
+        ? { ...stateData, financeAssets: updatedFinanceAssets, accounts: updatedAccounts }
+        : { ...stateData, financeAssets: updatedFinanceAssets };
+      await saveState(finalState);
 
       setShowAddModal(false);
       resetForm();
@@ -3078,6 +3695,21 @@ export default function Finance({ onAssetPenetration }) {
     } catch (err) {
       console.error('Failed to delete account:', err);
       alert('删除失败：' + (err.message || '未知错误'));
+    }
+  };
+
+  const handleDeleteArchive = async (id) => {
+    if (!window.confirm('确定要彻底删除这条归档记录吗？此操作不可恢复。')) return;
+    try {
+      const updatedArchives = (stateData?.financeAssetArchives || []).filter(
+        item => String(item.originalAssetId || item.id) !== String(id)
+      );
+      const newState = { ...stateData, financeAssetArchives: updatedArchives };
+      await saveState(newState);
+      setStateData(newState);
+    } catch (err) {
+      console.error('Failed to delete archive:', err);
+      alert('删除归档失败：' + (err.message || '未知错误'));
     }
   };
 
@@ -3603,6 +4235,46 @@ export default function Finance({ onAssetPenetration }) {
   const DEFAULT_CATEGORY_L1 = ['权益类', '固收类', '现金类', '另类投资', '商品'];
   const DEFAULT_CATEGORY_L2 = ['A股', '港股', '美股', '混合型', '指数型', '货币型', '债券型', 'QDII', '其他'];
 
+  // 资产类型 → 持仓分组映射
+  const ASSET_TYPE_POSITION_GROUP_MAP = {
+    '股票': ['核心仓位', '卫星仓位', '观察仓位', '波段仓位'],
+    '基金': ['核心仓位', '卫星仓位', '定投仓位', '观察仓位'],
+    '债券': ['核心仓位', '保守仓位'],
+    '现金': ['现金仓位'],
+    '期货': ['投机仓位', '套保仓位', '套利仓位'],
+    '期权': ['投机仓位', '套保仓位', '套利仓位'],
+    '外汇': ['投机仓位', '套保仓位'],
+    '保险': ['保障仓位'],
+    '房产': ['核心仓位', '投资仓位'],
+    '实体投资': ['核心仓位', '天使仓位'],
+    '黄金': ['核心仓位', '避险仓位'],
+    '白银': ['核心仓位', '投机仓位'],
+    '原油': ['投机仓位', '套保仓位'],
+    '数字货币': ['投机仓位', '核心仓位'],
+    '银行理财': ['现金仓位', '保守仓位'],
+    '其他': ['核心仓位', '卫星仓位', '观察仓位']
+  };
+
+  // 资产类型 → 持仓分类映射
+  const ASSET_TYPE_POSITION_TYPE_MAP = {
+    '股票': ['成长股仓位', '价值股仓位', '蓝筹股仓位', '周期股仓位', '消费股仓位', '科技股仓位', '打新仓位', '其他'],
+    '基金': ['核心基金仓位', '卫星基金仓位', '定投仓位', 'ETF仓位', 'LOF仓位', '其他'],
+    '债券': ['国债仓位', '企业债仓位', '可转债仓位', '债券基金仓位', '其他'],
+    '现金': ['现金管理', '货币基金', '短期理财', '其他'],
+    '期货': ['商品期货', '股指期货', '利率期货', '套利仓位', '其他'],
+    '期权': ['股票期权', '指数期权', '商品期权', '套利仓位', '其他'],
+    '外汇': ['主要货币对', '交叉货币对', '套利仓位', '其他'],
+    '保险': ['寿险仓位', '健康险仓位', '财产险仓位', '其他'],
+    '房产': ['住宅投资', '商业地产', '土地投资', '其他'],
+    '实体投资': ['股权投资', '合伙投资', '天使投资', '其他'],
+    '黄金': ['实物黄金', '纸黄金', '黄金ETF', '其他'],
+    '白银': ['实物白银', '纸白银', '白银ETF', '其他'],
+    '原油': ['原油期货', '原油ETF', '其他'],
+    '数字货币': ['主流币仓位', '山寨币仓位', 'DeFi仓位', '其他'],
+    '银行理财': ['固定收益', '浮动收益', '结构性存款', '其他'],
+    '其他': ['其他仓位', '观察仓位']
+  };
+
   // ── 动态资产分类（从 assetClasses 获取，无数据时降级使用默认值）──
   const assetClassOptions = useMemo(() => {
     if (assetClasses && assetClasses.length > 0) {
@@ -3612,6 +4284,15 @@ export default function Finance({ onAssetPenetration }) {
   }, [assetClasses]);
 
   const categoryL2Options = useMemo(() => {
+    if (newAccount.market === '港股市场') {
+      return ['港股'];
+    }
+    if (newAccount.market === '美股市场') {
+      return ['美股'];
+    }
+    if (newAccount.market === '国内市场') {
+      return ['A股', '港股通'];
+    }
     if (newAccount.assetType === '股票') {
       return ['A股', '港股', '美股', '其他'];
     }
@@ -3632,7 +4313,7 @@ export default function Finance({ onAssetPenetration }) {
       return [];
     }
     return DEFAULT_CATEGORY_L2;
-  }, [assetClasses, newAccount.categoryL1, newAccount.assetType]);
+  }, [assetClasses, newAccount.categoryL1, newAccount.assetType, newAccount.market]);
 
   const allCategoryL2Options = useMemo(() => {
     if (assetClasses && assetClasses.length > 0) {
@@ -3708,13 +4389,40 @@ export default function Finance({ onAssetPenetration }) {
       return parseFloat(a.todayPnlPercent) || parseFloat(a.dailyPnlRate) || 0;
     };
 
-    // 将 financeAssets 映射到前端 holding 结构
-    const financeAccounts = (financeAssets || []).map(a => {
+    // 将 financeAssets 映射到前端 holding 结构（倒序排列，最新数据在最上面）
+    const financeAccounts = (financeAssets || []).slice().reverse().map(a => {
       const _price = parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0;
       const _prevClose = parseFloat(quotesMap[a.code]?.prevClose) || parseFloat(a.prevPrice) || 0;
       const _priceChange = _price > _prevClose ? 'up' : _price < _prevClose ? 'down' : 'unchanged';
-      const _cost = parseFloat(a.costPrice || a.cost) || 0;
-      const _qty = parseFloat(a.shares || a.quantity) || 0;
+
+      // 从交易明细动态计算持仓数据
+      const transactions = a.transactions || [];
+      let buyTotalQty = 0;
+      let buyTotalAmount = 0;
+      let sellTotalQty = 0;
+      let sellTotalAmount = 0;
+      let totalFees = 0;
+      transactions.forEach(t => {
+        const qty = parseFloat(t.quantity || t.shares) || 0;
+        const amount = parseFloat(t.amount) || 0;
+        const fee = parseFloat(t.commission || t.fee) || 0;
+        if (!isNaN(fee)) totalFees += fee;
+        if (t.type === '建仓' || t.type === '买入') {
+          buyTotalQty += qty;
+          buyTotalAmount += amount;
+        } else if (t.type === '卖出' || t.type === '清仓') {
+          sellTotalQty += Math.abs(qty);
+          sellTotalAmount += Math.abs(amount);
+        }
+      });
+
+      // 动态计算持仓数量（以交易明细为准）
+      const _computedQty = buyTotalQty - sellTotalQty;
+      const _qty = buyTotalQty > 0 ? _computedQty : (parseFloat(a.shares || a.quantity) || 0);
+      // 动态计算成本价
+      const _computedCostPrice = buyTotalQty > 0 ? buyTotalAmount / buyTotalQty : 0;
+      const _cost = buyTotalQty > 0 ? _computedCostPrice : (parseFloat(a.costPrice || a.cost) || 0);
+
       const _unitPnl = _price - _cost;
       const _holdingPnl = Math.round(_unitPnl * _qty * 100) / 100;
       const _holdingPnlRate = _cost > 0 ? Math.round((_unitPnl / _cost) * 100 * 100) / 100 : 0;
@@ -3732,9 +4440,9 @@ export default function Finance({ onAssetPenetration }) {
         categoryL3: a.tertiaryCategory || a.categoryL3 || '',
         positionGroup: a.positionGroup || '',
         positionType: a.positionCategory || a.positionType || '',
-        costPrice: parseFloat(a.costPrice) || parseFloat(a.cost) || 0,
-        quantity: parseFloat(a.shares) || parseFloat(a.quantity) || 0,
-        cost: (parseFloat(a.costPrice) || parseFloat(a.cost) || 0) * (parseFloat(a.shares) || parseFloat(a.quantity) || 0),
+        costPrice: _cost,
+        quantity: _qty,
+        cost: _cost * _qty,
         currentPrice: _price,
         prevPrice: parseFloat(a.prevPrice) || _prevClose || 0,
         priceDate: a.priceDate || '',
@@ -3749,6 +4457,9 @@ export default function Finance({ onAssetPenetration }) {
         dailyPnl: getDailyPnl(a),
         dailyPnlRate: getDailyPnlRate(a),
         transactions: a.transactions || [],
+        status: a.status || 'active',
+        archiveDate: a.archiveDate || '',
+        isArchived: a.status === 'archived',
       };
     });
 
@@ -3858,6 +4569,72 @@ export default function Finance({ onAssetPenetration }) {
       holdingsSummary,
     };
   }, [financeAssets, quotesMap]);
+
+  const activeHoldings = useMemo(() => {
+    return computed.financeAccounts.filter(a => !a.isArchived);
+  }, [computed.financeAccounts]);
+
+  const archivedHoldings = useMemo(() => {
+    const archives = stateData?.financeAssetArchives || [];
+    return archives.map(a => {
+      // 从交易明细实时计算最终盈亏/收益率（兼容老数据 finalPnl=0 的情况）
+      const txs = a.transactions || [];
+      let buyTotalAmount = 0;
+      let sellTotalAmount = 0;
+      let totalFees = 0;
+      txs.forEach(t => {
+        const amount = parseFloat(t.amount) || 0;
+        const fee = parseFloat(t.commission || t.fee) || 0;
+        if (!isNaN(fee)) totalFees += fee;
+        if (t.type === '建仓' || t.type === '买入') {
+          buyTotalAmount += amount;
+        } else if (t.type === '卖出' || t.type === '清仓') {
+          sellTotalAmount += Math.abs(amount);
+        }
+      });
+      const computedFinalPnl = sellTotalAmount - buyTotalAmount - totalFees;
+      const computedFinalPnlPercent = buyTotalAmount > 0 ? (computedFinalPnl / buyTotalAmount) * 100 : 0;
+      // 优先使用交易明细实时计算结果；只有明细为空时才回退到数据库存档值
+      const finalPnl = (txs.length > 0) ? computedFinalPnl : (parseFloat(a.finalPnl) || 0);
+      const finalPnlPercent = (txs.length > 0) ? computedFinalPnlPercent : (parseFloat(a.finalPnlPercent) || 0);
+      return {
+        id: a.originalAssetId || a.id,
+        market: a.market || '国内市场',
+        currency: a.currency || 'CNY',
+        name: a.name,
+        code: a.code || '',
+        assetType: a.kind || a.assetType || '',
+        assetKind: a.kind || a.assetType || '',
+        account: a.accountId || '',
+        categoryL1: a.category || '',
+        categoryL2: a.subcategory || '',
+        categoryL3: a.tertiaryCategory || '',
+        positionGroup: '',
+        positionType: '',
+        costPrice: a.costPrice || 0,
+        quantity: a.shares || 0,
+        cost: (parseFloat(a.costPrice) || 0) * (parseFloat(a.shares) || 0),
+        currentPrice: 0,
+        prevPrice: 0,
+        priceDate: a.archiveDate || '',
+        prevClose: 0,
+        priceChange: 'unchanged',
+        avgBuyPrice: 0,
+        holdingDays: 0,
+        balance: 0,
+        currentValue: 0,
+        finalPnl,
+        finalPnlPercent,
+        holdingPnl: finalPnl,
+        holdingPnlRate: finalPnlPercent,
+        dailyPnl: 0,
+        dailyPnlRate: 0,
+        isArchived: true,
+        archiveDate: a.archiveDate,
+        transactions: txs,
+      };
+    });
+  }, [stateData?.financeAssetArchives]);
 
   // 账户本分页
   const accountBookTotalPages = Math.max(1, Math.ceil(computed.accountBook.length / ACCOUNTS_PER_PAGE));
@@ -4060,49 +4837,107 @@ export default function Finance({ onAssetPenetration }) {
             <div className="flex items-center gap-2">
               <Briefcase className="w-5 h-5 text-indigo-500" />
               <h2 className="text-base font-bold text-gray-900 dark:text-white">📊 持仓明细</h2>
-              <span className="text-xs text-gray-400 bg-gray-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
-                共 {computed.financeAccounts.length} 项
-              </span>
             </div>
-            <button onClick={() => { resetForm(); setShowAddModal(true); }}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-sm font-medium hover:from-indigo-600 hover:to-purple-700 active:scale-[0.97] transition-all shadow-md">
-              <Plus className="w-4 h-4" /> 新增持仓
-            </button>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-700 rounded-lg p-0.5">
+                <button
+                  onClick={() => setHoldingsTab('active')}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                    holdingsTab === 'active'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                >
+                  活跃持仓 ({activeHoldings.length})
+                </button>
+                <button
+                  onClick={() => setHoldingsTab('archived')}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                    holdingsTab === 'archived'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  }`}
+                >
+                  归档持仓 ({archivedHoldings.length})
+                </button>
+              </div>
+              {holdingsTab === 'active' && (
+                <button onClick={() => { resetForm(); setShowAddModal(true); }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-sm font-medium hover:from-indigo-600 hover:to-purple-700 active:scale-[0.97] transition-all shadow-md">
+                  <Plus className="w-4 h-4" /> 新增持仓
+                </button>
+              )}
+            </div>
           </div>
 
-          {computed.financeAccounts.length > 0 ? (
-            <CategoryTable
-              key="all"
-              categoryName="all"
-              holdings={computed.financeAccounts}
-              colorIdx={0}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onDetail={handleDetail}
-              onAdd={() => { resetForm(); setShowAddModal(true); }}
-              marketOptions={MARKET_OPTIONS}
-              currencyOptions={CURRENCY_SUGGESTIONS}
-              assetTypeOptions={ASSET_TYPE_OPTIONS}
-              assetClassOptions={assetClassOptions}
-              positionGroupOptions={positionGroupOptions}
-              positionTypeOptions={positionTypeOptions}
-              allCategoryL2Options={allCategoryL2Options}
-              tags={tags}
-              marketGroups={MARKET_GROUPS}
-              categoryL3CustomOptions={categoryL3CustomOptions}
-              categoryL4Options={categoryL4Options}
-              selectedCurrency={selectedCurrency}
-              exchangeRates={exchangeRates}
-            />
+          {holdingsTab === 'active' ? (
+            activeHoldings.length > 0 ? (
+              <CategoryTable
+                key="active"
+                categoryName="active"
+                holdings={activeHoldings}
+                colorIdx={0}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onDetail={handleDetail}
+                onAdd={() => { resetForm(); setShowAddModal(true); }}
+                marketOptions={MARKET_OPTIONS}
+                currencyOptions={CURRENCY_SUGGESTIONS}
+                assetTypeOptions={ASSET_TYPE_OPTIONS}
+                assetClassOptions={assetClassOptions}
+                positionGroupOptions={positionGroupOptions}
+                positionTypeOptions={positionTypeOptions}
+                allCategoryL2Options={allCategoryL2Options}
+                tags={tags}
+                marketGroups={MARKET_GROUPS}
+                categoryL3CustomOptions={categoryL3CustomOptions}
+                categoryL4Options={categoryL4Options}
+                selectedCurrency={selectedCurrency}
+                exchangeRates={exchangeRates}
+                financeAccounts={computed.financeAccounts}
+              />
+            ) : (
+              <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-12 text-center shadow-soft border border-gray-100/80 dark:border-slate-700/50">
+                <Briefcase className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+                <p className="text-gray-400 text-sm">暂无持仓数据</p>
+                <button onClick={() => { resetForm(); setShowAddModal(true); }}
+                  className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-sm font-medium hover:from-indigo-600 hover:to-purple-700 active:scale-[0.97] transition-all shadow-md">
+                  <Plus className="w-4 h-4" /> 新增持仓
+                </button>
+              </div>
+            )
           ) : (
-            <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-12 text-center shadow-soft border border-gray-100/80 dark:border-slate-700/50">
-              <Briefcase className="w-12 h-12 mx-auto text-gray-300 mb-3" />
-              <p className="text-gray-400 text-sm">暂无持仓数据</p>
-              <button onClick={() => { resetForm(); setShowAddModal(true); }}
-                className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-sm font-medium hover:from-indigo-600 hover:to-purple-700 active:scale-[0.97] transition-all shadow-md">
-                <Plus className="w-4 h-4" /> 新增持仓
-              </button>
-            </div>
+            archivedHoldings.length > 0 ? (
+              <CategoryTable
+                key="archived"
+                categoryName="archived"
+                holdings={archivedHoldings}
+                colorIdx={0}
+                onEdit={null}
+                onDelete={handleDeleteArchive}
+                onDetail={handleDetail}
+                marketOptions={MARKET_OPTIONS}
+                currencyOptions={CURRENCY_SUGGESTIONS}
+                assetTypeOptions={ASSET_TYPE_OPTIONS}
+                assetClassOptions={assetClassOptions}
+                positionGroupOptions={positionGroupOptions}
+                positionTypeOptions={positionTypeOptions}
+                allCategoryL2Options={allCategoryL2Options}
+                tags={tags}
+                marketGroups={MARKET_GROUPS}
+                categoryL3CustomOptions={categoryL3CustomOptions}
+                categoryL4Options={categoryL4Options}
+                selectedCurrency={selectedCurrency}
+                exchangeRates={exchangeRates}
+                financeAccounts={computed.financeAccounts}
+              />
+            ) : (
+              <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-12 text-center shadow-soft border border-gray-100/80 dark:border-slate-700/50">
+                <Archive className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+                <p className="text-gray-400 text-sm">暂无归档持仓</p>
+                <p className="text-gray-400 text-xs mt-1">卖出或清仓操作后持仓将自动归档</p>
+              </div>
+            )
           )}
         </section>
 
@@ -4121,6 +4956,7 @@ export default function Finance({ onAssetPenetration }) {
             selectedCurrency={selectedCurrency}
             exchangeRates={exchangeRates}
             quotesMap={quotesMap}
+            readOnly={detailData?.isArchived || detailData?.status === 'archived'}
           />
         )}
 
@@ -4303,7 +5139,14 @@ export default function Finance({ onAssetPenetration }) {
                   <FormField label="资产类型" required>
                     <div className="flex gap-2">
                       <select value={newAccount.assetType} onChange={e => {
-                        setNewAccount({ ...newAccount, assetType: e.target.value });
+                        const assetType = e.target.value;
+                        // 切换资产类型时清空持仓分组和持仓分类
+                        setNewAccount({ 
+                          ...newAccount, 
+                          assetType: assetType,
+                          positionGroup: '',
+                          positionType: ''
+                        });
                       }}
                         disabled={!newAccount.categoryL1}
                         className={`${FORM_SELECT} flex-1 ${!newAccount.categoryL1 ? 'opacity-50 cursor-not-allowed' : ''}`}>
@@ -4341,7 +5184,7 @@ export default function Finance({ onAssetPenetration }) {
                       }}
                         className={`${FORM_SELECT} flex-1`}>
                         <option value="">请选择</option>
-                        {(categoryL2OptionsMap[newAccount.categoryL1] || []).map(o => <option key={o} value={o}>{o}</option>)}
+                        {categoryL2Options.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                       <button onClick={() => setShowCategoryL2Modal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理二级分类">
                         <Settings className="w-4 h-4" />
@@ -4350,7 +5193,7 @@ export default function Finance({ onAssetPenetration }) {
                   </FormField>
 
                   {/* Row 4: 资产分类三级 | 资产分类四级 */}
-                  <FormField label="资产分类三级">
+                  <FormField label="资产分类三级" required>
                     <div className="flex gap-2">
                       <select value={newAccount.categoryL3} onChange={e => setNewAccount({ ...newAccount, categoryL3: e.target.value, categoryL4: '' })}
                         className={`${FORM_SELECT} flex-1`}>
@@ -4399,10 +5242,14 @@ export default function Finance({ onAssetPenetration }) {
                   {/* Row 5: 持仓分组 | 持仓分类 */}
                   <FormField label="持仓分组">
                     <div className="flex gap-2">
-                      <select value={newAccount.positionGroup} onChange={e => setNewAccount({ ...newAccount, positionGroup: e.target.value })}
-                        className={`${FORM_SELECT} flex-1`}>
-                        <option value="">请选择</option>
-                        {positionGroupOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                      <select
+                        value={newAccount.positionGroup}
+                        onChange={e => setNewAccount({ ...newAccount, positionGroup: e.target.value })}
+                        disabled={!newAccount.assetType}
+                        className={`${FORM_SELECT} flex-1 ${!newAccount.assetType ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <option value="">{newAccount.assetType ? '请选择' : '请先选择资产类型'}</option>
+                        {(ASSET_TYPE_POSITION_GROUP_MAP[newAccount.assetType] || []).map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                       <button onClick={() => setShowPositionGroupModal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理持仓分组">
                         <Settings className="w-4 h-4" />
@@ -4412,12 +5259,14 @@ export default function Finance({ onAssetPenetration }) {
 
                   <FormField label="持仓分类" required>
                     <div className="flex gap-2">
-                      <select value={newAccount.positionType} onChange={e => setNewAccount({ ...newAccount, positionType: e.target.value })}
-                        className={`${FORM_SELECT} flex-1`}>
-                        <option value="">请选择</option>
-                        {newAccount.assetType === '股票' 
-                          ? ['成长股', '价值股', '周期股', '消费股'].map(o => <option key={o} value={o}>{o}</option>)
-                          : positionTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                      <select
+                        value={newAccount.positionType}
+                        onChange={e => setNewAccount({ ...newAccount, positionType: e.target.value })}
+                        disabled={!newAccount.assetType}
+                        className={`${FORM_SELECT} flex-1 ${!newAccount.assetType ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <option value="">{newAccount.assetType ? '请选择' : '请先选择资产类型'}</option>
+                        {(ASSET_TYPE_POSITION_TYPE_MAP[newAccount.assetType] || positionTypeOptions).map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                       <button onClick={() => setShowPositionTypeModal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理持仓分类">
                         <Settings className="w-4 h-4" />
