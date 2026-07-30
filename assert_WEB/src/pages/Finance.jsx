@@ -30,6 +30,7 @@ import {
   Archive,
 } from 'lucide-react';
 import FinanceHoldingsTable from '../components/FinanceHoldingsTable';
+import { Pagination } from '../components/FinanceHoldingsTable.subcomponents';
 
 // ── 工具函数 ──
 function formatCurrency(value) {
