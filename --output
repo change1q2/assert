@@ -1,0 +1,1200 @@
+{
+  "log": {
+    "browser": {
+      "name": "Chrome",
+      "version": "150.0.7871.184"
+    },
+    "creator": {
+      "name": "agent-browser",
+      "version": "0.32.0"
+    },
+    "entries": [
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 0,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "GET",
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 925,
+          "content": {
+            "mimeType": "application/json",
+            "size": 925
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Vary",
+              "value": "Origin"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:41:40 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 200,
+          "statusText": "OK"
+        },
+        "startedDateTime": "2026-07-28T02:41:40.247419136Z",
+        "time": 17.580000000052387,
+        "timings": {
+          "blocked": 2.077,
+          "receive": 1.150000000052387,
+          "send": 0.20599999999999996,
+          "wait": 14.147
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 2126,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "PUT",
+          "postData": {
+            "mimeType": "application/json",
+            "text": "{\"state\":{\"user\":{\"account\":\"admin\",\"name\":\"\",\"phone\":\"\",\"email\":\"\",\"currency\":\"CNY\",\"theme\":\"light\",\"avatar\":\"\",\"birthday\":\"\",\"city\":\"\",\"occupation\":\"\",\"riskLevel\":\"稳健型\",\"privacyLock\":\"已开启\",\"dataMask\":\"已开启\",\"deviceName\":\"\"},\"rates\":{},\"accounts\":[{\"id\":\"1\",\"name\":\"工商银行储蓄卡\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"bank\",\"balance\":10000,\"liability\":0,\"enabled\":true,\"is_default\":true,\"sort_order\":0},{\"id\":\"2\",\"name\":\"支付宝余额\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":5000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":1},{\"id\":\"3\",\"name\":\"微信零钱\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":2000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":2}],\"assetClasses\":[],\"records\":[],\"budgets\":[],\"financeAssets\":[{\"id\":\"fa1785206240060\",\"market\":\"国内市场\",\"currency\":\"CNY\",\"assetKind\":\"\",\"kind\":\"股票\",\"accountId\":\"工商银行储蓄卡\",\"category\":\"权益类\",\"subcategory\":\"A股\",\"tertiaryCategory\":\"场内\",\"positionGroup\":\"\",\"positionCategory\":\"\",\"name\":\"清仓测试股\",\"code\":\"000001\",\"costPrice\":10,\"shares\":100,\"cost\":1000,\"availableShares\":100,\"currentPrice\":10,\"prevPrice\":0,\"priceDate\":\"\",\"avgBuyPrice\":0,\"holdingDays\":0,\"holdingDaysBase\":0,\"holdingDaysDate\":\"2026-07-28\",\"pnl\":0,\"pnlPercent\":0,\"todayPnl\":0,\"todayPnlPercent\":0,\"holdingPnl\":0,\"holdingPnlRate\":0,\"dailyPnl\":0,\"dailyPnlRate\":0,\"currentValue\":1000,\"positionWeight\":0,\"totalFees\":0,\"tags\":\"\",\"transactions\":[{\"id\":1785206240060,\"direction\":\"建仓\",\"type\":\"建仓\",\"transaction_date\":\"2026-07-28 10:37\",\"date\":\"2026-07-28\",\"time\":\"10:37\",\"shares\":100,\"quantity\":100,\"price\":10,\"amount\":1000,\"commission\":0,\"fee\":0}]}],\"customCategories\":{\"records\":{\"income\":[],\"expense\":[],\"transfer\":[]},\"finance\":{\"tertiaryByScope\":{}}},\"recordTags\":{\"tagsByCategory\":{},\"lastByCategory\":{}},\"books\":[],\"tags\":[],\"recordTagList\":[],\"recorders\":[],\"reminders\":[],\"debts\":[],\"debtCategories\":[],\"strategies\":[],\"financeAssetDraft\":{},\"feeConfig\":{},\"overviewGoals\":{},\"hkIpoRules\":null,\"independentAssets\":{},\"yearlyRecords\":[],\"accountCategories\":{}}}"
+          },
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 337,
+          "content": {
+            "mimeType": "application/json",
+            "size": 337
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "access-control-allow-origin",
+              "value": "http://localhost:5173"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:41:40 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            },
+            {
+              "name": "vary",
+              "value": "Origin"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 500,
+          "statusText": "Internal Server Error"
+        },
+        "startedDateTime": "2026-07-28T02:41:40.266913792Z",
+        "time": 358.4030000009917,
+        "timings": {
+          "blocked": 0.349,
+          "connect": 306.33299999999997,
+          "dns": 0.01100000000000001,
+          "receive": 0.8680000009917421,
+          "send": 0.27499999999997726,
+          "wait": 50.56700000000001
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 0,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "GET",
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 925,
+          "content": {
+            "mimeType": "application/json",
+            "size": 925
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Vary",
+              "value": "Origin"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:42:10 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 200,
+          "statusText": "OK"
+        },
+        "startedDateTime": "2026-07-28T02:42:10.234537984Z",
+        "time": 17.790999999617984,
+        "timings": {
+          "blocked": 0.702,
+          "receive": 1.2319999996179831,
+          "send": 0.18700000000000006,
+          "wait": 15.670000000000002
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 2126,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "PUT",
+          "postData": {
+            "mimeType": "application/json",
+            "text": "{\"state\":{\"user\":{\"account\":\"admin\",\"name\":\"\",\"phone\":\"\",\"email\":\"\",\"currency\":\"CNY\",\"theme\":\"light\",\"avatar\":\"\",\"birthday\":\"\",\"city\":\"\",\"occupation\":\"\",\"riskLevel\":\"稳健型\",\"privacyLock\":\"已开启\",\"dataMask\":\"已开启\",\"deviceName\":\"\"},\"rates\":{},\"accounts\":[{\"id\":\"1\",\"name\":\"工商银行储蓄卡\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"bank\",\"balance\":10000,\"liability\":0,\"enabled\":true,\"is_default\":true,\"sort_order\":0},{\"id\":\"2\",\"name\":\"支付宝余额\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":5000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":1},{\"id\":\"3\",\"name\":\"微信零钱\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":2000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":2}],\"assetClasses\":[],\"records\":[],\"budgets\":[],\"financeAssets\":[{\"id\":\"fa1785206240060\",\"market\":\"国内市场\",\"currency\":\"CNY\",\"assetKind\":\"\",\"kind\":\"股票\",\"accountId\":\"工商银行储蓄卡\",\"category\":\"权益类\",\"subcategory\":\"A股\",\"tertiaryCategory\":\"场内\",\"positionGroup\":\"\",\"positionCategory\":\"\",\"name\":\"清仓测试股\",\"code\":\"000001\",\"costPrice\":10,\"shares\":100,\"cost\":1000,\"availableShares\":100,\"currentPrice\":10,\"prevPrice\":0,\"priceDate\":\"\",\"avgBuyPrice\":0,\"holdingDays\":0,\"holdingDaysBase\":0,\"holdingDaysDate\":\"2026-07-28\",\"pnl\":0,\"pnlPercent\":0,\"todayPnl\":0,\"todayPnlPercent\":0,\"holdingPnl\":0,\"holdingPnlRate\":0,\"dailyPnl\":0,\"dailyPnlRate\":0,\"currentValue\":1000,\"positionWeight\":0,\"totalFees\":0,\"tags\":\"\",\"transactions\":[{\"id\":1785206240060,\"direction\":\"建仓\",\"type\":\"建仓\",\"transaction_date\":\"2026-07-28 10:37\",\"date\":\"2026-07-28\",\"time\":\"10:37\",\"shares\":100,\"quantity\":100,\"price\":10,\"amount\":1000,\"commission\":0,\"fee\":0}]}],\"customCategories\":{\"records\":{\"income\":[],\"expense\":[],\"transfer\":[]},\"finance\":{\"tertiaryByScope\":{}}},\"recordTags\":{\"tagsByCategory\":{},\"lastByCategory\":{}},\"books\":[],\"tags\":[],\"recordTagList\":[],\"recorders\":[],\"reminders\":[],\"debts\":[],\"debtCategories\":[],\"strategies\":[],\"financeAssetDraft\":{},\"feeConfig\":{},\"overviewGoals\":{},\"hkIpoRules\":null,\"independentAssets\":{},\"yearlyRecords\":[],\"accountCategories\":{}}}"
+          },
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 337,
+          "content": {
+            "mimeType": "application/json",
+            "size": 337
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "access-control-allow-origin",
+              "value": "http://localhost:5173"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:42:10 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            },
+            {
+              "name": "vary",
+              "value": "Origin"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 500,
+          "statusText": "Internal Server Error"
+        },
+        "startedDateTime": "2026-07-28T02:42:10.254276096Z",
+        "time": 345.9740000002791,
+        "timings": {
+          "blocked": 0.394,
+          "connect": 310.002,
+          "dns": 0.013999999999999957,
+          "receive": 0.7450000002791057,
+          "send": 0.5309999999999491,
+          "wait": 34.28800000000001
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 0,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "GET",
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 925,
+          "content": {
+            "mimeType": "application/json",
+            "size": 925
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Vary",
+              "value": "Origin"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:42:40 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 200,
+          "statusText": "OK"
+        },
+        "startedDateTime": "2026-07-28T02:42:40.236774912Z",
+        "time": 17.09500000088563,
+        "timings": {
+          "blocked": 1.458,
+          "receive": 0.8650000008856296,
+          "send": 0.17100000000000004,
+          "wait": 14.601
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 2126,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "PUT",
+          "postData": {
+            "mimeType": "application/json",
+            "text": "{\"state\":{\"user\":{\"account\":\"admin\",\"name\":\"\",\"phone\":\"\",\"email\":\"\",\"currency\":\"CNY\",\"theme\":\"light\",\"avatar\":\"\",\"birthday\":\"\",\"city\":\"\",\"occupation\":\"\",\"riskLevel\":\"稳健型\",\"privacyLock\":\"已开启\",\"dataMask\":\"已开启\",\"deviceName\":\"\"},\"rates\":{},\"accounts\":[{\"id\":\"1\",\"name\":\"工商银行储蓄卡\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"bank\",\"balance\":10000,\"liability\":0,\"enabled\":true,\"is_default\":true,\"sort_order\":0},{\"id\":\"2\",\"name\":\"支付宝余额\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":5000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":1},{\"id\":\"3\",\"name\":\"微信零钱\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":2000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":2}],\"assetClasses\":[],\"records\":[],\"budgets\":[],\"financeAssets\":[{\"id\":\"fa1785206240060\",\"market\":\"国内市场\",\"currency\":\"CNY\",\"assetKind\":\"\",\"kind\":\"股票\",\"accountId\":\"工商银行储蓄卡\",\"category\":\"权益类\",\"subcategory\":\"A股\",\"tertiaryCategory\":\"场内\",\"positionGroup\":\"\",\"positionCategory\":\"\",\"name\":\"清仓测试股\",\"code\":\"000001\",\"costPrice\":10,\"shares\":100,\"cost\":1000,\"availableShares\":100,\"currentPrice\":10,\"prevPrice\":0,\"priceDate\":\"\",\"avgBuyPrice\":0,\"holdingDays\":0,\"holdingDaysBase\":0,\"holdingDaysDate\":\"2026-07-28\",\"pnl\":0,\"pnlPercent\":0,\"todayPnl\":0,\"todayPnlPercent\":0,\"holdingPnl\":0,\"holdingPnlRate\":0,\"dailyPnl\":0,\"dailyPnlRate\":0,\"currentValue\":1000,\"positionWeight\":0,\"totalFees\":0,\"tags\":\"\",\"transactions\":[{\"id\":1785206240060,\"direction\":\"建仓\",\"type\":\"建仓\",\"transaction_date\":\"2026-07-28 10:37\",\"date\":\"2026-07-28\",\"time\":\"10:37\",\"shares\":100,\"quantity\":100,\"price\":10,\"amount\":1000,\"commission\":0,\"fee\":0}]}],\"customCategories\":{\"records\":{\"income\":[],\"expense\":[],\"transfer\":[]},\"finance\":{\"tertiaryByScope\":{}}},\"recordTags\":{\"tagsByCategory\":{},\"lastByCategory\":{}},\"books\":[],\"tags\":[],\"recordTagList\":[],\"recorders\":[],\"reminders\":[],\"debts\":[],\"debtCategories\":[],\"strategies\":[],\"financeAssetDraft\":{},\"feeConfig\":{},\"overviewGoals\":{},\"hkIpoRules\":null,\"independentAssets\":{},\"yearlyRecords\":[],\"accountCategories\":{}}}"
+          },
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 337,
+          "content": {
+            "mimeType": "application/json",
+            "size": 337
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "access-control-allow-origin",
+              "value": "http://localhost:5173"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:42:40 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            },
+            {
+              "name": "vary",
+              "value": "Origin"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 500,
+          "statusText": "Internal Server Error"
+        },
+        "startedDateTime": "2026-07-28T02:42:40.255552Z",
+        "time": 367.4929999997184,
+        "timings": {
+          "blocked": 0.344,
+          "connect": 316.028,
+          "dns": 0.010000000000000009,
+          "receive": 0.8319999997183913,
+          "send": 0.29000000000002046,
+          "wait": 49.988999999999976
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 0,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "GET",
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 925,
+          "content": {
+            "mimeType": "application/json",
+            "size": 925
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Vary",
+              "value": "Origin"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:43:10 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 200,
+          "statusText": "OK"
+        },
+        "startedDateTime": "2026-07-28T02:43:10.234765056Z",
+        "time": 51.58200000034785,
+        "timings": {
+          "blocked": 32.532,
+          "receive": 5.761000000347849,
+          "send": 0.19400000000000261,
+          "wait": 13.094999999999999
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 2126,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "PUT",
+          "postData": {
+            "mimeType": "application/json",
+            "text": "{\"state\":{\"user\":{\"account\":\"admin\",\"name\":\"\",\"phone\":\"\",\"email\":\"\",\"currency\":\"CNY\",\"theme\":\"light\",\"avatar\":\"\",\"birthday\":\"\",\"city\":\"\",\"occupation\":\"\",\"riskLevel\":\"稳健型\",\"privacyLock\":\"已开启\",\"dataMask\":\"已开启\",\"deviceName\":\"\"},\"rates\":{},\"accounts\":[{\"id\":\"1\",\"name\":\"工商银行储蓄卡\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"bank\",\"balance\":10000,\"liability\":0,\"enabled\":true,\"is_default\":true,\"sort_order\":0},{\"id\":\"2\",\"name\":\"支付宝余额\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":5000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":1},{\"id\":\"3\",\"name\":\"微信零钱\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":2000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":2}],\"assetClasses\":[],\"records\":[],\"budgets\":[],\"financeAssets\":[{\"id\":\"fa1785206240060\",\"market\":\"国内市场\",\"currency\":\"CNY\",\"assetKind\":\"\",\"kind\":\"股票\",\"accountId\":\"工商银行储蓄卡\",\"category\":\"权益类\",\"subcategory\":\"A股\",\"tertiaryCategory\":\"场内\",\"positionGroup\":\"\",\"positionCategory\":\"\",\"name\":\"清仓测试股\",\"code\":\"000001\",\"costPrice\":10,\"shares\":100,\"cost\":1000,\"availableShares\":100,\"currentPrice\":10,\"prevPrice\":0,\"priceDate\":\"\",\"avgBuyPrice\":0,\"holdingDays\":0,\"holdingDaysBase\":0,\"holdingDaysDate\":\"2026-07-28\",\"pnl\":0,\"pnlPercent\":0,\"todayPnl\":0,\"todayPnlPercent\":0,\"holdingPnl\":0,\"holdingPnlRate\":0,\"dailyPnl\":0,\"dailyPnlRate\":0,\"currentValue\":1000,\"positionWeight\":0,\"totalFees\":0,\"tags\":\"\",\"transactions\":[{\"id\":1785206240060,\"direction\":\"建仓\",\"type\":\"建仓\",\"transaction_date\":\"2026-07-28 10:37\",\"date\":\"2026-07-28\",\"time\":\"10:37\",\"shares\":100,\"quantity\":100,\"price\":10,\"amount\":1000,\"commission\":0,\"fee\":0}]}],\"customCategories\":{\"records\":{\"income\":[],\"expense\":[],\"transfer\":[]},\"finance\":{\"tertiaryByScope\":{}}},\"recordTags\":{\"tagsByCategory\":{},\"lastByCategory\":{}},\"books\":[],\"tags\":[],\"recordTagList\":[],\"recorders\":[],\"reminders\":[],\"debts\":[],\"debtCategories\":[],\"strategies\":[],\"financeAssetDraft\":{},\"feeConfig\":{},\"overviewGoals\":{},\"hkIpoRules\":null,\"independentAssets\":{},\"yearlyRecords\":[],\"accountCategories\":{}}}"
+          },
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 337,
+          "content": {
+            "mimeType": "application/json",
+            "size": 337
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "access-control-allow-origin",
+              "value": "http://localhost:5173"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:43:10 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            },
+            {
+              "name": "vary",
+              "value": "Origin"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 500,
+          "statusText": "Internal Server Error"
+        },
+        "startedDateTime": "2026-07-28T02:43:10.3102528Z",
+        "time": 340.67399999925294,
+        "timings": {
+          "blocked": 2.629,
+          "connect": 309.475,
+          "dns": 0.016000000000000014,
+          "receive": 0.4759999992529629,
+          "send": 1.072999999999979,
+          "wait": 27.004999999999995
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 0,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "GET",
+          "queryString": [
+            {
+              "name": "q",
+              "value": "000001"
+            }
+          ],
+          "url": "http://localhost:5173/api/finance/lookup?q=000001"
+        },
+        "response": {
+          "bodySize": 659,
+          "content": {
+            "mimeType": "application/json",
+            "size": 659
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Vary",
+              "value": "Origin"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:43:20 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 200,
+          "statusText": "OK"
+        },
+        "startedDateTime": "2026-07-28T02:43:20.498667008Z",
+        "time": 211.04199999979434,
+        "timings": {
+          "blocked": 85.337,
+          "receive": 0.9369999997943523,
+          "send": 0.7749999999999915,
+          "wait": 123.993
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 0,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "GET",
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 925,
+          "content": {
+            "mimeType": "application/json",
+            "size": 925
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Vary",
+              "value": "Origin"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:43:40 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 200,
+          "statusText": "OK"
+        },
+        "startedDateTime": "2026-07-28T02:43:40.236556032Z",
+        "time": 326.61399999976396,
+        "timings": {
+          "blocked": 3.186,
+          "connect": 308.889,
+          "dns": 0.383,
+          "receive": 0.8589999997639097,
+          "send": 0.20100000000002183,
+          "wait": 13.096000000000004
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 2126,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "PUT",
+          "postData": {
+            "mimeType": "application/json",
+            "text": "{\"state\":{\"user\":{\"account\":\"admin\",\"name\":\"\",\"phone\":\"\",\"email\":\"\",\"currency\":\"CNY\",\"theme\":\"light\",\"avatar\":\"\",\"birthday\":\"\",\"city\":\"\",\"occupation\":\"\",\"riskLevel\":\"稳健型\",\"privacyLock\":\"已开启\",\"dataMask\":\"已开启\",\"deviceName\":\"\"},\"rates\":{},\"accounts\":[{\"id\":\"1\",\"name\":\"工商银行储蓄卡\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"bank\",\"balance\":10000,\"liability\":0,\"enabled\":true,\"is_default\":true,\"sort_order\":0},{\"id\":\"2\",\"name\":\"支付宝余额\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":5000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":1},{\"id\":\"3\",\"name\":\"微信零钱\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":2000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":2}],\"assetClasses\":[],\"records\":[],\"budgets\":[],\"financeAssets\":[{\"id\":\"fa1785206240060\",\"market\":\"国内市场\",\"currency\":\"CNY\",\"assetKind\":\"\",\"kind\":\"股票\",\"accountId\":\"工商银行储蓄卡\",\"category\":\"权益类\",\"subcategory\":\"A股\",\"tertiaryCategory\":\"场内\",\"positionGroup\":\"\",\"positionCategory\":\"\",\"name\":\"清仓测试股\",\"code\":\"000001\",\"costPrice\":10,\"shares\":100,\"cost\":1000,\"availableShares\":100,\"currentPrice\":10,\"prevPrice\":0,\"priceDate\":\"\",\"avgBuyPrice\":0,\"holdingDays\":0,\"holdingDaysBase\":0,\"holdingDaysDate\":\"2026-07-28\",\"pnl\":0,\"pnlPercent\":0,\"todayPnl\":0,\"todayPnlPercent\":0,\"holdingPnl\":0,\"holdingPnlRate\":0,\"dailyPnl\":0,\"dailyPnlRate\":0,\"currentValue\":1000,\"positionWeight\":0,\"totalFees\":0,\"tags\":\"\",\"transactions\":[{\"id\":1785206240060,\"direction\":\"建仓\",\"type\":\"建仓\",\"transaction_date\":\"2026-07-28 10:37\",\"date\":\"2026-07-28\",\"time\":\"10:37\",\"shares\":100,\"quantity\":100,\"price\":10,\"amount\":1000,\"commission\":0,\"fee\":0}]}],\"customCategories\":{\"records\":{\"income\":[],\"expense\":[],\"transfer\":[]},\"finance\":{\"tertiaryByScope\":{}}},\"recordTags\":{\"tagsByCategory\":{},\"lastByCategory\":{}},\"books\":[],\"tags\":[],\"recordTagList\":[],\"recorders\":[],\"reminders\":[],\"debts\":[],\"debtCategories\":[],\"strategies\":[],\"financeAssetDraft\":{},\"feeConfig\":{},\"overviewGoals\":{},\"hkIpoRules\":null,\"independentAssets\":{},\"yearlyRecords\":[],\"accountCategories\":{}}}"
+          },
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 337,
+          "content": {
+            "mimeType": "application/json",
+            "size": 337
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "access-control-allow-origin",
+              "value": "http://localhost:5173"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:43:40 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            },
+            {
+              "name": "vary",
+              "value": "Origin"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 500,
+          "statusText": "Internal Server Error"
+        },
+        "startedDateTime": "2026-07-28T02:43:40.56545408Z",
+        "time": 628.87599999993,
+        "timings": {
+          "blocked": 281.335,
+          "connect": 280.92,
+          "dns": 0.0,
+          "receive": 3.4949999999298598,
+          "send": 0.674000000000035,
+          "wait": 62.452
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 2126,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "PUT",
+          "postData": {
+            "mimeType": "application/json",
+            "text": "{\"state\":{\"user\":{\"account\":\"admin\",\"name\":\"\",\"phone\":\"\",\"email\":\"\",\"currency\":\"CNY\",\"theme\":\"light\",\"avatar\":\"\",\"birthday\":\"\",\"city\":\"\",\"occupation\":\"\",\"riskLevel\":\"稳健型\",\"privacyLock\":\"已开启\",\"dataMask\":\"已开启\",\"deviceName\":\"\"},\"rates\":{},\"accounts\":[{\"id\":\"1\",\"name\":\"工商银行储蓄卡\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"bank\",\"balance\":10000,\"liability\":0,\"enabled\":true,\"is_default\":true,\"sort_order\":0},{\"id\":\"2\",\"name\":\"支付宝余额\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":5000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":1},{\"id\":\"3\",\"name\":\"微信零钱\",\"owner\":\"本人\",\"currency\":\"CNY\",\"type\":\"wallet\",\"balance\":2000,\"liability\":0,\"enabled\":true,\"is_default\":false,\"sort_order\":2}],\"assetClasses\":[],\"records\":[],\"budgets\":[],\"financeAssets\":[{\"id\":\"fa1785206636294\",\"market\":\"国内市场\",\"currency\":\"CNY\",\"assetKind\":\"\",\"kind\":\"股票\",\"accountId\":\"工商银行储蓄卡\",\"category\":\"权益类\",\"subcategory\":\"A股\",\"tertiaryCategory\":\"场内\",\"positionGroup\":\"\",\"positionCategory\":\"\",\"name\":\"清仓测试股\",\"code\":\"000001\",\"costPrice\":10,\"shares\":100,\"cost\":1000,\"availableShares\":100,\"currentPrice\":10,\"prevPrice\":0,\"priceDate\":\"\",\"avgBuyPrice\":0,\"holdingDays\":0,\"holdingDaysBase\":0,\"holdingDaysDate\":\"2026-07-28\",\"pnl\":0,\"pnlPercent\":0,\"todayPnl\":0,\"todayPnlPercent\":0,\"holdingPnl\":0,\"holdingPnlRate\":0,\"dailyPnl\":0,\"dailyPnlRate\":0,\"currentValue\":1000,\"positionWeight\":0,\"totalFees\":0,\"tags\":\"\",\"transactions\":[{\"id\":1785206636294,\"direction\":\"建仓\",\"type\":\"建仓\",\"transaction_date\":\"2026-07-28 10:43\",\"date\":\"2026-07-28\",\"time\":\"10:43\",\"shares\":100,\"quantity\":100,\"price\":10,\"amount\":1000,\"commission\":0,\"fee\":0}]}],\"customCategories\":{\"records\":{\"income\":[],\"expense\":[],\"transfer\":[]},\"finance\":{\"tertiaryByScope\":{}}},\"recordTags\":{\"tagsByCategory\":{},\"lastByCategory\":{}},\"books\":[],\"tags\":[],\"recordTagList\":[],\"recorders\":[],\"reminders\":[],\"debts\":[],\"debtCategories\":[],\"strategies\":[],\"financeAssetDraft\":{},\"feeConfig\":{},\"overviewGoals\":{},\"hkIpoRules\":null,\"independentAssets\":{},\"yearlyRecords\":[],\"accountCategories\":{}}}"
+          },
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 337,
+          "content": {
+            "mimeType": "application/json",
+            "size": 337
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "access-control-allow-origin",
+              "value": "http://localhost:5173"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:43:56 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            },
+            {
+              "name": "vary",
+              "value": "Origin"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 500,
+          "statusText": "Internal Server Error"
+        },
+        "startedDateTime": "2026-07-28T02:43:56.29469696Z",
+        "time": 31.40399999968853,
+        "timings": {
+          "blocked": 0.658,
+          "receive": 1.1139999996885308,
+          "send": 0.30799999999999994,
+          "wait": 29.323999999999998
+        }
+      },
+      {
+        "_resourceType": "Fetch",
+        "cache": {},
+        "request": {
+          "bodySize": 0,
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer vHIHbLzSKJlaL2qBEnZQRUEY2QX3x0lrDCOCFKIzbNQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Referer",
+              "value": "http://localhost:5173/"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36"
+            },
+            {
+              "name": "sec-ch-ua",
+              "value": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\", \"Google Chrome\";v=\"150\""
+            },
+            {
+              "name": "sec-ch-ua-mobile",
+              "value": "?0"
+            },
+            {
+              "name": "sec-ch-ua-platform",
+              "value": "\"Windows\""
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "method": "GET",
+          "queryString": [],
+          "url": "http://localhost:5173/api/state"
+        },
+        "response": {
+          "bodySize": 925,
+          "content": {
+            "mimeType": "application/json",
+            "size": 925
+          },
+          "cookies": [],
+          "headers": [
+            {
+              "name": "Vary",
+              "value": "Origin"
+            },
+            {
+              "name": "connection",
+              "value": "close"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Jul 2026 02:43:56 GMT"
+            },
+            {
+              "name": "transfer-encoding",
+              "value": "chunked"
+            }
+          ],
+          "headersSize": -1,
+          "httpVersion": "HTTP/1.1",
+          "redirectURL": "",
+          "status": 200,
+          "statusText": "OK"
+        },
+        "startedDateTime": "2026-07-28T02:43:56.328432128Z",
+        "time": 323.83399999966207,
+        "timings": {
+          "blocked": 0.575,
+          "connect": 312.672,
+          "dns": 0.015000000000000013,
+          "receive": 0.3589999996620463,
+          "send": 0.242999999999995,
+          "wait": 9.970000000000027
+        }
+      }
+    ],
+    "version": "1.2"
+  }
+}
