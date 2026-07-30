@@ -740,8 +740,20 @@ export default function IndependentAssets() {
 
   const handleEdit = (item) => {
     const defaults = getDefaultFormData(activeTab);
+    if (activeTab === 'insurance' && showInsuranceDetailModal && selectedInsurance && selectedInsurance.id === item.id) {
+      setShowInsuranceDetailModal(false);
+    }
+    const editData = { ...defaults, ...item };
+    if (activeTab === 'insurance' && item.insuranceType === '年金险') {
+      const records = item.transactionRecords || [];
+      editData.paidAmount = records.reduce((sum, r) => sum + parseFloat(r.annualPremium || 0), 0);
+      if (records.length > 0) {
+        const latestRecord = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop();
+        editData.cashValue = parseFloat(latestRecord.yearEndCashValue || 0);
+      }
+    }
     setEditingItem(item);
-    setFormData({ ...defaults, ...item });
+    setFormData(editData);
     setShowModal(true);
   };
 
@@ -763,19 +775,35 @@ export default function IndependentAssets() {
 
   const handleAddInsuranceTransaction = () => {
     setEditingTransaction(null);
-    setTransactionFormData({
-      year: '',
-      premiumPaid: '',
-      guaranteedCashValue: '',
-      bonusDividend: '',
-      midTermDividend: '',
-      demoProfitAmount: '',
-      demoProfitRate: '',
-      actualProfitAmount: '',
-      actualProfitRate: '',
-      irr: '',
-      dividendRealizationRate: '',
-    });
+    const isAnnuity = selectedInsurance?.insuranceType === '年金险';
+    if (isAnnuity) {
+      setTransactionFormData({
+        year: '',
+        annualPremium: '',
+        cumulativePremium: '',
+        annualGuaranteedAnnuity: '',
+        cumulativeGuaranteedReceived: '',
+        yearEndCashValue: '',
+        annualDividendDemo: '',
+        cumulativeDividendDemo: '',
+        annualActualDividend: '',
+        cumulativeActualDividend: '',
+      });
+    } else {
+      setTransactionFormData({
+        year: '',
+        premiumPaid: '',
+        guaranteedCashValue: '',
+        bonusDividend: '',
+        midTermDividend: '',
+        demoProfitAmount: '',
+        demoProfitRate: '',
+        actualProfitAmount: '',
+        actualProfitRate: '',
+        irr: '',
+        dividendRealizationRate: '',
+      });
+    }
     setOcrImage(null);
     setOcrResult(null);
     setOcrLoading(false);
@@ -1423,11 +1451,42 @@ export default function IndependentAssets() {
       id: editingItem?.id || Date.now().toString(),
       createdAt: editingItem?.createdAt || new Date().toISOString(),
     };
+
+    if (activeTab === 'insurance' && !editingItem && itemData.insuranceType === '年金险') {
+      const policyDate = itemData.policyDate ? new Date(itemData.policyDate) : new Date();
+      const firstYearEnd = new Date(policyDate);
+      firstYearEnd.setFullYear(firstYearEnd.getFullYear() + 1);
+      const dateStr = firstYearEnd.toISOString().split('T')[0];
+
+      const firstYearRecord = {
+        id: Date.now().toString(),
+        year: 1,
+        annualPremium: itemData.paidAmount || '',
+        cumulativePremium: itemData.paidAmount || '',
+        annualGuaranteedAnnuity: '',
+        cumulativeGuaranteedReceived: '',
+        yearEndCashValue: '',
+        annualDividendDemo: '',
+        cumulativeDividendDemo: '',
+        annualActualDividend: '',
+        cumulativeActualDividend: '',
+        date: dateStr,
+      };
+      newItem.transactionRecords = [firstYearRecord];
+    }
+
     const nextItems = editingItem
       ? items.map(i => i.id === newItem.id ? newItem : i)
       : [...items, newItem];
     try {
       await updateAssets(activeTab, nextItems);
+      if (activeTab === 'insurance' && selectedInsurance && editingItem && selectedInsurance.id === editingItem.id) {
+        const updatedItem = nextItems.find(i => i.id === editingItem.id);
+        if (updatedItem) {
+          setSelectedInsurance(updatedItem);
+          setShowInsuranceDetailModal(true);
+        }
+      }
     } catch (err) {
       console.error('Failed to save asset:', err);
       alert('保存失败：' + err.message + '\n数据已写入本地缓存，刷新页面后可见');
@@ -1448,6 +1507,13 @@ export default function IndependentAssets() {
       } catch (storageErr) {
         console.error('Failed to write fallback to localStorage:', storageErr);
       }
+      if (activeTab === 'insurance' && selectedInsurance && editingItem && selectedInsurance.id === editingItem.id) {
+        const updatedItem = nextItems.find(i => i.id === editingItem.id);
+        if (updatedItem) {
+          setSelectedInsurance(updatedItem);
+          setShowInsuranceDetailModal(true);
+        }
+      }
     } finally {
       setShowModal(false);
       setEditingItem(null);
@@ -1465,10 +1531,23 @@ export default function IndependentAssets() {
       const items = independentAssets[type] || [];
       items.forEach(item => {
         if (type === 'insurance') {
-          totalValue += parseFloat(item.paidAmount || 0);
-          totalCost += parseFloat(item.paidAmount || 0);
-          demoProfit += parseFloat(item.demoProfitAmount || 0);
-          actualProfit += parseFloat(item.actualProfitAmount || 0);
+          if (item.insuranceType === '年金险') {
+            const records = item.transactionRecords || [];
+            const sumAnnualPremium = records.reduce((sum, r) => sum + parseFloat(r.annualPremium || 0), 0);
+            const latestRecord = records.length > 0
+              ? [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop()
+              : null;
+            const latestCashValue = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
+            totalValue += sumAnnualPremium > 0 ? sumAnnualPremium : parseFloat(item.paidAmount || 0);
+            totalCost += sumAnnualPremium > 0 ? sumAnnualPremium : parseFloat(item.paidAmount || 0);
+            demoProfit += parseFloat(item.demoProfitAmount || 0);
+            actualProfit += parseFloat(item.actualProfitAmount || 0);
+          } else {
+            totalValue += parseFloat(item.paidAmount || 0);
+            totalCost += parseFloat(item.paidAmount || 0);
+            demoProfit += parseFloat(item.demoProfitAmount || 0);
+            actualProfit += parseFloat(item.actualProfitAmount || 0);
+          }
         } else if (type === 'realestate') {
           if (item.usage === '出租') {
             totalValue += parseFloat(item.purchasePrice || 0);
@@ -1776,9 +1855,25 @@ export default function IndependentAssets() {
             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
               {items.map(item => {
                 const records = item.transactionRecords || [];
-                const totalDividend = records.reduce((sum, r) => {
-                  return sum + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0);
-                }, 0);
+                const isAnnuity = item.insuranceType === '年金险';
+
+                let listPaidAmount = parseFloat(item.paidAmount || 0);
+                let listCashValue = parseFloat(item.cashValue || 0);
+                let listDividend = 0;
+
+                if (isAnnuity) {
+                  listPaidAmount = records.reduce((sum, r) => sum + parseFloat(r.annualPremium || 0), 0);
+                  if (records.length > 0) {
+                    const latestRecord = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop();
+                    listCashValue = parseFloat(latestRecord.yearEndCashValue || 0);
+                  }
+                  listDividend = records.reduce((sum, r) => sum + parseFloat(r.annualActualDividend || 0), 0);
+                } else {
+                  listDividend = records.reduce((sum, r) => {
+                    return sum + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0);
+                  }, 0);
+                }
+
                 return (
                   <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyNumber || '—'}</td>
@@ -1789,9 +1884,9 @@ export default function IndependentAssets() {
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyDate || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyStatus || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.paymentMethod || '—'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.paidAmount, item.currency)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.cashValue, item.currency)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(totalDividend, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listPaidAmount, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listCashValue, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listDividend, item.currency)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.currency || '—'}</td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
@@ -2538,11 +2633,11 @@ export default function IndependentAssets() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">已付金额</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{formData.insuranceType === '年金险' ? '当年保费' : '已付金额'}</label>
             <input type="number" value={formData.paidAmount || ''} onChange={(e) => setFormData({ ...formData, paidAmount: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">现金价值</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{formData.insuranceType === '年金险' ? '年末现金价值' : '现金价值'}</label>
             <input type="number" value={formData.cashValue || ''} onChange={(e) => setFormData({ ...formData, cashValue: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
@@ -3833,13 +3928,36 @@ export default function IndependentAssets() {
     const paidAmount = parseFloat(item.paidAmount || 0);
     const cashValue = parseFloat(item.cashValue || 0);
     const records = item.transactionRecords || [];
+    const isAnnuity = item.insuranceType === '年金险';
 
-    const totalDividend = records.reduce((sum, r) => {
+    let displayPaidAmount = paidAmount;
+    let displayCashValue = cashValue;
+    let totalDividend = records.reduce((sum, r) => {
       return sum + parseFloat(r.actualProfitAmount || 0);
     }, 0);
 
-    const dividendRate = paidAmount > 0 && totalDividend > 0
-      ? ((totalDividend / paidAmount) * 100).toFixed(2) + '%'
+    if (isAnnuity) {
+      displayPaidAmount = records.reduce((sum, r) => {
+        return sum + parseFloat(r.annualPremium || 0);
+      }, 0);
+
+      if (records.length > 0) {
+        const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
+        const latestRecord = sortedByYear[sortedByYear.length - 1];
+        displayCashValue = parseFloat(latestRecord.yearEndCashValue || 0);
+      }
+
+      totalDividend = records.reduce((sum, r) => {
+        return sum + parseFloat(r.annualActualDividend || 0);
+      }, 0);
+    }
+
+    const dividendRate = displayPaidAmount > 0 && totalDividend > 0
+      ? ((totalDividend / displayPaidAmount) * 100).toFixed(2) + '%'
+      : '—';
+
+    const returnProgress = displayPaidAmount > 0
+      ? ((displayCashValue + totalDividend) / displayPaidAmount * 100).toFixed(2) + '%'
       : '—';
 
     return (
@@ -3893,11 +4011,11 @@ export default function IndependentAssets() {
             <div className="grid grid-cols-5 gap-3 mb-6">
               <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">已交保费</div>
-                <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(paidAmount, item.currency)}</div>
+                <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(displayPaidAmount, item.currency)}</div>
               </div>
               <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">现金价值</div>
-                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(cashValue, item.currency)}</div>
+                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(displayCashValue, item.currency)}</div>
               </div>
               <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">累计分红额</div>
@@ -3909,7 +4027,7 @@ export default function IndependentAssets() {
               </div>
               <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">回本进度</div>
-                <div className="text-lg font-bold text-yellow-600 dark:text-yellow-400">{paidAmount > 0 ? ((cashValue + totalDividend) / paidAmount * 100).toFixed(2) + '%' : '—'}</div>
+                <div className="text-lg font-bold text-yellow-600 dark:text-yellow-400">{returnProgress}</div>
               </div>
             </div>
 
@@ -3957,6 +4075,158 @@ export default function IndependentAssets() {
 
               {records.length > 0 ? (
                 <div className="overflow-x-auto">
+                  {item.insuranceType === '年金险' ? (
+                  <table className="w-full">
+                    <thead className="bg-gray-50 dark:bg-slate-700">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保单年度</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年保费</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">累计保费</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年保证年金</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">累计保证领取</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">年末现金价值</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年红利(演示)</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">累积红利(演示)</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">含红利生存总利益</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年实际红利</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">实际累计红利</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+                      {records
+                        .slice()
+                        .sort((a, b) => {
+                          const yearA = parseInt(a.year) || 0;
+                          const yearB = parseInt(b.year) || 0;
+                          if (yearA === 0 && yearB !== 0) return 1;
+                          if (yearA !== 0 && yearB === 0) return -1;
+                          if (yearA === 0 && yearB === 0) return 0;
+                          return yearA - yearB;
+                        })
+                        .map((record, index) => {
+                        const annualPremium = parseFloat(record.annualPremium || 0);
+                        const cumulativePremium = parseFloat(record.cumulativePremium || 0);
+                        const annualGuaranteedAnnuity = parseFloat(record.annualGuaranteedAnnuity || 0);
+                        const cumulativeGuaranteedReceived = parseFloat(record.cumulativeGuaranteedReceived || 0);
+                        const yearEndCashValue = parseFloat(record.yearEndCashValue || 0);
+                        const annualDividendDemo = parseFloat(record.annualDividendDemo || 0);
+                        const cumulativeDividendDemo = parseFloat(record.cumulativeDividendDemo || 0);
+                        const totalBenefit = yearEndCashValue + cumulativeDividendDemo;
+                        const annualActualDividend = parseFloat(record.annualActualDividend || 0);
+                        const cumulativeActualDividend = parseFloat(record.cumulativeActualDividend || 0);
+
+                        const toggleStatus = () => {
+                          const newRecords = selectedInsurance.transactionRecords.map(r => {
+                            if (r.id === record.id) {
+                              return { ...r, status: record.status === '达成' ? '未达成' : '达成' };
+                            }
+                            return r;
+                          });
+                          handleUpdateTransactionField(newRecords);
+                        };
+
+                        return (
+                          <tr key={record.id || index} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{record.year || '—'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.annualPremium || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) return { ...r, annualPremium: e.target.value };
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.cumulativePremium || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) return { ...r, cumulativePremium: e.target.value };
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.annualGuaranteedAnnuity || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) return { ...r, annualGuaranteedAnnuity: e.target.value };
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.cumulativeGuaranteedReceived || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) return { ...r, cumulativeGuaranteedReceived: e.target.value };
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.yearEndCashValue || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) return { ...r, yearEndCashValue: e.target.value };
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.annualDividendDemo || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) return { ...r, annualDividendDemo: e.target.value };
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.cumulativeDividendDemo || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) return { ...r, cumulativeDividendDemo: e.target.value };
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">{formatCurrency(totalBenefit, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.annualActualDividend || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) return { ...r, annualActualDividend: e.target.value };
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                              <input type="number" value={record.cumulativeActualDividend || ''} onChange={(e) => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                  if (r.id === record.id) return { ...r, cumulativeActualDividend: e.target.value };
+                                  return r;
+                                });
+                                handleUpdateTransactionField(newRecords);
+                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => handleEditInsuranceTransaction(record)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDeleteInsuranceTransaction(record)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  ) : (
                   <table className="w-full">
                     <thead className="bg-gray-50 dark:bg-slate-700">
                       <tr>
@@ -4202,6 +4472,7 @@ export default function IndependentAssets() {
                       })}
                     </tbody>
                   </table>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-8">
@@ -4502,65 +4773,122 @@ export default function IndependentAssets() {
             )}
 
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保单年度终结</label>
-                <input type="text" value={transactionFormData.year || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, year: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日期</label>
-                <input type="date" value={transactionFormData.date || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, date: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">缴付保费总额</label>
-                <input type="number" value={transactionFormData.premiumPaid || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, premiumPaid: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保证现金价值</label>
-                <input type="number" value={transactionFormData.guaranteedCashValue || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, guaranteedCashValue: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">复归红利</label>
-                <input type="number" value={transactionFormData.bonusDividend || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, bonusDividend: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">终期红利</label>
-                <input type="number" value={transactionFormData.midTermDividend || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, midTermDividend: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">总额</label>
-                <input type="number" readOnly value={totalAmount} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">演示现金流</label>
-                <input type="number" readOnly value={-(parseFloat(transactionFormData.premiumPaid || 0)) + totalAmount} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">演示收益率(%)</label>
-                <input type="number" readOnly value={demoRate.toFixed(2)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">年化收益率(%)</label>
-                <input type="number" readOnly value={annualizedReturn !== null ? annualizedReturn.toFixed(4) : ''} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
-              </div>
-              {editingTransaction && (
+              {selectedInsurance?.insuranceType === '年金险' ? (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际收益额</label>
-                    <input type="number" value={transactionFormData.actualProfitAmount || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, actualProfitAmount: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保单年度</label>
+                    <input type="text" value={transactionFormData.year || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, year: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际收益率(%)</label>
-                    <input type="number" value={transactionFormData.actualProfitRate || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, actualProfitRate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日期</label>
+                    <input type="date" value={transactionFormData.date || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, date: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际现金流</label>
-                    <input type="number" readOnly value={-(parseFloat(transactionFormData.premiumPaid || 0)) + parseFloat(transactionFormData.actualProfitAmount || 0)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">当年保费</label>
+                    <input type="number" value={transactionFormData.annualPremium || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, annualPremium: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">内部收益率IRR(%)</label>
-                    <input type="number" value={transactionFormData.irr || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, irr: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">累计保费</label>
+                    <input type="number" value={transactionFormData.cumulativePremium || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, cumulativePremium: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
-
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">当年保证年金</label>
+                    <input type="number" value={transactionFormData.annualGuaranteedAnnuity || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, annualGuaranteedAnnuity: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">累计保证领取</label>
+                    <input type="number" value={transactionFormData.cumulativeGuaranteedReceived || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, cumulativeGuaranteedReceived: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">年末现金价值</label>
+                    <input type="number" value={transactionFormData.yearEndCashValue || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, yearEndCashValue: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">当年红利(演示)</label>
+                    <input type="number" value={transactionFormData.annualDividendDemo || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, annualDividendDemo: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">累积红利(演示)</label>
+                    <input type="number" value={transactionFormData.cumulativeDividendDemo || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, cumulativeDividendDemo: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">含红利生存总利益</label>
+                    <input type="number" readOnly value={
+                      parseFloat(transactionFormData.yearEndCashValue || 0) +
+                      parseFloat(transactionFormData.cumulativeDividendDemo || 0)
+                    } className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">当年实际红利</label>
+                    <input type="number" value={transactionFormData.annualActualDividend || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, annualActualDividend: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际累计红利</label>
+                    <input type="number" value={transactionFormData.cumulativeActualDividend || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, cumulativeActualDividend: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保单年度终结</label>
+                    <input type="text" value={transactionFormData.year || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, year: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日期</label>
+                    <input type="date" value={transactionFormData.date || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, date: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">缴付保费总额</label>
+                    <input type="number" value={transactionFormData.premiumPaid || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, premiumPaid: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保证现金价值</label>
+                    <input type="number" value={transactionFormData.guaranteedCashValue || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, guaranteedCashValue: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">复归红利</label>
+                    <input type="number" value={transactionFormData.bonusDividend || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, bonusDividend: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">终期红利</label>
+                    <input type="number" value={transactionFormData.midTermDividend || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, midTermDividend: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">总额</label>
+                    <input type="number" readOnly value={totalAmount} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">演示现金流</label>
+                    <input type="number" readOnly value={-(parseFloat(transactionFormData.premiumPaid || 0)) + totalAmount} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">演示收益率(%)</label>
+                    <input type="number" readOnly value={demoRate.toFixed(2)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">年化收益率(%)</label>
+                    <input type="number" readOnly value={annualizedReturn !== null ? annualizedReturn.toFixed(4) : ''} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+                  </div>
+                  {editingTransaction && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际收益额</label>
+                        <input type="number" value={transactionFormData.actualProfitAmount || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, actualProfitAmount: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际收益率(%)</label>
+                        <input type="number" value={transactionFormData.actualProfitRate || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, actualProfitRate: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际现金流</label>
+                        <input type="number" readOnly value={-(parseFloat(transactionFormData.premiumPaid || 0)) + parseFloat(transactionFormData.actualProfitAmount || 0)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">内部收益率IRR(%)</label>
+                        <input type="number" value={transactionFormData.irr || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, irr: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>
