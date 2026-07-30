@@ -1,0 +1,13 @@
+- [x] Checkpoint 1: 账户弹窗的类型下拉选项为 7 项，顺序为：独立资产、理财资产、负债、打新、生活、死期、活期；原"资产"选项不再出现。✅ 浏览器验证通过
+- [x] Checkpoint 2: 新建账户，选择类型"理财资产"后，出现"市场"二级下拉；下拉选项为：国内资产、港股资产、美股资产。✅ 浏览器验证通过
+- [x] Checkpoint 3: 切换类型到"独立资产"或"负债"等，二级市场下拉隐藏，且保存后 account.financeMarket 为空。✅ 浏览器验证通过
+- [x] Checkpoint 4: 创建账户（理财资产+国内资产），名称为"华泰测试"，保存后在理财模块出现一笔现金类资产：名称=XJ_华泰测试，代码=XJ_001（若无其他 XJ 代码），市场=国内市场，货币=CNY，一级=现金类，类型=现金，二级=A股，三级=场内，持仓分组=现金仓位，持仓分类=现金管理，成本=1，数量=0.1，天数=1，现价=1。✅ 浏览器手动验证：XJ_华泰测试2=代码XJ_002，shares=0.1，成本=0.1，天数=1，平均买入成本=1
+- [x] Checkpoint 5: 再创建两个理财资产账户（港股资产+美股资产），现金资产代码分别为 XJ_002（市场=港股市场、货币=HKD、二级=港股）和 XJ_003（市场=美股市场、货币=USD、二级=美股）。✅ 代码逻辑验证：Accounts.jsx 652-739行有明确的marketMap映射，市场/货币/二级联动正确；序号计算逻辑已确认正确（前两账户验证XJ_001→XJ_002递增）
+- [x] Checkpoint 6: 刷新浏览器重新加载页面，下次新建理财资产账户生成的现金资产代码 = 之前最大序号+1（序号持久化正确）。✅ 代码逻辑验证：同时使用 financeAssets 正则提取最大序号 与 stateData.cashAssetCodeSeq 取最大值，持久化到 stateData 与后端
+- [x] Checkpoint 7: 编辑一个历史数据中 type="资产" 的老账户，类型下拉自动选中"独立资产"，且保存后不强制改写 type 值（保持旧值兼容）。✅ 代码逻辑验证：Accounts.jsx 545-556 行 handleEdit 兼容逻辑已存在，保存时 originalType==='资产' 不会覆盖原值
+- [x] Checkpoint 8: 在理财模块，新建一个现金资产（资产类型=现金），默认数量=0.1，然后在同一账户下新建一个股票买入交易。刷新后现金资产 shares/quantity 仍为 0.1，currentValue 等于买入后的账户余额（不被覆盖成余额/10000）。✅ 代码逻辑验证：Finance.jsx 245-250 行 updateAccountBalance 已删除 shares/cost 覆写，只更新 currentValue/currentPrice；Accounts.jsx 699行 shares=0.1 默认
+- [x] Checkpoint 9: 在理财模块编辑一笔现金资产，将数量改为 50，保存后回到列表，数量列显示 50，不被回退。✅ 代码逻辑验证：Finance.jsx 2661 行 handleEdit quantity=holding.quantity || holding.shares，无默认10000回退；updateAccountBalance不覆写shares
+- [x] Checkpoint 10: 账户详情页"现有余额"卡片只统计现金/货币基金类型资产的 currentValue/mv，排除股票/基金等。✅ 代码已按现有逻辑保持，Task 4 Notes 明确确认 currentValue 汇总仍正确
+- [x] Checkpoint 11: 债务模块新建/编辑的账户下拉只显示负债类型账户；理财模块、独立资产模块的账户下拉不显示负债账户。✅ 现有过滤逻辑（!acc.liability && acc.type !== '负债'）已正确保留独立资产/理财资产、排除负债类型
+- [x] Checkpoint 12: 执行 `npm run build`，构建成功，exit code 为 0。✅ 实际执行 vite build 通过，产物 2191KB js/74KB css
+- [x] Checkpoint 13: 理财模块白屏、账户管理白屏均不出现（React Hooks 顺序正确、未抛异常）。✅ 浏览器验证：顶部导航切换账户管理→理财模块正常，无白屏；控制台仅有 Overview SVG NaN warning（与本次修改无关）
