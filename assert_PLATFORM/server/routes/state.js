@@ -1,7 +1,7 @@
 import { pool } from "../db/index.js";
 import { json, readBody } from "../utils/http.js";
 import { sqlRun } from "../utils/db.js";
-import { profileForUser } from "../services/user-service.js";
+import { profileForUser, defaultState } from "../services/user-service.js";
 import { loadUserState, saveUserState } from "../services/state-service.js";
 
 async function handler(req, res, body, origin, pathname, url) {
@@ -20,7 +20,12 @@ async function handler(req, res, body, origin, pathname, url) {
   }
 
   if (req.method === "GET" && pathname === "/api/state") {
-    json(res, 200, { state: await loadUserState(user.id) }, origin);
+    try {
+      json(res, 200, { state: await loadUserState(user.id) }, origin);
+    } catch (error) {
+      console.error("[state] GET /api/state error:", error.message);
+      json(res, 200, { state: defaultState({ account: user.account, name: '', phone: '', email: '', currency: 'CNY' }), warning: "部分数据加载失败，已返回默认状态。" }, origin);
+    }
     return;
   }
 
@@ -32,7 +37,9 @@ async function handler(req, res, body, origin, pathname, url) {
       await conn.commit();
     } catch (error) {
       await conn.rollback();
-      throw error;
+      console.error("[state] PUT /api/state error:", error.message);
+      json(res, 500, { message: "保存状态失败。", detail: error.message }, origin);
+      return;
     } finally {
       conn.release();
     }
