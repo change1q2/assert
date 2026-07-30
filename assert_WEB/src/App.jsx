@@ -27,6 +27,8 @@ import CategoryDetail from './pages/CategoryDetail.jsx';
 import Analysis from './pages/Analysis.jsx';
 import Tools from './pages/Tools.jsx';
 import Strategies from './pages/Strategies.jsx';
+import ValueInvesting from './pages/ValueInvesting.jsx';
+import StrategyDetail from './pages/StrategyDetail.jsx';
 import Accounts from './pages/Accounts.jsx';
 import Downloads from './pages/Downloads.jsx';
 import UserProfile from './pages/UserProfile.jsx';
@@ -47,7 +49,7 @@ const menuItems = [
   { id: 'classes', label: '资产分类', icon: PieChart },
   { id: 'analysis', label: '统计分析', icon: BarChart3 },
   { id: 'tools', label: '辅助工具', icon: Wrench },
-  { id: 'strategies', label: '业务设计', icon: Lightbulb },
+  { id: 'strategies', label: '投资策略', icon: Lightbulb },
   { id: 'accounts', label: '账户管理', icon: UserCog },
   { id: 'downloads', label: '产品下载页', icon: Download },
 ];
@@ -200,7 +202,9 @@ export default function App() {
       case 'tools':
         return <Tools onNavigate={setActiveMenu} />;
       case 'strategies':
-        return <Strategies />;
+        return <Strategies onNavigate={setActiveMenu} />;
+      case 'value-investing':
+        return <StrategyDetail strategyId="value-investing" onBack={() => setActiveMenu('strategies')} onNavigate={setActiveMenu} />;
       case 'accounts':
         return <Accounts />;
       case 'downloads':
@@ -216,6 +220,10 @@ export default function App() {
       case 'budget':
         return <BudgetManagement onBack={() => setActiveMenu('records')} />;
       default:
+        if (activeMenu.startsWith('strategy-detail:')) {
+          const strategyId = activeMenu.slice('strategy-detail:'.length);
+          return <StrategyDetail strategyId={strategyId} onBack={() => setActiveMenu('strategies')} onNavigate={setActiveMenu} />;
+        }
         return (
           <div className="flex items-center justify-center min-h-[400px]">
             <div className="text-center">
@@ -305,7 +313,9 @@ export default function App() {
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {menuItems.map((item) => {
             const Icon = item.icon;
-            return (
+            const isStrategyDetail = activeMenu.startsWith('strategy-detail:');
+                const isActive = activeMenu === item.id || (item.id === 'strategies' && isStrategyDetail);
+                return (
               <button
                 key={item.id}
                 onClick={() => {
@@ -313,7 +323,7 @@ export default function App() {
                   setSelectedCategory(null);
                 }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ease-out ${
-                  activeMenu === item.id && !selectedCategory
+                  isActive && !selectedCategory
                     ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 font-medium border-l-2 border-blue-600'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800/50 border-l-2 border-transparent'
                 }`}
