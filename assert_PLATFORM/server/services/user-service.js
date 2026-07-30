@@ -47,6 +47,7 @@ function defaultState(profile) {
     records: [],
     budgets: [],
     financeAssets: [],
+    financeAssetArchives: [],
     customCategories: { records: { income: [], expense: [], transfer: [] }, finance: { tertiaryByScope: {} } },
     recordTags: { tagsByCategory: {}, lastByCategory: {} },
     recorders: [],

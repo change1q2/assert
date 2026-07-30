@@ -1562,7 +1562,7 @@ export default function Debts() {
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">账户</label>
                       <select value={form.account} onChange={(e) => setForm({ ...form, account: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
                         <option value="">请选择账户</option>
-                        {(stateData?.accounts || []).map((acc) => (
+                        {(stateData?.accounts || []).filter(acc => acc.liability || acc.type === '负债').map((acc) => (
                           <option key={acc.id} value={acc.name}>{acc.name}</option>
                         ))}
                       </select>

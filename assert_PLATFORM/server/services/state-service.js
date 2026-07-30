@@ -53,6 +53,7 @@ async function loadUserState(userId) {
       stamp_duty: row.stamp_duty || 0,
       transfer_fee: row.transfer_fee || 0,
       transaction_type: isOutdoor ? 'outdoor' : 'indoor',
+      cashAccountId: row.cash_account_id || '',
     });
     transactionsByAsset.set(String(row.asset_id), rows);
   };
@@ -69,8 +70,16 @@ async function loadUserState(userId) {
     pnlPercent: row.pnl_percent, avgBuyPrice: row.avg_buy_price, holdingDays: row.holding_days,
     positionWeight: row.position_weight, totalFees: row.total_fees, todayPnl: row.today_pnl,
     todayPnlPercent: row.today_pnl_percent, prevPrice: row.prev_price, priceDate: row.price_date,
-    tags: row.tags,
+    tags: row.tags, status: row.status || 'active', archiveDate: row.archive_date || '',
     transactions: transactionsByAsset.get(String(row.id)) || [],
+  }));
+  const financeAssetArchives = (await sqlAll(pool, "SELECT * FROM finance_asset_archives WHERE user_id = ? ORDER BY archive_date DESC", [userId])).map((row) => ({
+    id: numericIfPossible(row.id), originalAssetId: row.original_asset_id, name: row.name, code: row.code,
+    market: row.market, currency: row.currency, kind: row.kind, category: row.category,
+    subcategory: row.subcategory, tertiaryCategory: row.tertiary_category,
+    accountId: row.account_id, costPrice: row.cost_price, shares: row.shares,
+    finalPnl: row.final_pnl, finalPnlPercent: row.final_pnl_percent,
+    archiveDate: row.archive_date, status: row.status,
   }));
   const customRecords = { income: [], expense: [], transfer: [] };
   (await sqlAll(pool, "SELECT record_type, name, icon FROM custom_record_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
@@ -143,6 +152,7 @@ async function loadUserState(userId) {
     records,
     budgets,
     financeAssets,
+    financeAssetArchives,
     customCategories: { records: customRecords, finance: { tertiaryByScope } },
     recordTags: oldRecordTags,
     books,
@@ -174,7 +184,7 @@ async function saveUserState(conn, userId, state) {
     text(user.privacyLock || "已开启"), text(user.dataMask || "已开启"), text(user.deviceName), userId]);
 
   const tables = [
-    "exchange_rates", "accounts", "asset_classes", "records", "budgets", "finance_asset_transactions", "finance_asset_indoor_transactions", "finance_asset_outdoor_transactions", "finance_assets",
+    "exchange_rates", "accounts", "asset_classes", "records", "budgets", "finance_asset_transactions", "finance_asset_indoor_transactions", "finance_asset_outdoor_transactions", "finance_assets", "finance_asset_archives",
     "custom_record_categories", "finance_tertiary_categories", "record_tags", "recorders",
     "reminders", "debt_payments", "debts", "debt_categories", "strategies", "user_settings", "books", "tags", "yearly_records",
   ];
@@ -221,36 +231,48 @@ async function saveUserState(conn, userId, state) {
 
   for (const [index, row] of (state.financeAssets || []).entries()) {
     await sqlRun(conn, `INSERT INTO finance_assets
-      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, sort_order, tags)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, text(row.id), text(row.kind), text(row.assetKind), text(row.accountId), text(row.category),
        text(row.subcategory), text(row.tertiaryCategory), text(row.market), text(row.currency),
        text(row.name), text(row.code), text(row.positionGroup), text(row.positionCategory),
        number(row.costPrice), number(row.shares), number(row.availableShares), number(row.currentPrice),
        number(row.pnl), number(row.pnlPercent), number(row.avgBuyPrice), number(row.holdingDays),
-       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), number(row.prevPrice), text(row.priceDate), index, text(row.tags)]);
+       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), number(row.prevPrice), text(row.priceDate), text(row.tags), text(row.status || 'active'), text(row.archiveDate || ''), index]);
 
     const isOutdoor = (row.market === '国内市场') && (row.tertiaryCategory === '场外' || row.categoryL3 === '场外');
 
     for (const [transactionIndex, transaction] of (row.transactions || []).entries()) {
       if (isOutdoor) {
         await sqlRun(conn, `INSERT INTO finance_asset_outdoor_transactions
-          (user_id, asset_id, id, direction, transaction_date, net_value, shares, amount, commission, sort_order)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (user_id, asset_id, id, direction, transaction_date, net_value, shares, amount, commission, cash_account_id, sort_order)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [userId, text(row.id), text(transaction.id || `${row.id}-${transactionIndex}`), text(transaction.direction),
            text(transaction.transaction_date), number(transaction.net_value || transaction.price),
            number(transaction.shares || transaction.quantity), number(transaction.amount),
-           number(transaction.commission), transactionIndex]);
+           number(transaction.commission), text(transaction.cashAccountId || ''), transactionIndex]);
       } else {
         await sqlRun(conn, `INSERT INTO finance_asset_indoor_transactions
-          (user_id, asset_id, id, direction, transaction_date, price, quantity, amount, commission, stamp_duty, transfer_fee, sort_order)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (user_id, asset_id, id, direction, transaction_date, price, quantity, amount, commission, stamp_duty, transfer_fee, cash_account_id, sort_order)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [userId, text(row.id), text(transaction.id || `${row.id}-${transactionIndex}`), text(transaction.direction),
            text(transaction.transaction_date), number(transaction.price),
            number(transaction.quantity || transaction.shares), number(transaction.amount),
-           number(transaction.commission), number(transaction.stampDuty), number(transaction.transferFee), transactionIndex]);
+           number(transaction.commission), number(transaction.stampDuty), number(transaction.transferFee),
+           text(transaction.cashAccountId || ''), transactionIndex]);
       }
     }
+  }
+
+  for (const [index, row] of (state.financeAssetArchives || []).entries()) {
+    await sqlRun(conn, `INSERT INTO finance_asset_archives
+      (user_id, original_asset_id, name, code, market, currency, kind, category, subcategory, tertiary_category,
+       account_id, cost_price, shares, final_pnl, final_pnl_percent, archive_date, status, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId, text(row.originalAssetId), text(row.name), text(row.code), text(row.market), text(row.currency),
+       text(row.kind), text(row.category), text(row.subcategory), text(row.tertiaryCategory),
+       text(row.accountId), number(row.costPrice), number(row.shares), number(row.finalPnl),
+       number(row.finalPnlPercent), text(row.archiveDate), text(row.status), index]);
   }
 
   let catOrder = 0;

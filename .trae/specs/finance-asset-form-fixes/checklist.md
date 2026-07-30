@@ -1,0 +1,14 @@
+- [x] Checkpoint 1: 基金场内分类的持仓盈亏和盈亏率自动计算正确，不为0
+- [x] Checkpoint 2: 场内分类资产不显示持仓盈亏、盈亏率、当前市值手动输入框
+- [x] Checkpoint 3: 三级分类显示红色星号标识必填
+- [x] Checkpoint 4: 未选择三级分类时表单验证不通过
+- [x] Checkpoint 5: 选择港股市场，二级分类只显示"港股"选项
+- [x] Checkpoint 6: 选择美股市场，二级分类只显示"美股"选项
+- [x] Checkpoint 7: 选择国内市场，二级分类显示"A股"和"港股通"选项
+- [x] Checkpoint 8: 选择不同一级分类，资产类型下拉选项变化
+- [x] Checkpoint 9: 新增资产类型时，只在对应一级分类下显示
+- [x] Checkpoint 10: 筛选条件可保存并自定义名称
+- [x] Checkpoint 11: 历史筛选条件组合可快速选择
+- [x] Checkpoint 12: 账户列表显示正确的余额数据
+- [x] Checkpoint 13: 选择不同货币，账户余额按汇率转换显示
+- [x] Checkpoint 14: 前端构建通过，无编译错误

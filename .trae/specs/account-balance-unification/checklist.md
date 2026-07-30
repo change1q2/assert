@@ -1,0 +1,10 @@
+- [x] AC-1: 账户列表余额列与详情页现有余额显示一致（均为 account.balance）
+- [x] AC-2: 理财模块明细弹窗的「账户余额卡片」显示值与账户管理一致
+- [x] AC-3.1: 买入交易后 account.balance = 原值 - 金额 - 费用，三处余额统一为新值
+- [x] AC-3.2: 卖出交易后 account.balance = 原值 + 金额 - 费用，三处余额统一为新值
+- [x] AC-3.3: 交易后对应现金类资产的 currentValue/shares/cost 与新 account.balance 一致
+- [x] AC-4.1: 详情页资产列表中，categoryL1===现金类 的资产默认 checkbox 选中
+- [x] AC-4.2: 非现金类资产默认不选中（包括独立资产、债务、记录、其他理财资产）
+- [x] AC-5: 新建理财持仓资产后，自动创建的现金类资产 currentValue/shares/cost === 账户初始 balance
+- [x] AC-6: 老数据（无现金类资产）打开账户详情页现有余额仍显示 account.balance，不崩溃
+- [x] Build: assert_WEB 项目 `npx vite build` 退出码为 0 且无警告/错误
