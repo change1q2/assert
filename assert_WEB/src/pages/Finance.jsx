@@ -2954,6 +2954,7 @@ export default function Finance({ onAssetPenetration }) {
         currentValue: _currentPrice * _quantity,
         positionWeight: 0,
         totalFees: 0,
+        tags: newAccount.tags || '',
       };
 
       // 获取当前的 financeAssets 数组
@@ -4582,33 +4583,32 @@ export default function Finance({ onAssetPenetration }) {
                           placeholder="0" className={FORM_INPUT} />
                       </FormField>
 
+                      {/* 现价 — 所有场景都显示，支持自动获取和手动输入 */}
+                      <FormField label="现价">
+                        <input type="number" step="0.0001" value={newAccount.currentPrice} onChange={e => {
+                          const val = e.target.value;
+                          setNewAccount(p => {
+                            const qty = parseFloat(p.quantity) || 0;
+                            const cost = parseFloat(p.cost) || 0;
+                            const price = parseFloat(val) || 0;
+                            const currentValue = qty * price;
+                            const unitPnl = price - cost;
+                            const holdingPnl = unitPnl * qty;
+                            const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+                            return {
+                              ...p,
+                              currentPrice: val,
+                              currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
+                              holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
+                              holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                            };
+                          });
+                        }} placeholder="搜索资产自动获取，或手动输入" className={FORM_INPUT} />
+                      </FormField>
+
                       {/* 以下字段仅在非国内市场简单模式（股票/基金场内/基金场外）时显示 */}
                       {!(newAccount.market === '国内市场' && (newAccount.assetType === '股票' || (newAccount.assetType === '基金' && (newAccount.categoryL3 === '场内' || newAccount.categoryL3 === '场外')))) && (
                         <>
-                          <FormField label="现价">
-                            <input type="number" step="0.0001" value={newAccount.currentPrice} onChange={e => {
-                              const val = e.target.value;
-                              setNewAccount(p => {
-                                const qty = parseFloat(p.quantity) || 0;
-                                const cost = parseFloat(p.cost) || 0;
-                                const price = parseFloat(val) || 0;
-                                const currentValue = qty * price;
-                                const unitPnl = price - cost;
-                                const holdingPnl = unitPnl * qty;
-                                const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
-                                return {
-                                  ...p,
-                                  currentPrice: val,
-                                  currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
-                                  holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
-                                  holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
-                                };
-                              });
-                            }} placeholder="0.0000" className={FORM_INPUT} />
-                          </FormField>
-
-                          <div></div>
-
                           <FormField label="持仓盈亏">
                             <div className="relative">
                               <input type="number" step="0.001" value={newAccount.holdingPnl}

@@ -647,24 +647,26 @@ export default function Overview() {
       const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
       const val = _price * _qty;
       const currency = a.currency || 'CNY';
-      const fromRate = exchangeRates[currency] ?? 1;
-      const toRate = exchangeRates['CNY'] ?? 1;
-      return sum + (currency === 'CNY' ? val : (val * fromRate) / toRate);
+      const fromRate = exchangeRates && exchangeRates[currency] ? exchangeRates[currency] : 1;
+      const toRate = exchangeRates && exchangeRates['CNY'] ? exchangeRates['CNY'] : 1;
+      const rate = currency === 'CNY' ? 1 : (fromRate / toRate);
+      return sum + (isNaN(val) ? 0 : val) * rate;
     }, 0);
     const cost = items.reduce((sum, a) => {
       const _cost = parseFloat(a.cost) || parseFloat(a.costPrice) || 0;
       const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
       const c = _cost * _qty;
       const currency = a.currency || 'CNY';
-      const fromRate = exchangeRates[currency] ?? 1;
-      const toRate = exchangeRates['CNY'] ?? 1;
-      return sum + (currency === 'CNY' ? c : (c * fromRate) / toRate);
+      const fromRate = exchangeRates && exchangeRates[currency] ? exchangeRates[currency] : 1;
+      const toRate = exchangeRates && exchangeRates['CNY'] ? exchangeRates['CNY'] : 1;
+      const rate = currency === 'CNY' ? 1 : (fromRate / toRate);
+      return sum + (isNaN(c) ? 0 : c) * rate;
     }, 0);
     return {
       category,
-      value,
-      cost,
-      pnl: value - cost,
+      value: isNaN(value) ? 0 : value,
+      cost: isNaN(cost) ? 0 : cost,
+      pnl: isNaN(value - cost) ? 0 : value - cost,
       count: items.length,
     };
   }).sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
@@ -1219,31 +1221,28 @@ export default function Overview() {
         return (
           <CardWrapper>
             <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">独立资产配置</h2>
-            <div className="mt-4 h-[240px]">
+            <div className="mt-4 h-[260px]">
               {independentAssetAllocation.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
+                  <PieChart margin={{ left: 40, right: 40, top: 10, bottom: 10 }}>
                     <Pie
                       data={independentAssetAllocation}
                       cx="50%"
                       cy="50%"
-                      innerRadius={35}
-                      outerRadius={65}
+                      innerRadius={30}
+                      outerRadius={55}
                       dataKey="value"
                       nameKey="name"
-                      label={({ name, percent }) => {
-                        const text = `${name}: ${(percent * 100).toFixed(1)}%`;
-                        return text.length > 16 ? text.slice(0, 15) + '…' : text;
-                      }}
+                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
                       labelLine={{ strokeWidth: 1, stroke: '#9CA3AF' }}
-                      style={{ fontSize: '11px', fontWeight: '500' }}
+                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
                     >
                       {independentAssetAllocation.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value, name) => [formatCurrency(value), name]} contentStyle={{ backgroundColor: '#FFFFFF', border: '1px solid #E5E7EB', borderRadius: '8px', padding: '8px 12px', fontSize: '13px', fontWeight: '500' }} labelStyle={{ fontWeight: '600', fontSize: '13px', color: '#111827' }} />
-                    <Legend iconType="circle" iconSize={10} formatter={(value) => <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{value}</span>} />
+                    <Legend iconType="circle" iconSize={10} formatter={(value) => <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{value}</span>} />
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
@@ -1391,12 +1390,13 @@ export default function Overview() {
                     if (categoryStats.length === 0) {
                       return <div className="text-sm text-gray-400 dark:text-gray-500 py-4 text-center">暂无品类盈亏数据</div>;
                     }
-                    const maxPnl = Math.max(0, ...categoryStats.map((s) => Math.abs(s.pnl)));
-                    const totalAbsPnl = categoryStats.reduce((sum, s) => sum + Math.abs(s.pnl), 0);
+                    const maxPnl = Math.max(0, ...categoryStats.map((s) => Math.abs(isNaN(s.pnl) ? 0 : s.pnl)));
                     return categoryStats.map((stat) => {
-                      const isPositive = stat.pnl >= 0;
-                      const barWidth = maxPnl > 0 ? (Math.abs(stat.pnl) / maxPnl) * 100 : 0;
-                      const percentage = totalAbsPnl > 0 ? (Math.abs(stat.pnl) / totalAbsPnl * 100).toFixed(1) : 0;
+                      const pnl = isNaN(stat.pnl) ? 0 : stat.pnl;
+                      const cost = isNaN(stat.cost) ? 0 : stat.cost;
+                      const isPositive = pnl >= 0;
+                      const barWidth = maxPnl > 0 ? (Math.abs(pnl) / maxPnl) * 100 : 0;
+                      const yieldRate = cost > 0 ? ((pnl / cost) * 100).toFixed(1) : 0;
                       return (
                         <div key={stat.category}>
                           <div className="flex items-center justify-between text-sm mb-1">
@@ -1404,10 +1404,10 @@ export default function Overview() {
                             <div className="flex items-center gap-2">
                               <span className={`font-mono tabular-nums font-medium truncate ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
                                 {isPositive ? '+' : ''}
-                                {formatCurrency(stat.pnl)}
+                                {formatCurrency(pnl)}
                               </span>
-                              <span className="text-xs text-gray-400 dark:text-gray-500 w-12 text-right">
-                                {percentage}%
+                              <span className={`text-xs font-mono tabular-nums w-12 text-right ${isPositive ? 'text-green-600' : 'text-red-500'}`}>
+                                {isPositive ? '+' : ''}{yieldRate}%
                               </span>
                             </div>
                           </div>

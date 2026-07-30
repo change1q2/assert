@@ -13,6 +13,14 @@ import {
   Filter,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  Settings2,
+  FolderPlus,
+  FolderMinus,
+  ArrowLeft,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 
 function formatCurrency(value) {
@@ -25,10 +33,37 @@ function formatCurrency(value) {
 
 const categoryIcons = {
   '银行': Building2,
-  '信用卡': CreditCard,
-  '储蓄': PiggyBank,
-  '投资': Wallet,
+  '券商': CreditCard,
+  '基金平台': PiggyBank,
+  '交易所': Wallet,
   '其他': Wallet,
+};
+
+const defaultCategories = {
+  '银行': ['招商银行', '工商银行', '建设银行', '农业银行', '中国银行', '交通银行', '浦发银行', '中信银行', '光大银行', '民生银行', '华夏银行', '兴业银行', '平安银行', '广发银行', '邮储银行', '其他银行'],
+  '券商': ['东方财富', '同花顺', '太平洋证券', '银河证券', '中信证券', '华泰证券', '海通证券', '广发证券', '招商证券', '申万宏源', '其他券商'],
+  '基金平台': ['天天基金', '同花顺基金', '东方财富基金', '且慢', '支付宝基金', '微信理财通', '其他基金平台'],
+  '交易所': ['欧易', '币安', 'AIDOG', '其他交易所'],
+  '其他': ['支付宝', '微信支付', '信用卡', '储蓄', '其他'],
+};
+
+const currencies = [
+  { value: 'CNY', label: '人民币 (¥)' },
+  { value: 'HKD', label: '港元 (HK$)' },
+  { value: 'USD', label: '美元 ($)' },
+  { value: 'EUR', label: '欧元 (€)' },
+  { value: 'JPY', label: '日元 (¥)' },
+];
+
+const defaultAccountTypes = ['资产', '负债', '打新', '生活', '死期', '活期'];
+
+const independentAssetTypeLabels = {
+  insurance: '保险',
+  realestate: '房产',
+  vehicle: '车辆',
+  fixedinvestment: '固定投资',
+  equity: '股权',
+  fixeddeposit: '定期存款',
 };
 
 export default function Accounts() {
@@ -40,6 +75,7 @@ export default function Accounts() {
   const [formData, setFormData] = useState({
     name: '',
     category: '银行',
+    subCategory: '招商银行',
     liability: false,
   });
   const [filters, setFilters] = useState({
@@ -49,8 +85,179 @@ export default function Accounts() {
   });
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [categoryForm, setCategoryForm] = useState({ name: '' });
+  const [editingSubCategory, setEditingSubCategory] = useState({ main: '', index: -1, name: '' });
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const [showSubDropdown, setShowSubDropdown] = useState(false);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCatName, setEditingCatName] = useState({ value: '', name: '' });
+  const [addingSub, setAddingSub] = useState(false);
+  const [newSubName, setNewSubName] = useState('');
+  const [editingSubName, setEditingSubName] = useState({ index: -1, name: '' });
+  const [showTypeDropdown, setShowTypeDropdown] = useState(false);
+  const [addingType, setAddingType] = useState(false);
+  const [newTypeName, setNewTypeName] = useState('');
+  const [editingTypeName, setEditingTypeName] = useState({ oldName: '', newName: '' });
+  const [selectedAccountId, setSelectedAccountId] = useState(null);
+  const [balanceMapping, setBalanceMapping] = useState(() => {
+    try {
+      const saved = localStorage.getItem('wealth_os_account_balance_mapping');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const saveBalanceMapping = (newMapping) => {
+    setBalanceMapping(newMapping);
+    localStorage.setItem('wealth_os_account_balance_mapping', JSON.stringify(newMapping));
+  };
+  const [balanceCardExpanded, setBalanceCardExpanded] = useState(true);
 
-  const { accounts = [], records = [], finance = {}, debts = [] } = stateData || {};
+  const { accounts = [], records = [], finance = {}, debts = [], accountCategories = {}, independentAssets = {}, accountTypes = [], financeAssets = [] } = stateData || {};
+
+  const accountCatConfig = useMemo(() => {
+    if (Object.keys(accountCategories).length === 0) {
+      return defaultCategories;
+    }
+    return accountCategories;
+  }, [accountCategories]);
+
+  const categoryList = useMemo(() => {
+    return Object.keys(accountCatConfig).map(key => ({ value: key, label: key }));
+  }, [accountCatConfig]);
+
+  const getSubCategories = (mainCategory) => {
+    return (accountCatConfig[mainCategory] || []).map(name => ({ value: name, label: name }));
+  };
+
+  const accountTypesList = useMemo(() => {
+    if (!accountTypes || accountTypes.length === 0) {
+      return defaultAccountTypes;
+    }
+    return accountTypes;
+  }, [accountTypes]);
+
+  const getEffectiveType = (account) => {
+    if (account && account.type) return account.type;
+    return account && account.liability ? '负债' : '资产';
+  };
+
+  const calcIndependentAsset = (type, item) => {
+    let mv = 0;
+    let cost = 0;
+    if (!item) return { mv, cost };
+    if (type === 'insurance') {
+      mv = parseFloat(item.cashValue) || 0;
+      cost = parseFloat(item.paidAmount) || 0;
+    } else if (type === 'realestate') {
+      if (item.type === '自用') {
+        const perSqm = parseFloat(item.selfUseMarketPricePerSqm) || 0;
+        const area = parseFloat(item.selfUseMarketArea) || 0;
+        const computed = perSqm * area;
+        mv = computed || parseFloat(item.marketValue) || 0;
+      } else {
+        mv = parseFloat(item.marketValue) || 0;
+      }
+      cost = parseFloat(item.purchasePrice) || 0;
+    } else if (type === 'vehicle') {
+      mv = parseFloat(item.residualValue) || 0;
+      cost = parseFloat(item.purchasePrice) || 0;
+    } else if (type === 'fixedinvestment') {
+      const baseCost = parseFloat(item.investmentCost) || 0;
+      const annual = parseFloat(item.annualContribution) || 0;
+      let years = 0;
+      if (item.startYear) {
+        const startYear = parseInt(item.startYear, 10);
+        if (!isNaN(startYear)) {
+          years = Math.max(0, new Date().getFullYear() - startYear);
+        }
+      }
+      mv = baseCost + annual * years;
+      cost = mv;
+    } else if (type === 'equity') {
+      const qty = parseFloat(item.quantity) || 0;
+      mv = qty * (parseFloat(item.currentPrice) || 0);
+      cost = qty * (parseFloat(item.cost) || 0);
+    } else if (type === 'fixeddeposit') {
+      mv = parseFloat(item.amount) || 0;
+      cost = parseFloat(item.amount) || 0;
+    }
+    return { mv, cost };
+  };
+
+  const calcFinanceAsset = (a, fromArray) => {
+    let mv = 0;
+    let cost = 0;
+    if (!a) return { mv, cost };
+    if (fromArray) {
+      mv = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
+      const costPriceShares = parseFloat(a.costPrice) * parseFloat(a.shares);
+      cost = (!isNaN(costPriceShares) && costPriceShares) || parseFloat(a.cost) || 0;
+    } else {
+      mv = parseFloat(a.currentValue) || 0;
+      cost = parseFloat(a.totalCost) || 0;
+    }
+    return { mv, cost };
+  };
+
+  const accountStats = useMemo(() => {
+    const stats = {};
+    accounts.forEach(a => { stats[a.id] = { marketValue: 0, holdingCost: 0 }; });
+
+    // 独立资产
+    if (independentAssets && typeof independentAssets === 'object') {
+      Object.entries(independentAssets).forEach(([type, items]) => {
+        if (!Array.isArray(items)) return;
+        items.forEach(item => {
+          const acc = accounts.find(a => a.id === item.accountId);
+          if (!acc) return;
+          if (!stats[acc.id]) stats[acc.id] = { marketValue: 0, holdingCost: 0 };
+          const { mv, cost } = calcIndependentAsset(type, item);
+          stats[acc.id].marketValue += mv;
+          stats[acc.id].holdingCost += cost;
+        });
+      });
+    }
+
+    // 理财持仓
+    if (Array.isArray(financeAssets)) {
+      financeAssets.forEach(a => {
+        const accId = a.accountId || a.account || '';
+        const acc = accounts.find(acct => acct.id === accId || acct.name === accId);
+        if (!acc) return;
+        if (!stats[acc.id]) stats[acc.id] = { marketValue: 0, holdingCost: 0 };
+        const { mv, cost } = calcFinanceAsset(a, true);
+        stats[acc.id].marketValue += mv;
+        stats[acc.id].holdingCost += cost;
+      });
+    }
+
+    // 收支记录
+    records.forEach(record => {
+      const accName = record.account;
+      const acc = accounts.find(acct => acct.name === accName);
+      if (!acc) return;
+      if (!stats[acc.id]) stats[acc.id] = { marketValue: 0, holdingCost: 0 };
+      stats[acc.id].marketValue += parseFloat(record.amount) || 0;
+      // 成本 = 0
+    });
+
+    // 债务记录（仅对负债类型账户）
+    debts.forEach(debt => {
+      if (!debt.account) return;
+      const acc = accounts.find(acct => acct.name === debt.account);
+      if (!acc) return;
+      if (getEffectiveType(acc) !== '负债') return;
+      if (!stats[acc.id]) stats[acc.id] = { marketValue: 0, holdingCost: 0 };
+      stats[acc.id].marketValue += parseFloat(debt.amount) || 0;
+      stats[acc.id].holdingCost += parseFloat(debt.principal) || 0;
+    });
+
+    return stats;
+  }, [accounts, independentAssets, finance, financeAssets, records, debts]);
 
   useEffect(() => {
     loadData();
@@ -61,7 +268,6 @@ export default function Accounts() {
     setError(null);
     try {
       const data = await fetchState();
-      // 后端账户为空时，尝试从 localStorage 读取缓存
       const cachedAccounts = localStorage.getItem('wealth_os_accounts');
       if ((!data.accounts || data.accounts.length === 0) && cachedAccounts) {
         try {
@@ -71,13 +277,12 @@ export default function Accounts() {
           /* ignore parse error */
         }
       }
-      // 首次使用：既然后端和本地都没有账户，初始化测试数据
       if (!data.accounts || data.accounts.length === 0) {
         const demoAccounts = [
-          { id: 'demo-1', name: '招商银行', category: '银行', currency: 'CNY', liability: false },
-          { id: 'demo-2', name: '支付宝', category: '储蓄', currency: 'CNY', liability: false },
-          { id: 'demo-3', name: '微信支付', category: '储蓄', currency: 'CNY', liability: false },
-          { id: 'demo-4', name: '工商银行信用卡', category: '信用卡', currency: 'CNY', liability: true },
+          { id: 'demo-1', name: '招商银行', category: '银行', subCategory: '招商银行', currency: 'CNY', liability: false },
+          { id: 'demo-2', name: '支付宝', category: '其他', subCategory: '支付宝', currency: 'CNY', liability: false },
+          { id: 'demo-3', name: '微信支付', category: '其他', subCategory: '微信支付', currency: 'CNY', liability: false },
+          { id: 'demo-4', name: '工商银行信用卡', category: '银行', subCategory: '工商银行', currency: 'CNY', liability: true },
         ];
         data.accounts = demoAccounts;
         localStorage.setItem('wealth_os_accounts', JSON.stringify(demoAccounts));
@@ -85,7 +290,6 @@ export default function Accounts() {
       setStateData(data);
     } catch (err) {
       console.error('Failed to load accounts data:', err);
-      // 后端完全不可用，从本地缓存加载
       const cachedAccounts = localStorage.getItem('wealth_os_accounts');
       if (cachedAccounts) {
         try {
@@ -105,49 +309,25 @@ export default function Accounts() {
   const calculateAccountBalance = useMemo(() => {
     const balanceMap = {};
     accounts.forEach(account => {
-      balanceMap[account.id] = 0;
+      const stats = accountStats[account.id] || { marketValue: 0, holdingCost: 0 };
+      balanceMap[account.id] = stats.marketValue - stats.holdingCost;
     });
-
-    records.forEach(record => {
-      const accountName = record.account || '';
-      const account = accounts.find(a => a.name === accountName);
-      if (account) {
-        balanceMap[account.id] = (balanceMap[account.id] || 0) + (record.amount || 0);
-      }
-    });
-
-    if (finance.accounts) {
-      Object.values(finance.accounts).forEach(finAccount => {
-        if (finAccount.account) {
-          const account = accounts.find(a => a.name === finAccount.account);
-          if (account) {
-            const currentValue = finAccount.currentValue || 0;
-            const cost = finAccount.totalCost || 0;
-            balanceMap[account.id] = (balanceMap[account.id] || 0) + currentValue - cost;
-          }
-        }
-      });
-    }
-
-    debts.forEach(debt => {
-      if (debt.account) {
-        const account = accounts.find(a => a.name === debt.account);
-        if (account) {
-          balanceMap[account.id] = (balanceMap[account.id] || 0) - (debt.balance || 0);
-        }
-      }
-    });
-
     return balanceMap;
-  }, [accounts, records, finance, debts]);
+  }, [accounts, accountStats]);
 
   const computeStats = () => {
     const accountList = accounts || [];
-    const assetAccounts = accountList.filter(a => !a.liability);
-    const liabilityAccounts = accountList.filter(a => a.liability);
+    const assetAccounts = accountList.filter(a => getEffectiveType(a) !== '负债');
+    const liabilityAccounts = accountList.filter(a => getEffectiveType(a) === '负债');
 
-    const totalAssets = assetAccounts.reduce((sum, a) => sum + (calculateAccountBalance[a.id] || 0), 0);
-    const totalLiabilities = liabilityAccounts.reduce((sum, a) => sum + (calculateAccountBalance[a.id] || 0), 0);
+    const totalAssets = assetAccounts.reduce((sum, a) => {
+      const s = accountStats[a.id] || { marketValue: 0, holdingCost: 0 };
+      return sum + s.marketValue;
+    }, 0);
+    const totalLiabilities = liabilityAccounts.reduce((sum, a) => {
+      const s = accountStats[a.id] || { marketValue: 0, holdingCost: 0 };
+      return sum + s.marketValue;
+    }, 0);
     const netWorth = totalAssets - totalLiabilities;
 
     return { totalAssets, totalLiabilities, netWorth, assetAccounts, liabilityAccounts };
@@ -157,33 +337,190 @@ export default function Accounts() {
     return accounts.filter(account => {
       if (filters.name && !account.name.includes(filters.name)) return false;
       if (filters.category && account.category !== filters.category) return false;
-      if (filters.type === 'asset' && account.liability) return false;
-      if (filters.type === 'liability' && !account.liability) return false;
+      if (filters.type === 'asset' && getEffectiveType(account) === '负债') return false;
+      if (filters.type === 'liability' && getEffectiveType(account) !== '负债') return false;
       return true;
     });
   }, [accounts, filters]);
+
+  // 统一资产列表（详情页用）- 必须在 renderDetailPage 之前定义
+  const unifiedAssets = useMemo(() => {
+    if (!selectedAccountId) return [];
+    const account = accounts.find(a => a.id === selectedAccountId);
+    if (!account) return [];
+
+    const assets = [];
+
+    if (Array.isArray(financeAssets)) {
+      financeAssets
+        .filter(a => {
+          const accId = a.accountId || a.account || '';
+          return accId === account.id || accId === account.name;
+        })
+        .forEach((item, index) => {
+          const { mv, cost } = calcFinanceAsset(item, true);
+          const price = parseFloat(item.currentPrice) || 0;
+          const qty = parseFloat(item.shares) || parseFloat(item.quantity) || 0;
+          const costPrice = parseFloat(item.costPrice) || parseFloat(item.cost) || 0;
+          const holdingPnl = mv - cost;
+          const holdingPnlRate = cost > 0 ? holdingPnl / cost * 100 : 0;
+          assets.push({
+            key: `finance_${item.id || index}`,
+            name: item.name || item.symbol || item.code || '-',
+            code: item.code || '',
+            assetType: item.kind || item.assetType || '理财',
+            categoryL1: item.category || item.categoryL1 || '',
+            categoryL2: item.subcategory || item.categoryL2 || '',
+            categoryL3: item.tertiaryCategory || item.categoryL3 || '',
+            market: item.market || '国内市场',
+            currency: item.currency || 'CNY',
+            costPrice,
+            quantity: qty,
+            currentPrice: price,
+            mv,
+            cost,
+            holdingPnl,
+            holdingPnlRate,
+            holdingDays: item.holdingDays || 0,
+            source: 'finance',
+            defaultIncluded: (item.category || item.categoryL1) === '现金类',
+            raw: item,
+          });
+        });
+    }
+
+    if (independentAssets && typeof independentAssets === 'object') {
+      Object.entries(independentAssets).forEach(([type, items]) => {
+        if (!Array.isArray(items)) return;
+        items
+          .filter(item => item.accountId === selectedAccountId)
+          .forEach((item, index) => {
+            const { mv, cost } = calcIndependentAsset(type, item);
+            assets.push({
+              key: `independent_${type}_${index}`,
+              name: item.name || item.type || '-',
+              assetType: independentAssetTypeLabels[type] || type,
+              categoryL1: item.categoryL1 || '',
+              categoryL2: item.categoryL2 || '',
+              mv,
+              cost,
+              source: 'independent',
+              defaultIncluded: false,
+            });
+          });
+      });
+    }
+
+    debts
+      .filter(d => d.account === account.name)
+      .forEach((debt, index) => {
+        const mv = parseFloat(debt.balance) || 0;
+        assets.push({
+          key: `debt_${index}`,
+          name: debt.name || debt.type || '-',
+          assetType: debt.type || '债务',
+          categoryL1: '',
+          categoryL2: '',
+          mv,
+          cost: parseFloat(debt.principal) || 0,
+          source: 'debt',
+          defaultIncluded: false,
+        });
+      });
+
+    records
+      .filter(r => r.account === account.name)
+      .forEach((record, index) => {
+        const mv = parseFloat(record.amount) || 0;
+        assets.push({
+          key: `record_${index}`,
+          name: record.description || record.category || record.note || '-',
+          assetType: record.type || record.category || '记录',
+          categoryL1: '',
+          categoryL2: '',
+          mv,
+          cost: 0,
+          source: 'record',
+          defaultIncluded: false,
+        });
+      });
+
+    return assets;
+  }, [selectedAccountId, accounts, financeAssets, finance, independentAssets, debts, records]);
+
+  const balanceData = useMemo(() => {
+    if (!selectedAccountId || unifiedAssets.length === 0) {
+      return { totalBalance: 0, balanceByType: {}, includedCount: 0 };
+    }
+
+    const includedAssets = unifiedAssets.filter(asset => {
+      const mappingKey = `${selectedAccountId}_${asset.key}`;
+      return mappingKey in balanceMapping
+        ? balanceMapping[mappingKey]
+        : asset.defaultIncluded;
+    });
+
+    const totalBalance = includedAssets.reduce((sum, a) => sum + a.mv, 0);
+
+    const balanceByType = {};
+    includedAssets.forEach(asset => {
+      const type = asset.assetType || '其他';
+      if (!balanceByType[type]) {
+        balanceByType[type] = 0;
+      }
+      balanceByType[type] += asset.mv;
+    });
+
+    return { totalBalance, balanceByType, includedCount: includedAssets.length };
+  }, [selectedAccountId, unifiedAssets, balanceMapping]);
+
+  const toggleAssetBalance = (accountId, assetKey) => {
+    const mappingKey = `${accountId}_${assetKey}`;
+    const currentAsset = unifiedAssets.find(a => a.key === assetKey);
+    const isCurrentlyIncluded = mappingKey in balanceMapping
+      ? balanceMapping[mappingKey]
+      : (currentAsset?.defaultIncluded || false);
+    const newMapping = { ...balanceMapping, [mappingKey]: !isCurrentlyIncluded };
+    saveBalanceMapping(newMapping);
+  };
 
   const totalPages = Math.ceil(filteredAccounts.length / pageSize);
   const paginatedAccounts = filteredAccounts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleAdd = () => {
     setEditingAccount(null);
+    const firstCategory = categoryList[0]?.value || '银行';
+    const defaultSub = (accountCatConfig[firstCategory] || [])[0] || '';
     setFormData({
       name: '',
-      category: '银行',
+      category: firstCategory,
+      subCategory: defaultSub,
       currency: 'CNY',
       liability: false,
+      type: '资产',
     });
     setShowModal(true);
   };
 
   const handleEdit = (account) => {
     setEditingAccount(account);
+    const cat = account.category || categoryList[0]?.value || '银行';
+    const subs = getSubCategories(cat);
+    const subCat = subs.find(s => s.value === account.subCategory)
+      ? account.subCategory
+      : subs[0]?.value || '';
+    // 兼容旧数据：liability=true 且无 type 映射为 '负债'，否则为 '资产'
+    let type = account.type;
+    if (!type) {
+      type = account.liability ? '负债' : '资产';
+    }
     setFormData({
       name: account.name,
-      category: account.category || '银行',
+      category: cat,
+      subCategory: subCat,
       currency: account.currency || 'CNY',
       liability: account.liability || false,
+      type,
     });
     setShowModal(true);
   };
@@ -228,15 +565,16 @@ export default function Accounts() {
             id: Date.now().toString(),
             name: formData.name,
             category: formData.category,
+            subCategory: formData.subCategory,
             currency: formData.currency || 'CNY',
             liability: formData.liability,
+            type: formData.type || '资产',
           },
         ];
       }
 
       const newState = { ...stateData, accounts: newAccounts };
 
-      // 本地缓存兜底：无论后端是否成功，都先写 localStorage
       localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
 
       const result = await saveState(newState);
@@ -256,6 +594,340 @@ export default function Accounts() {
 
   const getCategoryIcon = (category) => {
     return categoryIcons[category] || Wallet;
+  };
+
+  const handleAddCategoryInModal = async () => {
+    const name = newCategoryName.trim();
+    if (!name || accountCatConfig[name]) return;
+
+    const newCategories = { ...accountCatConfig, [name]: ['其他'] };
+    const newState = { ...stateData, accountCategories: newCategories };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      setFormData({ ...formData, category: name, subCategory: '其他' });
+    }
+    setNewCategoryName('');
+    setAddingCategory(false);
+  };
+
+  const handleEditCategoryInModal = async () => {
+    const { value, name } = editingCatName;
+    const newName = name.trim();
+    if (!newName || !value || newName === value) {
+      setEditingCatName({ value: '', name: '' });
+      return;
+    }
+    if (accountCatConfig[newName]) {
+      alert('该大类名称已存在');
+      return;
+    }
+
+    const newCategories = {};
+    Object.keys(accountCatConfig).forEach(key => {
+      if (key === value) {
+        newCategories[newName] = accountCatConfig[key];
+      } else {
+        newCategories[key] = accountCatConfig[key];
+      }
+    });
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === value ? { ...acc, category: newName } : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      if (formData.category === value) {
+        setFormData({ ...formData, category: newName });
+      }
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+    setEditingCatName({ value: '', name: '' });
+  };
+
+  const handleDeleteCategoryInModal = async (catName) => {
+    if (!confirm(`确定要删除大类「${catName}」吗？`)) return;
+
+    const newCategories = { ...accountCatConfig };
+    delete newCategories[catName];
+    const firstCat = Object.keys(newCategories)[0] || '其他';
+    const firstSub = newCategories[firstCat]?.[0] || '';
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === catName ? { ...acc, category: firstCat, subCategory: firstSub } : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      if (formData.category === catName) {
+        setFormData({ ...formData, category: firstCat, subCategory: firstSub });
+      }
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+  };
+
+  const handleAddSubInModal = async () => {
+    const name = newSubName.trim();
+    if (!name) return;
+
+    const subs = accountCatConfig[formData.category] || [];
+    if (subs.includes(name)) {
+      alert('该类名已存在');
+      return;
+    }
+    const newSubs = [...subs, name];
+    const newCategories = { ...accountCatConfig, [formData.category]: newSubs };
+    const newState = { ...stateData, accountCategories: newCategories };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      setFormData({ ...formData, subCategory: name });
+    }
+    setNewSubName('');
+    setAddingSub(false);
+  };
+
+  const handleEditSubInModal = async () => {
+    const { index, name } = editingSubName;
+    const newName = name.trim();
+    if (index < 0 || !newName) {
+      setEditingSubName({ index: -1, name: '' });
+      return;
+    }
+    const subs = accountCatConfig[formData.category] || [];
+    if (subs.includes(newName) && subs[index] !== newName) {
+      alert('该类名已存在');
+      return;
+    }
+    const oldName = subs[index];
+    const newSubs = [...subs];
+    newSubs[index] = newName;
+    const newCategories = { ...accountCatConfig, [formData.category]: newSubs };
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === formData.category && acc.subCategory === oldName
+        ? { ...acc, subCategory: newName }
+        : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      if (formData.subCategory === oldName) {
+        setFormData({ ...formData, subCategory: newName });
+      }
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+    setEditingSubName({ index: -1, name: '' });
+  };
+
+  const handleDeleteSubInModal = async (index) => {
+    const subs = accountCatConfig[formData.category] || [];
+    const subName = subs[index];
+    if (!subName) return;
+    if (!confirm(`确定要删除类名「${subName}」吗？`)) return;
+
+    const newSubs = subs.filter((_, i) => i !== index);
+    const newCategories = { ...accountCatConfig, [formData.category]: newSubs };
+    const firstSub = newSubs[0] || '';
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === formData.category && acc.subCategory === subName
+        ? { ...acc, subCategory: firstSub }
+        : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      if (formData.subCategory === subName) {
+        setFormData({ ...formData, subCategory: firstSub });
+      }
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+  };
+
+  const handleOpenCategoryModal = () => {
+    setEditingCategory(null);
+    setCategoryForm({ name: '' });
+    setEditingSubCategory({ main: '', index: -1, name: '' });
+    setShowCategoryModal(true);
+  };
+
+  const handleAddCategory = async () => {
+    const name = categoryForm.name.trim();
+    if (!name || accountCatConfig[name]) return;
+
+    const newCategories = { ...accountCatConfig, [name]: ['其他'] };
+    const newState = { ...stateData, accountCategories: newCategories };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      setCategoryForm({ name: '' });
+    }
+  };
+
+  const handleDeleteCategory = async (catName) => {
+    if (!confirm(`确定要删除大类「${catName}」吗？删除后相关账户的大类将变为「其他」。`)) return;
+
+    const newCategories = { ...accountCatConfig };
+    delete newCategories[catName];
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === catName ? { ...acc, category: '其他' } : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+  };
+
+  const handleAddSubCategory = async (mainCategory) => {
+    const subName = editingSubCategory.name.trim();
+    if (!subName) return;
+
+    const newSubs = [...(accountCatConfig[mainCategory] || [])];
+    if (!newSubs.includes(subName)) {
+      newSubs.push(subName);
+      const newCategories = { ...accountCatConfig, [mainCategory]: newSubs };
+      const newState = { ...stateData, accountCategories: newCategories };
+      const result = await saveState(newState);
+      if (result.success !== false) {
+        setStateData(newState);
+      }
+    }
+    setEditingSubCategory({ main: '', index: -1, name: '' });
+  };
+
+  const handleEditSubCategory = (mainCategory, index, name) => {
+    setEditingSubCategory({ main: mainCategory, index, name });
+  };
+
+  const handleSaveSubCategory = async () => {
+    const { main, index, name } = editingSubCategory;
+    const newName = name.trim();
+    if (!newName || !main || index < 0) return;
+
+    const newSubs = [...(accountCatConfig[main] || [])];
+    newSubs[index] = newName;
+    const newCategories = { ...accountCatConfig, [main]: newSubs };
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === main && acc.subCategory === accountCatConfig[main][index]
+        ? { ...acc, subCategory: newName }
+        : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+    setEditingSubCategory({ main: '', index: -1, name: '' });
+  };
+
+  const handleDeleteSubCategory = async (mainCategory, index) => {
+    const subName = accountCatConfig[mainCategory]?.[index];
+    if (!subName) return;
+
+    if (!confirm(`确定要删除类名「${subName}」吗？删除后相关账户的类名将变为空。`)) return;
+
+    const newSubs = accountCatConfig[mainCategory].filter((_, i) => i !== index);
+    const newCategories = { ...accountCatConfig, [mainCategory]: newSubs };
+
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.category === mainCategory && acc.subCategory === subName
+        ? { ...acc, subCategory: '' }
+        : acc
+    );
+
+    const newState = { ...stateData, accountCategories: newCategories, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+  };
+
+  const handleAddTypeInModal = async () => {
+    const name = newTypeName.trim();
+    if (!name) return;
+    if (accountTypesList.includes(name)) {
+      alert('该类型已存在');
+      return;
+    }
+    const newTypes = [...accountTypesList, name];
+    const newState = { ...stateData, accountTypes: newTypes };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      setFormData({ ...formData, type: name });
+    }
+    setNewTypeName('');
+    setAddingType(false);
+  };
+
+  const handleEditTypeInModal = async () => {
+    const { oldName, newName } = editingTypeName;
+    const trimmedNew = newName.trim();
+    if (!trimmedNew || !oldName || trimmedNew === oldName) {
+      setEditingTypeName({ oldName: '', newName: '' });
+      return;
+    }
+    // 内置类型不可编辑
+    if (defaultAccountTypes.includes(oldName)) {
+      setEditingTypeName({ oldName: '', newName: '' });
+      return;
+    }
+    if (accountTypesList.includes(trimmedNew)) {
+      alert('该类型已存在');
+      return;
+    }
+    const newTypes = accountTypesList.map(t => (t === oldName ? trimmedNew : t));
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.type === oldName ? { ...acc, type: trimmedNew } : acc
+    );
+    const newState = { ...stateData, accountTypes: newTypes, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      if (formData.type === oldName) {
+        setFormData({ ...formData, type: trimmedNew });
+      }
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
+    setEditingTypeName({ oldName: '', newName: '' });
+  };
+
+  const handleDeleteTypeInModal = async (typeName) => {
+    // 内置类型不可删除
+    if (defaultAccountTypes.includes(typeName)) return;
+    if (!confirm(`确定要删除类型「${typeName}」吗？相关账户类型将变为「资产」。`)) return;
+
+    const newTypes = accountTypesList.filter(t => t !== typeName);
+    const newAccounts = (stateData.accounts || []).map(acc =>
+      acc.type === typeName ? { ...acc, type: '资产' } : acc
+    );
+    const newState = { ...stateData, accountTypes: newTypes, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      if (formData.type === typeName) {
+        setFormData({ ...formData, type: '资产' });
+      }
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+    }
   };
 
   if (loading) {
@@ -287,6 +959,278 @@ export default function Accounts() {
 
   const { totalAssets, totalLiabilities, netWorth, assetAccounts, liabilityAccounts } = computeStats();
 
+  const renderDetailPage = () => {
+    const account = accounts.find(a => a.id === selectedAccountId);
+    if (!account) {
+      return (
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 shadow-soft border border-gray-100 dark:border-slate-700 text-center">
+          <p className="text-gray-500 dark:text-gray-400 mb-4">未找到该账户</p>
+          <button
+            onClick={() => setSelectedAccountId(null)}
+            className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+          >
+            返回列表
+          </button>
+        </div>
+      );
+    }
+
+    const stats = accountStats[selectedAccountId] || { marketValue: 0, holdingCost: 0 };
+    const effectiveType = getEffectiveType(account);
+    const isLiability = effectiveType === '负债';
+    const rawPl = stats.marketValue - stats.holdingCost;
+    const pl = isLiability ? -rawPl : rawPl;
+    const plRate = isLiability
+      ? (stats.marketValue > 0 ? -rawPl / stats.marketValue : null)
+      : (stats.holdingCost > 0 ? rawPl / stats.holdingCost : null);
+    const plColor = pl > 0 ? 'text-green-600' : pl < 0 ? 'text-red-500' : 'text-gray-900 dark:text-white';
+
+    return (
+      <>
+        {/* 顶部栏 */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSelectedAccountId(null)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                返回
+              </button>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">{account.name}</h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {account.category || '其他'} · {account.subCategory || '-'} · {effectiveType}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setSelectedAccountId(null);
+                  handleEdit(account);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                <Edit2 className="w-4 h-4" />
+                编辑
+              </button>
+              <button
+                onClick={() => {
+                  if (!confirm('确定要删除这个账户吗？')) return;
+                  const idToDelete = account.id;
+                  setSelectedAccountId(null);
+                  handleDelete(idToDelete);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 汇总卡片 */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full p-1.5">
+                <TrendingUp className="w-4 h-4" />
+              </div>
+              <span className="text-xs text-gray-500 dark:text-gray-400">总市值</span>
+            </div>
+            <div className="text-lg font-bold text-green-600 tabular-nums whitespace-nowrap">
+              {formatCurrency(stats.marketValue)}
+            </div>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400 rounded-full p-1.5">
+                <Wallet className="w-4 h-4" />
+              </div>
+              <span className="text-xs text-gray-500 dark:text-gray-400">总成本</span>
+            </div>
+            <div className="text-lg font-bold text-gray-900 dark:text-white tabular-nums whitespace-nowrap">
+              {formatCurrency(stats.holdingCost)}
+            </div>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
+            <div className="flex items-center gap-2 mb-2">
+              <div className={`${pl >= 0 ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'} rounded-full p-1.5`}>
+                {pl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+              </div>
+              <span className="text-xs text-gray-500 dark:text-gray-400">总盈亏</span>
+            </div>
+            <div className={`text-lg font-bold tabular-nums whitespace-nowrap ${plColor}`}>
+              {formatCurrency(pl)}
+            </div>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
+            <div className="flex items-center gap-2 mb-2">
+              <div className={`${pl >= 0 ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'} rounded-full p-1.5`}>
+                {pl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+              </div>
+              <span className="text-xs text-gray-500 dark:text-gray-400">总收益率</span>
+            </div>
+            <div className={`text-lg font-bold tabular-nums whitespace-nowrap ${plColor}`}>
+              {plRate !== null ? `${(plRate * 100).toFixed(2)}%` : '—'}
+            </div>
+          </div>
+        </div>
+
+        {/* 现有余额卡片 */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div
+            className="flex items-center justify-between cursor-pointer select-none"
+            onClick={() => setBalanceCardExpanded(!balanceCardExpanded)}
+          >
+            <div className="flex items-center gap-3">
+              <div className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-full p-2">
+                <Wallet className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">现有余额</div>
+                <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                  {formatCurrency(balanceData.totalBalance)}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {balanceData.includedCount} 项资产计入
+              </span>
+              {balanceCardExpanded ? (
+                <ChevronUp className="w-5 h-5 text-gray-400" />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-gray-400" />
+              )}
+            </div>
+          </div>
+          {balanceCardExpanded && (
+            <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700 transition-all duration-200">
+              {balanceData.includedCount === 0 ? (
+                <div className="text-center py-4 text-gray-400 dark:text-gray-500 text-sm">
+                  暂无计入余额的资产，请在下方勾选资产
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {Object.entries(balanceData.balanceByType).map(([type, total]) => (
+                    <div key={type} className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-100 dark:border-emerald-800/50">
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">{type}</div>
+                      <div className="text-base font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                        {formatCurrency(total)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 统一资产列表 */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">资产列表</h3>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              共 {unifiedAssets.length} 项 · 已勾选 {balanceData.includedCount} 项
+            </span>
+          </div>
+          {unifiedAssets.length === 0 ? (
+            <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+              暂无关联资产记录
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-slate-700">
+                    <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap w-10"></th>
+                    <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap">资产名称</th>
+                    <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap">代码</th>
+                    <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap">资产类型</th>
+                    <th className="text-left py-2 px-3 text-gray-500 font-medium whitespace-nowrap">一级分类</th>
+                    <th className="text-right py-2 px-3 text-gray-500 font-medium whitespace-nowrap">持仓成本</th>
+                    <th className="text-right py-2 px-3 text-gray-500 font-medium whitespace-nowrap">数量</th>
+                    <th className="text-right py-2 px-3 text-gray-500 font-medium whitespace-nowrap">现价</th>
+                    <th className="text-right py-2 px-3 text-gray-500 font-medium whitespace-nowrap">天数</th>
+                    <th className="text-right py-2 px-3 text-gray-500 font-medium whitespace-nowrap">当前市值</th>
+                    <th className="text-right py-2 px-3 text-gray-500 font-medium whitespace-nowrap">持仓盈亏</th>
+                    <th className="text-right py-2 px-3 text-gray-500 font-medium whitespace-nowrap">盈亏率</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unifiedAssets.map((asset) => {
+                    const mappingKey = `${account.id}_${asset.key}`;
+                    const isIncluded = mappingKey in balanceMapping
+                      ? balanceMapping[mappingKey]
+                      : asset.defaultIncluded;
+                    const itemPl = asset.mv - asset.cost;
+                    const itemPlRate = asset.cost > 0 ? itemPl / asset.cost * 100 : null;
+                    const itemPlColor = itemPl > 0 ? 'text-green-600' : itemPl < 0 ? 'text-red-500' : 'text-gray-400';
+                    const isFinance = asset.source === 'finance';
+                    return (
+                      <tr
+                        key={asset.key}
+                        className={`border-b border-gray-100 dark:border-slate-700/50 transition-colors ${
+                          isIncluded
+                            ? 'bg-emerald-50/50 dark:bg-emerald-900/10'
+                            : 'hover:bg-gray-50 dark:hover:bg-slate-700/30'
+                        }`}
+                      >
+                        <td className="py-2 px-3">
+                          <input
+                            type="checkbox"
+                            checked={isIncluded}
+                            onChange={() => toggleAssetBalance(account.id, asset.key)}
+                            className="w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          />
+                        </td>
+                        <td className="py-2 px-3 text-gray-900 dark:text-white font-medium">{asset.name}</td>
+                        <td className="py-2 px-3 text-gray-600 dark:text-gray-400">{asset.code || '—'}</td>
+                        <td className="py-2 px-3">
+                          <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400">
+                            {asset.assetType}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-gray-600 dark:text-gray-400">
+                          {asset.categoryL1 || '—'}
+                        </td>
+                        <td className="py-2 px-3 text-right font-medium tabular-nums text-gray-900 dark:text-white">
+                          {asset.cost > 0 ? formatCurrency(asset.cost) : '—'}
+                        </td>
+                        <td className="py-2 px-3 text-right tabular-nums text-gray-600 dark:text-gray-400">
+                          {isFinance && asset.quantity ? asset.quantity : '—'}
+                        </td>
+                        <td className="py-2 px-3 text-right tabular-nums text-gray-600 dark:text-gray-400">
+                          {isFinance && asset.currentPrice ? asset.currentPrice.toFixed(4) : '—'}
+                        </td>
+                        <td className="py-2 px-3 text-right tabular-nums text-gray-600 dark:text-gray-400">
+                          {isFinance && asset.holdingDays ? asset.holdingDays : '—'}
+                        </td>
+                        <td className="py-2 px-3 text-right font-medium tabular-nums text-gray-900 dark:text-white">
+                          {formatCurrency(asset.mv)}
+                        </td>
+                        <td className={`py-2 px-3 text-right font-medium tabular-nums ${itemPlColor}`}>
+                          {itemPl === 0 ? '—' : formatCurrency(itemPl)}
+                        </td>
+                        <td className={`py-2 px-3 text-right font-medium tabular-nums ${itemPlColor}`}>
+                          {itemPlRate !== null ? `${itemPlRate.toFixed(2)}%` : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-900 p-4 sm:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
@@ -310,6 +1254,13 @@ export default function Accounts() {
                 刷新数据
               </button>
               <button
+                onClick={handleOpenCategoryModal}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                <Settings2 className="w-4 h-4" />
+                分类管理
+              </button>
+              <button
                 onClick={handleAdd}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors"
               >
@@ -320,6 +1271,10 @@ export default function Accounts() {
           </div>
         </section>
 
+        {selectedAccountId ? (
+          renderDetailPage()
+        ) : (
+          <>
         <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
             <div className="flex items-center gap-2 mb-2">
@@ -393,11 +1348,9 @@ export default function Accounts() {
                 className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
               >
                 <option value="">全部分类</option>
-                <option value="银行">银行</option>
-                <option value="信用卡">信用卡</option>
-                <option value="储蓄">储蓄</option>
-                <option value="投资">投资</option>
-                <option value="其他">其他</option>
+                {categoryList.map(cat => (
+                  <option key={cat.value} value={cat.value}>{cat.label}</option>
+                ))}
               </select>
             </div>
             <div style={{ width: '100px' }}>
@@ -426,8 +1379,13 @@ export default function Accounts() {
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">账户名称</th>
-                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">分类</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">大类</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类名</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类型</th>
+                  <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">当前市值</th>
+                  <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">持有成本</th>
+                  <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">盈亏额</th>
+                  <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">收益率</th>
                   <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">余额</th>
                   <th className="text-center py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">操作</th>
                 </tr>
@@ -436,12 +1394,27 @@ export default function Accounts() {
                 {paginatedAccounts.map((account) => {
                   const Icon = getCategoryIcon(account.category);
                   const balance = calculateAccountBalance[account.id] || 0;
+                  const stats = accountStats[account.id] || { marketValue: 0, holdingCost: 0 };
+                  const effectiveType = getEffectiveType(account);
+                  const isLiabilityType = effectiveType === '负债';
+                  // 负债类型盈亏逻辑与资产相反
+                  const rawPl = stats.marketValue - stats.holdingCost;
+                  const pl = isLiabilityType ? -rawPl : rawPl;
+                  const plRate = isLiabilityType
+                    ? (stats.marketValue > 0 ? -rawPl / stats.marketValue : null)
+                    : (stats.holdingCost > 0 ? rawPl / stats.holdingCost : null);
+                  const hasAssets = stats.marketValue !== 0 || stats.holdingCost !== 0;
+                  const plColor = pl > 0 ? 'text-green-600' : pl < 0 ? 'text-red-500' : 'text-gray-400';
                   return (
-                    <tr key={account.id} className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30">
+                    <tr
+                      key={account.id}
+                      className="border-b border-gray-100 dark:border-slate-700/50 hover:bg-gray-50 dark:hover:bg-slate-700/30 cursor-pointer"
+                      onClick={() => setSelectedAccountId(account.id)}
+                    >
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-2">
                           <div className={`rounded-lg p-2 ${
-                            account.liability
+                            isLiabilityType
                               ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
                               : 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
                           }`}>
@@ -456,13 +1429,34 @@ export default function Accounts() {
                         </span>
                       </td>
                       <td className="py-3 px-3">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                          {account.subCategory || '-'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          account.liability
+                          isLiabilityType
                             ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
                             : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
                         }`}>
-                          {account.liability ? '负债' : '资产'}
+                          {effectiveType}
                         </span>
+                      </td>
+                      <td className="py-3 px-3 text-right font-medium tabular-nums text-gray-900 dark:text-white">
+                        {hasAssets ? formatCurrency(stats.marketValue) : '—'}
+                      </td>
+                      <td className="py-3 px-3 text-right font-medium tabular-nums text-gray-900 dark:text-white">
+                        {hasAssets ? formatCurrency(stats.holdingCost) : '—'}
+                      </td>
+                      <td className={`py-3 px-3 text-right font-medium tabular-nums ${
+                        !hasAssets ? 'text-gray-400' : plColor
+                      }`}>
+                        {!hasAssets ? '—' : (pl === 0 ? '—' : formatCurrency(pl))}
+                      </td>
+                      <td className={`py-3 px-3 text-right font-medium tabular-nums ${
+                        !hasAssets ? 'text-gray-400' : plColor
+                      }`}>
+                        {hasAssets && plRate !== null ? `${(plRate * 100).toFixed(2)}%` : '—'}
                       </td>
                       <td className={`py-3 px-3 text-right font-medium tabular-nums ${
                         balance < 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'
@@ -472,13 +1466,13 @@ export default function Accounts() {
                       <td className="py-3 px-3">
                         <div className="flex items-center justify-center gap-1">
                           <button
-                            onClick={() => handleEdit(account)}
+                            onClick={(e) => { e.stopPropagation(); handleEdit(account); }}
                             className="p-1.5 rounded-lg text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => handleDelete(account.id)}
+                            onClick={(e) => { e.stopPropagation(); handleDelete(account.id); }}
                             className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -488,6 +1482,23 @@ export default function Accounts() {
                     </tr>
                   );
                 })}
+                {paginatedAccounts.length > 0 && (() => {
+                  const totalMv = paginatedAccounts.reduce((sum, a) => sum + (accountStats[a.id]?.marketValue || 0), 0);
+                  const totalCost = paginatedAccounts.reduce((sum, a) => sum + (accountStats[a.id]?.holdingCost || 0), 0);
+                  const totalPl = totalMv - totalCost;
+                  const totalBalance = paginatedAccounts.reduce((sum, a) => sum + (calculateAccountBalance[a.id] || 0), 0);
+                  return (
+                    <tr className="border-b-2 border-gray-300 dark:border-slate-600 bg-gray-50 dark:bg-slate-700/50 font-semibold">
+                      <td className="py-3 px-3 text-gray-900 dark:text-white" colSpan={4}>合计（{paginatedAccounts.length} 条）</td>
+                      <td className="py-3 px-3 text-right tabular-nums text-gray-900 dark:text-white">{formatCurrency(totalMv)}</td>
+                      <td className="py-3 px-3 text-right tabular-nums text-gray-900 dark:text-white">{formatCurrency(totalCost)}</td>
+                      <td className={`py-3 px-3 text-right tabular-nums ${totalPl > 0 ? 'text-green-600' : totalPl < 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'}`}>{formatCurrency(totalPl)}</td>
+                      <td className="py-3 px-3 text-right tabular-nums text-gray-400">—</td>
+                      <td className={`py-3 px-3 text-right tabular-nums ${totalBalance < 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'}`}>{formatCurrency(totalBalance)}</td>
+                      <td></td>
+                    </tr>
+                  );
+                })()}
               </tbody>
             </table>
             {filteredAccounts.length === 0 && (
@@ -532,8 +1543,24 @@ export default function Accounts() {
           </div>
         </section>
 
+          </>
+        )}
+
         {showModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={() => {
+              setShowCategoryDropdown(false);
+              setShowSubDropdown(false);
+              setShowTypeDropdown(false);
+              setAddingCategory(false);
+              setAddingSub(false);
+              setAddingType(false);
+              setEditingCatName({ value: '', name: '' });
+              setEditingSubName({ index: -1, name: '' });
+              setEditingTypeName({ oldName: '', newName: '' });
+            }}
+          >
             <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-md shadow-xl">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -561,49 +1588,373 @@ export default function Accounts() {
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
+                  <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      分类
+                      大类
                     </label>
-                    <select
-                      value={formData.category}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowCategoryDropdown(!showCategoryDropdown);
+                        setShowSubDropdown(false);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-left flex items-center justify-between hover:border-primary-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     >
-                      <option value="银行">银行</option>
-                      <option value="信用卡">信用卡</option>
-                      <option value="储蓄">储蓄</option>
-                      <option value="投资">投资</option>
-                      <option value="其他">其他</option>
-                    </select>
+                      <span className="truncate">{formData.category}</span>
+                      <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showCategoryDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showCategoryDropdown && (
+                      <div className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}>
+                        {categoryList.map(cat => (
+                          <div key={cat.value} className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-slate-600">
+                            {editingCatName.value === cat.value ? (
+                              <input
+                                type="text"
+                                value={editingCatName.name}
+                                onChange={(e) => setEditingCatName({ ...editingCatName, name: e.target.value })}
+                                autoFocus
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleEditCategoryInModal();
+                                  if (e.key === 'Escape') setEditingCatName({ value: '', name: '' });
+                                }}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const availableSubs = getSubCategories(cat.value);
+                                  const defaultSub = availableSubs[0]?.value || '';
+                                  setFormData({ ...formData, category: cat.value, subCategory: defaultSub });
+                                  setShowCategoryDropdown(false);
+                                }}
+                                className={`flex-1 text-left text-sm ${formData.category === cat.value ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+                              >
+                                {cat.label}
+                              </button>
+                            )}
+                            {editingCatName.value === cat.value ? (
+                              <button
+                                type="button"
+                                onClick={handleEditCategoryInModal}
+                                className="p-1 text-green-500 hover:text-green-600"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingCatName({ value: cat.value, name: cat.label });
+                                  }}
+                                  className="p-1 text-gray-400 hover:text-primary-500"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteCategoryInModal(cat.value);
+                                  }}
+                                  className="p-1 text-gray-400 hover:text-red-500"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <div className="border-t border-gray-100 dark:border-slate-600">
+                          {addingCategory ? (
+                            <div className="flex items-center gap-2 px-3 py-2">
+                              <input
+                                type="text"
+                                value={newCategoryName}
+                                onChange={(e) => setNewCategoryName(e.target.value)}
+                                placeholder="输入大类名称"
+                                autoFocus
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleAddCategoryInModal();
+                                  if (e.key === 'Escape') { setAddingCategory(false); setNewCategoryName(''); }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={handleAddCategoryInModal}
+                                className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600"
+                              >
+                                添加
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => { setAddingCategory(true); setNewCategoryName(''); }}
+                              className="w-full px-3 py-2 text-sm text-primary-600 dark:text-primary-400 hover:bg-gray-50 dark:hover:bg-slate-600 flex items-center justify-center gap-1"
+                            >
+                              <Plus className="w-4 h-4" />
+                              添加大类
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div>
+                  <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      货币
+                      类名
                     </label>
-                    <select
-                      value={formData.currency || 'CNY'}
-                      onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowSubDropdown(!showSubDropdown);
+                        setShowCategoryDropdown(false);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-left flex items-center justify-between hover:border-primary-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     >
-                      <option value="CNY">人民币 (¥)</option>
-                      <option value="USD">美元 ($)</option>
-                      <option value="EUR">欧元 (€)</option>
-                      <option value="GBP">英镑 (£)</option>
-                    </select>
+                      <span className="truncate">{formData.subCategory || '-'}</span>
+                      <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showSubDropdown ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showSubDropdown && (
+                      <div className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}>
+                        {getSubCategories(formData.category).map((sub, index) => (
+                          <div key={sub.value} className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-slate-600">
+                            {editingSubName.index === index ? (
+                              <input
+                                type="text"
+                                value={editingSubName.name}
+                                onChange={(e) => setEditingSubName({ ...editingSubName, name: e.target.value })}
+                                autoFocus
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleEditSubInModal();
+                                  if (e.key === 'Escape') setEditingSubName({ index: -1, name: '' });
+                                }}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFormData({ ...formData, subCategory: sub.value });
+                                  setShowSubDropdown(false);
+                                }}
+                                className={`flex-1 text-left text-sm ${formData.subCategory === sub.value ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+                              >
+                                {sub.label}
+                              </button>
+                            )}
+                            {editingSubName.index === index ? (
+                              <button
+                                type="button"
+                                onClick={handleEditSubInModal}
+                                className="p-1 text-green-500 hover:text-green-600"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingSubName({ index, name: sub.label });
+                                  }}
+                                  className="p-1 text-gray-400 hover:text-primary-500"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteSubInModal(index);
+                                  }}
+                                  className="p-1 text-gray-400 hover:text-red-500"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <div className="border-t border-gray-100 dark:border-slate-600">
+                          {addingSub ? (
+                            <div className="flex items-center gap-2 px-3 py-2">
+                              <input
+                                type="text"
+                                value={newSubName}
+                                onChange={(e) => setNewSubName(e.target.value)}
+                                placeholder="输入类名"
+                                autoFocus
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleAddSubInModal();
+                                  if (e.key === 'Escape') { setAddingSub(false); setNewSubName(''); }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={handleAddSubInModal}
+                                className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600"
+                              >
+                                添加
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => { setAddingSub(true); setNewSubName(''); }}
+                              className="w-full px-3 py-2 text-sm text-primary-600 dark:text-primary-400 hover:bg-gray-50 dark:hover:bg-slate-600 flex items-center justify-center gap-1"
+                            >
+                              <Plus className="w-4 h-4" />
+                              添加类名
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="liability"
-                    checked={formData.liability}
-                    onChange={(e) => setFormData({ ...formData, liability: e.target.checked })}
-                    className="w-4 h-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                  />
-                  <label htmlFor="liability" className="text-sm text-gray-700 dark:text-gray-300">
-                    这是负债账户
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    货币
                   </label>
+                  <select
+                    value={formData.currency || 'CNY'}
+                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    {currencies.map(curr => (
+                      <option key={curr.value} value={curr.value}>{curr.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    类型
+                  </label>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowTypeDropdown(!showTypeDropdown);
+                      setShowCategoryDropdown(false);
+                      setShowSubDropdown(false);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-left flex items-center justify-between hover:border-primary-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    <span className="truncate">{formData.type || '资产'}</span>
+                    <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showTypeDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showTypeDropdown && (
+                    <div className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                      onClick={(e) => e.stopPropagation()}>
+                      {accountTypesList.map(t => (
+                        <div key={t} className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-slate-600">
+                          {editingTypeName.oldName === t ? (
+                            <input
+                              type="text"
+                              value={editingTypeName.newName}
+                              onChange={(e) => setEditingTypeName({ ...editingTypeName, newName: e.target.value })}
+                              autoFocus
+                              className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleEditTypeInModal();
+                                if (e.key === 'Escape') setEditingTypeName({ oldName: '', newName: '' });
+                              }}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData({ ...formData, type: t });
+                                setShowTypeDropdown(false);
+                              }}
+                              className={`flex-1 text-left text-sm ${formData.type === t ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+                            >
+                              {t}
+                            </button>
+                          )}
+                          {editingTypeName.oldName === t ? (
+                            <button
+                              type="button"
+                              onClick={handleEditTypeInModal}
+                              className="p-1 text-green-500 hover:text-green-600"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          ) : defaultAccountTypes.includes(t) ? (
+                            <span className="text-xs text-gray-400">内置</span>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingTypeName({ oldName: t, newName: t });
+                                }}
+                                className="p-1 text-gray-400 hover:text-primary-500"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteTypeInModal(t);
+                                }}
+                                className="p-1 text-gray-400 hover:text-red-500"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      <div className="border-t border-gray-100 dark:border-slate-600">
+                        {addingType ? (
+                          <div className="flex items-center gap-2 px-3 py-2">
+                            <input
+                              type="text"
+                              value={newTypeName}
+                              onChange={(e) => setNewTypeName(e.target.value)}
+                              placeholder="输入类型名称"
+                              autoFocus
+                              className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleAddTypeInModal();
+                                if (e.key === 'Escape') { setAddingType(false); setNewTypeName(''); }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleAddTypeInModal}
+                              className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600"
+                            >
+                              添加
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => { setAddingType(true); setNewTypeName(''); }}
+                            className="w-full px-3 py-2 text-sm text-primary-600 dark:text-primary-400 hover:bg-gray-50 dark:hover:bg-slate-600 flex items-center justify-center gap-1"
+                          >
+                            <Plus className="w-4 h-4" />
+                            添加类型
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -620,6 +1971,147 @@ export default function Accounts() {
                   className="px-4 py-2 rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   保存
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCategoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">分类管理</h3>
+                <button
+                  onClick={() => setShowCategoryModal(false)}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 mb-4">
+                <input
+                  type="text"
+                  value={categoryForm.name}
+                  onChange={(e) => setCategoryForm({ name: e.target.value })}
+                  placeholder="输入新大类名称"
+                  className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <button
+                  onClick={handleAddCategory}
+                  disabled={!categoryForm.name.trim() || accountCatConfig[categoryForm.name]}
+                  className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  添加大类
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-4">
+                {Object.entries(accountCatConfig).map(([mainCategory, subs]) => (
+                  <div key={mainCategory} className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-semibold text-gray-900 dark:text-white">{mainCategory}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setEditingSubCategory({ main: mainCategory, index: -1, name: '' });
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1 text-xs rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+                        >
+                          <Plus className="w-3 h-3" />
+                          添加类名
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCategory(mainCategory)}
+                          className="inline-flex items-center gap-1 px-3 py-1 text-xs rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors"
+                        >
+                          <FolderMinus className="w-3 h-3" />
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {subs.map((subName, index) => (
+                        <div key={index} className="flex items-center gap-1 bg-white dark:bg-slate-600 rounded-lg px-3 py-1.5 border border-gray-200 dark:border-slate-500">
+                          {editingSubCategory.main === mainCategory && editingSubCategory.index === index ? (
+                            <input
+                              type="text"
+                              value={editingSubCategory.name}
+                              onChange={(e) => setEditingSubCategory({ ...editingSubCategory, name: e.target.value })}
+                              autoFocus
+                              className="w-24 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveSubCategory();
+                                if (e.key === 'Escape') setEditingSubCategory({ main: '', index: -1, name: '' });
+                              }}
+                            />
+                          ) : (
+                            <span className="text-sm text-gray-700 dark:text-gray-300">{subName}</span>
+                          )}
+                          {editingSubCategory.main === mainCategory && editingSubCategory.index === index ? (
+                            <button
+                              onClick={handleSaveSubCategory}
+                              className="p-1 text-green-500 hover:text-green-600"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => handleEditSubCategory(mainCategory, index, subName)}
+                                className="p-1 text-gray-400 hover:text-primary-500"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteSubCategory(mainCategory, index)}
+                                className="p-1 text-gray-400 hover:text-red-500"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {editingSubCategory.main === mainCategory && editingSubCategory.index === -1 && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editingSubCategory.name}
+                          onChange={(e) => setEditingSubCategory({ ...editingSubCategory, name: e.target.value })}
+                          placeholder="输入类名"
+                          autoFocus
+                          className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleAddSubCategory(mainCategory);
+                            }
+                            if (e.key === 'Escape') {
+                              setEditingSubCategory({ main: '', index: -1, name: '' });
+                            }
+                          }}
+                        />
+                        <button
+                          onClick={() => handleAddSubCategory(mainCategory)}
+                          className="px-3 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600"
+                        >
+                          添加
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end mt-4 pt-4 border-t border-gray-200 dark:border-slate-700">
+                <button
+                  onClick={() => setShowCategoryModal(false)}
+                  className="px-4 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+                >
+                  关闭
                 </button>
               </div>
             </div>

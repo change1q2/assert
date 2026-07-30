@@ -20,53 +20,101 @@ function formatPercentage(value) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
-function calculateRepayment(principal, annualRate, repaymentMethod, startDate, dueDate, paidAmount) {
+function calculateRepayment(principal, annualRate, repaymentMethod, startDate, dueDate, paidAmount, useDailyInterest = false, investmentDays = 365) {
   const methodLabel = {
     equal_principal: '等额本金',
     equal_payment: '等额本息',
     bullet: '到期一次',
     interest_only: '只还利息',
+    equalPrincipalInterest: '等额本息',
+    equalPrincipal: '等额本金',
+    interestOnly: '先息后本',
+    lumpSum: '到期一次性',
   }[repaymentMethod] || repaymentMethod || '其他';
 
   if (!principal || !annualRate) {
     return { methodLabel, totalInterest: 0, schedule: [] };
   }
 
-  const rate = annualRate / 100 / 12;
+  const monthlyRate = annualRate / 100 / 12;
+  const dailyRate = annualRate / 100 / (parseFloat(investmentDays) || 365);
   const start = new Date(startDate);
   const due = new Date(dueDate);
-  const months = Math.round((due - start) / (1000 * 60 * 60 * 24 * 30));
+  const months = Math.max(1, Math.round((due - start) / (1000 * 60 * 60 * 24 * 30)));
+
+  const getDaysInMonth = (date) => new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  const getEffectiveMonthlyRate = (paymentDate) => {
+    if (useDailyInterest) return dailyRate * getDaysInMonth(paymentDate);
+    return monthlyRate;
+  };
 
   let totalInterest = 0;
   const schedule = [];
 
-  if (repaymentMethod === 'equal_principal') {
+  if (repaymentMethod === 'equal_principal' || repaymentMethod === 'equalPrincipal') {
     const principalPerMonth = principal / months;
     for (let i = 0; i < months; i++) {
-      const interest = (principal - principalPerMonth * i) * rate;
-      totalInterest += interest;
       const date = new Date(start);
       date.setMonth(date.getMonth() + i);
+      const effRate = getEffectiveMonthlyRate(date);
+      const interest = (principal - principalPerMonth * i) * effRate;
+      totalInterest += interest;
       schedule.push({ period: i + 1, date: date.toISOString().split('T')[0], payment: principalPerMonth + interest });
     }
-  } else if (repaymentMethod === 'equal_payment') {
-    const payment = (principal * rate * Math.pow(1 + rate, months)) / (Math.pow(1 + rate, months) - 1);
-    for (let i = 0; i < months; i++) {
-      const interest = principal * rate * Math.pow(1 + rate, i);
-      totalInterest += interest;
-      const date = new Date(start);
-      date.setMonth(date.getMonth() + i);
-      schedule.push({ period: i + 1, date: date.toISOString().split('T')[0], payment });
+  } else if (repaymentMethod === 'equal_payment' || repaymentMethod === 'equalPrincipalInterest') {
+    if (useDailyInterest) {
+      const avgMonthlyRate = dailyRate * 30.4167;
+      const x = Math.pow(1 + avgMonthlyRate, months);
+      const payment = avgMonthlyRate === 0 ? principal / months : (principal * avgMonthlyRate * x) / (x - 1);
+      let remainingPrincipal = principal;
+      for (let i = 0; i < months; i++) {
+        const date = new Date(start);
+        date.setMonth(date.getMonth() + i);
+        const effRate = getEffectiveMonthlyRate(date);
+        const interest = remainingPrincipal * effRate;
+        let principalPart = payment - interest;
+        if (i === months - 1) principalPart = remainingPrincipal;
+        remainingPrincipal -= principalPart;
+        if (remainingPrincipal < 0) remainingPrincipal = 0;
+        totalInterest += interest;
+        schedule.push({ period: i + 1, date: date.toISOString().split('T')[0], payment: principalPart + interest });
+      }
+    } else {
+      const payment = (principal * monthlyRate * Math.pow(1 + monthlyRate, months)) / (Math.pow(1 + monthlyRate, months) - 1);
+      for (let i = 0; i < months; i++) {
+        const interest = principal * monthlyRate * Math.pow(1 + monthlyRate, i);
+        totalInterest += interest;
+        const date = new Date(start);
+        date.setMonth(date.getMonth() + i);
+        schedule.push({ period: i + 1, date: date.toISOString().split('T')[0], payment });
+      }
     }
-  } else if (repaymentMethod === 'bullet') {
-    totalInterest = principal * rate * months;
+  } else if (repaymentMethod === 'bullet' || repaymentMethod === 'lumpSum') {
+    if (useDailyInterest) {
+      const totalDays = Math.max(1, Math.round((due - start) / (1000 * 60 * 60 * 24)));
+      totalInterest = principal * dailyRate * totalDays;
+    } else {
+      totalInterest = principal * monthlyRate * months;
+    }
     schedule.push({ period: 1, date: dueDate, payment: principal + totalInterest });
   } else {
-    totalInterest = principal * rate * months;
-    for (let i = 0; i < months; i++) {
-      const date = new Date(start);
-      date.setMonth(date.getMonth() + i);
-      schedule.push({ period: i + 1, date: date.toISOString().split('T')[0], payment: principal * rate });
+    // interest_only / interestOnly
+    if (useDailyInterest) {
+      for (let i = 0; i < months; i++) {
+        const date = new Date(start);
+        date.setMonth(date.getMonth() + i);
+        const effRate = getEffectiveMonthlyRate(date);
+        const interest = principal * effRate;
+        totalInterest += interest;
+        schedule.push({ period: i + 1, date: date.toISOString().split('T')[0], payment: interest });
+      }
+    } else {
+      totalInterest = principal * monthlyRate * months;
+      for (let i = 0; i < months; i++) {
+        const date = new Date(start);
+        date.setMonth(date.getMonth() + i);
+        schedule.push({ period: i + 1, date: date.toISOString().split('T')[0], payment: principal * monthlyRate });
+      }
     }
   }
 
@@ -85,6 +133,13 @@ function adjustColor(color, amount) {
 
 export default function DebtAnalysis({ debts, debtCategories = [] }) {
   const [drilldown, setDrilldown] = useState({ level: 0, category: null, type: null });
+
+  // 判断债务类别是否为消费贷（按日计息）
+  const isConsumerLoan = (debtCategory) => {
+    const cat = debtCategories.find(c => c.id === debtCategory);
+    return cat && cat.name === '消费贷';
+  };
+
   const debtMetrics = useMemo(() => {
     let totalAmount = 0;
     let totalPrincipal = 0;
@@ -107,7 +162,7 @@ export default function DebtAnalysis({ debts, debtCategories = [] }) {
         totalLent += amount;
       }
 
-      const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount);
+      const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount, isConsumerLoan(debt.debtCategory), debt.investmentDays);
       totalInterest += plan.totalInterest || 0;
     });
 
@@ -237,7 +292,9 @@ export default function DebtAnalysis({ debts, debtCategories = [] }) {
         debt.repaymentMethod,
         debt.startDate,
         debt.dueDate,
-        debt.paidAmount
+        debt.paidAmount,
+        isConsumerLoan(debt.debtCategory),
+        debt.investmentDays
       );
 
       if (plan.schedule && plan.schedule.length > 0) {

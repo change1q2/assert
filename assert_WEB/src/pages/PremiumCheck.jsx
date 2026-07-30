@@ -336,7 +336,7 @@ export default function PremiumCheck() {
           >
             <div className="text-sm text-gray-600 dark:text-gray-400">可套利标的</div>
             <div className="text-xl font-bold text-green-600 dark:text-green-400">{arbitrageTargets.length}</div>
-            <div className="text-xs text-gray-500 dark:text-gray-500">溢价>4%且申购上限≠0</div>
+            <div className="text-xs text-gray-500 dark:text-gray-500">溢价{'>'}4%且申购上限≠0</div>
           </button>
           <button
             onClick={() => setQuickFilter('transfer')}
@@ -344,7 +344,7 @@ export default function PremiumCheck() {
           >
             <div className="text-sm text-gray-600 dark:text-gray-400">建议转仓</div>
             <div className="text-xl font-bold text-orange-600 dark:text-orange-400">{transferTargets.length}</div>
-            <div className="text-xs text-gray-500 dark:text-gray-500">溢价率>6%</div>
+            <div className="text-xs text-gray-500 dark:text-gray-500">溢价率{'>'}6%</div>
           </button>
           <button
             onClick={() => setQuickFilter('buy')}

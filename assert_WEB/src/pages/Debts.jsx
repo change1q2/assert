@@ -112,7 +112,7 @@ export default function Debts() {
     };
     const cls = colorClasses[color] || colorClasses.red;
     
-    const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount);
+    const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount, isConsumerLoan(debt.debtCategory), debt.investmentDays);
     const payments = debt.payments || {};
 
     const cardWidth = cardSizes[debt.id] || '100%';
@@ -573,7 +573,7 @@ export default function Debts() {
   };
 
   const handlePaymentToggle = async (debt, period) => {
-    const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount);
+    const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount, isConsumerLoan(debt.debtCategory), debt.investmentDays);
     const paymentItem = plan?.schedule?.find((s) => s.period === period);
     if (!paymentItem) return;
 
@@ -644,7 +644,13 @@ export default function Debts() {
     await saveState(newStateData);
   };
 
-  const calculateRepayment = (principal, rate, method, startDate, dueDate, paidAmount = 0) => {
+  // 判断债务类别是否为消费贷（按日计息）
+  const isConsumerLoan = (debtCategory) => {
+    const cat = debtCategories.find(c => c.id === debtCategory);
+    return cat && cat.name === '消费贷';
+  };
+
+  const calculateRepayment = (principal, rate, method, startDate, dueDate, paidAmount = 0, useDailyInterest = false, investmentDays = 365) => {
     const p = parseFloat(principal) || 0;
     const r = parseFloat(rate) || 0;
     if (!p || !dueDate || !startDate) return null;
@@ -653,6 +659,19 @@ export default function Debts() {
     const due = new Date(dueDate);
     const months = Math.max(1, (due.getFullYear() - start.getFullYear()) * 12 + (due.getMonth() - start.getMonth()));
     const monthlyRate = r / 100 / 12;
+    const dailyRate = r / 100 / (parseFloat(investmentDays) || 365);
+
+    // 获取某月的天数
+    const getDaysInMonth = (date) => {
+      return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    };
+    // 按日计息时，获取某月的实际月利率
+    const getEffectiveMonthlyRate = (paymentDate) => {
+      if (useDailyInterest) {
+        return dailyRate * getDaysInMonth(paymentDate);
+      }
+      return monthlyRate;
+    };
 
     let totalAmount = 0;
     let totalInterest = 0;
@@ -660,7 +679,39 @@ export default function Debts() {
     const schedule = [];
 
     if (method === 'equalPrincipalInterest') {
-      if (monthlyRate === 0) {
+      if (useDailyInterest) {
+        // 按日计息的等额本息：用平均月利率计算基础月还款额，每月利息按实际天数计算
+        const avgMonthlyRate = dailyRate * 30.4167; // 年均月天数
+        let remainingPrincipal = p;
+        if (avgMonthlyRate === 0) {
+          eachAmount = p / months;
+        } else {
+          const x = Math.pow(1 + avgMonthlyRate, months);
+          eachAmount = (p * avgMonthlyRate * x) / (x - 1);
+        }
+        for (let i = 0; i < months; i++) {
+          const paymentDate = new Date(start);
+          paymentDate.setMonth(start.getMonth() + i + 1);
+          const effRate = getEffectiveMonthlyRate(paymentDate);
+          const interest = remainingPrincipal * effRate;
+          let principalPart = eachAmount - interest;
+          // 最后一期调整，确保本金刚好还完
+          if (i === months - 1) {
+            principalPart = remainingPrincipal;
+          }
+          remainingPrincipal -= principalPart;
+          if (remainingPrincipal < 0) remainingPrincipal = 0;
+          schedule.push({
+            period: i + 1,
+            date: paymentDate.toISOString().split('T')[0],
+            principal: principalPart,
+            interest,
+            total: principalPart + interest,
+          });
+        }
+        totalInterest = schedule.reduce((s, item) => s + item.interest, 0);
+        totalAmount = p + totalInterest;
+      } else if (monthlyRate === 0) {
         eachAmount = p / months;
         totalAmount = p;
         totalInterest = 0;
@@ -680,7 +731,7 @@ export default function Debts() {
         eachAmount = (p * monthlyRate * x) / (x - 1);
         totalAmount = eachAmount * months;
         totalInterest = totalAmount - p;
-        
+
         let remainingPrincipal = p;
         for (let i = 0; i < months; i++) {
           const interest = remainingPrincipal * monthlyRate;
@@ -701,14 +752,15 @@ export default function Debts() {
       const basePrincipal = p / months;
       totalInterest = 0;
       let remainingPrincipal = p;
-      
+
       for (let i = 0; i < months; i++) {
-        const interest = remainingPrincipal * monthlyRate;
+        const paymentDate = new Date(start);
+        paymentDate.setMonth(start.getMonth() + i + 1);
+        const effRate = getEffectiveMonthlyRate(paymentDate);
+        const interest = remainingPrincipal * effRate;
         const totalPayment = basePrincipal + interest;
         totalInterest += interest;
         remainingPrincipal -= basePrincipal;
-        const paymentDate = new Date(start);
-        paymentDate.setMonth(start.getMonth() + i + 1);
         schedule.push({
           period: i + 1,
           date: paymentDate.toISOString().split('T')[0],
@@ -720,35 +772,74 @@ export default function Debts() {
       totalAmount = p + totalInterest;
       eachAmount = totalAmount / months;
     } else if (method === 'interestOnly') {
-      totalInterest = p * monthlyRate * months;
-      totalAmount = p + totalInterest;
-      eachAmount = p * monthlyRate;
-      
-      for (let i = 0; i < months - 1; i++) {
-        const paymentDate = new Date(start);
-        paymentDate.setMonth(start.getMonth() + i + 1);
+      if (useDailyInterest) {
+        // 按日计息的先息后本：每月利息 = 本金 × 日利率 × 当月天数
+        totalInterest = 0;
+        for (let i = 0; i < months - 1; i++) {
+          const paymentDate = new Date(start);
+          paymentDate.setMonth(start.getMonth() + i + 1);
+          const effRate = getEffectiveMonthlyRate(paymentDate);
+          const interest = p * effRate;
+          totalInterest += interest;
+          schedule.push({
+            period: i + 1,
+            date: paymentDate.toISOString().split('T')[0],
+            principal: 0,
+            interest,
+            total: interest,
+          });
+        }
+        const lastPaymentDate = new Date(start);
+        lastPaymentDate.setMonth(start.getMonth() + months);
+        const lastEffRate = getEffectiveMonthlyRate(lastPaymentDate);
+        const lastInterest = p * lastEffRate;
+        totalInterest += lastInterest;
         schedule.push({
-          period: i + 1,
-          date: paymentDate.toISOString().split('T')[0],
-          principal: 0,
+          period: months,
+          date: lastPaymentDate.toISOString().split('T')[0],
+          principal: p,
+          interest: lastInterest,
+          total: p + lastInterest,
+        });
+        totalAmount = p + totalInterest;
+        eachAmount = totalInterest / months;
+      } else {
+        totalInterest = p * monthlyRate * months;
+        totalAmount = p + totalInterest;
+        eachAmount = p * monthlyRate;
+
+        for (let i = 0; i < months - 1; i++) {
+          const paymentDate = new Date(start);
+          paymentDate.setMonth(start.getMonth() + i + 1);
+          schedule.push({
+            period: i + 1,
+            date: paymentDate.toISOString().split('T')[0],
+            principal: 0,
+            interest: eachAmount,
+            total: eachAmount,
+          });
+        }
+        const lastPaymentDate = new Date(start);
+        lastPaymentDate.setMonth(start.getMonth() + months);
+        schedule.push({
+          period: months,
+          date: lastPaymentDate.toISOString().split('T')[0],
+          principal: p,
           interest: eachAmount,
-          total: eachAmount,
+          total: p + eachAmount,
         });
       }
-      const lastPaymentDate = new Date(start);
-      lastPaymentDate.setMonth(start.getMonth() + months);
-      schedule.push({
-        period: months,
-        date: lastPaymentDate.toISOString().split('T')[0],
-        principal: p,
-        interest: eachAmount,
-        total: p + eachAmount,
-      });
     } else if (method === 'lumpSum') {
-      totalInterest = p * monthlyRate * months;
+      if (useDailyInterest) {
+        // 按日计息的到期一次性：总利息 = 本金 × 日利率 × 总天数
+        const totalDays = Math.max(1, Math.round((due - start) / (1000 * 60 * 60 * 24)));
+        totalInterest = p * dailyRate * totalDays;
+      } else {
+        totalInterest = p * monthlyRate * months;
+      }
       totalAmount = p + totalInterest;
       eachAmount = totalAmount;
-      
+
       const paymentDate = new Date(start);
       paymentDate.setMonth(start.getMonth() + months);
       schedule.push({
@@ -772,14 +863,14 @@ export default function Debts() {
   };
 
   const getRepaymentPlan = () => {
-    return calculateRepayment(form.principal, form.annualRate, form.repaymentMethod, form.startDate, form.dueDate, form.paidAmount);
+    return calculateRepayment(form.principal, form.annualRate, form.repaymentMethod, form.startDate, form.dueDate, form.paidAmount, isConsumerLoan(form.debtCategory), form.investmentDays);
   };
 
   const handleFormChange = (field, value) => {
     setForm((prev) => {
       const newForm = { ...prev, [field]: value };
-      if (!totalAmountOverridden && (field === 'principal' || field === 'annualRate' || field === 'startDate' || field === 'dueDate' || field === 'repaymentMethod')) {
-        const plan = calculateRepayment(newForm.principal, newForm.annualRate, newForm.repaymentMethod, newForm.startDate, newForm.dueDate);
+      if (!totalAmountOverridden && (field === 'principal' || field === 'annualRate' || field === 'startDate' || field === 'dueDate' || field === 'repaymentMethod' || field === 'debtCategory' || field === 'investmentDays')) {
+        const plan = calculateRepayment(newForm.principal, newForm.annualRate, newForm.repaymentMethod, newForm.startDate, newForm.dueDate, newForm.paidAmount, isConsumerLoan(newForm.debtCategory), newForm.investmentDays);
         if (plan) {
           newForm.amount = plan.totalAmount.toFixed(2);
         }
@@ -1029,7 +1120,7 @@ export default function Debts() {
     let monthDueInterest = 0;
 
     payables.forEach((debt) => {
-      const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount);
+      const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount, isConsumerLoan(debt.debtCategory), debt.investmentDays);
       if (plan?.schedule) {
         const payments = debt.payments || {};
         plan.schedule.forEach((period) => {
@@ -1054,7 +1145,7 @@ export default function Debts() {
     let overdueAmount = 0;
     let overdueDebtCount = 0;
     payables.forEach((d) => {
-      const plan = calculateRepayment(d.principal, d.annualRate, d.repaymentMethod, d.startDate, d.dueDate, d.paidAmount);
+      const plan = calculateRepayment(d.principal, d.annualRate, d.repaymentMethod, d.startDate, d.dueDate, d.paidAmount, isConsumerLoan(d.debtCategory), d.investmentDays);
       const payments = d.payments || {};
       if (plan?.schedule) {
         const hasOverdue = plan.schedule.some(item => payments[item.period] !== true && new Date(item.date) < new Date());
@@ -1456,7 +1547,7 @@ export default function Debts() {
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         类别 <button type="button" onClick={() => setShowCategoryModal(true)} className="ml-1 text-xs text-indigo-600 hover:text-indigo-700">设置</button>
                       </label>
-                      <select value={form.debtCategory} onChange={(e) => setForm({ ...form, debtCategory: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
+                      <select value={form.debtCategory} onChange={(e) => handleFormChange('debtCategory', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
                         <option value="">请选择类别</option>
                         {form.type === '借出' || form.type === '应收' ? (
                           <><option value="cat_4">亲友借款</option><option value="cat_5">他人借款</option></>
@@ -1495,7 +1586,7 @@ export default function Debts() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">投资天数</label>
-                    <input type="number" value={form.investmentDays} onChange={(e) => setForm({ ...form, investmentDays: e.target.value })} placeholder="365" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
+                    <input type="number" value={form.investmentDays} onChange={(e) => handleFormChange('investmentDays', e.target.value)} placeholder="365" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
                     <p className="text-xs text-gray-400 mt-1">不填默认为365天</p>
                   </div>
                   <div>

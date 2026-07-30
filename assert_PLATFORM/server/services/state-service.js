@@ -12,6 +12,7 @@ async function loadUserState(userId) {
   const accounts = (await sqlAll(pool, "SELECT * FROM accounts WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, owner: row.owner, currency: row.currency, type: row.type,
     balance: row.balance, liability: row.liability, enabled: Boolean(row.enabled), default: Boolean(row.is_default),
+    category: row.category, subCategory: row.sub_category,
   }));
   const assetClasses = (await sqlAll(pool, "SELECT * FROM asset_classes WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, children: maybeParseJson(row.children_json), visible: Boolean(row.visible),
@@ -68,6 +69,7 @@ async function loadUserState(userId) {
     pnlPercent: row.pnl_percent, avgBuyPrice: row.avg_buy_price, holdingDays: row.holding_days,
     positionWeight: row.position_weight, totalFees: row.total_fees, todayPnl: row.today_pnl,
     todayPnlPercent: row.today_pnl_percent, prevPrice: row.prev_price, priceDate: row.price_date,
+    tags: row.tags,
     transactions: transactionsByAsset.get(String(row.id)) || [],
   }));
   const customRecords = { income: [], expense: [], transfer: [] };
@@ -77,7 +79,7 @@ async function loadUserState(userId) {
   (await sqlAll(pool, "SELECT scope, name FROM finance_tertiary_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
     .forEach((row) => (tertiaryByScope[row.scope] ||= []).push(row.name));
   const books = (await sqlAll(pool, "SELECT * FROM books WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
-    id: row.id, name: row.name, icon: row.icon, color: row.color, createdAt: row.created_at,
+    id: row.id, name: row.name, icon: row.icon, color: row.color, tags: maybeParseJson(row.tags_json) || [], createdAt: row.created_at,
   }));
   const tags = (await sqlAll(pool, "SELECT * FROM tags WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, color: row.color, createdAt: row.created_at,
@@ -125,7 +127,7 @@ async function loadUserState(userId) {
     allocation: maybeParseJson(row.allocation_json), debtLimit: row.debt_limit,
     annualReturn: row.annual_return, risk: row.risk,
   }));
-  const settings = await sqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json FROM user_settings WHERE user_id = ?", [userId]);
+  const settings = await sqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json FROM user_settings WHERE user_id = ?", [userId]);
   const yearlyRecords = (await sqlAll(pool, "SELECT year, opening_asset, closing_asset, target_profit, actual_profit FROM yearly_records WHERE user_id = ? ORDER BY year", [userId])).map((row) => ({
     year: row.year,
     openingAsset: row.opening_asset,
@@ -155,7 +157,9 @@ async function loadUserState(userId) {
     feeConfig: settings ? maybeParseJson(settings.fee_config_json) : undefined,
     overviewGoals: settings ? maybeParseJson(settings.overview_goals_json) : undefined,
     hkIpoRules: settings ? maybeParseJson(settings.hk_ipo_rules_json) : undefined,
+    independentAssets: settings ? maybeParseJson(settings.independent_assets_json) || {} : {},
     yearlyRecords,
+    accountCategories: settings ? maybeParseJson(settings.account_categories_json) || {} : {},
   };
 }
 
@@ -183,11 +187,11 @@ async function saveUserState(conn, userId, state) {
   }
 
   for (const row of (state.accounts || [])) {
-    await sqlRun(conn, `INSERT INTO accounts (user_id, id, name, owner, currency, type, balance, liability, enabled, is_default, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    await sqlRun(conn, `INSERT INTO accounts (user_id, id, name, owner, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, text(row.id), text(row.name), text(row.owner), text(row.currency), text(row.type),
        number(row.balance), number(row.liability), row.enabled === false ? 0 : 1, row.default ? 1 : 0,
-       (state.accounts || []).indexOf(row)]);
+       (state.accounts || []).indexOf(row), text(row.category), text(row.subCategory)]);
   }
 
   for (const [index, row] of (state.assetClasses || []).entries()) {
@@ -217,14 +221,14 @@ async function saveUserState(conn, userId, state) {
 
   for (const [index, row] of (state.financeAssets || []).entries()) {
     await sqlRun(conn, `INSERT INTO finance_assets
-      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, sort_order, tags)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, text(row.id), text(row.kind), text(row.assetKind), text(row.accountId), text(row.category),
        text(row.subcategory), text(row.tertiaryCategory), text(row.market), text(row.currency),
        text(row.name), text(row.code), text(row.positionGroup), text(row.positionCategory),
        number(row.costPrice), number(row.shares), number(row.availableShares), number(row.currentPrice),
        number(row.pnl), number(row.pnlPercent), number(row.avgBuyPrice), number(row.holdingDays),
-       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), number(row.prevPrice), text(row.priceDate), index]);
+       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), number(row.prevPrice), text(row.priceDate), index, text(row.tags)]);
 
     const isOutdoor = (row.market === '国内市场') && (row.tertiaryCategory === '场外' || row.categoryL3 === '场外');
 
@@ -267,9 +271,9 @@ async function saveUserState(conn, userId, state) {
   }
 
   for (const [index, row] of (state.books || []).entries()) {
-    await sqlRun(conn, `INSERT INTO books (user_id, id, name, icon, color, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?)`,
-      [userId, text(row.id), text(row.name), text(row.icon || ''), text(row.color || ''), index]);
+    await sqlRun(conn, `INSERT INTO books (user_id, id, name, icon, color, tags_json, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [userId, text(row.id), text(row.name), text(row.icon || ''), text(row.color || ''), JSON.stringify(row.tags || []), index]);
   }
 
   for (const [index, row] of (state.tags || []).entries()) {
@@ -322,9 +326,10 @@ async function saveUserState(conn, userId, state) {
       [userId, Number(row.id), text(row.name), row.active ? 1 : 0, text(row.target),
        JSON.stringify(row.allocation || []), number(row.debtLimit), number(row.annualReturn), text(row.risk)]);
   }
-  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json) VALUES (?, ?, ?, ?, ?)",
+  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
     [userId, JSON.stringify(state.financeAssetDraft || {}), JSON.stringify(state.feeConfig || {}),
-     JSON.stringify(state.overviewGoals || {}), previousSettings?.hk_ipo_rules_json || null]);
+     JSON.stringify(state.overviewGoals || {}), previousSettings?.hk_ipo_rules_json || null,
+     JSON.stringify(state.independentAssets || {}), JSON.stringify(state.accountCategories || {})]);
 
   for (const row of (state.yearlyRecords || [])) {
     await sqlRun(conn, `INSERT INTO yearly_records (user_id, year, opening_asset, closing_asset, target_profit, actual_profit)

@@ -484,7 +484,8 @@ export default function Analysis({ onNavigate }) {
         percent: total > 0 ? (value / total) * 100 : 0,
         color: CATEGORY_COLORS[idx % CATEGORY_COLORS.length],
       }))
-      .sort((a, b) => b.value - a.value);
+      .sort((a, b) => b.value - a.value)
+      .filter(item => item.percent >= 1);
 
     const categoryData = {
       income: buildCategoryDataV2(categoryMap.income, totalIncome),
@@ -693,7 +694,8 @@ export default function Analysis({ onNavigate }) {
           yoy,
         };
       })
-      .sort((a, b) => b.value - a.value);
+      .sort((a, b) => b.value - a.value)
+      .filter(item => item.percent >= 1);
 
     const categoryData = {
       income: buildCategoryData(categoryMap.income, categoryCountMap.income, totalIncome, {}),

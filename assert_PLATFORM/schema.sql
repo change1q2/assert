@@ -315,6 +315,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
   fee_config_json JSON,
   overview_goals_json JSON,
   hk_ipo_rules_json JSON,
+  independent_assets_json JSON,
+  account_categories_json JSON,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -428,6 +430,7 @@ CREATE TABLE IF NOT EXISTS books (
   name VARCHAR(255) NOT NULL,
   icon VARCHAR(100) NOT NULL DEFAULT '',
   color VARCHAR(50) NOT NULL DEFAULT '',
+  tags_json JSON,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
