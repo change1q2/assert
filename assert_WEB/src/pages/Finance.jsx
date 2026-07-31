@@ -485,6 +485,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   const _quotePrice = _quote && _quote.price != null ? parseFloat(_quote.price) : null;
   const _quotePrevClose = _quote && _quote.prevClose != null ? parseFloat(_quote.prevClose) : null;
   const _quoteChangePct = _quote && _quote.changePct != null ? parseFloat(_quote.changePct) : null;
+  const isUSMarket = latestData.market === '美股市场' || latestData.market === '美股';
+  const _storedPrevPrice = parseFloat(latestData.prevPrice) || 0;
 
   const prevPrice = _quotePrevClose != null ? _quotePrevClose : (parseFloat(latestData.prevPrice) || 0);
   const currentPrice = _quotePrice != null ? _quotePrice : (parseFloat(latestData.currentPrice || costPrice) || 0);
@@ -504,21 +506,37 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   // 当日盈亏：优先使用实时行情（与列表保持一致），其次使用 stateData 中存储的 prevPrice/currentPrice，最后回退到 todayPnl/dailyPnl
   let computedDailyPnl = 0;
   if (_quotePrice != null && _quotePrevClose != null && _quotePrevClose !== 0 && quantity > 0) {
-    computedDailyPnl = Math.round((_quotePrice - _quotePrevClose) * quantity * 100) / 100;
+    // 美股市场：当实时价等于昨收价（盘外时间），改用昨收价与前一日收盘价计算
+    if (isUSMarket && Math.abs(_quotePrice - _quotePrevClose) < 0.0001 && _storedPrevPrice > 0) {
+      computedDailyPnl = Math.round((_quotePrevClose - _storedPrevPrice) * quantity * 100) / 100;
+    } else {
+      computedDailyPnl = Math.round((_quotePrice - _quotePrevClose) * quantity * 100) / 100;
+    }
   } else if (_quotePrice != null && _quoteChangePct != null && quantity > 0) {
     // prevClose为0但changePct可用时，用changePct反推prevClose
     const _prevClose = _quotePrice / (1 + _quoteChangePct / 100);
     computedDailyPnl = Math.round((_quotePrice - _prevClose) * quantity * 100) / 100;
+  } else if (isUSMarket && _quotePrevClose != null && _quotePrevClose > 0 && _storedPrevPrice > 0 && quantity > 0) {
+    // 美股市场：price为空但prevClose可用，用prevClose和前一日收盘价计算
+    computedDailyPnl = Math.round((_quotePrevClose - _storedPrevPrice) * quantity * 100) / 100;
   } else if (prevPrice > 0 && currentPrice > 0 && quantity > 0) {
     computedDailyPnl = Math.round((currentPrice - prevPrice) * quantity * 100) / 100;
   } else {
     computedDailyPnl = parseFloat(latestData.todayPnl) || 0;
   }
-  const dailyPnl = (_quotePrice != null && (_quotePrevClose != null || _quoteChangePct != null)) ? computedDailyPnl : (parseFloat(latestData.dailyPnl) || computedDailyPnl);
+  const dailyPnl = (_quotePrice != null && (_quotePrevClose != null || _quoteChangePct != null)) || (isUSMarket && _quotePrevClose != null) ? computedDailyPnl : (parseFloat(latestData.dailyPnl) || computedDailyPnl);
 
   let computedDailyPnlRate = 0;
   if (_quoteChangePct != null) {
-    computedDailyPnlRate = _quoteChangePct;
+    // 美股市场：当实时价等于昨收价（盘外时间），changePct为0，改用昨收价与前一日收盘价计算
+    if (isUSMarket && _quotePrice != null && _quotePrevClose != null && Math.abs(_quotePrice - _quotePrevClose) < 0.0001 && _storedPrevPrice > 0 && _quotePrevClose > 0) {
+      computedDailyPnlRate = ((_quotePrevClose - _storedPrevPrice) / _storedPrevPrice) * 100;
+    } else {
+      computedDailyPnlRate = _quoteChangePct;
+    }
+  } else if (isUSMarket && _quotePrevClose != null && _quotePrevClose > 0 && _storedPrevPrice > 0) {
+    // 美股市场：price为空但prevClose可用
+    computedDailyPnlRate = ((_quotePrevClose - _storedPrevPrice) / _storedPrevPrice) * 100;
   } else if (Number.isFinite(parseFloat(latestData.dailyChangePct))) {
     computedDailyPnlRate = parseFloat(latestData.dailyChangePct);
   } else if (prevPrice > 0 && currentPrice > 0) {
@@ -526,7 +544,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   } else {
     computedDailyPnlRate = parseFloat(latestData.todayPnlPercent) || parseFloat(latestData.dailyPnlRate) || 0;
   }
-  const dailyPnlRate = _quoteChangePct != null ? computedDailyPnlRate : (parseFloat(latestData.dailyPnlRate) || computedDailyPnlRate);
+  const dailyPnlRate = (_quoteChangePct != null || (isUSMarket && _quotePrevClose != null)) ? computedDailyPnlRate : (parseFloat(latestData.dailyPnlRate) || computedDailyPnlRate);
 
   const computedHoldingReturnRate = floatPnlRate;
 
@@ -2260,6 +2278,8 @@ export default function Finance({ onAssetPenetration }) {
     const codes = financeAssetsData
       .filter(a => {
         if (!a.code) return false;
+        // 排除现金类资产
+        if (a.kind === 'cash' || a.categoryL2 === '现金') return false;
         // 排除场外基金（由 loadFundNav 单独处理）
         const catL3 = a.categoryL3 || a.tertiaryCategory;
         if (catL3 === '场外' || (!catL3 && a.market === '场外基金')) return false;
@@ -3347,8 +3367,14 @@ export default function Finance({ onAssetPenetration }) {
   const computed = useMemo(() => {
     const getDailyPnl = (a) => {
       const q = a.code && quotesMap[a.code] ? quotesMap[a.code] : null;
+      const isUSMarket = a.market === '美股市场' || a.market === '美股';
+      const _storedPrevPrice = parseFloat(a.prevPrice) || 0;
       if (q && q.price != null && q.prevClose != null && q.prevClose !== 0) {
         const qty = parseFloat(a.shares || a.quantity) || 0;
+        // 美股市场：当实时价等于昨收价（盘外时间），改用昨收价与前一日收盘价计算
+        if (isUSMarket && Math.abs(q.price - q.prevClose) < 0.0001 && _storedPrevPrice > 0) {
+          return (q.prevClose - _storedPrevPrice) * qty;
+        }
         return (q.price - q.prevClose) * qty;
       }
       // prevClose为0但changePct可用时，用changePct反推prevClose
@@ -3357,8 +3383,13 @@ export default function Finance({ onAssetPenetration }) {
         const prevClose = q.price / (1 + q.changePct / 100);
         return (q.price - prevClose) * qty;
       }
+      // 美股市场：price为空但prevClose可用，用prevClose和前一日收盘价(prevPrice)计算
+      if (isUSMarket && q && q.prevClose != null && q.prevClose > 0 && _storedPrevPrice > 0) {
+        const qty = parseFloat(a.shares || a.quantity) || 0;
+        return (q.prevClose - _storedPrevPrice) * qty;
+      }
       // 其次使用资产自身存储的 prevPrice + currentPrice 计算（适用于场外基金）
-      const _prevPrice = parseFloat(a.prevPrice) || 0;
+      const _prevPrice = _storedPrevPrice;
       const _currPrice = parseFloat(a.currentPrice) || 0;
       if (_prevPrice > 0 && _currPrice > 0) {
         const qty = parseFloat(a.shares || a.quantity) || 0;
@@ -3368,10 +3399,21 @@ export default function Finance({ onAssetPenetration }) {
     };
 
     const getDailyPnlRate = (a) => {
-      if (a.code && quotesMap[a.code] && quotesMap[a.code].changePct != null) {
-        return quotesMap[a.code].changePct;
+      const q = a.code && quotesMap[a.code] ? quotesMap[a.code] : null;
+      const isUSMarket = a.market === '美股市场' || a.market === '美股';
+      const _storedPrevPrice = parseFloat(a.prevPrice) || 0;
+      if (q && q.changePct != null) {
+        // 美股市场：当实时价等于昨收价（盘外时间），changePct为0，改用昨收价与前一日收盘价计算
+        if (isUSMarket && q.price != null && q.prevClose != null && Math.abs(q.price - q.prevClose) < 0.0001 && _storedPrevPrice > 0 && q.prevClose > 0) {
+          return ((q.prevClose - _storedPrevPrice) / _storedPrevPrice) * 100;
+        }
+        return q.changePct;
       }
-      const _prevPrice = parseFloat(a.prevPrice) || 0;
+      // 美股市场：price为空但prevClose可用
+      if (isUSMarket && q && q.prevClose != null && q.prevClose > 0 && _storedPrevPrice > 0) {
+        return ((q.prevClose - _storedPrevPrice) / _storedPrevPrice) * 100;
+      }
+      const _prevPrice = _storedPrevPrice;
       const _currPrice = parseFloat(a.currentPrice) || 0;
       // 对于场外基金，使用 (currentPrice - prevPrice) / prevPrice 计算日涨幅
       if (_prevPrice > 0 && _currPrice > 0) {
@@ -4327,8 +4369,8 @@ export default function Finance({ onAssetPenetration }) {
                       {/* 平均买入成本 */}
                       <FormField label="平均买入成本" required>
                         <input type="number" step="0.001"
-                          value={newAccount.assetType === '现金' ? '1' : newAccount.cost}
-                          disabled={newAccount.assetType === '现金'}
+                          value={(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? '1' : newAccount.cost}
+                          disabled={newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类'}
                           onChange={e => {
                             const val = e.target.value;
                             setNewAccount(p => {
@@ -4349,7 +4391,7 @@ export default function Finance({ onAssetPenetration }) {
                             });
                           }}
                           placeholder="0.00"
-                          className={`${FORM_INPUT} ${newAccount.assetType === '现金' ? 'bg-gray-100 dark:bg-slate-600 cursor-not-allowed opacity-70' : ''}`} />
+                          className={`${FORM_INPUT} ${(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? 'bg-gray-100 dark:bg-slate-600 cursor-not-allowed opacity-70' : ''}`} />
                       </FormField>
 
                       {/* 份额/数量 - 根据资产类型动态显示标签 */}
@@ -4391,8 +4433,8 @@ export default function Finance({ onAssetPenetration }) {
                       {/* 现价 — 所有场景都显示，支持自动获取和手动输入 */}
                       <FormField label="现价">
                         <input type="number" step="0.0001"
-                          value={newAccount.assetType === '现金' ? '1' : newAccount.currentPrice}
-                          disabled={newAccount.assetType === '现金'}
+                          value={(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? '1' : newAccount.currentPrice}
+                          disabled={newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类'}
                           onChange={e => {
                             const val = e.target.value;
                             setNewAccount(p => {
@@ -4412,7 +4454,7 @@ export default function Finance({ onAssetPenetration }) {
                               };
                             });
                           }} placeholder="搜索资产自动获取，或手动输入"
-                          className={`${FORM_INPUT} ${newAccount.assetType === '现金' ? 'bg-gray-100 dark:bg-slate-600 cursor-not-allowed opacity-70' : ''}`} />
+                          className={`${FORM_INPUT} ${(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? 'bg-gray-100 dark:bg-slate-600 cursor-not-allowed opacity-70' : ''}`} />
                       </FormField>
 
                       {/* 以下字段仅在非国内市场简单模式（股票/基金场内/基金场外）时显示 */}

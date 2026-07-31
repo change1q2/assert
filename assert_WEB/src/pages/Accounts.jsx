@@ -398,6 +398,10 @@ export default function Accounts() {
         localStorage.setItem('wealth_os_accounts', JSON.stringify(demoAccounts));
       }
       setStateData(data);
+      const migrated = await migrateFinanceCashAssets(data);
+      if (migrated !== data) {
+        setStateData(migrated);
+      }
     } catch (err) {
       console.error('Failed to load accounts data:', err);
       const cachedAccounts = localStorage.getItem('wealth_os_accounts');
@@ -414,6 +418,112 @@ export default function Accounts() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const migrateFinanceCashAssets = async (state) => {
+    const accounts = state?.accounts || [];
+    const financeAssets = state?.financeAssets || [];
+    const financeAccounts = accounts.filter(
+      a => a.type === '理财资产'
+    );
+    if (financeAccounts.length === 0) return state;
+
+    let maxSeq = 0;
+    financeAssets.forEach(a => {
+      if (a.name && typeof a.name === 'string') {
+        const match = a.name.match(/^ZZGL_(\d+)$/);
+        if (match) {
+          const seq = parseInt(match[1], 10);
+          if (seq > maxSeq) maxSeq = seq;
+        }
+      }
+    });
+    const cashAssetCodeSeq = state?.cashAssetCodeSeq;
+    if (cashAssetCodeSeq !== undefined && cashAssetCodeSeq !== null && cashAssetCodeSeq > maxSeq) {
+      maxSeq = cashAssetCodeSeq;
+    }
+
+    const marketMap = {
+      '国内资产': { market: '国内市场', currency: 'CNY', subcategory: 'A股' },
+      '港股资产': { market: '港股市场', currency: 'HKD', subcategory: '港股' },
+      '美股资产': { market: '美股市场', currency: 'USD', subcategory: '美股' },
+    };
+
+    const defaultMarket = { market: '国内市场', currency: 'CNY', subcategory: 'A股' };
+
+    const newCashAssets = [];
+    let nextSeq = maxSeq;
+
+    for (const account of financeAccounts) {
+      const hasCash = financeAssets.some(
+        a => (a.accountId === account.name || a.account === account.name)
+          && (a.category === '现金类' || a.categoryL1 === '现金类')
+      );
+      if (hasCash) continue;
+
+      const mapped = account.financeMarket ? (marketMap[account.financeMarket] || defaultMarket) : defaultMarket;
+
+      nextSeq += 1;
+      const seqStr = String(nextSeq).padStart(3, '0');
+      const name = `ZZGL_${seqStr}`;
+      const code = `ZZDM_${seqStr}`;
+
+      newCashAssets.push({
+        id: `cash-asset-migrate-${Date.now()}-${newCashAssets.length}`,
+        market: mapped.market,
+        currency: mapped.currency,
+        assetKind: '流动资产',
+        kind: '现金',
+        accountId: account.name,
+        account: account.name,
+        category: '现金类',
+        subcategory: mapped.subcategory,
+        tertiaryCategory: '场内',
+        positionGroup: '现金仓位',
+        positionCategory: '现金管理',
+        name,
+        code,
+        costPrice: 1,
+        shares: 0.1,
+        quantity: 0.1,
+        cost: 0.1,
+        availableShares: 0.1,
+        currentPrice: 1,
+        prevPrice: 1,
+        priceDate: '',
+        avgBuyPrice: 1,
+        holdingDays: 1,
+        holdingDaysBase: 1,
+        holdingDaysDate: new Date().toISOString().split('T')[0],
+        pnl: 0,
+        pnlPercent: 0,
+        todayPnl: 0,
+        todayPnlPercent: 0,
+        holdingPnl: 0,
+        holdingPnlRate: 0,
+        dailyPnl: 0,
+        dailyPnlRate: 0,
+        currentValue: 0.1,
+        positionWeight: 0,
+        totalFees: 0,
+        tags: '',
+        transactions: [],
+      });
+    }
+
+    if (newCashAssets.length === 0) return state;
+
+    const updatedState = {
+      ...state,
+      financeAssets: [...financeAssets, ...newCashAssets],
+      cashAssetCodeSeq: nextSeq,
+    };
+
+    try {
+      await saveState(updatedState);
+    } catch (_) { /* ignore */ }
+
+    return updatedState;
   };
 
   const calculateAccountBalance = useMemo(() => {
@@ -667,8 +777,8 @@ export default function Accounts() {
             if (mapped) {
               let maxSeq = 0;
               existingFinanceAssets.forEach(a => {
-                if (a.code && typeof a.code === 'string') {
-                  const match = a.code.match(/^XJ_(\d+)$/);
+                if (a.name && typeof a.name === 'string') {
+                  const match = a.name.match(/^ZZGL_(\d+)$/);
                   if (match) {
                     const seq = parseInt(match[1], 10);
                     if (seq > maxSeq) maxSeq = seq;
@@ -680,7 +790,9 @@ export default function Accounts() {
                 maxSeq = cashAssetCodeSeq;
               }
               const nextSeq = maxSeq + 1;
-              const code = 'XJ_' + String(nextSeq).padStart(3, '0');
+              const seqStr = String(nextSeq).padStart(3, '0');
+              const name = `ZZGL_${seqStr}`;
+              const code = `ZZDM_${seqStr}`;
 
               const cashAsset = {
                 id: `cash-asset-${Date.now()}`,
@@ -695,7 +807,7 @@ export default function Accounts() {
                 tertiaryCategory: '场内',
                 positionGroup: '现金仓位',
                 positionCategory: '现金管理',
-                name: `XJ_${formData.name}`,
+                name,
                 code,
                 costPrice: 1,
                 shares: 0.1,

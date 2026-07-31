@@ -1,0 +1,17 @@
+- [x] Accounts.jsx 自动创建条件为 `formData.type === '理财资产' && formData.financeMarket`（任意大类均触发）
+- [x] 资产名称生成规则为 `ZZGL_{3位序号}`（全局自增，与账户名解耦）
+- [x] 资产代码生成规则为 `ZZDM_{3位序号}`（全局自增，与 name 序号一致）
+- [x] 序号取最大值逻辑：扫描现有 `financeAssets` 中 `^ZZGL_(\d+)$` 匹配的最大序号 +1，并考虑 `stateData.cashAssetCodeSeq`
+- [x] 默认值正确：`avgBuyPrice=1`、`costPrice=1`、`currentPrice=1`、`prevPrice=1`、`shares=0.1`、`quantity=0.1`、`availableShares=0.1`、`cost=0.1`、`currentValue=0.1`
+- [x] 市场映射正确：国内资产→国内市场/A股/CNY、港股资产→港股市场/港股/HKD、美股资产→美股市场/美股/USD
+- [x] 保存时更新 `stateData.cashAssetCodeSeq = nextSeq`
+- [x] 非券商大类的理财资产账户同样触发自动创建（条件已放宽）
+- [x] Finance.jsx 表单中现金类资产的"平均买入成本"输入框为 disabled 状态，值固定为 1
+- [x] Finance.jsx 表单中现金类资产的"现价"输入框为 disabled 状态，值固定为 1
+- [x] 禁用样式使用灰底 + `cursor-not-allowed`，与现有现金类字段禁用样式一致
+- [x] 创建首个券商国内理财资产账户生成 `ZZGL_001` / `ZZDM_001`
+- [x] 连续创建多个账户，序号正确自增（002、003...）（代码逻辑已核对，浏览器预算耗尽未实测）
+- [x] 同一账户不重复创建现金类资产（幂等性）
+- [x] `vite build` 构建通过，无语法错误
+- [x] 版本号已自增（V1.0.14）
+- [x] 本地运行验证：前后端服务正常，场景1与场景3已实测通过，场景2/4代码逻辑已核对
