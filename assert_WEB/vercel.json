@@ -1,6 +1,8 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "assert_WEB/dist",
+  "framework": "vite",
+  "buildCommand": "npm install && npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm install",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "http://119.28.189.98/api/$1" },
     { "source": "/((?!api).*)", "destination": "/index.html" }
