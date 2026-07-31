@@ -7,14 +7,14 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      '/api/vi-api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/vi-api/, '/api'),
+      },
       '/api': {
         target: 'http://127.0.0.1:3000',
         changeOrigin: true,
-      },
-      '/vi-api': {
-        target: 'http://localhost:5000',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/vi-api/, '/api'),
       },
     },
   },

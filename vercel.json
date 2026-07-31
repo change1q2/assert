@@ -2,8 +2,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "assert_WEB/dist",
   "rewrites": [
-    { "source": "/vi-api/(.*)", "destination": "/api/vi-api/$1" },
     { "source": "/api/(.*)", "destination": "http://119.28.189.98/api/$1" },
-    { "source": "/((?!api|vi-api).*)", "destination": "/index.html" }
+    { "source": "/((?!api).*)", "destination": "/index.html" }
   ]
 }

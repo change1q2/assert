@@ -259,7 +259,7 @@ export default function ValueInvestingTool({ onBack }) {
   // --- Load examples when market changes ---
   const loadExamples = async (mkt) => {
     try {
-      const res = await fetch('/vi-api/symbols');
+      const res = await fetch('/api/vi-api/symbols');
       const data = await res.json();
       setExamples(data[mkt] || []);
       setExamplesError(false);
@@ -347,7 +347,7 @@ export default function ValueInvestingTool({ onBack }) {
     setLoading(true);
     clearResults();
     try {
-      const res = await fetch('/vi-api/analyze', {
+      const res = await fetch('/api/vi-api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ market, symbol: s }),
@@ -368,7 +368,7 @@ export default function ValueInvestingTool({ onBack }) {
     setLoading(true);
     clearResults();
     try {
-      const res = await fetch('/vi-api/score', {
+      const res = await fetch('/api/vi-api/score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ market, symbol: s }),
@@ -392,7 +392,7 @@ export default function ValueInvestingTool({ onBack }) {
     setLoading(true);
     clearResults();
     try {
-      const res = await fetch('/vi-api/compare', {
+      const res = await fetch('/api/vi-api/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stocks: compareStocks }),
@@ -413,7 +413,7 @@ export default function ValueInvestingTool({ onBack }) {
     setLoading(true);
     clearResults();
     try {
-      const res = await fetch('/vi-api/deep-report', {
+      const res = await fetch('/api/vi-api/deep-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ market, symbol: s }),
@@ -440,7 +440,7 @@ export default function ValueInvestingTool({ onBack }) {
   async function loadStrategy() {
     setLoading(true);
     try {
-      const res = await fetch('/vi-api/strategy');
+      const res = await fetch('/api/vi-api/strategy');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '加载策略框架失败');
       setLoading(false);
@@ -458,7 +458,7 @@ export default function ValueInvestingTool({ onBack }) {
     setActiveSectionId(sectionId);
     setStrategyError('');
     try {
-      const res = await fetch('/vi-api/strategy/' + sectionId);
+      const res = await fetch('/api/vi-api/strategy?id=' + sectionId);
       const section = await res.json();
       if (!res.ok) throw new Error(section.error || '加载章节失败');
       setStrategyContent(section.content || '');
@@ -470,7 +470,7 @@ export default function ValueInvestingTool({ onBack }) {
 
   const downloadStrategy = async () => {
     try {
-      const res = await fetch('/vi-api/strategy/full');
+      const res = await fetch('/api/vi-api/strategy?id=full');
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '下载失败');
       downloadBlob(
