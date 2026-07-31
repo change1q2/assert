@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 投资分析 - 四大师视角</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+    // Fallback markdown parser
+    (function(){
+        if (typeof marked !== 'undefined') return;
+        function parseMd(md){
+            var lines = md.replace(/\r\n/g,'\n').split('\n');
+            var out = [];
+            var i = 0;
+            while (i < lines.length){
+                var line = lines[i];
+                if (/^\s*---+\s*$/.test(line)){ out.push('<hr>'); i++; continue; }
+                var h = line.match(/^(#{1,4})\s+(.*)/);
+                if (h){ out.push('<h'+h[1].length+'>'+inline(h[2])+'</h'+h[1].length+'>'); i++; continue; }
+                if (/^>\s/.test(line)){
+                    var bq = [];
+                    while (i < lines.length && /^>\s/.test(lines[i])){ bq.push(lines[i].replace(/^>\s/,'')); i++; }
+                    out.push('<blockquote>'+parseMd(bq.join('\n'))+'</blockquote>');
+                    continue;
+                }
+                if (line.indexOf('|') !== -1 && i+1 < lines.length && /^\s*\|?\s*-{2,}/.test(lines[i+1])){
+                    var tblLines = [line];
+                    i++; i++;
+                    while (i < lines.length && lines[i].indexOf('|') !== -1){ tblLines.push(lines[i]); i++; }
+                    out.push(buildTable(tblLines));
+                    continue;
+                }
+                var ul = [], ol = [];
+                while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])){ ul.push(lines[i].replace(/^\s*[-*]\s+/,'')); i++; }
+                while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])){ ol.push(lines[i].replace(/^\s*\d+\.\s+/,'')); i++; }
+                if (ul.length){ out.push('<ul>'+ul.map(function(x){return '<li>'+inline(x)+'</li>';}).join('')+'</ul>'); continue; }
+                if (ol.length){ out.push('<ol>'+ol.map(function(x){return '<li>'+inline(x)+'</li>';}).join('')+'</ol>'); continue; }
+                if (/^```/.test(line)){
+                    var codeLines = []; i++;
+                    while (i < lines.length && !/^```/.test(lines[i])){ codeLines.push(lines[i]); i++; }
+                    i++;
+                    out.push('<pre><code>'+codeLines.join('\n')+'</code></pre>');
+                    continue;
+                }
+                if (line.trim() !== ''){
+                    var pLines = [line]; i++;
+                    while (i < lines.length && lines[i].trim() !== '' && !/^(#{1,4})\s+/.test(lines[i]) && !/^\s*---+\s*$/.test(lines[i]) && !/^>\s/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i]) && !/^\s*\d+\.\s+/.test(lines[i]) && !/^```/.test(lines[i])){ pLines.push(lines[i]); i++; }
+                    out.push('<p>'+inline(pLines.join(' '))+'</p>');
+                    continue;
+                }
+                i++;
+            }
+            return out.join('\n');
+        }
+        function inline(s){
+            s = s.replace(/`([^`]+)`/g,'<code>$1</code>');
+            s = s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+            s = s.replace(/\*([^*]+)\*/g,'<em>$1</em>');
+            s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2">$1</a>');
+            return s;
+        }
+        function buildTable(lines){
+            var rows = lines.map(function(l){ return l.replace(/^\s*\|/,'').replace(/\|\s*$/,'').split('|').map(function(c){ return c.trim(); }); });
+            if (rows.length < 2) return '';
+            var header = rows[0];
+            var body = rows.slice(2);
+            var html = '<table><thead><tr>';
+            header.forEach(function(h){ html += '<th>'+inline(h)+'</th>'; });
+            html += '</tr></thead><tbody>';
+            body.forEach(function(r){
+                html += '<tr>';
+                r.forEach(function(c){ html += '<td>'+inline(c)+'</td>'; });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            return html;
+        }
+        window.marked = { parse: parseMd };
+    })();
+    </script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+        .loading-dots::after { content: ''; animation: dots 1.5s steps(4, end) infinite; }
+        @keyframes dots { 0% { content: '' } 25% { content: '.' } 50% { content: '..' } 75% { content: '...' } }
+        .prose h1 { font-size: 1.75rem; font-weight: 700; margin: 1.5rem 0 1rem; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .prose h2 { font-size: 1.375rem; font-weight: 700; margin: 1.25rem 0 0.75rem; color: #111827; }
+        .prose h3 { font-size: 1.125rem; font-weight: 600; margin: 1rem 0 0.5rem; color: #374151; }
+        .prose p { margin: 0.75rem 0; line-height: 1.8; color: #374151; }
+        .prose strong { color: #111827; font-weight: 600; }
+        .prose ul { list-style: disc; padding-left: 1.5rem; margin: 0.5rem 0; }
+        .prose ol { list-style: decimal; padding-left: 1.5rem; margin: 0.5rem 0; }
+        .prose li { margin: 0.25rem 0; line-height: 1.7; }
+        .prose blockquote { border-left: 4px solid #3b82f6; padding: 0.5rem 1rem; margin: 1rem 0; background: #eff6ff; color: #1e40af; }
+        .prose table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.875rem; }
+        .prose th { background: #f3f4f6; border: 1px solid #d1d5db; padding: 0.5rem 0.75rem; text-align: left; font-weight: 600; }
+        .prose td { border: 1px solid #d1d5db; padding: 0.5rem 0.75rem; }
+        .prose hr { border: none; border-top: 2px solid #e5e7eb; margin: 1.5rem 0; }
+        .prose code { background: #f3f4f6; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-size: 0.875em; }
+        .card-gradient { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); transition: all 0.2s; }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 25px -5px rgba(102,126,234,0.5); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .market-tab.active { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .market-tab { transition: all 0.2s; }
+        .feature-tab.active { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .feature-tab { transition: all 0.2s; }
+        .score-bar { height: 8px; border-radius: 4px; background: #e5e7eb; overflow: hidden; }
+        .score-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+        .grade-a { background: #10b981; }
+        .grade-b { background: #3b82f6; }
+        .grade-c { background: #f59e0b; }
+        .grade-d { background: #ef4444; }
+        .radar-bg { background: conic-gradient(#10b981 0deg 90deg, #3b82f6 90deg 180deg, #f59e0b 180deg 270deg, #ef4444 270deg 360deg); }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 min-h-screen">
+
+<div class="max-w-5xl mx-auto px-4 py-8">
+
+    <!-- Header -->
+    <header class="text-center mb-6">
+        <h1 class="text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-2">
+            📈 AI 投资分析
+        </h1>
+        <p class="text-gray-500">价值投资评分 · 对比分析 · 深度研究</p>
+        <p class="text-xs text-gray-400 mt-1">基于 AkShare 实时数据 · 段永平 / 巴菲特 / 芒格 / 李录</p>
+    </header>
+
+    <!-- Feature Tabs -->
+    <div class="flex justify-center gap-2 mb-6">
+        <button data-feature="analyze" class="feature-tab active px-5 py-2 rounded-xl font-medium text-gray-600 bg-white shadow hover:shadow-md">
+            🔍 实时分析
+        </button>
+        <button data-feature="score" class="feature-tab px-5 py-2 rounded-xl font-medium text-gray-600 bg-white shadow hover:shadow-md">
+            ⭐ 价值评分
+        </button>
+        <button data-feature="compare" class="feature-tab px-5 py-2 rounded-xl font-medium text-gray-600 bg-white shadow hover:shadow-md">
+            ⚖️ 对比分析
+        </button>
+        <button data-feature="deep" class="feature-tab px-5 py-2 rounded-xl font-medium text-gray-600 bg-white shadow hover:shadow-md">
+            📚 深度报告
+        </button>
+        <button data-feature="strategy" class="feature-tab px-5 py-2 rounded-xl font-medium text-gray-600 bg-white shadow hover:shadow-md">
+            📖 策略框架
+        </button>
+    </div>
+
+    <!-- Market Tabs (shared) -->
+    <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+        <div class="flex gap-2 mb-4">
+            <button data-market="a" class="market-tab active px-6 py-2.5 rounded-lg font-medium text-gray-600 bg-gray-100 hover:bg-gray-200">
+                🇨🇳 A股
+            </button>
+            <button data-market="hk" class="market-tab px-6 py-2.5 rounded-lg font-medium text-gray-600 bg-gray-100 hover:bg-gray-200">
+                🇭🇰 港股
+            </button>
+            <button data-market="us" class="market-tab px-6 py-2.5 rounded-lg font-medium text-gray-600 bg-gray-100 hover:bg-gray-200">
+                🇺🇸 美股
+            </button>
+        </div>
+
+        <!-- Single Stock Input (for analyze/score/deep) -->
+        <div id="single-input-section">
+            <div class="flex gap-3">
+                <input id="symbol-input" type="text" placeholder="输入股票代码 (如: 600519 / 00700 / AAPL)" 
+                       class="flex-1 px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:outline-none transition text-lg font-mono"
+                       value="600519">
+                <button id="action-btn" class="btn-primary px-8 py-3 rounded-xl text-white font-semibold text-lg">
+                    🔍 分析
+                </button>
+            </div>
+            <div id="examples" class="mt-4 flex flex-wrap gap-2"></div>
+        </div>
+
+        <!-- Compare Input Section -->
+        <div id="compare-input-section" class="hidden">
+            <div id="stocks-list" class="space-y-2 mb-4"></div>
+            <div class="flex gap-3 mb-4">
+                <select id="compare-market" class="px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:outline-none">
+                    <option value="a">🇨🇳 A股</option>
+                    <option value="hk">🇭🇰 港股</option>
+                    <option value="us">🇺🇸 美股</option>
+                </select>
+                <input id="compare-symbol" type="text" placeholder="输入股票代码 (如: 600519)" 
+                       class="flex-1 px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:outline-none text-lg font-mono">
+                <button id="add-stock-btn" class="px-6 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200">
+                    ➕ 添加
+                </button>
+            </div>
+            <div class="flex gap-3">
+                <button id="compare-btn" class="btn-primary flex-1 px-8 py-3 rounded-xl text-white font-semibold text-lg">
+                    ⚖️ 开始对比分析
+                </button>
+            </div>
+        </div>
+
+        <!-- Error -->
+        <div id="error" class="hidden mt-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700"></div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="hidden text-center py-16">
+        <div class="inline-flex items-center gap-2 text-xl text-gray-600">
+            <span class="loading-dots">正在获取实时数据并分析</span>
+        </div>
+        <p class="text-sm text-gray-400 mt-3">数据源：AkShare 新浪 · 生成时间取决于网络速度</p>
+    </div>
+
+    <!-- Analyze Result -->
+    <div id="analyze-result" class="hidden">
+        <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+            <div class="card-gradient px-6 py-4 flex items-center justify-between">
+                <div>
+                    <h2 id="result-title" class="text-white text-xl font-bold">分析报告</h2>
+                    <p id="result-subtitle" class="text-white/80 text-sm"></p>
+                </div>
+                <div id="quick-stats" class="text-right text-white"></div>
+            </div>
+            <div id="analysis" class="prose p-6"></div>
+        </div>
+    </div>
+
+    <!-- Score Result -->
+    <div id="score-result" class="hidden">
+        <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+            <!-- Score Header -->
+            <div class="card-gradient px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 id="score-title" class="text-white text-xl font-bold">价值投资评分</h2>
+                        <p id="score-subtitle" class="text-white/80 text-sm"></p>
+                    </div>
+                    <div class="text-right text-white">
+                        <div id="grade-badge" class="text-4xl font-bold"></div>
+                        <div id="score-total" class="text-lg"></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Score Content -->
+            <div class="p-6">
+                <!-- Quick Stats -->
+                <div id="score-stats" class="grid grid-cols-3 gap-4 mb-6"></div>
+                <!-- Dimensions -->
+                <div class="space-y-4" id="score-dimensions"></div>
+                <!-- Dimension Details -->
+                <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4" id="score-details"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Compare Result -->
+    <div id="compare-result" class="hidden">
+        <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+            <div class="card-gradient px-6 py-4">
+                <h2 class="text-white text-xl font-bold">📊 对比分析结果</h2>
+                <p id="compare-count" class="text-white/80 text-sm"></p>
+            </div>
+            <!-- Compare Table -->
+            <div class="overflow-x-auto p-6">
+                <table class="w-full" id="compare-table">
+                </table>
+            </div>
+            <!-- Compare Summary -->
+            <div id="compare-summary" class="px-6 pb-6"></div>
+        </div>
+    </div>
+
+    <!-- Deep Report Result -->
+    <div id="deep-result" class="hidden">
+        <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+            <div class="card-gradient px-6 py-4 flex items-center justify-between">
+                <div>
+                    <h2 id="deep-title" class="text-white text-xl font-bold">深度研究报告</h2>
+                    <p id="deep-subtitle" class="text-white/80 text-sm"></p>
+                </div>
+                <div class="flex gap-2">
+                    <button id="download-btn" class="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm">
+                        📥 下载报告
+                    </button>
+                </div>
+            </div>
+            <div id="deep-report" class="prose p-6"></div>
+        </div>
+    </div>
+
+    <!-- Strategy Framework Result -->
+    <div id="strategy-result" class="hidden">
+        <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+            <div class="card-gradient px-6 py-4 flex items-center justify-between">
+                <div>
+                    <h2 id="strategy-title" class="text-white text-xl font-bold">📖 价值投资策略框架</h2>
+                    <p id="strategy-subtitle" class="text-white/80 text-sm">基于格雷厄姆、巴菲特等大师的经典理论</p>
+                </div>
+                <div class="flex gap-2">
+                    <button id="download-strategy-btn" class="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm">
+                        📥 下载完整框架
+                    </button>
+                </div>
+            </div>
+            <!-- Strategy Section Navigation -->
+            <div class="border-b px-6 py-3 bg-gray-50">
+                <div class="flex flex-wrap gap-2" id="strategy-nav">
+                    <!-- 章节导航由 JS 填充 -->
+                </div>
+            </div>
+            <!-- Strategy Content -->
+            <div id="strategy-content" class="prose p-6"></div>
+        </div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="text-center py-20 text-gray-400">
+        <div class="text-6xl mb-4">💡</div>
+        <p id="empty-text" class="text-lg">选择功能并输入股票代码开始分析</p>
+        <p class="text-sm mt-2">支持 A股 / 港股 / 美股 实时数据</p>
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center text-xs text-gray-400 mt-12 pb-4">
+        <p>⚠️ 本工具基于公开数据自动生成分析，仅供参考，不构成投资建议</p>
+        <p class="mt-1">数据来源: AkShare · 生成时间: <span id="footer-time"></span></p>
+    </footer>
+</div>
+
+<script>
+const state = {
+    market: 'a',
+    symbol: '600519',
+    feature: 'analyze',
+    compareStocks: []
+};
+
+// Feature tabs
+document.querySelectorAll('.feature-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.feature-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.feature = btn.dataset.feature;
+        updateFeatureUI();
+    });
+});
+
+// Market tabs
+document.querySelectorAll('.market-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.market-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.market = btn.dataset.market;
+        loadExamples();
+    });
+});
+
+// Update UI based on feature
+function updateFeatureUI() {
+    const singleSection = document.getElementById('single-input-section');
+    const compareSection = document.getElementById('compare-input-section');
+    const btn = document.getElementById('action-btn');
+    const input = document.getElementById('symbol-input');
+
+    // Hide all results
+    ['analyze-result', 'score-result', 'compare-result', 'deep-result', 'strategy-result'].forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+    });
+    document.getElementById('empty-state').classList.remove('hidden');
+    document.getElementById('loading').classList.add('hidden');
+
+    if (state.feature === 'compare') {
+        singleSection.classList.add('hidden');
+        compareSection.classList.remove('hidden');
+        state.compareStocks = [];
+        renderCompareList();
+    } else if (state.feature === 'strategy') {
+        singleSection.classList.add('hidden');
+        compareSection.classList.add('hidden');
+        document.getElementById('empty-state').classList.add('hidden');
+        loadStrategy();
+    } else {
+        singleSection.classList.remove('hidden');
+        compareSection.classList.add('hidden');
+        if (state.feature === 'analyze') {
+            btn.textContent = '🔍 分析';
+            input.placeholder = '输入股票代码 (如: 600519 / 00700 / AAPL)';
+        } else if (state.feature === 'score') {
+            btn.textContent = '⭐ 价值评分';
+            input.placeholder = '输入股票代码获取价值投资评分';
+        } else if (state.feature === 'deep') {
+            btn.textContent = '📚 生成报告';
+            input.placeholder = '输入股票代码生成深度研究报告';
+        }
+    }
+}
+
+// Enter key
+document.getElementById('symbol-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') executeAction();
+});
+
+// Action button
+document.getElementById('action-btn').addEventListener('click', executeAction);
+
+// Execute based on feature
+function executeAction() {
+    const symbol = document.getElementById('symbol-input').value.trim();
+    if (!symbol) return;
+    state.symbol = symbol;
+
+    if (state.feature === 'analyze') analyzeStock();
+    else if (state.feature === 'score') scoreStock();
+    else if (state.feature === 'deep') deepReport();
+}
+
+// Compare stock management
+document.getElementById('add-stock-btn').addEventListener('click', () => {
+    const market = document.getElementById('compare-market').value;
+    const symbol = document.getElementById('compare-symbol').value.trim().toUpperCase();
+    if (!symbol) return;
+    if (state.compareStocks.length >= 6) {
+        showError('最多支持对比6只股票');
+        return;
+    }
+    state.compareStocks.push({ market, symbol });
+    document.getElementById('compare-symbol').value = '';
+    renderCompareList();
+});
+
+document.getElementById('compare-symbol').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') document.getElementById('add-stock-btn').click();
+});
+
+document.getElementById('compare-btn').addEventListener('click', compareStocks);
+
+function renderCompareList() {
+    const list = document.getElementById('stocks-list');
+    if (state.compareStocks.length === 0) {
+        list.innerHTML = '<div class="text-gray-400 text-sm text-center py-4">请添加至少2只股票进行对比（最多6只）</div>';
+        return;
+    }
+    list.innerHTML = state.compareStocks.map((s, i) => {
+        const marketNames = { a: 'A股', hk: '港股', us: '美股' };
+        return `
+            <div class="flex items-center gap-3 bg-gray-50 rounded-lg p-3">
+                <span class="text-2xl">📌</span>
+                <div class="flex-1">
+                    <span class="font-mono font-semibold text-lg">${s.symbol}</span>
+                    <span class="ml-2 text-sm text-gray-500 bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded">${marketNames[s.market]}</span>
+                </div>
+                <button onclick="removeStock(${i})" class="text-red-400 hover:text-red-600 text-xl px-2">✕</button>
+            </div>
+        `;
+    }).join('');
+}
+
+window.removeStock = function(i) {
+    state.compareStocks.splice(i, 1);
+    renderCompareList();
+};
+
+// Helpers
+function fmtNum(v, prefix = '') {
+    if (v == null || v === '-' || v === '' || v === 'N/A') return '-';
+    const n = parseFloat(v);
+    if (isNaN(n)) return v;
+    return prefix + n.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+}
+function fmtPct(v) {
+    if (v == null || v === '-' || v === '' || v === 'N/A') return '<span class="text-gray-400">-</span>';
+    const n = parseFloat(v);
+    if (isNaN(n)) return '<span class="text-gray-400">' + v + '</span>';
+    const color = n >= 0 ? 'text-green-500' : 'text-red-500';
+    const sign = n >= 0 ? '+' : '';
+    return '<span class="' + color + ' font-semibold">' + sign + n.toFixed(2) + '%</span>';
+}
+function gradeClass(grade) {
+    if (grade === 'A+' || grade === 'A') return 'grade-a';
+    if (grade === 'B') return 'grade-b';
+    if (grade === 'C') return 'grade-c';
+    return 'grade-d';
+}
+function gradeColor(grade) {
+    if (grade === 'A+') return '#059669';
+    if (grade === 'A') return '#10b981';
+    if (grade === 'B') return '#3b82f6';
+    if (grade === 'C') return '#f59e0b';
+    return '#ef4444';
+}
+
+// Load examples
+async function loadExamples() {
+    const examples = document.getElementById('examples');
+    examples.innerHTML = '';
+    try {
+        const res = await fetch('/api/symbols');
+        const data = await res.json();
+        const list = data[state.market] || [];
+        list.forEach(item => {
+            const btn = document.createElement('button');
+            btn.className = 'px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 text-sm hover:bg-indigo-100 transition';
+            btn.textContent = `${item.name} (${item.code})`;
+            btn.onclick = () => {
+                document.getElementById('symbol-input').value = item.code;
+                executeAction();
+            };
+            examples.appendChild(btn);
+        });
+    } catch(e) {
+        examples.innerHTML = '<span class="text-xs text-gray-400">加载示例失败</span>';
+    }
+}
+
+function showError(msg) {
+    const err = document.getElementById('error');
+    err.classList.remove('hidden');
+    err.textContent = msg;
+    setTimeout(() => err.classList.add('hidden'), 5000);
+}
+
+// === Analyze ===
+async function analyzeStock() {
+    showLoading();
+    hideAllResults();
+
+    try {
+        const res = await fetch('/api/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ market: state.market, symbol: state.symbol })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '分析失败');
+
+        hideLoading();
+        const q = (data.data?.quotes && data.data.quotes[0]) || {};
+        const name = q.name || data.symbol;
+
+        document.getElementById('result-title').textContent = `${name} · ${data.symbol}`;
+        document.getElementById('result-subtitle').textContent = `数据时间: ${q.datetime || data.timestamp}`;
+        document.getElementById('quick-stats').innerHTML = `
+            <div class="text-3xl font-bold">${fmtNum(q.price, '$')}</div>
+            <div>${fmtPct(q.chg_pct)}</div>
+        `;
+        document.getElementById('analysis').innerHTML = marked.parse(data.analysis || '');
+        document.getElementById('analyze-result').classList.remove('hidden');
+
+    } catch(e) {
+        hideLoading();
+        showError(e.message);
+        document.getElementById('empty-state').classList.remove('hidden');
+    }
+}
+
+// === Score ===
+async function scoreStock() {
+    showLoading();
+    hideAllResults();
+
+    try {
+        const res = await fetch('/api/score', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ market: state.market, symbol: state.symbol })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '评分失败');
+
+        hideLoading();
+        const d = data.data || {};
+        const s = data.scores || {};
+
+        document.getElementById('score-title').textContent = `${d.name || data.symbol} · 价值投资评分`;
+        document.getElementById('score-subtitle').textContent = `数据时间: ${d.datetime || data.timestamp}`;
+
+        // Grade badge
+        const gradeBadge = document.getElementById('grade-badge');
+        gradeBadge.textContent = s.grade;
+        gradeBadge.style.color = gradeColor(s.grade);
+        gradeBadge.style.textShadow = '0 2px 4px rgba(0,0,0,0.3)';
+        document.getElementById('score-total').textContent = `${s.total_score}/100`;
+
+        // Quick stats
+        document.getElementById('score-stats').innerHTML = `
+            <div class="bg-gray-50 rounded-lg p-4 text-center">
+                <div class="text-sm text-gray-500">最新价</div>
+                <div class="text-xl font-bold">${fmtNum(d.price, '$')}</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-4 text-center">
+                <div class="text-sm text-gray-500">涨跌幅</div>
+                <div class="text-xl font-bold">${fmtPct(d.chg_pct)}</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-4 text-center">
+                <div class="text-sm text-gray-500">投资建议</div>
+                <div class="text-sm font-bold ${gradeClass(s.grade)} text-white px-2 py-1 rounded mt-1">${s.recommendation}</div>
+            </div>
+        `;
+
+        // Dimensions bars
+        const dims = s.dimensions || {};
+        document.getElementById('score-dimensions').innerHTML = `
+            <div>
+                <div class="flex justify-between text-sm mb-1">
+                    <span class="font-medium">🏢 生意模式（段永平）</span>
+                    <span>${dims.business?.score || 0}/${dims.business?.max || 30}</span>
+                </div>
+                <div class="score-bar"><div class="score-bar-fill bg-purple-500" style="width:${(dims.business?.score || 0) / (dims.business?.max || 30) * 100}%"></div></div>
+            </div>
+            <div>
+                <div class="flex justify-between text-sm mb-1">
+                    <span class="font-medium">💰 财务质量（巴菲特）</span>
+                    <span>${dims.financial?.score || 0}/${dims.financial?.max || 25}</span>
+                </div>
+                <div class="score-bar"><div class="score-bar-fill bg-blue-500" style="width:${(dims.financial?.score || 0) / (dims.financial?.max || 25) * 100}%"></div></div>
+            </div>
+            <div>
+                <div class="flex justify-between text-sm mb-1">
+                    <span class="font-medium">⚔️ 竞争格局（芒格）</span>
+                    <span>${dims.competition?.score || 0}/${dims.competition?.max || 25}</span>
+                </div>
+                <div class="score-bar"><div class="score-bar-fill bg-green-500" style="width:${(dims.competition?.score || 0) / (dims.competition?.max || 25) * 100}%"></div></div>
+            </div>
+            <div>
+                <div class="flex justify-between text-sm mb-1">
+                    <span class="font-medium">🛡️ 风险管理（李录）</span>
+                    <span>${dims.risk?.score || 0}/${dims.risk?.max || 20}</span>
+                </div>
+                <div class="score-bar"><div class="score-bar-fill bg-orange-500" style="width:${(dims.risk?.score || 0) / (dims.risk?.max || 20) * 100}%"></div></div>
+            </div>
+        `;
+
+        // Details
+        const detailsHtml = Object.keys(dims).map(key => {
+            const dim = dims[key];
+            const icon = { business: '🏢', financial: '💰', competition: '⚔️', risk: '🛡️' }[key];
+            const name = { business: '生意模式', financial: '财务质量', competition: '竞争格局', risk: '风险管理' }[key];
+            const details = dim.details || {};
+            const detailHtml = Object.keys(details).map(k => {
+                const item = details[k];
+                const pct = (item.score / item.max) * 100;
+                return `
+                    <div class="mb-2">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span>${k}</span>
+                            <span class="text-gray-500">${item.score}/${item.max}</span>
+                        </div>
+                        <div class="score-bar"><div class="score-bar-fill bg-gray-400" style="width:${pct}%"></div></div>
+                        <div class="text-xs text-gray-400 mt-0.5">${item.reason}</div>
+                    </div>
+                `;
+            }).join('');
+            return `
+                <div class="border rounded-lg p-4">
+                    <div class="font-semibold mb-3">${icon} ${name} <span class="text-sm text-gray-500">(${dim.weight})</span></div>
+                    ${detailHtml}
+                </div>
+            `;
+        }).join('');
+        document.getElementById('score-details').innerHTML = detailsHtml;
+
+        document.getElementById('score-result').classList.remove('hidden');
+
+    } catch(e) {
+        hideLoading();
+        showError(e.message);
+        document.getElementById('empty-state').classList.remove('hidden');
+    }
+}
+
+// === Compare ===
+async function compareStocks() {
+    if (state.compareStocks.length < 2) {
+        showError('至少需要添加2只股票进行对比');
+        return;
+    }
+    showLoading();
+    hideAllResults();
+
+    try {
+        const res = await fetch('/api/compare', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stocks: state.compareStocks })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '对比失败');
+
+        hideLoading();
+        document.getElementById('compare-count').textContent = `共对比 ${data.count} 只股票`;
+
+        const results = data.results || [];
+        const marketNames = { a: 'A股', hk: '港股', us: '美股' };
+
+        // Build table
+        const tableHtml = `
+            <thead>
+                <tr class="border-b-2 border-gray-200">
+                    <th class="text-left py-3 px-4">股票</th>
+                    <th class="text-center py-3 px-4">最新价</th>
+                    <th class="text-center py-3 px-4">涨跌幅</th>
+                    <th class="text-center py-3 px-4">总分</th>
+                    <th class="text-center py-3 px-4">评级</th>
+                    <th class="text-center py-3 px-4">生意模式</th>
+                    <th class="text-center py-3 px-4">财务质量</th>
+                    <th class="text-center py-3 px-4">竞争格局</th>
+                    <th class="text-center py-3 px-4">风险管理</th>
+                    <th class="text-left py-3 px-4">建议</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${results.map(r => {
+                    if (r.error) {
+                        return `<tr class="border-b"><td colspan="10" class="py-3 px-4 text-red-500">${r.symbol} - ${r.error}</td></tr>`;
+                    }
+                    const d = r.data || {};
+                    const s = r.scores || {};
+                    const dims = s.dimensions || {};
+                    return `
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="py-3 px-4">
+                                <div class="font-mono font-bold">${r.symbol}</div>
+                                <div class="text-xs text-gray-500">${d.name || ''}</div>
+                                <div class="text-xs text-gray-400">${marketNames[r.market]}</div>
+                            </td>
+                            <td class="text-center py-3 px-4">${fmtNum(d.price, '$')}</td>
+                            <td class="text-center py-3 px-4">${fmtPct(d.chg_pct)}</td>
+                            <td class="text-center py-3 px-4 font-bold text-lg">${s.total_score}</td>
+                            <td class="text-center py-3 px-4">
+                                <span class="px-2 py-1 rounded text-white font-bold text-sm" style="background:${gradeColor(s.grade)}">${s.grade}</span>
+                            </td>
+                            <td class="text-center py-3 px-4">${dims.business?.score || 0}<span class="text-gray-400 text-sm">/30</span></td>
+                            <td class="text-center py-3 px-4">${dims.financial?.score || 0}<span class="text-gray-400 text-sm">/25</span></td>
+                            <td class="text-center py-3 px-4">${dims.competition?.score || 0}<span class="text-gray-400 text-sm">/25</span></td>
+                            <td class="text-center py-3 px-4">${dims.risk?.score || 0}<span class="text-gray-400 text-sm">/20</span></td>
+                            <td class="py-3 px-4 text-sm">${s.recommendation}</td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        `;
+        document.getElementById('compare-table').innerHTML = tableHtml;
+
+        // Summary - find best
+        const validResults = results.filter(r => !r.error);
+        if (validResults.length >= 2) {
+            const best = validResults.reduce((a, b) => (a.scores.total_score > b.scores.total_score ? a : b));
+            const sorted = [...validResults].sort((a, b) => b.scores.total_score - a.scores.total_score);
+
+            document.getElementById('compare-summary').innerHTML = `
+                <div class="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-4">
+                    <h3 class="font-bold text-lg mb-3">🏆 对比总结</h3>
+                    <div class="mb-3">
+                        <span class="text-sm text-gray-600">综合评分最高：</span>
+                        <span class="font-bold text-lg">${best.data?.name || best.symbol}</span>
+                        <span class="ml-2 text-2xl font-bold" style="color:${gradeColor(best.scores.grade)}">${best.scores.total_score}分</span>
+                        <span class="ml-2 px-2 py-1 rounded text-white text-sm font-bold" style="background:${gradeColor(best.scores.grade)}">${best.scores.grade}</span>
+                    </div>
+                    <div class="text-sm text-gray-600">
+                        <strong>排名：</strong>
+                        ${sorted.map((r, i) => 
+                            `${i + 1}. ${r.data?.name || r.symbol} (${r.scores.total_score}分)`
+                        ).join(' → ')}
+                    </div>
+                </div>
+            `;
+        }
+
+        document.getElementById('compare-result').classList.remove('hidden');
+
+    } catch(e) {
+        hideLoading();
+        showError(e.message);
+        document.getElementById('empty-state').classList.remove('hidden');
+    }
+}
+
+// === Deep Report ===
+async function deepReport() {
+    showLoading();
+    hideAllResults();
+
+    try {
+        const res = await fetch('/api/deep-report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ market: state.market, symbol: state.symbol })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '报告生成失败');
+
+        hideLoading();
+        const d = data.data || {};
+        const s = data.scores || {};
+
+        document.getElementById('deep-title').textContent = `${d.name || data.symbol} · 深度研究报告`;
+        document.getElementById('deep-subtitle').textContent = `评级: ${s.grade} ${s.total_score}/100 · ${s.recommendation}`;
+        document.getElementById('deep-report').innerHTML = marked.parse(data.report || '');
+
+        // Store for download
+        window._deepReport = data.report;
+        document.getElementById('deep-result').classList.remove('hidden');
+
+    } catch(e) {
+        hideLoading();
+        showError(e.message);
+        document.getElementById('empty-state').classList.remove('hidden');
+    }
+}
+
+// Download report
+document.getElementById('download-btn').addEventListener('click', () => {
+    if (!window._deepReport) return;
+    const blob = new Blob([window._deepReport], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `深度研究报告_${state.symbol}_${new Date().toISOString().slice(0,10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+
+// === UI helpers ===
+function showLoading() {
+    document.getElementById('loading').classList.remove('hidden');
+    document.getElementById('empty-state').classList.add('hidden');
+}
+
+function hideLoading() {
+    document.getElementById('loading').classList.add('hidden');
+}
+
+function hideAllResults() {
+    ['analyze-result', 'score-result', 'compare-result', 'deep-result', 'strategy-result'].forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+    });
+}
+
+// === Strategy Framework ===
+let strategyData = null;
+
+async function loadStrategy() {
+    try {
+        showLoading();
+        const res = await fetch('/api/strategy');
+        strategyData = await res.json();
+        if (!res.ok) throw new Error(strategyData.error || '加载策略框架失败');
+
+        hideLoading();
+
+        // Build nav
+        const nav = document.getElementById('strategy-nav');
+        nav.innerHTML = strategyData.sections.map((s, i) => `
+            <button onclick="loadStrategySection('${s.id}')" 
+                    class="strategy-nav-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 hover:border-indigo-400 hover:text-indigo-600 transition"
+                    data-section="${s.id}">
+                ${s.icon} ${s.title}
+            </button>
+        `).join('');
+
+        // Load first section by default
+        if (strategyData.sections.length > 0) {
+            loadStrategySection(strategyData.sections[0].id);
+        }
+
+        document.getElementById('strategy-result').classList.remove('hidden');
+    } catch(e) {
+        hideLoading();
+        showError(e.message);
+        document.getElementById('empty-state').classList.remove('hidden');
+    }
+}
+
+async function loadStrategySection(sectionId) {
+    try {
+        // Update active nav button
+        document.querySelectorAll('.strategy-nav-btn').forEach(btn => {
+            if (btn.dataset.section === sectionId) {
+                btn.classList.add('bg-indigo-50', 'border-indigo-400', 'text-indigo-600');
+                btn.classList.remove('bg-white', 'border-gray-200');
+            } else {
+                btn.classList.remove('bg-indigo-50', 'border-indigo-400', 'text-indigo-600');
+                btn.classList.add('bg-white', 'border-gray-200');
+            }
+        });
+
+        const res = await fetch('/api/strategy/' + sectionId);
+        const section = await res.json();
+        if (!res.ok) throw new Error(section.error || '加载章节失败');
+
+        const content = document.getElementById('strategy-content');
+        content.innerHTML = marked.parse(section.content || '');
+    } catch(e) {
+        document.getElementById('strategy-content').innerHTML = '<div class="text-red-500">加载章节失败: ' + e.message + '</div>';
+    }
+}
+
+// Download strategy framework
+document.getElementById('download-strategy-btn').addEventListener('click', async () => {
+    try {
+        const res = await fetch('/api/strategy/full');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '下载失败');
+
+        const blob = new Blob([data.content], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `价值投资策略框架_${new Date().toISOString().slice(0,10)}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch(e) {
+        showError('下载失败: ' + e.message);
+    }
+});
+
+// Init
+updateFeatureUI();
+loadExamples();
+document.getElementById('footer-time').textContent = new Date().toLocaleString('zh-CN');
+</script>
+
+</body>
+</html>
