@@ -23,6 +23,7 @@ const builtInTools = [
   { id: 'premium-check', name: '溢价查询', icon: TrendingUp, description: '查询可转债、封闭式基金等溢价率', color: 'purple' },
   { id: 'hk-ipo', name: '港股打新分析', icon: BarChart3, description: '分析港股新股认购价值', color: 'green' },
   { id: 'hkipo-calculator', name: '港股打新计算器', icon: Activity, description: '港股打新溢价计算与收益分析', color: 'blue' },
+  { id: 'value-investing-tool', name: '四大价值投资', icon: Zap, description: '四大师视角AI投资分析、价值评分与深度报告', color: 'purple' },
 ];
 
 const defaultGroups = [
