@@ -1641,6 +1641,10 @@ export default function IndependentAssets() {
     </div>
   );
 
+  const hasLinkedAccounts = Object.values(independentAssets).some(items =>
+    items.some(item => item.accountId)
+  );
+
   const renderAccountsTable = () => {
     const usedAccountIds = new Set();
     Object.values(independentAssets).forEach(items => {
@@ -6297,7 +6301,7 @@ export default function IndependentAssets() {
 
       {renderSummaryCards()}
 
-      {renderAccountsTable()}
+      {hasLinkedAccounts && renderAccountsTable()}
 
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden mb-6">
         <div className="flex border-b border-gray-200 dark:border-slate-700">

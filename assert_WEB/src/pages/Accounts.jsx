@@ -667,8 +667,8 @@ export default function Accounts() {
             if (mapped) {
               let maxSeq = 0;
               existingFinanceAssets.forEach(a => {
-                if (a.code && typeof a.code === 'string') {
-                  const match = a.code.match(/^XJ_(\d+)$/);
+                if (a.name && typeof a.name === 'string') {
+                  const match = a.name.match(/^ZZGL_(\d+)$/);
                   if (match) {
                     const seq = parseInt(match[1], 10);
                     if (seq > maxSeq) maxSeq = seq;
@@ -680,7 +680,9 @@ export default function Accounts() {
                 maxSeq = cashAssetCodeSeq;
               }
               const nextSeq = maxSeq + 1;
-              const code = 'XJ_' + String(nextSeq).padStart(3, '0');
+              const seqStr = String(nextSeq).padStart(3, '0');
+              const name = `ZZGL_${seqStr}`;
+              const code = `ZZDM_${seqStr}`;
 
               const cashAsset = {
                 id: `cash-asset-${Date.now()}`,
@@ -695,7 +697,7 @@ export default function Accounts() {
                 tertiaryCategory: '场内',
                 positionGroup: '现金仓位',
                 positionCategory: '现金管理',
-                name: `XJ_${formData.name}`,
+                name,
                 code,
                 costPrice: 1,
                 shares: 0.1,

@@ -11,14 +11,14 @@ function tencentCodeFor(code, market) {
   code = String(code || "").trim();
   if (!code) return null;
   market = String(market || "").toLowerCase();
-  if (market === "domestic" || /^sh/i.test(code)) {
+  if (market === "domestic" || market === "国内市场" || market === "国内" || /^sh/i.test(code)) {
     const raw = code.replace(/^(sh|sz)/i, "");
     return (raw.startsWith("6") || raw.startsWith("9") || raw.startsWith("11")) ? "sh" + raw : "sz" + raw;
   }
-  if (market === "hk" || /^hk/i.test(code) || /^0[0-9]{4}$/.test(code)) {
+  if (market === "hk" || market === "港股市场" || market === "港股" || /^hk/i.test(code) || /^0[0-9]{4}$/.test(code)) {
     return "hk" + code.replace(/^hk/i, "").padStart(5, "0");
   }
-  if (market === "us" || /^us/i.test(code)) {
+  if (market === "us" || market === "美股市场" || market === "美股" || /^us/i.test(code)) {
     return "us" + code.replace(/^us/i, "").toUpperCase();
   }
   if (/^[569]/.test(code)) return "sh" + code;
