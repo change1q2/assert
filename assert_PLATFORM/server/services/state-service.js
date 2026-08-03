@@ -3,17 +3,36 @@ import { sqlRun, sqlAll, sqlGet, maybeParseJson } from "../utils/db.js";
 import { text, number, numericIfPossible } from "../utils/validators.js";
 import { profileForUser } from "./user-service.js";
 
+async function safeSqlAll(pool, sql, params = [], fallback = []) {
+  try {
+    return await sqlAll(pool, sql, params);
+  } catch (e) {
+    console.warn(`[state-service] Query failed (${sql.slice(0, 80)}...): ${e.message}`);
+    return fallback;
+  }
+}
+
+async function safeSqlGet(pool, sql, params = [], fallback = null) {
+  try {
+    return await sqlGet(pool, sql, params);
+  } catch (e) {
+    console.warn(`[state-service] Query failed (${sql.slice(0, 80)}...): ${e.message}`);
+    return fallback;
+  }
+}
+
 async function loadUserState(userId) {
   const profile = await profileForUser(userId);
   const rates = Object.fromEntries(
-    (await sqlAll(pool, "SELECT currency, rate FROM exchange_rates WHERE user_id = ?", [userId]))
+    (await safeSqlAll(pool, "SELECT currency, rate FROM exchange_rates WHERE user_id = ?", [userId]))
       .map((row) => [row.currency, row.rate])
   );
-  const accounts = (await sqlAll(pool, "SELECT * FROM accounts WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
-    id: row.id, name: row.name, owner: row.owner, currency: row.currency, type: row.type,
-    balance: row.balance, liability: row.liability, enabled: Boolean(row.enabled), default: Boolean(row.is_default),
-    category: row.category, subCategory: row.sub_category,
-  }));
+  const accounts = (await safeSqlAll(pool, "SELECT id, name, owner, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category FROM accounts WHERE user_id = ? ORDER BY sort_order", [userId]))
+    .map((row) => ({
+      id: row.id, name: row.name, owner: row.owner, currency: row.currency, type: row.type,
+      balance: row.balance, liability: row.liability, enabled: Boolean(row.enabled), default: Boolean(row.is_default),
+      category: row.category || '', subCategory: row.sub_category || '',
+    }));
   const assetClasses = (await sqlAll(pool, "SELECT * FROM asset_classes WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, children: maybeParseJson(row.children_json), visible: Boolean(row.visible),
     value: row.value, openingValue: row.opening_value, targetValue: row.target_value,
@@ -28,9 +47,9 @@ async function loadUserState(userId) {
   const budgets = (await sqlAll(pool, "SELECT * FROM budgets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: numericIfPossible(row.id), name: row.name, category: row.category, amount: row.amount, used: row.used,
   }));
-  const indoorTransactionRows = await sqlAll(pool, "SELECT * FROM finance_asset_indoor_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
-  const outdoorTransactionRows = await sqlAll(pool, "SELECT * FROM finance_asset_outdoor_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
-  const legacyTransactionRows = await sqlAll(pool, "SELECT * FROM finance_asset_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
+  const indoorTransactionRows = await safeSqlAll(pool, "SELECT * FROM finance_asset_indoor_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
+  const outdoorTransactionRows = await safeSqlAll(pool, "SELECT * FROM finance_asset_outdoor_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
+  const legacyTransactionRows = await safeSqlAll(pool, "SELECT * FROM finance_asset_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
 
   const transactionsByAsset = new Map();
 
@@ -61,8 +80,8 @@ async function loadUserState(userId) {
   indoorTransactionRows.forEach(row => addTransaction(row, false));
   outdoorTransactionRows.forEach(row => addTransaction(row, true));
   legacyTransactionRows.forEach(row => addTransaction(row, false));
-  const financeAssets = (await sqlAll(pool, "SELECT * FROM finance_assets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
-    id: numericIfPossible(row.id), kind: row.kind, assetKind: row.asset_kind, accountId: row.account_id, category: row.category,
+  const financeAssets = (await safeSqlAll(pool, "SELECT id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order FROM finance_assets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+    id: numericIfPossible(row.id), kind: row.kind, assetKind: row.asset_kind || '', accountId: row.account_id, category: row.category,
     subcategory: row.subcategory, tertiaryCategory: row.tertiary_category, market: row.market,
     currency: row.currency, name: row.name, code: row.code, positionGroup: row.position_group,
     positionCategory: row.position_category, costPrice: row.cost_price, shares: row.shares,
@@ -70,10 +89,10 @@ async function loadUserState(userId) {
     pnlPercent: row.pnl_percent, avgBuyPrice: row.avg_buy_price, holdingDays: row.holding_days,
     positionWeight: row.position_weight, totalFees: row.total_fees, todayPnl: row.today_pnl,
     todayPnlPercent: row.today_pnl_percent, prevPrice: row.prev_price, priceDate: row.price_date,
-    tags: row.tags, status: row.status || 'active', archiveDate: row.archive_date || '',
+    tags: row.tags || '', status: row.status || 'active', archiveDate: row.archive_date || '',
     transactions: transactionsByAsset.get(String(row.id)) || [],
   }));
-  const financeAssetArchives = (await sqlAll(pool, "SELECT * FROM finance_asset_archives WHERE user_id = ? ORDER BY archive_date DESC", [userId])).map((row) => ({
+  const financeAssetArchives = (await safeSqlAll(pool, "SELECT * FROM finance_asset_archives WHERE user_id = ? ORDER BY archive_date DESC", [userId])).map((row) => ({
     id: numericIfPossible(row.id), originalAssetId: row.original_asset_id, name: row.name, code: row.code,
     market: row.market, currency: row.currency, kind: row.kind, category: row.category,
     subcategory: row.subcategory, tertiaryCategory: row.tertiary_category,
@@ -109,7 +128,7 @@ async function loadUserState(userId) {
   const reminders = (await sqlAll(pool, "SELECT * FROM reminders WHERE user_id = ? ORDER BY reminder_date", [userId])).map((row) => ({
     id: row.id, date: row.reminder_date, title: row.title, type: row.type,
   }));
-  const debts = (await sqlAll(pool, "SELECT * FROM debts WHERE user_id = ? ORDER BY sort_order", [userId])).map(async (row) => {
+  const debts = (await safeSqlAll(pool, "SELECT * FROM debts WHERE user_id = ? ORDER BY sort_order", [userId])).map(async (row) => {
     const payments = Object.fromEntries(
       (await sqlAll(pool, "SELECT period, status FROM debt_payments WHERE user_id = ? AND debt_id = ?", [userId, row.id]))
         .map((payment) => [payment.period, payment.status])
@@ -136,7 +155,7 @@ async function loadUserState(userId) {
     allocation: maybeParseJson(row.allocation_json), debtLimit: row.debt_limit,
     annualReturn: row.annual_return, risk: row.risk,
   }));
-  const settings = await sqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json FROM user_settings WHERE user_id = ?", [userId]);
+  const settings = await safeSqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json FROM user_settings WHERE user_id = ?", [userId]);
   const yearlyRecords = (await sqlAll(pool, "SELECT year, opening_asset, closing_asset, target_profit, actual_profit FROM yearly_records WHERE user_id = ? ORDER BY year", [userId])).map((row) => ({
     year: row.year,
     openingAsset: row.opening_asset,

@@ -39,3 +39,4 @@ assert_WEB/.trae/
 assert_PLATFORM/temp_state.json
 tmp_login.js
 .vercel
+.env*
