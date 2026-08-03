@@ -213,9 +213,9 @@ export default function App() {
       case 'profile':
         return <UserProfile onAdmin={() => setCurrentPage('admin-login')} isAdmin={isAdmin} />;
       case 'premium-check':
-        return <PremiumCheck />;
+        return <PremiumCheck onBack={() => setActiveMenu('tools')} />;
       case 'hk-ipo':
-        return <HkIpo />;
+        return <HkIpo onBack={() => setActiveMenu('tools')} />;
       case 'hkipo-calculator':
         return <HkipoCalculator onBack={() => setActiveMenu('tools')} />;
       case 'value-investing-tool':

@@ -86,6 +86,7 @@ const PRESET_COLORS = [
   '#14B8A6',
 ];
 
+const PROTECTED_CATEGORY_NAMES = ['权益类', '债权类', '商品类', '现金类'];
 const CATEGORY_L1_OPTIONS = ['权益类', '债权类', '现金类', '商品类', '分红类', '固收类', '另类投资'];
 const CATEGORY_COLORS = {
   '权益类': '#6366F1',
@@ -222,14 +223,16 @@ function aggregateClassesFromFinance(financeAccounts, existingClasses) {
   });
 
   const result = [];
-  Object.keys(categoryMap).forEach((name) => {
-    const existing = existingMap[name];
+  const processedNames = new Set();
+
+  existing.forEach((cls) => {
+    const name = cls.name;
     const data = categoryMap[name];
     const autoChildren = childrenMap[name]
       ? Object.values(childrenMap[name]).sort((a, b) => b.value - a.value)
       : [];
 
-    const existingChildren = existing?.children || [];
+    const existingChildren = cls.children || [];
     const customChildren = existingChildren
       .filter((c) => !c.isAutoSync)
       .map((c) => ({
@@ -238,38 +241,59 @@ function aggregateClassesFromFinance(financeAccounts, existingClasses) {
         isAutoSync: false,
       }));
 
-    const autoTotal = autoChildren.reduce((sum, c) => sum + (c.value || 0), 0);
-    const customTotal = customChildren.reduce((sum, c) => sum + (c.value || 0), 0);
-    const combinedValue = data.value + customTotal;
-    const combinedOpening = data.cost + customChildren.reduce((sum, c) => sum + (c.openingValue || 0), 0);
+    if (data) {
+      const autoTotal = autoChildren.reduce((sum, c) => sum + (c.value || 0), 0);
+      const customTotal = customChildren.reduce((sum, c) => sum + (c.value || 0), 0);
+      const combinedValue = data.value + customTotal;
+      const combinedOpening = data.cost + customChildren.reduce((sum, c) => sum + (c.openingValue || 0), 0);
 
-    result.push({
-      id: existing?.id || `finance-${name}`,
-      name,
-      children: [...autoChildren, ...customChildren],
-      visible: existing?.visible !== false,
-      value: combinedValue,
-      openingValue: combinedOpening,
-      targetValue: existing?.targetValue || 0,
-      income: existing?.income || 0,
-      expense: existing?.expense || 0,
-      laborIncome: existing?.laborIncome || 0,
-      color: existing?.color || CATEGORY_COLORS[name] || PRESET_COLORS[result.length % PRESET_COLORS.length],
-      expectedReturn: existing?.expectedReturn || 0,
-    });
-  });
-
-  const financeCategoryNames = new Set(Object.keys(categoryMap));
-  existing.forEach((cls) => {
-    if (!financeCategoryNames.has(cls.name)) {
-      const customChildren = (cls.children || []).map((c) => ({
+      result.push({
+        id: cls.id || `finance-${name}`,
+        name,
+        children: [...autoChildren, ...customChildren],
+        visible: cls.visible !== false,
+        value: combinedValue,
+        openingValue: combinedOpening,
+        targetValue: cls.targetValue || 0,
+        income: cls.income || 0,
+        expense: cls.expense || 0,
+        laborIncome: cls.laborIncome || 0,
+        color: cls.color || CATEGORY_COLORS[name] || PRESET_COLORS[result.length % PRESET_COLORS.length],
+        expectedReturn: cls.expectedReturn || 0,
+      });
+    } else {
+      const customChildrenMapped = (cls.children || []).map((c) => ({
         ...c,
         market: c.market || '',
         isAutoSync: false,
       }));
       result.push({
         ...cls,
-        children: customChildren,
+        children: customChildrenMapped,
+      });
+    }
+    processedNames.add(name);
+  });
+
+  Object.keys(categoryMap).forEach((name) => {
+    if (!processedNames.has(name)) {
+      const autoChildren = childrenMap[name]
+        ? Object.values(childrenMap[name]).sort((a, b) => b.value - a.value)
+        : [];
+      const data = categoryMap[name];
+      result.push({
+        id: `finance-${name}`,
+        name,
+        children: autoChildren,
+        visible: true,
+        value: data.value,
+        openingValue: data.cost,
+        targetValue: 0,
+        income: 0,
+        expense: 0,
+        laborIncome: 0,
+        color: CATEGORY_COLORS[name] || PRESET_COLORS[result.length % PRESET_COLORS.length],
+        expectedReturn: 0,
       });
     }
   });
@@ -594,6 +618,53 @@ export default function AssetClasses({ onCategorySelect }) {
     large: '14px',
   };
 
+  const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }, isDark = false) => {
+    if (percent < 0.03) return null;
+    const RADIAN = Math.PI / 180;
+    const labelFontSize = labelSize === 'small' ? 10 : labelSize === 'large' ? 14 : 12;
+    if (percent < 0.08) {
+      const radius = (innerRadius + outerRadius) / 2;
+      const x = cx + radius * Math.cos(-midAngle * RADIAN);
+      const y = cy + radius * Math.sin(-midAngle * RADIAN);
+      return (
+        <text
+          x={x}
+          y={y}
+          fill="white"
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={labelFontSize}
+          fontWeight={700}
+          style={{ pointerEvents: 'none', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+        >
+          {(percent * 100).toFixed(1)}%
+        </text>
+      );
+    }
+    const radius = outerRadius + 18;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    const anchor = Math.cos(-midAngle * RADIAN) > 0 ? 'start' : 'end';
+    const textColor = isDark ? '#E5E7EB' : '#374151';
+    return (
+      <text
+        x={x}
+        y={y}
+        fill={textColor}
+        textAnchor={anchor}
+        dominantBaseline="central"
+        fontSize={labelFontSize}
+        fontWeight={600}
+        style={{ pointerEvents: 'none' }}
+      >
+        {`${name} ${(percent * 100).toFixed(1)}%`}
+      </text>
+    );
+  };
+
+  const renderCustomLabel = (data) => renderPieLabel(data, false);
+  const renderCustomLabelDark = (data) => renderPieLabel(data, true);
+
   const { assetClasses = [] } = stateData || {};
 
   useEffect(() => {
@@ -607,17 +678,56 @@ export default function AssetClasses({ onCategorySelect }) {
       const data = await fetchState();
       let currentClasses = data.assetClasses || [];
 
+      // 合并重复分类（同名的分类合并为一个，资产和子分类归并到第一个）
+      const seen = {};
+      let hasDuplicates = false;
+      const mergedClasses = [];
+
+      currentClasses.forEach((cls) => {
+        if (seen[cls.name]) {
+          hasDuplicates = true;
+          const kept = seen[cls.name];
+          // 合并 children（去重）
+          const existingChildKeys = new Set((kept.children || []).map((c) =>
+            typeof c === 'object' ? `${c.name}__${c.market || ''}` : c
+          ));
+          (cls.children || []).forEach((c) => {
+            const key = typeof c === 'object' ? `${c.name}__${c.market || ''}` : c;
+            if (!existingChildKeys.has(key)) {
+              kept.children.push(c);
+              existingChildKeys.add(key);
+            }
+          });
+          // 合并数值字段
+          kept.value = (kept.value || 0) + (cls.value || 0);
+          kept.openingValue = (kept.openingValue || 0) + (cls.openingValue || 0);
+          kept.targetValue = (kept.targetValue || 0) + (cls.targetValue || 0);
+          kept.income = (kept.income || 0) + (cls.income || 0);
+          kept.expense = (kept.expense || 0) + (cls.expense || 0);
+          kept.laborIncome = (kept.laborIncome || 0) + (cls.laborIncome || 0);
+        } else {
+          seen[cls.name] = { ...cls, children: Array.isArray(cls.children) ? [...cls.children] : [] };
+          mergedClasses.push(seen[cls.name]);
+        }
+      });
+
+      if (hasDuplicates) {
+        currentClasses = mergedClasses;
+      }
+
       const existingNames = new Set(currentClasses.map((c) => c.name));
       const missingDefaults = DEFAULT_CLASSES.filter(
         (dc) => !existingNames.has(dc.name)
       );
 
-      if (missingDefaults.length > 0) {
+      if (missingDefaults.length > 0 || hasDuplicates) {
         const newDefaultClasses = missingDefaults.map((dc, idx) => ({
           ...createDefaultClass(dc),
           id: `default-${dc.name}-${Date.now()}-${idx}`,
         }));
         const updatedClasses = [...newDefaultClasses, ...currentClasses];
+
+        // 同步更新 financeAssets（重复分类合并后，financeAssets 中的 categoryL1 名称不变，无需重映射）
         const newState = { ...data, assetClasses: updatedClasses };
         const result = await saveState(newState);
         if (result.success !== false) {
@@ -866,6 +976,12 @@ export default function AssetClasses({ onCategorySelect }) {
     const clsId = cls.id;
     const className = cls.name;
 
+    // 默认分类不允许删除
+    if (PROTECTED_CATEGORY_NAMES.includes(className)) {
+      alert(`默认分类「${className}」不允许删除`);
+      return;
+    }
+
     if (!className) {
       alert('分类信息异常，无法删除');
       return;
@@ -1113,6 +1229,22 @@ export default function AssetClasses({ onCategorySelect }) {
     }
     if (!stateData) {
       alert('数据尚未加载，请稍后重试');
+      return;
+    }
+
+    // 检查分类名称重复（新增和编辑均校验）
+    const allClasses = stateData.assetClasses || [];
+    const duplicate = allClasses.find(
+      (c) => c.name === formData.name.trim() && (!editingClass || c.id !== editingClass.id)
+    );
+    if (duplicate) {
+      alert(`分类名称「${formData.name.trim()}」已存在，不允许重复`);
+      return;
+    }
+
+    // 默认分类不允许修改名称
+    if (editingClass && PROTECTED_CATEGORY_NAMES.includes(editingClass.name) && formData.name !== editingClass.name) {
+      alert(`默认分类「${editingClass.name}」不允许修改名称`);
       return;
     }
 
@@ -1379,9 +1511,8 @@ export default function AssetClasses({ onCategorySelect }) {
                               innerRadius="40%"
                               outerRadius="65%"
                               paddingAngle={2}
-                              label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
-                              labelLine={{ strokeWidth: 1, stroke: '#ccc' }}
-                              labelStyle={{ fontSize: LABEL_SIZE_MAP[labelSize] }}
+                              label={renderCustomLabel}
+                              labelLine={false}
                             >
                               {drilldownData.map((entry, index) => (
                                 <Cell key={`cell-dd-${index}`} fill={entry.color} />
@@ -1405,9 +1536,8 @@ export default function AssetClasses({ onCategorySelect }) {
                               innerRadius="40%"
                               outerRadius="65%"
                               paddingAngle={2}
-                              label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
-                              labelLine={{ strokeWidth: 1, stroke: '#ccc' }}
-                              labelStyle={{ fontSize: LABEL_SIZE_MAP[labelSize] }}
+                              label={renderCustomLabel}
+                              labelLine={false}
                               style={{ cursor: 'pointer' }}
                             >
                             {chartData.map((entry, index) => (
@@ -1449,9 +1579,8 @@ export default function AssetClasses({ onCategorySelect }) {
                             innerRadius="35%"
                             outerRadius="55%"
                             paddingAngle={3}
-                            label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
-                            labelLine={{ strokeWidth: 1, stroke: '#ccc' }}
-                            labelStyle={{ fontSize: LABEL_SIZE_MAP[labelSize], whiteSpace: 'nowrap' }}
+                            label={renderCustomLabel}
+                            labelLine={false}
                           >
                             {domesticOverseasData.map((entry, index) => (
                               <Cell key={`cell-do-${index}`} fill={entry.color} />
@@ -1485,9 +1614,8 @@ export default function AssetClasses({ onCategorySelect }) {
                             innerRadius="40%"
                             outerRadius="65%"
                             paddingAngle={2}
-                            label={({ name, payload }) => `${name} ${payload.percent?.toFixed(1) || 0}%`}
-                            labelLine={{ strokeWidth: 1, stroke: '#ccc' }}
-                            labelStyle={{ fontSize: LABEL_SIZE_MAP[labelSize] }}
+                            label={renderCustomLabel}
+                            labelLine={false}
                           >
                             {independentAssetsData.map((entry, index) => (
                               <Cell key={`cell-ia-${index}`} fill={entry.color} />
@@ -1672,7 +1800,7 @@ export default function AssetClasses({ onCategorySelect }) {
                           innerRadius="35%"
                           outerRadius="65%"
                           paddingAngle={1}
-                          label={({ payload }) => `${payload.percent?.toFixed(0) || 0}%`}
+                          label={renderCustomLabel}
                           labelLine={false}
                           style={{ cursor: 'pointer' }}
                         >
@@ -1839,6 +1967,7 @@ export default function AssetClasses({ onCategorySelect }) {
                             >
                               {isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                             </button>
+                            {!PROTECTED_CATEGORY_NAMES.includes(cls.name) && (
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDelete(cls); }}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
@@ -1846,6 +1975,7 @@ export default function AssetClasses({ onCategorySelect }) {
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
+                            )}
                           </div>
                         </div>
 
@@ -1930,16 +2060,25 @@ export default function AssetClasses({ onCategorySelect }) {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         分类名称 <span className="text-red-500">*</span>
+                        {editingClass && PROTECTED_CATEGORY_NAMES.includes(editingClass.name) && (
+                          <span className="ml-2 text-xs text-gray-400">（默认分类，不可改名）</span>
+                        )}
                       </label>
                       <input
                         type="text"
                         value={formData.name}
                         onChange={(e) => handleCategoryNameChange(e.target.value)}
                         placeholder="请输入分类名称"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        readOnly={!!editingClass && PROTECTED_CATEGORY_NAMES.includes(editingClass.name)}
+                        className={`w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
+                          editingClass && PROTECTED_CATEGORY_NAMES.includes(editingClass.name)
+                            ? 'opacity-60 cursor-not-allowed bg-gray-50 dark:bg-slate-600' : ''
+                        }`}
                       />
                     </div>
 
+                    {/* 二级分类仅在编辑模式下显示，新增时不展示 */}
+                    {editingClass && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         二级分类
@@ -1971,6 +2110,7 @@ export default function AssetClasses({ onCategorySelect }) {
                         </button>
                       </div>
                     </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>

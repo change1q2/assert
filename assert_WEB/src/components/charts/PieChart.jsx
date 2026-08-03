@@ -27,24 +27,44 @@ const defaultTooltipFormatter = (value) => {
   }).format(value);
 };
 
-const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-  if (percent < 0.05) return null;
+const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
+  if (percent < 0.03) return null;
   const RADIAN = Math.PI / 180;
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+  if (percent < 0.08) {
+    const radius = (innerRadius + outerRadius) / 2;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="white"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={11}
+        fontWeight={700}
+        style={{ pointerEvents: 'none', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+      >
+        {(percent * 100).toFixed(1)}%
+      </text>
+    );
+  }
+  const radius = outerRadius + 18;
   const x = cx + radius * Math.cos(-midAngle * RADIAN);
   const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
+  const anchor = Math.cos(-midAngle * RADIAN) > 0 ? 'start' : 'end';
   return (
     <text
       x={x}
       y={y}
-      fill="white"
-      textAnchor="middle"
+      fill="#374151"
+      textAnchor={anchor}
       dominantBaseline="central"
       fontSize={12}
-      fontWeight={500}
+      fontWeight={600}
+      style={{ pointerEvents: 'none' }}
     >
-      {`${(percent * 100).toFixed(0)}%`}
+      {`${name || ''} ${(percent * 100).toFixed(1)}%`}
     </text>
   );
 };

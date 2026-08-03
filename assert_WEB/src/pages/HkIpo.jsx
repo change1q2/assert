@@ -960,7 +960,7 @@ function hkIpoAdvFilterRows(rows, filters) {
   });
 }
 
-export default function HkIpo({ onNavigate }) {
+export default function HkIpo({ onBack }) {
   const [payload, setPayload] = useState({
     rows: [],
     recommendations: [],
@@ -1362,7 +1362,7 @@ export default function HkIpo({ onNavigate }) {
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <button onClick={() => onNavigate && onNavigate('tools')} className="w-10 h-10 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-700">
+            <button onClick={onBack} className="w-10 h-10 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-700">
               <span className="text-xl">‹</span>
             </button>
             <div>

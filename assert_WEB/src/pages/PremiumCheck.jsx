@@ -34,7 +34,7 @@ const transferRecommendOptions = [
   { value: 'strong-buy', label: '强烈转入' },
 ];
 
-export default function PremiumCheck() {
+export default function PremiumCheck({ onBack }) {
   const [rows, setRows] = useState(mockPremiumData);
   const [filteredRows, setFilteredRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -287,7 +287,7 @@ export default function PremiumCheck() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => window.history.back()}
+              onClick={onBack}
               className="text-2xl text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
             >
               ‹
