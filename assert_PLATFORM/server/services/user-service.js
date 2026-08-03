@@ -137,7 +137,7 @@ async function authPayload(userId) {
 async function ensureDefaultAdmin() {
   const existing = await sqlGet(pool, "SELECT id FROM admin_users WHERE username = ?", ["SuperAdmin"]);
   if (!existing) {
-    const password = process.env.ADMIN_PASSWORD || "Super12345";
+    const password = process.env.ADMIN_PASSWORD || "admin123";
     const hash = hashPassword(password);
     const userExists = await sqlGet(pool, "SELECT id FROM users WHERE account = ?", ["SuperAdmin"]);
     let userId;
@@ -152,6 +152,28 @@ async function ensureDefaultAdmin() {
     }
     await sqlRun(pool, "INSERT INTO admin_users (username, password_hash) VALUES (?, ?)", ["SuperAdmin", hash]);
     console.log("Default admin entry created (username: SuperAdmin)");
+  } else {
+    const password = process.env.ADMIN_PASSWORD || "admin123";
+    const hash = hashPassword(password);
+    const userExists = await sqlGet(pool, "SELECT id FROM users WHERE account = ?", ["SuperAdmin"]);
+    if (userExists) {
+      await sqlRun(pool, "UPDATE users SET password_hash = ? WHERE id = ?", [hash, userExists.id]);
+    }
+    await sqlRun(pool, "UPDATE admin_users SET password_hash = ? WHERE username = ?", [hash, "SuperAdmin"]);
+  }
+
+  const testAccount = "admin";
+  const testPassword = "admin123";
+  const testHash = hashPassword(testPassword);
+  const testUserExists = await sqlGet(pool, "SELECT id FROM users WHERE account = ?", [testAccount]);
+  if (!testUserExists) {
+    const result = await sqlRun(pool, "INSERT INTO users (account, password_hash) VALUES (?, ?)", [testAccount, testHash]);
+    const testUserId = result.insertId;
+    await sqlRun(pool, "INSERT INTO user_profiles (user_id, name, phone) VALUES (?, ?, ?)", [testUserId, "测试账户", ""]);
+    console.log("Test account created (account: admin, password: admin123)");
+  } else {
+    await sqlRun(pool, "UPDATE users SET password_hash = ? WHERE id = ?", [testHash, testUserExists.id]);
+    console.log("Test account password updated (account: admin, password: admin123)");
   }
 }
 

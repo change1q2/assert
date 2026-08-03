@@ -114,9 +114,9 @@ function FormField({ label, required, markRequired, children, fullWidth }) {
   return (
     <div className={fullWidth ? 'sm:col-span-2' : ''}>
       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-        {required && <span className="text-red-500 mr-0.5">*</span>}
+        {required && <span className="text-red-500 mr-0.5 font-bold" style={{ color: '#ef4444' }}>*</span>}
         {label}
-        {markRequired && <span className="text-red-500 ml-0.5">*</span>}
+        {markRequired && <span className="text-red-500 ml-0.5 font-bold" style={{ color: '#ef4444' }}>*</span>}
       </label>
       {children}
     </div>
@@ -1945,15 +1945,14 @@ export default function Finance({ onAssetPenetration }) {
   const DEFAULT_CATEGORY_L1_OPTIONS = ['权益类', '债权类', '现金类', '商品类', '分红类', '固收类', '另类投资'];
   const [categoryL1Options, setCategoryL1Options] = useState(DEFAULT_CATEGORY_L1_OPTIONS);
 
-  // 当 assetClasses 数据加载后，动态更新一级分类选项
+  // 当 assetClasses 数据加载后，动态更新一级分类选项（与本地存储的自定义选项合并去重）
   useEffect(() => {
-    const assetClassNames = stateData?.assetClasses?.map(c => c.name)?.filter(Boolean);
-    if (assetClassNames && assetClassNames.length > 0) {
-      setCategoryL1Options(assetClassNames);
-    } else {
-      const saved = localStorage.getItem('finance_category_l1_options');
-      setCategoryL1Options(saved ? JSON.parse(saved) : DEFAULT_CATEGORY_L1_OPTIONS);
-    }
+    const saved = localStorage.getItem('finance_category_l1_options');
+    const savedOptions = saved ? JSON.parse(saved) : [];
+    const assetClassNames = stateData?.assetClasses?.map(c => c.name)?.filter(Boolean) || [];
+    // 合并：以本地存储为主，补充资产分类模块新增的项
+    const merged = [...new Set([...savedOptions, ...assetClassNames, ...DEFAULT_CATEGORY_L1_OPTIONS])].sort();
+    setCategoryL1Options(merged);
   }, [stateData?.assetClasses]);
   const [showCategoryL1Modal, setShowCategoryL1Modal] = useState(false);
   const [categoryL1ToEdit, setCategoryL1ToEdit] = useState(null);
@@ -2006,8 +2005,8 @@ export default function Finance({ onAssetPenetration }) {
     tag: ''
   });
 
-  const DEFAULT_POSITION_TYPE_OPTIONS = ['核心股票仓位', '成长股仓位', '价值股仓位', 'ETF仓位', '基金定投', '打新仓位', '波段操作', '其他'];
-  const [positionTypeOptions, setPositionTypeOptions] = useState(DEFAULT_POSITION_TYPE_OPTIONS);
+  const [positionTypeOptionsMap, setPositionTypeOptionsMap] = useState({});
+  const [deletedPositionTypeMap, setDeletedPositionTypeMap] = useState({});
   const [showPositionTypeModal, setShowPositionTypeModal] = useState(false);
   const [positionTypeToEdit, setPositionTypeToEdit] = useState(null);
   const [newPositionTypeName, setNewPositionTypeName] = useState('');
@@ -2145,22 +2144,55 @@ export default function Finance({ onAssetPenetration }) {
   }, [positionGroupOptions]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('finance_position_type_options');
+    const saved = localStorage.getItem('finance_position_type_options_map');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setPositionTypeOptions(parsed);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          setPositionTypeOptionsMap(parsed);
+          return;
         }
       } catch {
-        setPositionTypeOptions(DEFAULT_POSITION_TYPE_OPTIONS);
+        // ignore
+      }
+    }
+    // 兼容旧版扁平数组格式
+    const oldSaved = localStorage.getItem('finance_position_type_options');
+    if (oldSaved) {
+      try {
+        const parsed = JSON.parse(oldSaved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const migrated = { '其他': parsed };
+          setPositionTypeOptionsMap(migrated);
+          localStorage.setItem('finance_position_type_options_map', JSON.stringify(migrated));
+        }
+      } catch {
+        // ignore
       }
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('finance_position_type_options', JSON.stringify(positionTypeOptions));
-  }, [positionTypeOptions]);
+    localStorage.setItem('finance_position_type_options_map', JSON.stringify(positionTypeOptionsMap));
+  }, [positionTypeOptionsMap]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('finance_position_type_deleted_map');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          setDeletedPositionTypeMap(parsed);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('finance_position_type_deleted_map', JSON.stringify(deletedPositionTypeMap));
+  }, [deletedPositionTypeMap]);
 
   const loadData = async () => {
     setLoading(true);
@@ -2411,6 +2443,7 @@ export default function Finance({ onAssetPenetration }) {
         category: newAccount.categoryL1 || '',
         subcategory: newAccount.categoryL2 || '',
         tertiaryCategory: newAccount.categoryL3 || '',
+        categoryL4: newAccount.categoryL4 || '',
         positionGroup: newAccount.positionGroup || '',
         positionCategory: newAccount.positionType || '',
         name: newAccount.name,
@@ -2669,6 +2702,7 @@ export default function Finance({ onAssetPenetration }) {
       categoryL1: holding.categoryL1 || '',
       categoryL2: holding.categoryL2 || '',
       categoryL3: holding.categoryL3 || '',
+      categoryL4: holding.categoryL4 || '',
       positionGroup: holding.positionGroup || '',
       positionType: holding.positionType || '',
       name: holding.name || '',
@@ -2986,26 +3020,62 @@ export default function Finance({ onAssetPenetration }) {
   };
 
   const handleAddPositionType = () => {
-    if (!newPositionTypeName.trim()) return;
-    if (positionTypeOptions.includes(newPositionTypeName.trim())) return;
-    const newOptions = [...positionTypeOptions, newPositionTypeName.trim()].sort();
-    setPositionTypeOptions(newOptions);
+    if (!newPositionTypeName.trim() || !newAccount.assetType) return;
+    const key = newAccount.assetType;
+    const name = newPositionTypeName.trim();
+    const hardcoded = ASSET_TYPE_POSITION_TYPE_MAP[key] || [];
+    const existing = positionTypeOptionsMap[key] || [];
+    if (hardcoded.includes(name) || existing.includes(name)) return;
+    // 如果该名称在删除列表中（被删除过的硬编码），恢复它
+    const deleted = deletedPositionTypeMap[key] || [];
+    if (deleted.includes(name)) {
+      setDeletedPositionTypeMap({ ...deletedPositionTypeMap, [key]: deleted.filter(o => o !== name) });
+      setNewPositionTypeName('');
+      return;
+    }
+    const newOptions = [...existing, name].sort();
+    setPositionTypeOptionsMap({ ...positionTypeOptionsMap, [key]: newOptions });
     setNewPositionTypeName('');
   };
 
   const handleSavePositionTypeEdit = () => {
-    if (!positionTypeToEdit || !newPositionTypeName.trim()) return;
-    if (positionTypeOptions.includes(newPositionTypeName.trim()) && newPositionTypeName.trim() !== positionTypeToEdit) return;
+    if (!positionTypeToEdit || !newPositionTypeName.trim() || !newAccount.assetType) return;
+    const key = newAccount.assetType;
+    const oldName = positionTypeToEdit;
+    const newName = newPositionTypeName.trim();
+    const hardcoded = ASSET_TYPE_POSITION_TYPE_MAP[key] || [];
+    const existing = positionTypeOptionsMap[key] || [];
+    if ((hardcoded.includes(newName) || existing.includes(newName)) && newName !== oldName) return;
 
-    const newOptions = positionTypeOptions.map(o => o === positionTypeToEdit ? newPositionTypeName.trim() : o).sort();
-    setPositionTypeOptions(newOptions);
+    if (hardcoded.includes(oldName)) {
+      // 编辑硬编码选项：旧名加入删除列表，新名加入自定义列表
+      const deleted = deletedPositionTypeMap[key] || [];
+      setDeletedPositionTypeMap({ ...deletedPositionTypeMap, [key]: [...new Set([...deleted, oldName])] });
+      const newOptions = [...existing, newName].sort();
+      setPositionTypeOptionsMap({ ...positionTypeOptionsMap, [key]: newOptions });
+    } else {
+      // 编辑自定义选项
+      const newOptions = existing.map(o => o === oldName ? newName : o).sort();
+      setPositionTypeOptionsMap({ ...positionTypeOptionsMap, [key]: newOptions });
+    }
     setPositionTypeToEdit(null);
     setNewPositionTypeName('');
   };
 
   const handleDeletePositionType = (name) => {
-    const newOptions = positionTypeOptions.filter(o => o !== name);
-    setPositionTypeOptions(newOptions);
+    if (!newAccount.assetType) return;
+    const key = newAccount.assetType;
+    const hardcoded = ASSET_TYPE_POSITION_TYPE_MAP[key] || [];
+    if (hardcoded.includes(name)) {
+      // 删除硬编码选项：加入删除列表
+      const deleted = deletedPositionTypeMap[key] || [];
+      setDeletedPositionTypeMap({ ...deletedPositionTypeMap, [key]: [...new Set([...deleted, name])] });
+    } else {
+      // 删除自定义选项
+      const existing = positionTypeOptionsMap[key] || [];
+      const newOptions = existing.filter(o => o !== name);
+      setPositionTypeOptionsMap({ ...positionTypeOptionsMap, [key]: newOptions });
+    }
     setDeleteConfirm(null);
   };
 
@@ -3290,6 +3360,24 @@ export default function Finance({ onAssetPenetration }) {
     '其他': ['其他仓位', '观察仓位']
   };
 
+  // 当前资产类型的持仓分类选项（合并硬编码 + 自定义，排除已删除）
+  const currentPositionTypeOptions = useMemo(() => {
+    if (!newAccount.assetType) return [];
+    const key = newAccount.assetType;
+    const hardcoded = ASSET_TYPE_POSITION_TYPE_MAP[key] || [];
+    const custom = positionTypeOptionsMap[key] || [];
+    const deleted = deletedPositionTypeMap[key] || [];
+    return [...new Set([...hardcoded, ...custom])].filter(o => !deleted.includes(o)).sort();
+  }, [newAccount.assetType, positionTypeOptionsMap, deletedPositionTypeMap]);
+
+  // 所有持仓分类选项（用于筛选器，排除已删除）
+  const allPositionTypeOptions = useMemo(() => {
+    const hardcoded = Object.values(ASSET_TYPE_POSITION_TYPE_MAP).flat();
+    const custom = Object.values(positionTypeOptionsMap).flat();
+    const allDeleted = Object.values(deletedPositionTypeMap).flat();
+    return [...new Set([...hardcoded, ...custom])].filter(o => !allDeleted.includes(o)).sort();
+  }, [positionTypeOptionsMap, deletedPositionTypeMap, ASSET_TYPE_POSITION_TYPE_MAP]);
+
   // ── 动态资产分类（从 assetClasses 获取，无数据时降级使用默认值）──
   const assetClassOptions = useMemo(() => {
     if (assetClasses && assetClasses.length > 0) {
@@ -3320,28 +3408,45 @@ export default function Finance({ onAssetPenetration }) {
     if (newAccount.categoryL1 === '债权类') {
       return ['中债', '美债'];
     }
-    if (assetClasses && assetClasses.length > 0 && newAccount.categoryL1) {
-      const l1 = assetClasses.find(c => c.name === newAccount.categoryL1);
-      if (l1 && l1.children && l1.children.length > 0) {
-        return l1.children.map(c => c.name);
-      }
-      return [];
-    }
-    return DEFAULT_CATEGORY_L2;
-  }, [assetClasses, newAccount.categoryL1, newAccount.assetType, newAccount.market]);
+    // 合并资产分类模块数据和 localStorage 自定义数据
+    const l1Key = newAccount.categoryL1;
+    const moduleL2 = assetClasses && assetClasses.length > 0 && l1Key
+      ? (() => {
+          const l1 = assetClasses.find(c => c.name === l1Key);
+          return l1?.children?.map(c => c.name) || [];
+        })()
+      : [];
+    const customL2 = (categoryL2OptionsMap[l1Key] || []);
+    const cascadeL2 = newAccount.assetType && CASCADE_OPTIONS[newAccount.assetType]?.l2Options?.[l1Key]
+      ? CASCADE_OPTIONS[newAccount.assetType].l2Options[l1Key]
+      : [];
+    return [...new Set([...moduleL2, ...customL2, ...cascadeL2, ...DEFAULT_CATEGORY_L2])];
+  }, [assetClasses, newAccount.categoryL1, newAccount.assetType, newAccount.market, categoryL2OptionsMap]);
 
   const allCategoryL2Options = useMemo(() => {
+    const l2s = new Set();
     if (assetClasses && assetClasses.length > 0) {
-      const l2s = new Set();
       assetClasses.forEach(c => {
         if (c.children) {
           c.children.forEach(child => l2s.add(child.name));
         }
       });
-      if (l2s.size > 0) return [...l2s].sort();
     }
-    return DEFAULT_CATEGORY_L2;
-  }, [assetClasses]);
+    // 合并所有一级分类下的自定义二级分类
+    Object.values(categoryL2OptionsMap).forEach(arr => {
+      (arr || []).forEach(o => l2s.add(o));
+    });
+    // 合并 CASCADE_OPTIONS 中的默认二级分类
+    Object.values(CASCADE_OPTIONS).forEach(opt => {
+      if (opt?.l2Options) {
+        Object.values(opt.l2Options).forEach(arr => {
+          (arr || []).forEach(o => l2s.add(o));
+        });
+      }
+    });
+    DEFAULT_CATEGORY_L2.forEach(o => l2s.add(o));
+    return [...l2s].sort();
+  }, [assetClasses, categoryL2OptionsMap]);
 
   const categoryL3Options = useMemo(() => {
     let defaults = [];
@@ -3490,6 +3595,7 @@ export default function Finance({ onAssetPenetration }) {
         categoryL1: a.category || a.categoryL1 || '',
         categoryL2: a.subcategory || a.categoryL2 || '',
         categoryL3: a.tertiaryCategory || a.categoryL3 || '',
+        categoryL4: a.categoryL4 || '',
         positionGroup: a.positionGroup || '',
         positionType: a.positionCategory || a.positionType || '',
         costPrice: isCash ? 1 : _cost,
@@ -3943,7 +4049,7 @@ export default function Finance({ onAssetPenetration }) {
                 assetTypeOptions={ASSET_TYPE_OPTIONS}
                 assetClassOptions={assetClassOptions}
                 positionGroupOptions={positionGroupOptions}
-                positionTypeOptions={positionTypeOptions}
+                positionTypeOptions={allPositionTypeOptions}
                 allCategoryL2Options={allCategoryL2Options}
                 tags={tags}
                 marketGroups={MARKET_GROUPS}
@@ -3980,7 +4086,7 @@ export default function Finance({ onAssetPenetration }) {
                 assetTypeOptions={ASSET_TYPE_OPTIONS}
                 assetClassOptions={assetClassOptions}
                 positionGroupOptions={positionGroupOptions}
-                positionTypeOptions={positionTypeOptions}
+                positionTypeOptions={allPositionTypeOptions}
                 allCategoryL2Options={allCategoryL2Options}
                 tags={tags}
                 marketGroups={MARKET_GROUPS}
@@ -4112,7 +4218,7 @@ export default function Finance({ onAssetPenetration }) {
                           const l3 = cascade.l3Default[l1][l2];
                           setNewAccount({ ...newAccount, categoryL1: l1, assetType: '', categoryL2: l2, categoryL3: l3, categoryL4: '' });
                         } else {
-                          setNewAccount({ ...newAccount, categoryL1: l1, assetType: '', categoryL2: '', categoryL3: '' });
+                          setNewAccount({ ...newAccount, categoryL1: l1, assetType: '', categoryL2: '', categoryL3: '', categoryL4: '' });
                         }
                       }}
                         className={`${FORM_SELECT} flex-1`}>
@@ -4144,7 +4250,13 @@ export default function Finance({ onAssetPenetration }) {
                         disabled={!newAccount.categoryL1}
                         className={`${FORM_SELECT} flex-1 ${!newAccount.categoryL1 ? 'opacity-50 cursor-not-allowed' : ''}`}>
                         <option value="">{newAccount.categoryL1 ? '请选择资产类型' : '请先选择资产分类一级'}</option>
-                        {(CATEGORY_L1_ASSET_TYPES[newAccount.categoryL1] || assetTypeOptions).map(o => <option key={o} value={o}>{o}</option>)}
+                        {(() => {
+                          const mapped = CATEGORY_L1_ASSET_TYPES[newAccount.categoryL1];
+                          if (mapped) {
+                            return [...new Set([...mapped, ...assetTypeOptions])].map(o => <option key={o} value={o}>{o}</option>);
+                          }
+                          return assetTypeOptions.map(o => <option key={o} value={o}>{o}</option>);
+                        })()}
                       </select>
                       <button onClick={() => setShowAssetTypeModal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理资产类型">
                         <Settings className="w-4 h-4" />
@@ -4162,8 +4274,9 @@ export default function Finance({ onAssetPenetration }) {
                     </select>
                   </FormField>
 
+                  {newAccount.categoryL1 && (<>
                   {/* Row 4: 资产分类二级 */}
-                  <FormField label="资产分类二级">
+                  <FormField label="资产分类二级" required>
                     <div className="flex gap-2">
                       <select value={newAccount.categoryL2} onChange={e => {
                         const l2 = e.target.value;
@@ -4172,19 +4285,21 @@ export default function Finance({ onAssetPenetration }) {
                           const l3 = cascade.l3Default[newAccount.categoryL1][l2];
                           setNewAccount({ ...newAccount, categoryL2: l2, categoryL3: l3, categoryL4: '' });
                         } else {
-                          setNewAccount({ ...newAccount, categoryL2: l2, categoryL3: '' });
+                          setNewAccount({ ...newAccount, categoryL2: l2, categoryL3: '', categoryL4: '' });
                         }
                       }}
                         className={`${FORM_SELECT} flex-1`}>
                         <option value="">请选择</option>
                         {categoryL2Options.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
-                      <button onClick={() => setShowCategoryL2Modal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理二级分类">
+                      <button onClick={() => { if (newAccount.categoryL1) setShowCategoryL2Modal(true); }} disabled={!newAccount.categoryL1} className={`p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors ${!newAccount.categoryL1 ? 'opacity-50 cursor-not-allowed' : ''}`} title="管理二级分类">
                         <Settings className="w-4 h-4" />
                       </button>
                     </div>
                   </FormField>
+                  </>)}
 
+                  {newAccount.categoryL2 && (<>
                   {/* Row 4: 资产分类三级 | 资产分类四级 */}
                   <FormField label="资产分类三级" required>
                     <div className="flex gap-2">
@@ -4193,26 +4308,27 @@ export default function Finance({ onAssetPenetration }) {
                         <option value="">请选择</option>
                         {(() => {
                           const cascade = CASCADE_OPTIONS[newAccount.assetType];
-                          if (newAccount.market === '国内市场' && cascade && cascade.l3Options[newAccount.categoryL1] && cascade.l3Options[newAccount.categoryL1][newAccount.categoryL2]) {
-                            return cascade.l3Options[newAccount.categoryL1][newAccount.categoryL2].map(o => <option key={o} value={o}>{o}</option>);
-                          }
-                          const key = `${newAccount.categoryL1}__${newAccount.categoryL2}`;
+                          const l1 = newAccount.categoryL1;
+                          const l2 = newAccount.categoryL2;
+                          const key = `${l1}__${l2}`;
                           const customOptions = categoryL3OptionsMap[key] || [];
-                          return (
-                            <>
-                              <option value="场内">场内</option>
-                              <option value="场外">场外</option>
-                              {customOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                            </>
-                          );
+                          const cascadeL3 = (cascade?.l3Options?.[l1]?.[l2]) || [];
+                          const marketL3 = (newAccount.market === '国内市场') ? ['场内', '场外'] : ['场内', '场外'];
+                          const allOptions = [...new Set([...cascadeL3, ...marketL3, ...customOptions])];
+                          if (newAccount.market === '国内市场' && cascadeL3.length > 0) {
+                            return cascadeL3.map(o => <option key={o} value={o}>{o}</option>);
+                          }
+                          return allOptions.map(o => <option key={o} value={o}>{o}</option>);
                         })()}
                       </select>
-                      <button onClick={() => setShowCategoryL3Modal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理三级分类">
+                      <button onClick={() => { if (newAccount.categoryL2) setShowCategoryL3Modal(true); }} disabled={!newAccount.categoryL2} className={`p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors ${!newAccount.categoryL2 ? 'opacity-50 cursor-not-allowed' : ''}`} title="管理三级分类">
                         <Settings className="w-4 h-4" />
                       </button>
                     </div>
                   </FormField>
+                  </>)}
 
+                  {newAccount.categoryL3 && (<>
                   <FormField label="资产分类四级">
                     <div className="flex gap-2">
                       <select value={newAccount.categoryL4 || ''} onChange={e => setNewAccount({ ...newAccount, categoryL4: e.target.value })}
@@ -4226,11 +4342,12 @@ export default function Finance({ onAssetPenetration }) {
                           return (categoryL4Options[newAccount.categoryL1] || []).map(o => <option key={o} value={o}>{o}</option>);
                         })()}
                       </select>
-                      <button onClick={() => setShowCategoryL4Modal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理四级分类">
+                      <button onClick={() => { if (newAccount.categoryL3) setShowCategoryL4Modal(true); }} disabled={!newAccount.categoryL3} className={`p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors ${!newAccount.categoryL3 ? 'opacity-50 cursor-not-allowed' : ''}`} title="管理四级分类">
                         <Settings className="w-4 h-4" />
                       </button>
                     </div>
                   </FormField>
+                  </>)}
 
                   {/* Row 5: 持仓分组 | 持仓分类 */}
                   <FormField label="持仓分组" required>
@@ -4259,9 +4376,9 @@ export default function Finance({ onAssetPenetration }) {
                         className={`${FORM_SELECT} flex-1 ${!newAccount.assetType ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <option value="">{newAccount.assetType ? '请选择' : '请先选择资产类型'}</option>
-                        {(ASSET_TYPE_POSITION_TYPE_MAP[newAccount.assetType] || positionTypeOptions).map(o => <option key={o} value={o}>{o}</option>)}
+                        {currentPositionTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
-                      <button onClick={() => setShowPositionTypeModal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理持仓分类">
+                      <button onClick={() => { if (newAccount.assetType) setShowPositionTypeModal(true); }} disabled={!newAccount.assetType} className={`p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 transition-colors ${!newAccount.assetType ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 dark:hover:bg-slate-600'}`} title={newAccount.assetType ? '管理持仓分类' : '请先选择资产类型'}>
                         <Settings className="w-4 h-4" />
                       </button>
                     </div>
@@ -4675,7 +4792,7 @@ export default function Finance({ onAssetPenetration }) {
                 <FormField label="持仓分类">
                   <select value={batchEditData.positionType} onChange={e => setBatchEditData({ ...batchEditData, positionType: e.target.value })} className={FORM_SELECT}>
                     <option value="">不修改</option>
-                    {positionTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                    {allPositionTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </FormField>
 
@@ -4986,7 +5103,7 @@ export default function Finance({ onAssetPenetration }) {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">持仓分类管理</h3>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">持仓分类管理{newAccount.assetType ? ` - ${newAccount.assetType}` : ''}</h3>
                 <button onClick={() => setShowPositionTypeModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
                   <X className="w-5 h-5" />
                 </button>
@@ -4997,28 +5114,36 @@ export default function Finance({ onAssetPenetration }) {
                   <button onClick={handleAddPositionType} className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {positionTypeOptions.length > 0 ? (
-                    positionTypeOptions.map((item) => (
-                      <div key={item} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
-                        {positionTypeToEdit === item ? (
-                          <>
-                            <input type="text" value={newPositionTypeName || item} onChange={e => setNewPositionTypeName(e.target.value)} className="flex-1 px-2 py-1 border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-600 dark:text-white" autoFocus />
-                            <button onClick={handleSavePositionTypeEdit} className="p-1 text-green-600 hover:bg-green-100 rounded"><Edit2 className="w-4 h-4" /></button>
-                            <button onClick={() => { setPositionTypeToEdit(null); setNewPositionTypeName(''); }} className="p-1 text-gray-500 hover:bg-gray-200 rounded"><X className="w-4 h-4" /></button>
-                          </>
-                        ) : (
-                          <>
-                            <span className="flex-1 text-gray-700 dark:text-gray-300">{item}</span>
-                            <button onClick={() => { setPositionTypeToEdit(item); setNewPositionTypeName(item); }} className="p-1 text-blue-600 hover:bg-blue-100 rounded"><Edit2 className="w-4 h-4" /></button>
-                            {deleteConfirm === `pt-${item}` ? (
-                              <button onClick={() => handleDeletePositionType(item)} className="p-1 text-red-600 hover:bg-red-100 rounded">确认</button>
-                            ) : (
-                              <button onClick={() => setDeleteConfirm(`pt-${item}`)} className="p-1 text-red-500 hover:bg-red-100 rounded"><Trash2 className="w-4 h-4" /></button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    ))
+                  {newAccount.assetType && currentPositionTypeOptions.length > 0 ? (
+                    currentPositionTypeOptions.map((item) => {
+                      const isHardcoded = (ASSET_TYPE_POSITION_TYPE_MAP[newAccount.assetType] || []).includes(item);
+                      const isDeleted = (deletedPositionTypeMap[newAccount.assetType] || []).includes(item);
+                      return (
+                        <div key={item} className={`flex items-center gap-2 p-2 rounded-lg ${isHardcoded ? 'bg-gray-100 dark:bg-slate-600' : 'bg-gray-50 dark:bg-slate-700'}`}>
+                          {positionTypeToEdit === item ? (
+                            <>
+                              <input type="text" value={newPositionTypeName || item} onChange={e => setNewPositionTypeName(e.target.value)} className="flex-1 px-2 py-1 border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-600 dark:text-white" autoFocus />
+                              <button onClick={handleSavePositionTypeEdit} className="p-1 text-green-600 hover:bg-green-100 rounded"><Edit2 className="w-4 h-4" /></button>
+                              <button onClick={() => { setPositionTypeToEdit(null); setNewPositionTypeName(''); }} className="p-1 text-gray-500 hover:bg-gray-200 rounded"><X className="w-4 h-4" /></button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="flex-1 text-gray-700 dark:text-gray-300 text-sm">
+                                {item}
+                                {isHardcoded && <span className="ml-1 text-xs text-gray-400 bg-gray-200 dark:bg-slate-500 px-1 rounded">默认</span>}
+                                {isDeleted && <span className="ml-1 text-xs text-red-400">（已删除，可重新添加）</span>}
+                              </span>
+                              <button onClick={() => { setPositionTypeToEdit(item); setNewPositionTypeName(item); }} className="p-1 text-blue-600 hover:bg-blue-100 rounded" title="编辑"><Edit2 className="w-4 h-4" /></button>
+                              {deleteConfirm === `pt-${item}` ? (
+                                <button onClick={() => handleDeletePositionType(item)} className="p-1 text-red-600 hover:bg-red-100 rounded">确认</button>
+                              ) : (
+                                <button onClick={() => setDeleteConfirm(`pt-${item}`)} className="p-1 text-red-500 hover:bg-red-100 rounded" title="删除"><Trash2 className="w-4 h-4" /></button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })
                   ) : (
                     <div className="text-center py-8 text-gray-400 text-sm">暂无持仓分类</div>
                   )}
