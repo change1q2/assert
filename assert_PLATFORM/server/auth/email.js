@@ -41,12 +41,19 @@ async function verifyEmailCode(email, code) {
 
 async function deliverEmailCode(email, code) {
   const resendApiKey = process.env.RESEND_API_KEY;
-  const emailFrom = process.env.EMAIL_FROM || "onboarding@resend.dev";
+  const fromEmail = process.env.RESEND_FROM_EMAIL || "noreply@lifeassert.online";
+  const appDomain = process.env.APP_DOMAIN || "https://www.lifeassert.online";
 
-  // 如果没有配置 Resend API Key，使用开发模式
   if (!resendApiKey) {
     console.log(`[EMAIL development] ${email}: ${code}`);
     return false;
+  }
+
+  const fromDomain = fromEmail.split("@")[1];
+  const verifiedDomain = "lifeassert.online";
+  if (fromDomain !== verifiedDomain) {
+    console.error(`[EMAIL] from domain "${fromDomain}" does not match verified domain "${verifiedDomain}"`);
+    throw new Error("邮件发件域名未配置，请联系管理员。");
   }
 
   try {
@@ -57,7 +64,7 @@ async function deliverEmailCode(email, code) {
         "Authorization": `Bearer ${resendApiKey}`,
       },
       body: JSON.stringify({
-        from: emailFrom,
+        from: `Wealth OS <${fromEmail}>`,
         to: email,
         subject: "Wealth OS 邮箱验证码",
         html: `
@@ -75,6 +82,7 @@ async function deliverEmailCode(email, code) {
             </div>
             <div style="text-align: center; margin-top: 30px; color: #9CA3AF; font-size: 12px;">
               <p>如果这不是您的操作，请忽略此邮件。</p>
+              <p style="margin-top: 8px;">${appDomain}</p>
             </div>
           </div>
         `,
@@ -82,9 +90,18 @@ async function deliverEmailCode(email, code) {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      console.error("Resend API error:", error);
-      throw new Error("邮件发送失败，请稍后重试。");
+      const errorText = await response.text();
+      console.error(`[EMAIL] Resend API error (HTTP ${response.status}):`, errorText);
+
+      if (response.status === 401) {
+        throw new Error("邮件服务鉴权失败，请联系管理员。");
+      } else if (response.status === 403) {
+        throw new Error("邮件发件域名未验证，请联系管理员。");
+      } else if (response.status === 429) {
+        throw new Error("邮件发送过于频繁，请稍后再试。");
+      } else {
+        throw new Error("邮件发送失败，请稍后重试。");
+      }
     }
 
     console.log(`[EMAIL] Verification code sent to ${email}`);
