@@ -22,7 +22,13 @@ async function safeSqlGet(pool, sql, params = [], fallback = null) {
 }
 
 async function loadUserState(userId) {
-  const profile = await profileForUser(userId);
+  let profile;
+  try {
+    profile = await profileForUser(userId);
+  } catch (e) {
+    console.warn(`[state-service] profileForUser failed for user ${userId}: ${e.message}`);
+    profile = null;
+  }
   const rates = Object.fromEntries(
     (await safeSqlAll(pool, "SELECT currency, rate FROM exchange_rates WHERE user_id = ?", [userId]))
       .map((row) => [row.currency, row.rate])
@@ -33,18 +39,18 @@ async function loadUserState(userId) {
       balance: row.balance, liability: row.liability, enabled: Boolean(row.enabled), default: Boolean(row.is_default),
       category: row.category || '', subCategory: row.sub_category || '',
     }));
-  const assetClasses = (await sqlAll(pool, "SELECT * FROM asset_classes WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+  const assetClasses = (await safeSqlAll(pool, "SELECT * FROM asset_classes WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, children: maybeParseJson(row.children_json), visible: Boolean(row.visible),
     value: row.value, openingValue: row.opening_value, targetValue: row.target_value,
     income: row.income, expense: row.expense, laborIncome: row.labor_income, color: row.color,
     expectedReturn: row.expected_return,
   }));
-  const records = (await sqlAll(pool, "SELECT * FROM records WHERE user_id = ? ORDER BY record_date DESC, sort_order DESC", [userId])).map((row) => ({
+  const records = (await safeSqlAll(pool, "SELECT * FROM records WHERE user_id = ? ORDER BY record_date DESC, sort_order DESC", [userId])).map((row) => ({
     id: numericIfPossible(row.id), type: row.type, category: row.category, sub: row.subcategory,
     tag: row.tag, bookId: row.book_id || '', amount: row.amount, currency: row.currency, accountId: row.account_id,
     date: row.record_date, recorder: row.recorder, note: row.note, createdAt: row.created_at,
   }));
-  const budgets = (await sqlAll(pool, "SELECT * FROM budgets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+  const budgets = (await safeSqlAll(pool, "SELECT * FROM budgets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: numericIfPossible(row.id), name: row.name, category: row.category, amount: row.amount, used: row.used,
   }));
   const indoorTransactionRows = await safeSqlAll(pool, "SELECT * FROM finance_asset_indoor_transactions WHERE user_id = ? ORDER BY sort_order", [userId]);
@@ -101,18 +107,18 @@ async function loadUserState(userId) {
     archiveDate: row.archive_date, status: row.status,
   }));
   const customRecords = { income: [], expense: [], transfer: [] };
-  (await sqlAll(pool, "SELECT record_type, name, icon FROM custom_record_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
+  (await safeSqlAll(pool, "SELECT record_type, name, icon FROM custom_record_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
     .forEach((row) => (customRecords[row.record_type] ||= []).push({ name: row.name, icon: row.icon || '' }));
   const tertiaryByScope = {};
-  (await sqlAll(pool, "SELECT scope, name FROM finance_tertiary_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
+  (await safeSqlAll(pool, "SELECT scope, name FROM finance_tertiary_categories WHERE user_id = ? ORDER BY sort_order", [userId]))
     .forEach((row) => (tertiaryByScope[row.scope] ||= []).push(row.name));
-  const books = (await sqlAll(pool, "SELECT * FROM books WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+  const books = (await safeSqlAll(pool, "SELECT * FROM books WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, icon: row.icon, color: row.color, tags: maybeParseJson(row.tags_json) || [], createdAt: row.created_at,
   }));
-  const tags = (await sqlAll(pool, "SELECT * FROM tags WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+  const tags = (await safeSqlAll(pool, "SELECT * FROM tags WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, color: row.color, createdAt: row.created_at,
   }));
-  const recordTagList = (await sqlAll(pool, "SELECT record_id, tag_id FROM record_tags WHERE user_id = ?", [userId])).map((row) => ({
+  const recordTagList = (await safeSqlAll(pool, "SELECT record_id, tag_id FROM record_tags WHERE user_id = ?", [userId])).map((row) => ({
     recordId: row.record_id, tagId: row.tag_id,
   }));
   const oldRecordTags = { tagsByCategory: {}, lastByCategory: {} };
@@ -124,15 +130,20 @@ async function loadUserState(userId) {
   } catch (e) {
     // record_tags_old 表可能不存在，忽略
   }
-  const recorders = (await sqlAll(pool, "SELECT name FROM recorders WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => row.name);
-  const reminders = (await sqlAll(pool, "SELECT * FROM reminders WHERE user_id = ? ORDER BY reminder_date", [userId])).map((row) => ({
+  const recorders = (await safeSqlAll(pool, "SELECT name FROM recorders WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => row.name);
+  const reminders = (await safeSqlAll(pool, "SELECT * FROM reminders WHERE user_id = ? ORDER BY reminder_date", [userId])).map((row) => ({
     id: row.id, date: row.reminder_date, title: row.title, type: row.type,
   }));
   const debts = (await safeSqlAll(pool, "SELECT * FROM debts WHERE user_id = ? ORDER BY sort_order", [userId])).map(async (row) => {
-    const payments = Object.fromEntries(
-      (await sqlAll(pool, "SELECT period, status FROM debt_payments WHERE user_id = ? AND debt_id = ?", [userId, row.id]))
-        .map((payment) => [payment.period, payment.status])
-    );
+    let payments = {};
+    try {
+      payments = Object.fromEntries(
+        (await sqlAll(pool, "SELECT period, status FROM debt_payments WHERE user_id = ? AND debt_id = ?", [userId, row.id]))
+          .map((payment) => [payment.period, payment.status])
+      );
+    } catch (e) {
+      console.warn(`[state-service] debt_payments query failed for debt ${row.id}: ${e.message}`);
+    }
     return {
       id: numericIfPossible(row.id), category: row.category, type: row.type, debtCategory: row.debt_category, name: row.name,
       creditor: row.creditor_name, debtor: row.debtor_name, creditorName: row.creditor_name, debtorName: row.debtor_name,
@@ -147,16 +158,16 @@ async function loadUserState(userId) {
     };
   });
   const resolvedDebts = await Promise.all(debts);
-  const debtCategories = (await sqlAll(pool, "SELECT * FROM debt_categories WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+  const debtCategories = (await safeSqlAll(pool, "SELECT * FROM debt_categories WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, sortOrder: row.sort_order,
   }));
-  const strategies = (await sqlAll(pool, "SELECT * FROM strategies WHERE user_id = ? ORDER BY id", [userId])).map((row) => ({
+  const strategies = (await safeSqlAll(pool, "SELECT * FROM strategies WHERE user_id = ? ORDER BY id", [userId])).map((row) => ({
     id: row.id, name: row.name, active: Boolean(row.active), target: row.target,
     allocation: maybeParseJson(row.allocation_json), debtLimit: row.debt_limit,
     annualReturn: row.annual_return, risk: row.risk,
   }));
   const settings = await safeSqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json FROM user_settings WHERE user_id = ?", [userId]);
-  const yearlyRecords = (await sqlAll(pool, "SELECT year, opening_asset, closing_asset, target_profit, actual_profit FROM yearly_records WHERE user_id = ? ORDER BY year", [userId])).map((row) => ({
+  const yearlyRecords = (await safeSqlAll(pool, "SELECT year, opening_asset, closing_asset, target_profit, actual_profit FROM yearly_records WHERE user_id = ? ORDER BY year", [userId])).map((row) => ({
     year: row.year,
     openingAsset: row.opening_asset,
     closingAsset: row.closing_asset,
@@ -194,6 +205,48 @@ async function loadUserState(userId) {
 
 async function saveUserState(conn, userId, state) {
   const user = state.user || {};
+
+  // 安全检查：防止数据被意外清空
+  // 场景1: 如果 state 基本为空（无任何实质数据），且数据库有数据，拒绝保存
+  const coreTables = ['accounts', 'records', 'finance_assets', 'debts', 'asset_classes'];
+  const stateCounts = {
+    accounts: (state.accounts || []).length,
+    records: (state.records || []).length,
+    financeAssets: (state.financeAssets || []).length,
+    debts: (state.debts || []).length,
+    assetClasses: (state.assetClasses || []).length,
+  };
+  const totalStateItems = Object.values(stateCounts).reduce((a, b) => a + b, 0);
+
+  const hasAnyCoreData = totalStateItems > 0;
+  const hasCriticalData = stateCounts.records > 0 || stateCounts.financeAssets > 0 || stateCounts.debts > 0;
+
+  // 检查数据库中现有的数据量
+  let existingCounts = null;
+  try {
+    const countRows = {};
+    for (const table of coreTables) {
+      const [rows] = await conn.execute(`SELECT COUNT(*) as cnt FROM ${table} WHERE user_id = ?`, [userId]);
+      countRows[table] = rows[0].cnt;
+    }
+    const totalExisting = Object.values(countRows).reduce((a, b) => a + b, 0);
+
+    // 如果数据库有大量数据，但提交的状态几乎没有数据，可能是加载出了问题
+    if (totalExisting > 0 && totalStateItems === 0) {
+      console.warn(`[state-service] 用户 ${userId} 保存的状态完全为空但数据库有 ${totalExisting} 条数据，跳过保存`);
+      return;
+    }
+
+    // 如果数据库有记录/资产/债务数据，但提交的状态中这些都为空，且缺少关键模块数据，则拒绝保存
+    const hasExistingCritical = countRows.records > 0 || countRows.finance_assets > 0 || countRows.debts > 0;
+    if (hasExistingCritical && !hasCriticalData && stateCounts.accounts === 0) {
+      console.warn(`[state-service] 用户 ${userId} 保存的状态中关键数据(records/assets/debts)为空但数据库有数据，跳过保存以防止数据丢失`);
+      return;
+    }
+  } catch (e) {
+    console.warn(`[state-service] 无法检查现有数据量: ${e.message}`);
+  }
+
   const previousSettings = await sqlGet(conn, "SELECT hk_ipo_rules_json FROM user_settings WHERE user_id = ?", [userId]);
   await sqlRun(conn, `
     UPDATE user_profiles SET name=?, phone=?, email=?, currency=?, theme=?, avatar=?, birthday=?, city=?,
