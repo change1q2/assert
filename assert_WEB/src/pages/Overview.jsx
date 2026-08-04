@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { fetchState, saveState } from '../api';
+import { calcCooperationFunds } from './Accounts';
 import { getCache, setCache } from '../utils/cache';
 import { PieChart, Pie, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import {
@@ -33,6 +34,106 @@ const ASSET_CATEGORY_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4
 const LAYOUT_CACHE_KEY = 'overview_dashboard_layout';
 
 const TOPSIDE_CARDS = ['total-income', 'total-expense', 'finance-total', 'independent-total', 'total-liabilities'];
+
+function getEffectiveAccountType(account) {
+  if (!account) return '资产';
+  if (account.type) return account.type;
+  return account.liability ? '负债' : '资产';
+}
+
+function calcIndependentAssetMv(type, item) {
+  if (!item) return 0;
+  if (type === 'insurance') return parseFloat(item.cashValue) || 0;
+  if (type === 'realestate') {
+    if (item.type === '自用') {
+      const perSqm = parseFloat(item.selfUseMarketPricePerSqm) || 0;
+      const area = parseFloat(item.selfUseMarketArea) || 0;
+      const computed = perSqm * area;
+      return computed || parseFloat(item.marketValue) || 0;
+    }
+    return parseFloat(item.marketValue) || 0;
+  }
+  if (type === 'vehicle') return parseFloat(item.residualValue) || 0;
+  if (type === 'fixedinvestment') {
+    const baseCost = parseFloat(item.investmentCost) || 0;
+    const annual = parseFloat(item.annualContribution) || 0;
+    let years = 0;
+    if (item.startYear) {
+      const startYear = parseInt(item.startYear, 10);
+      if (!isNaN(startYear)) years = Math.max(0, new Date().getFullYear() - startYear);
+    }
+    return baseCost + annual * years;
+  }
+  if (type === 'equity') {
+    const qty = parseFloat(item.quantity) || 0;
+    return qty * (parseFloat(item.currentPrice) || 0);
+  }
+  if (type === 'fixeddeposit') return parseFloat(item.amount) || 0;
+  return 0;
+}
+
+function calcFinanceAssetMv(a, accounts) {
+  if (!a) return 0;
+  const transactions = a.transactions || [];
+  let buyTotalQty = 0, sellTotalQty = 0;
+  transactions.forEach(t => {
+    const qty = parseFloat(t.quantity || t.shares) || 0;
+    if (t.type === '建仓' || t.type === '买入') buyTotalQty += qty;
+    else if (t.type === '卖出' || t.type === '清仓') sellTotalQty += Math.abs(qty);
+  });
+  const _computedQty = buyTotalQty - sellTotalQty;
+  const _qty = buyTotalQty > 0 ? _computedQty : (parseFloat(a.shares || a.quantity) || 0);
+  const isCashCategory = a.category === '现金类' || a.categoryL1 === '现金类';
+  let _cashValue = 0;
+  if (isCashCategory) {
+    _cashValue = parseFloat(a.currentValue) || 0;
+    if (_cashValue === 0 && Array.isArray(accounts)) {
+      const accId = a.accountId || a.account || '';
+      const matched = accounts.find(acct => acct.id === accId || acct.name === accId);
+      if (matched) _cashValue = parseFloat(matched.balance) || 0;
+    }
+  }
+  const _effectivePrice = isCashCategory ? 1 : (parseFloat(a.currentPrice) || 0);
+  return isCashCategory ? _cashValue : (parseFloat(a.currentValue) || (_effectivePrice * _qty));
+}
+
+function computeAccountAmountForCooperation(account, accounts, financeAssets, independentAssets, records, debts) {
+  if (!account) return 0;
+  const accId = account.id;
+  const accName = account.name;
+  const matchesAccount = (id, name) => {
+    const a = id || name || '';
+    return !!a && (a === accId || a === accName);
+  };
+  let amount = 0;
+  if (independentAssets && typeof independentAssets === 'object') {
+    Object.entries(independentAssets).forEach(([type, items]) => {
+      if (!Array.isArray(items)) return;
+      items.forEach(item => {
+        if (!matchesAccount(item.accountId, null)) return;
+        amount += calcIndependentAssetMv(type, item);
+      });
+    });
+  }
+  if (Array.isArray(financeAssets)) {
+    financeAssets.forEach(a => {
+      if (a.status === 'archived' || a.isArchived) return;
+      if (!matchesAccount(a.accountId, a.account)) return;
+      amount += calcFinanceAssetMv(a, accounts);
+    });
+  }
+  if (Array.isArray(records)) {
+    records.forEach(r => {
+      if (matchesAccount(r.account, null)) amount += parseFloat(r.amount) || 0;
+    });
+  }
+  if (Array.isArray(debts) && getEffectiveAccountType(account) === '负债') {
+    debts.forEach(d => {
+      if (matchesAccount(d.account, null)) amount += parseFloat(d.amount) || 0;
+    });
+  }
+  return amount;
+}
 
 const CardWrapper = ({ children, className = '' }) => (
   <div className={`bg-white dark:bg-slate-800 rounded-xl p-4 sm:p-5 shadow-sm hover:shadow-md transition-all duration-200 border border-gray-200/60 dark:border-slate-700 overflow-hidden break-words ${className}`}>
@@ -119,6 +220,9 @@ function formatPercentage(value) {
 
 export default function Overview() {
   const [stateData, setStateData] = useState(null);
+  const [excludeCooperationFunds, setExcludeCooperationFunds] = useState(() => {
+    try { return localStorage.getItem('overview_exclude_cooperation') === '1'; } catch (_) { return false; }
+  });
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [timePeriod, setTimePeriod] = useState('month');
@@ -561,6 +665,11 @@ export default function Overview() {
 
   // 资产总览 = 理财总资产 + 独立总资产 - 总负债
   const netAssetValue = financeTotalValue + independentTotalValue - liabilities.total;
+
+  const cooperationFunds = useMemo(() => {
+    return calcCooperationFunds(accounts, acc => computeAccountAmountForCooperation(acc, accounts, financeAssets, independentAssets, records, debts));
+  }, [accounts, financeAssets, independentAssets, records, debts]);
+  const displayNetAssetValue = excludeCooperationFunds ? netAssetValue - cooperationFunds.otherHeld : netAssetValue;
 
   const yearlyRecords = stateData?.yearlyRecords || [];
   const goals = computeGoals(overviewGoals, assets, yearlyRecords, netAssetValue);
@@ -1739,12 +1848,25 @@ export default function Overview() {
             </div>
             <div className="text-center lg:text-right">
               <div className="text-4xl sm:text-5xl font-bold font-mono text-gray-900 whitespace-nowrap tabular-nums tracking-tight">
-                {formatCurrency(netAssetValue)}
+                {formatCurrency(displayNetAssetValue)}
               </div>
               <div className="mt-1 flex items-center justify-center lg:justify-end gap-1 text-sm text-green-600">
                 <TrendingUp className="w-4 h-4" />
-                <span>资产总览 = 理财 + 独立 - 负债</span>
+                <span>{excludeCooperationFunds ? '资产总览 = 理财 + 独立 - 负债 - 合作资金' : '资产总览 = 理财 + 独立 - 负债'}</span>
               </div>
+              <label className="mt-2 flex items-center justify-center lg:justify-end gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={excludeCooperationFunds}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setExcludeCooperationFunds(v);
+                    try { localStorage.setItem('overview_exclude_cooperation', v ? '1' : '0'); } catch (_) {}
+                  }}
+                  className="w-3.5 h-3.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span>去除合作他人资金{cooperationFunds.multiAccountCount > 0 ? `（他人持有 ${formatCurrency(cooperationFunds.otherHeld)}）` : ''}</span>
+              </label>
             </div>
             <div className="flex items-center gap-3 shrink-0">
               <button
@@ -1825,6 +1947,13 @@ export default function Overview() {
               <div>
                 <span className="font-medium text-gray-900 dark:text-white">说明：</span>
                 负债数据来自 debts，收入支出数据来自 records，流动性数据来自 accounts 和 records
+              </div>
+            </div>
+            <div className="flex items-start gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 flex-shrink-0" />
+              <div>
+                <span className="font-medium text-gray-900 dark:text-white">合作资金：</span>
+                多人所有账户中非默认所有者按占比占有的资金份额。勾选「去除合作他人资金」后，资产总览 = 理财 + 独立 - 负债 - 合作资金
               </div>
             </div>
           </div>

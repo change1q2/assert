@@ -40,6 +40,79 @@ function formatCurrency(value) {
   }).format(value);
 }
 
+function migrateAccountOwnership(acc) {
+  const result = { ...acc };
+  if (!Array.isArray(result.owners) || result.owners.length === 0) {
+    result.ownershipType = 'personal';
+    result.owners = [{ name: '默认', share: 100, isDefault: true }];
+  } else {
+    const normalizedOwners = result.owners.map(o => {
+      const shareNum = parseFloat(o.share);
+      return {
+        name: (o.name && String(o.name).trim()) || '默认',
+        share: isNaN(shareNum) ? 100 : shareNum,
+        isDefault: o.isDefault === true,
+      };
+    });
+    // Ensure exactly one default owner: keep the first isDefault===true (if any) and reset the rest.
+    const firstDefaultIdx = normalizedOwners.findIndex(o => o.isDefault === true);
+    const defaultIdx = firstDefaultIdx >= 0 ? firstDefaultIdx : 0;
+    normalizedOwners.forEach((o, i) => {
+      o.isDefault = i === defaultIdx;
+    });
+    result.owners = normalizedOwners;
+    result.ownershipType = normalizedOwners.length > 1 ? 'multi' : 'personal';
+  }
+  return result;
+}
+
+function normalizeAccountsOwnership(accounts) {
+  if (!Array.isArray(accounts)) return [];
+  return accounts.map(acc => migrateAccountOwnership({ ...acc }));
+}
+
+function scaleAmountByOwner(val, share) {
+  if (val == null || Number.isNaN(Number(val))) return val;
+  const s = typeof share === 'number' ? share : 1;
+  return Number(val) * s;
+}
+
+function getOwnerShare(account, ownerName) {
+  if (!account || ownerName === '__ALL__' || !ownerName) return 1;
+  const owner = (account.owners || []).find(o => o.name === ownerName);
+  if (!owner) return 1;
+  const share = Number(owner.share);
+  if (Number.isNaN(share)) return 1;
+  return share / 100;
+}
+
+function normalizeOwnersDefault(owners) {
+  if (!Array.isArray(owners) || owners.length === 0) return owners;
+  let defaultIdx = owners.findIndex(o => o.isDefault === true);
+  if (defaultIdx === -1) defaultIdx = 0;
+  return owners.map((o, i) => ({ ...o, isDefault: i === defaultIdx }));
+}
+
+export function calcCooperationFunds(accounts, getAccountAmount) {
+  let defaultHeld = 0;
+  let otherHeld = 0;
+  let multiAccountCount = 0;
+  if (!Array.isArray(accounts)) return { defaultHeld, otherHeld, multiAccountCount };
+  accounts.forEach(acc => {
+    if ((acc.ownershipType || 'personal') !== 'multi') return;
+    if (!Array.isArray(acc.owners) || acc.owners.length === 0) return;
+    multiAccountCount += 1;
+    const defaultOwner = acc.owners.find(o => o.isDefault === true) || acc.owners[0];
+    const ds = parseFloat(defaultOwner && defaultOwner.share);
+    const share = isNaN(ds) ? 100 : ds;
+    const raw = getAccountAmount ? getAccountAmount(acc) : 0;
+    const amount = Math.abs(Number(raw) || 0);
+    defaultHeld += amount * share / 100;
+    otherHeld += amount * (100 - share) / 100;
+  });
+  return { defaultHeld, otherHeld, multiAccountCount };
+}
+
 function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
   const converted = convertCurrency(value, currency, targetCurrency, rates);
   const symbol = getCurrencySymbol(targetCurrency);
@@ -115,7 +188,19 @@ export default function Accounts() {
     category: '银行',
     subCategory: '招商银行',
     liability: false,
+    ownershipType: 'personal',
+    owners: [{ name: '默认', share: 100, isDefault: true }],
   });
+  const [extraOwnerNames, setExtraOwnerNames] = useState([]);
+  const [ownershipDropdownOpen, setOwnershipDropdownOpen] = useState(false);
+  const [ownerDropdownOpen, setOwnerDropdownOpen] = useState(false);
+  const [multiOwnerPanelOpen, setMultiOwnerPanelOpen] = useState(true);
+  const [personalNewName, setPersonalNewName] = useState('');
+  const [multiNewName, setMultiNewName] = useState('');
+  const [showPersonalAdd, setShowPersonalAdd] = useState(false);
+  const [showMultiAdd, setShowMultiAdd] = useState(false);
+  const [tempMultiCheckedNames, setTempMultiCheckedNames] = useState(new Set());
+  const [lastPersonalOwner, setLastPersonalOwner] = useState('默认');
   const [filters, setFilters] = useState({
     name: '',
     category: '',
@@ -140,7 +225,10 @@ export default function Accounts() {
   const [addingType, setAddingType] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
   const [editingTypeName, setEditingTypeName] = useState({ oldName: '', newName: '' });
+  const [editingOwner, setEditingOwner] = useState({ oldName: '', newName: '' });
   const [selectedAccountId, setSelectedAccountId] = useState(null);
+  const [detailOwnerFilter, setDetailOwnerFilter] = useState('__ALL__');
+  useEffect(() => { setDetailOwnerFilter('__ALL__'); }, [selectedAccountId]);
   const [balanceMapping, setBalanceMapping] = useState(() => {
     try {
       const saved = localStorage.getItem('wealth_os_account_balance_mapping');
@@ -303,62 +391,97 @@ export default function Accounts() {
     return { mv, cost, quantity, costPrice, currentPrice, holdingPnl, holdingPnlRate };
   };
 
+  // 判断一条资产/记录是否明确归属到指定账户（accountId 或 account === 账户 id 或 name）
+  function belongsToAccount(assetAccId, assetAccName, account) {
+    if (!account) return false;
+    const aId = assetAccId || assetAccName || '';
+    if (!aId) return false;
+    return aId === account.id || aId === account.name;
+  }
+
   const accountStats = useMemo(() => {
     const stats = {};
     accounts.forEach(a => { stats[a.id] = { marketValue: 0, holdingCost: 0 }; });
 
-    // 独立资产
+    // 独立资产（只认 accountId / accountName === 本账户 id 或 name）
     if (independentAssets && typeof independentAssets === 'object') {
       Object.entries(independentAssets).forEach(([type, items]) => {
         if (!Array.isArray(items)) return;
         items.forEach(item => {
-          const acc = accounts.find(a => a.id === item.accountId);
-          if (!acc) return;
-          if (!stats[acc.id]) stats[acc.id] = { marketValue: 0, holdingCost: 0 };
+          const account = accounts.find(acct => belongsToAccount(item.accountId, null, acct));
+          if (!account) return;
           const { mv, cost } = calcIndependentAsset(type, item);
-          stats[acc.id].marketValue += mv;
-          stats[acc.id].holdingCost += cost;
+          stats[account.id].marketValue += mv;
+          stats[account.id].holdingCost += cost;
         });
       });
     }
 
-    // 理财持仓（排除已归档资产）
+    // 理财持仓（排除已归档资产）：仅当 asset.accountId || asset.account 明确等于本账户 id 或 name 才计入
     if (Array.isArray(financeAssets)) {
-      financeAssets.forEach(a => {
-        if (a.status === 'archived' || a.isArchived) return;
-        const accId = a.accountId || a.account || '';
-        const acc = accounts.find(acct => acct.id === accId || acct.name === accId);
-        if (!acc) return;
-        if (!stats[acc.id]) stats[acc.id] = { marketValue: 0, holdingCost: 0 };
-        const { mv, cost } = calcFinanceAsset(a);
-        stats[acc.id].marketValue += mv;
-        stats[acc.id].holdingCost += cost;
+      accounts.forEach(account => {
+        financeAssets.forEach(a => {
+          if (a.status === 'archived' || a.isArchived) return;
+          if (!belongsToAccount(a.accountId, a.account, account)) return;
+          const { mv, cost } = calcFinanceAsset(a);
+          stats[account.id].marketValue += mv;
+          stats[account.id].holdingCost += cost;
+        });
       });
     }
 
-    // 收支记录
+    // 收支记录：record.account 等于账户 id 或 name 才计入
     records.forEach(record => {
       const accName = record.account;
-      const acc = accounts.find(acct => acct.name === accName);
-      if (!acc) return;
-      if (!stats[acc.id]) stats[acc.id] = { marketValue: 0, holdingCost: 0 };
-      stats[acc.id].marketValue += parseFloat(record.amount) || 0;
-      // 成本 = 0
+      const account = accounts.find(acct =>
+        (accName && accName === acct.id) || (accName && accName === acct.name)
+      );
+      if (!account) return;
+      stats[account.id].marketValue += parseFloat(record.amount) || 0;
     });
 
-    // 债务记录（仅对负债类型账户）
+    // 债务记录（仅对负债类型账户）：debt.account 等于账户 id 或 name 才计入
     debts.forEach(debt => {
       if (!debt.account) return;
-      const acc = accounts.find(acct => acct.name === debt.account);
-      if (!acc) return;
-      if (getEffectiveType(acc) !== '负债') return;
-      if (!stats[acc.id]) stats[acc.id] = { marketValue: 0, holdingCost: 0 };
-      stats[acc.id].marketValue += parseFloat(debt.amount) || 0;
-      stats[acc.id].holdingCost += parseFloat(debt.principal) || 0;
+      const account = accounts.find(acct =>
+        (debt.account === acct.id) || (debt.account === acct.name)
+      );
+      if (!account) return;
+      if (getEffectiveType(account) !== '负债') return;
+      stats[account.id].marketValue += parseFloat(debt.amount) || 0;
+      stats[account.id].holdingCost += parseFloat(debt.principal) || 0;
     });
 
     return stats;
   }, [accounts, independentAssets, finance, financeAssets, records, debts]);
+
+  const cooperationFunds = useMemo(() => {
+    return calcCooperationFunds(accounts, acc => {
+      const s = accountStats[acc.id];
+      return s ? s.marketValue : 0;
+    });
+  }, [accounts, accountStats]);
+
+  const allOwnerNames = useMemo(() => {
+    const nameSet = new Set();
+    if (Array.isArray(extraOwnerNames)) {
+      extraOwnerNames.forEach(n => {
+        if (n && String(n).trim()) nameSet.add(String(n).trim());
+      });
+    }
+    if (Array.isArray(accounts)) {
+      accounts.forEach(acc => {
+        if (Array.isArray(acc.owners)) {
+          acc.owners.forEach(o => {
+            if (o && o.name && String(o.name).trim()) {
+              nameSet.add(String(o.name).trim());
+            }
+          });
+        }
+      });
+    }
+    return [...nameSet];
+  }, [extraOwnerNames, accounts]);
 
   useEffect(() => {
     loadData();
@@ -416,7 +539,7 @@ export default function Accounts() {
       if ((!data.accounts || data.accounts.length === 0) && cachedAccounts) {
         try {
           const parsed = JSON.parse(cachedAccounts);
-          data.accounts = parsed;
+          data.accounts = normalizeAccountsOwnership(parsed);
         } catch {
           /* ignore parse error */
         }
@@ -428,8 +551,11 @@ export default function Accounts() {
           { id: 'demo-3', name: '微信支付', category: '其他', subCategory: '微信支付', currency: 'CNY', liability: false, balance: 2000 },
           { id: 'demo-4', name: '工商银行信用卡', category: '银行', subCategory: '工商银行', currency: 'CNY', liability: true, balance: 3000 },
         ];
-        data.accounts = demoAccounts;
-        localStorage.setItem('wealth_os_accounts', JSON.stringify(demoAccounts));
+        const normalizedDemoAccounts = normalizeAccountsOwnership(demoAccounts);
+        data.accounts = normalizedDemoAccounts;
+        localStorage.setItem('wealth_os_accounts', JSON.stringify(normalizedDemoAccounts));
+      } else {
+        data.accounts = normalizeAccountsOwnership(data.accounts);
       }
       setStateData(data);
       // 不再自动创建现金资产
@@ -443,7 +569,8 @@ export default function Accounts() {
       if (cachedAccounts) {
         try {
           const parsed = JSON.parse(cachedAccounts);
-          setStateData({ accounts: parsed, records: [], finance: {}, debts: [] });
+          const normalizedParsed = normalizeAccountsOwnership(parsed);
+          setStateData({ accounts: normalizedParsed, records: [], finance: {}, debts: [] });
         } catch {
           setError('加载数据失败');
         }
@@ -597,6 +724,17 @@ export default function Accounts() {
     });
   }, [accounts, filters]);
 
+  function scaleAssetList(list, s) {
+    if (s === 1 || !Array.isArray(list)) return list;
+    return list.map(it => {
+      const r = { ...it };
+      ['mv','cost','holdingPnl','dailyPnl','currentValue','balance','marketValue','holdingCost','totalCost','pl','pnl','amount'].forEach(k => {
+        if (typeof r[k] === 'number') r[k] = r[k] * s;
+      });
+      return r;
+    });
+  }
+
   // 统一资产列表（详情页用）- 必须在 renderDetailPage 之前定义
   const unifiedAssets = useMemo(() => {
     if (!selectedAccountId) return [];
@@ -688,6 +826,7 @@ export default function Accounts() {
     setEditingAccount(null);
     const firstCategory = categoryList[0]?.value || '银行';
     const defaultSub = (accountCatConfig[firstCategory] || [])[0] || '';
+    const defaultOwner = allOwnerNames[0] || '默认';
     setFormData({
       name: '',
       category: firstCategory,
@@ -696,7 +835,17 @@ export default function Accounts() {
       liability: false,
       type: '独立资产',
       financeMarket: '',
+      ownershipType: 'personal',
+      owners: [{ name: defaultOwner, share: 100, isDefault: true }],
     });
+    setLastPersonalOwner(defaultOwner);
+    setTempMultiCheckedNames(new Set());
+    setOwnershipDropdownOpen(false);
+    setOwnerDropdownOpen(false);
+    setShowPersonalAdd(false);
+    setShowMultiAdd(false);
+    setPersonalNewName('');
+    setMultiNewName('');
     setShowModal(true);
   };
 
@@ -713,6 +862,7 @@ export default function Accounts() {
     } else if (type === '资产') {
       type = '独立资产';
     }
+    const migratedAccount = migrateAccountOwnership({ ...account });
     setFormData({
       name: account.name,
       category: cat,
@@ -721,7 +871,23 @@ export default function Accounts() {
       liability: account.liability || false,
       type,
       financeMarket: account.financeMarket || '',
+      ownershipType: migratedAccount.ownershipType,
+      owners: migratedAccount.owners,
     });
+    if (migratedAccount.ownershipType === 'personal') {
+      const personalName = migratedAccount.owners[0]?.name || '默认';
+      setLastPersonalOwner(personalName);
+      setTempMultiCheckedNames(new Set());
+    } else {
+      const checkedSet = new Set(migratedAccount.owners.map(o => o.name));
+      setTempMultiCheckedNames(checkedSet);
+    }
+    setOwnershipDropdownOpen(false);
+    setOwnerDropdownOpen(false);
+    setShowPersonalAdd(false);
+    setShowMultiAdd(false);
+    setPersonalNewName('');
+    setMultiNewName('');
     setShowModal(true);
   };
 
@@ -752,6 +918,17 @@ export default function Accounts() {
     try {
       let newAccounts = stateData.accounts || [];
 
+      const ownersToSave = Array.isArray(formData.owners) && formData.owners.length > 0
+        ? formData.owners
+        : [{ name: '默认', share: 100, isDefault: true }];
+      const ownershipTypeToSave = formData.ownershipType || (ownersToSave.length > 1 ? 'multi' : 'personal');
+
+      const allOwnerNamesFromForm = ownersToSave.map(o => o.name).filter(n => n && String(n).trim());
+      const mergedExtraOwnerNames = Array.from(new Set([...(extraOwnerNames || []), ...allOwnerNamesFromForm]));
+      if (JSON.stringify(mergedExtraOwnerNames) !== JSON.stringify(extraOwnerNames || [])) {
+        setExtraOwnerNames(mergedExtraOwnerNames);
+      }
+
       if (editingAccount) {
         let saveType = formData.type;
         const originalType = editingAccount.type;
@@ -762,6 +939,8 @@ export default function Accounts() {
           saveType = undefined;
         }
         const saveData = { ...formData };
+        saveData.ownershipType = ownershipTypeToSave;
+        saveData.owners = ownersToSave;
         if (saveType === undefined) {
           delete saveData.type;
         } else {
@@ -787,6 +966,8 @@ export default function Accounts() {
           liability: formData.liability,
           type: formData.type || '独立资产',
           balance: isFinanceAsset ? 0.1 : 0,
+          ownershipType: ownershipTypeToSave,
+          owners: ownersToSave,
         };
         if (isFinanceAsset && formData.financeMarket) {
           newAccount.financeMarket = formData.financeMarket;
@@ -795,6 +976,7 @@ export default function Accounts() {
           ...newAccounts,
           newAccount,
         ];
+
       }
 
       const newState = { ...stateData, accounts: newAccounts };
@@ -1154,6 +1336,152 @@ export default function Accounts() {
     }
   };
 
+  const handleRenameOwnerGlobal = async () => {
+    const { oldName, newName } = editingOwner;
+    const trimmedNew = (newName || '').trim();
+    if (!trimmedNew || !oldName || trimmedNew === oldName) {
+      setEditingOwner({ oldName: '', newName: '' });
+      return;
+    }
+    const existingNames = new Set(allOwnerNames);
+    if (existingNames.has(trimmedNew)) {
+      if (!confirm(`所有者「${trimmedNew}」已存在，将合并「${oldName}」到「${trimmedNew}」，是否继续？`)) {
+        return;
+      }
+    }
+    // Update all accounts: rename oldName -> trimmedNew; merge if both exist in same account (sum shares, keep isDefault true if either was)
+    const newAccounts = (stateData.accounts || []).map(acc => {
+      if (!Array.isArray(acc.owners)) return acc;
+      const map = {};
+      const merged = [];
+      acc.owners.forEach(o => {
+        const targetName = o.name === oldName ? trimmedNew : o.name;
+        if (map[targetName] !== undefined) {
+          const idx = map[targetName];
+          const ex = merged[idx];
+          const wasDefault = ex.isDefault === true || o.isDefault === true;
+          merged[idx] = { ...ex, share: (parseFloat(ex.share) || 0) + (parseFloat(o.share) || 0), isDefault: wasDefault };
+        } else {
+          map[targetName] = merged.length;
+          merged.push({ ...o, name: targetName });
+        }
+      });
+      const normalized = normalizeOwnersDefault(merged);
+      const newType = normalized.length > 1 ? 'multi' : 'personal';
+      return { ...acc, owners: normalized, ownershipType: newType };
+    });
+    const newState = { ...stateData, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+      // update formData.owners if it referenced oldName (apply same merge)
+      if (Array.isArray(formData.owners) && formData.owners.some(o => o.name === oldName)) {
+        const map2 = {};
+        const merged2 = [];
+        formData.owners.forEach(o => {
+          const targetName = o.name === oldName ? trimmedNew : o.name;
+          if (map2[targetName] !== undefined) {
+            const idx = map2[targetName];
+            const ex = merged2[idx];
+            const wasDefault = ex.isDefault === true || o.isDefault === true;
+            merged2[idx] = { ...ex, share: (parseFloat(ex.share) || 0) + (parseFloat(o.share) || 0), isDefault: wasDefault };
+          } else {
+            map2[targetName] = merged2.length;
+            merged2.push({ ...o, name: targetName });
+          }
+        });
+        const normalizedFd = normalizeOwnersDefault(merged2);
+        setFormData({ ...formData, owners: normalizedFd, ownershipType: normalizedFd.length > 1 ? 'multi' : 'personal' });
+      }
+      // update extraOwnerNames
+      const newExtra = Array.from(new Set([...(extraOwnerNames || [])].map(n => n === oldName ? trimmedNew : n).filter(n => n && String(n).trim())));
+      setExtraOwnerNames(newExtra);
+      // update tempMultiCheckedNames
+      if (tempMultiCheckedNames.has(oldName)) {
+        const newChecked = new Set(tempMultiCheckedNames);
+        newChecked.delete(oldName);
+        newChecked.add(trimmedNew);
+        setTempMultiCheckedNames(newChecked);
+      }
+    } else {
+      alert('后端保存失败，但数据已写入本地缓存');
+    }
+    setEditingOwner({ oldName: '', newName: '' });
+  };
+
+  const handleDeleteOwnerGlobal = async (ownerName) => {
+    if (!ownerName) return;
+    if (!confirm(`确定要删除所有者「${ownerName}」吗？此操作将影响所有包含该所有者的账户，剩余所有者占比将按比例补齐到 100%。`)) return;
+    const newAccounts = (stateData.accounts || []).map(acc => {
+      if (!Array.isArray(acc.owners)) return acc;
+      const wasDefault = acc.owners.some(o => o.name === ownerName && o.isDefault === true);
+      let remaining = acc.owners.filter(o => o.name !== ownerName).map(o => ({ ...o }));
+      if (remaining.length === 0) {
+        return { ...acc, ownershipType: 'personal', owners: [{ name: '默认', share: 100, isDefault: true }] };
+      }
+      // rescale shares to sum 100
+      const sum = remaining.reduce((s, o) => s + (parseFloat(o.share) || 0), 0);
+      if (sum > 0) {
+        remaining = remaining.map(o => ({ ...o, share: Math.round(((parseFloat(o.share) || 0) / sum) * 100 * 100) / 100 }));
+      } else {
+        const eq = Math.round((100 / remaining.length) * 100) / 100;
+        remaining = remaining.map((o, i) => ({ ...o, share: i === 0 ? eq + (100 - eq * remaining.length) : eq }));
+      }
+      // set default: if removed was default, first remaining becomes default
+      if (wasDefault) {
+        remaining = remaining.map((o, i) => ({ ...o, isDefault: i === 0 }));
+      } else {
+        remaining = normalizeOwnersDefault(remaining);
+      }
+      const newType = remaining.length > 1 ? 'multi' : 'personal';
+      return { ...acc, owners: remaining, ownershipType: newType };
+    });
+    const newState = { ...stateData, accounts: newAccounts };
+    const result = await saveState(newState);
+    if (result.success !== false) {
+      setStateData(newState);
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+      // update formData.owners: remove the owner, rescale, fix default
+      if (Array.isArray(formData.owners) && formData.owners.some(o => o.name === ownerName)) {
+        const wasDefaultFd = formData.owners.some(o => o.name === ownerName && o.isDefault === true);
+        let remainingFd = formData.owners.filter(o => o.name !== ownerName).map(o => ({ ...o }));
+        if (remainingFd.length === 0) {
+          remainingFd = [{ name: '默认', share: 100, isDefault: true }];
+          setFormData({ ...formData, owners: remainingFd, ownershipType: 'personal' });
+        } else {
+          const sumFd = remainingFd.reduce((s, o) => s + (parseFloat(o.share) || 0), 0);
+          if (sumFd > 0) {
+            remainingFd = remainingFd.map(o => ({ ...o, share: Math.round(((parseFloat(o.share) || 0) / sumFd) * 100 * 100) / 100 }));
+          } else {
+            const eq = Math.round((100 / remainingFd.length) * 100) / 100;
+            remainingFd = remainingFd.map((o, i) => ({ ...o, share: i === 0 ? eq + (100 - eq * remainingFd.length) : eq }));
+          }
+          if (wasDefaultFd) remainingFd = remainingFd.map((o, i) => ({ ...o, isDefault: i === 0 }));
+          else remainingFd = normalizeOwnersDefault(remainingFd);
+          setFormData({ ...formData, owners: remainingFd, ownershipType: remainingFd.length > 1 ? 'multi' : 'personal' });
+        }
+      }
+      // update extraOwnerNames
+      const newExtra = Array.from(new Set([...(extraOwnerNames || [])].filter(n => n !== ownerName)));
+      setExtraOwnerNames(newExtra);
+      // update tempMultiCheckedNames
+      if (tempMultiCheckedNames.has(ownerName)) {
+        const newChecked = new Set(tempMultiCheckedNames);
+        newChecked.delete(ownerName);
+        setTempMultiCheckedNames(newChecked);
+      }
+    } else {
+      alert('后端保存失败，但数据已写入本地缓存');
+    }
+  };
+
+  const handleSetDefaultOwner = (ownerName) => {
+    if (!ownerName || !Array.isArray(formData.owners)) return;
+    const newOwners = formData.owners.map(o => ({ ...o, isDefault: o.name === ownerName }));
+    setFormData({ ...formData, owners: newOwners });
+  };
+
   const { totalAssets, totalLiabilities, netWorth, assetAccounts, liabilityAccounts } = computeStats();
 
   const tags = useMemo(() => {
@@ -1276,6 +1604,30 @@ export default function Accounts() {
       });
   }, [selectedAccountId, accounts, financeAssets, quotesMap]);
 
+  // 账户详情汇总：基于 accountHoldings（与持仓表合计行一致）
+  // 总市值 = Σ currentValue（按币种转换为 CNY）；总成本 = Σ cost（按币种转换为 CNY）；余额 = Σ currentValue(一级分类为现金类)
+  const holdingsSummary = useMemo(() => {
+    let totalMv = 0;
+    let totalCost = 0;
+    let balance = 0;
+    const balanceByType = {};
+    let balanceCount = 0;
+    accountHoldings.forEach(h => {
+      const currency = h.currency || 'CNY';
+      const mv = convertCurrency(parseFloat(h.currentValue) || 0, currency, 'CNY', exchangeRates);
+      const cost = convertCurrency(parseFloat(h.cost) || 0, currency, 'CNY', exchangeRates);
+      totalMv += mv;
+      totalCost += cost;
+      if (h.categoryL1 === '现金类') {
+        balance += mv;
+        balanceCount += 1;
+        const typeKey = h.assetType || h.assetKind || '其他';
+        balanceByType[typeKey] = (balanceByType[typeKey] || 0) + mv;
+      }
+    });
+    return { totalMv, totalCost, balance, balanceByType, balanceCount };
+  }, [accountHoldings, exchangeRates]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -1319,22 +1671,39 @@ export default function Accounts() {
       );
     }
 
-    const holdingStats = accountHoldings.reduce((acc, h) => {
-      const currency = h.currency || 'CNY';
-      const mv = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
-      const cost = parseFloat(h.cost) || 0;
-      acc.marketValue += convertCurrency(mv, currency, 'CNY', exchangeRates);
-      acc.holdingCost += convertCurrency(cost, currency, 'CNY', exchangeRates);
-      return acc;
-    }, { marketValue: 0, holdingCost: 0 });
+    const currentOwnerShare = getOwnerShare(account, detailOwnerFilter);
+    const s = currentOwnerShare;
+
+    // 汇总卡片数据来源：优先使用 holdingsSummary（与持仓表合计行一致）
+    // 当 accountHoldings 为空时（如负债账户无理财持仓），回退到 accountStats
+    const fallbackStats = accountStats[selectedAccountId] || { marketValue: 0, holdingCost: 0 };
+    const useHoldings = accountHoldings.length > 0;
+    const summaryMv = useHoldings ? holdingsSummary.totalMv : fallbackStats.marketValue;
+    const summaryCost = useHoldings ? holdingsSummary.totalCost : fallbackStats.holdingCost;
+    const summaryBalance = useHoldings ? holdingsSummary.balance : (balanceData.totalBalance || 0);
+    const summaryBalanceByType = useHoldings ? holdingsSummary.balanceByType : balanceData.balanceByType;
+    const summaryBalanceCount = useHoldings ? holdingsSummary.balanceCount : balanceData.includedCount;
+
     const effectiveType = getEffectiveType(account);
     const isLiability = effectiveType === '负债';
-    const rawPl = holdingStats.marketValue - holdingStats.holdingCost;
+    const rawPl = summaryMv - summaryCost;
     const pl = isLiability ? -rawPl : rawPl;
     const plRate = isLiability
-      ? (holdingStats.marketValue > 0 ? -rawPl / holdingStats.marketValue : null)
-      : (holdingStats.holdingCost > 0 ? rawPl / holdingStats.holdingCost : null);
+      ? (summaryMv > 0 ? -rawPl / summaryMv : null)
+      : (summaryCost > 0 ? rawPl / summaryCost : null);
     const plColor = pl > 0 ? 'text-green-600' : pl < 0 ? 'text-red-500' : 'text-gray-900 dark:text-white';
+
+    const scaledMv = summaryMv * s;
+    const scaledCost = summaryCost * s;
+    const scaledPl = (isLiability ? -rawPl : rawPl) * s;
+
+    const scaledTotalBalance = summaryBalance * s;
+    const scaledBalanceByType = {};
+    Object.entries(summaryBalanceByType).forEach(([type, total]) => {
+      scaledBalanceByType[type] = typeof total === 'number' ? total * s : total;
+    });
+    const scaledBalanceCount = summaryBalanceCount;
+    const scaledAccountHoldings = scaleAssetList(accountHoldings, s);
 
     return (
       <>
@@ -1383,6 +1752,35 @@ export default function Accounts() {
           </div>
         </div>
 
+        {/* 按所有者筛选条 */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
+          <div className="flex flex-wrap items-center gap-3 justify-between">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">按所有者查看：</span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={()=>setDetailOwnerFilter('__ALL__')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${detailOwnerFilter==='__ALL__' ? 'bg-primary-500 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'}`}
+                >全部</button>
+                {(account.owners||[]).map((o,i)=>(
+                  <button
+                    key={o.name + '_' + i}
+                    type="button"
+                    onClick={()=>setDetailOwnerFilter(o.name)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${detailOwnerFilter===o.name ? 'bg-primary-500 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'}`}
+                  >{o.name} · {o.share}%</button>
+                ))}
+              </div>
+            </div>
+            <div className="text-[11px] text-gray-500 dark:text-gray-400">
+              {detailOwnerFilter === '__ALL__'
+                ? <span>显示：全部 · 100%</span>
+                : <span>显示：{detailOwnerFilter} · 占比 {currentOwnerShare*100}%</span>}
+            </div>
+          </div>
+        </div>
+
         {/* 汇总卡片 */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
@@ -1393,7 +1791,7 @@ export default function Accounts() {
               <span className="text-xs text-gray-500 dark:text-gray-400">总市值</span>
             </div>
             <div className="text-lg font-bold text-green-600 tabular-nums whitespace-nowrap">
-              {formatCurrency(holdingStats.marketValue)}
+              {formatCurrencyWithRate(scaledMv, 'CNY', selectedCurrency, exchangeRates)}
             </div>
           </div>
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
@@ -1404,18 +1802,18 @@ export default function Accounts() {
               <span className="text-xs text-gray-500 dark:text-gray-400">总成本</span>
             </div>
             <div className="text-lg font-bold text-gray-900 dark:text-white tabular-nums whitespace-nowrap">
-              {formatCurrency(holdingStats.holdingCost)}
+              {formatCurrencyWithRate(scaledCost, 'CNY', selectedCurrency, exchangeRates)}
             </div>
           </div>
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
             <div className="flex items-center gap-2 mb-2">
-              <div className={`${pl >= 0 ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'} rounded-full p-1.5`}>
-                {pl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+              <div className={`${scaledPl >= 0 ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'} rounded-full p-1.5`}>
+                {scaledPl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
               </div>
               <span className="text-xs text-gray-500 dark:text-gray-400">总盈亏</span>
             </div>
             <div className={`text-lg font-bold tabular-nums whitespace-nowrap ${plColor}`}>
-              {formatCurrency(pl)}
+              {formatCurrencyWithRate(scaledPl, 'CNY', selectedCurrency, exchangeRates)}
             </div>
           </div>
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700">
@@ -1444,13 +1842,13 @@ export default function Accounts() {
               <div>
                 <div className="text-sm text-gray-500 dark:text-gray-400">现有余额</div>
                 <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                  {formatCurrency(balanceData.totalBalance)}
+                  {formatCurrencyWithRate(scaledTotalBalance, 'CNY', selectedCurrency, exchangeRates)}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                {balanceData.includedCount} 项资产计入
+                {scaledBalanceCount} 项资产计入
               </span>
               {balanceCardExpanded ? (
                 <ChevronUp className="w-5 h-5 text-gray-400" />
@@ -1461,17 +1859,17 @@ export default function Accounts() {
           </div>
           {balanceCardExpanded && (
             <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700 transition-all duration-200">
-              {balanceData.includedCount === 0 ? (
+              {scaledBalanceCount === 0 ? (
                 <div className="text-center py-4 text-gray-400 dark:text-gray-500 text-sm">
                   暂无计入余额的资产，请在下方勾选资产
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {Object.entries(balanceData.balanceByType).map(([type, total]) => (
+                  {Object.entries(scaledBalanceByType).map(([type, total]) => (
                     <div key={type} className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-100 dark:border-emerald-800/50">
                       <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">{type}</div>
                       <div className="text-base font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
-                        {formatCurrency(total)}
+                        {formatCurrencyWithRate(total, 'CNY', selectedCurrency, exchangeRates)}
                       </div>
                     </div>
                   ))}
@@ -1483,7 +1881,7 @@ export default function Accounts() {
 
         <FinanceHoldingsTable
           categoryName="account_detail"
-          holdings={accountHoldings}
+          holdings={scaledAccountHoldings}
           readOnly={true}
           defaultAccountFilter={account?.name || ''}
           colorIdx={0}
@@ -1608,6 +2006,41 @@ export default function Accounts() {
           </div>
         </section>
 
+        {cooperationFunds.multiAccountCount > 0 && (
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            {/* 默认持有 */}
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-full p-2">
+                  <PiggyBank className="w-5 h-5" />
+                </div>
+                <span className="text-sm text-gray-500 dark:text-gray-400">合作 · 默认持有</span>
+              </div>
+              <div className="text-2xl font-bold text-primary-600 dark:text-primary-400 tabular-nums whitespace-nowrap">
+                {formatCurrencyWithRate(cooperationFunds.defaultHeld, 'CNY', selectedCurrency, exchangeRates)}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                基于 {cooperationFunds.multiAccountCount} 个多人所有账户按默认占比拆分
+              </div>
+            </div>
+            {/* 他人持有 */}
+            <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-full p-2">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <span className="text-sm text-gray-500 dark:text-gray-400">合作 · 他人持有</span>
+              </div>
+              <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 tabular-nums whitespace-nowrap">
+                {formatCurrencyWithRate(cooperationFunds.otherHeld, 'CNY', selectedCurrency, exchangeRates)}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                多人所有账户中非默认所有者按占比占有的资金
+              </div>
+            </div>
+          </section>
+        )}
+
         <section className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-soft border border-gray-100 dark:border-slate-700">
           <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">账户列表</h3>
           
@@ -1689,6 +2122,11 @@ export default function Accounts() {
                     : (stats.holdingCost > 0 ? rawPl / stats.holdingCost : null);
                   const hasAssets = stats.marketValue !== 0 || stats.holdingCost !== 0;
                   const plColor = pl > 0 ? 'text-green-600' : pl < 0 ? 'text-red-500' : 'text-gray-400';
+                  const ownershipType = account.ownershipType || (Array.isArray(account.owners) && account.owners.length>1 ? 'multi' : 'personal');
+                  const owners = Array.isArray(account.owners) && account.owners.length>0 ? account.owners : [{name:'默认', share:100}];
+                  const ownerSummaryText = owners.length===1
+                    ? (owners[0].name || '默认')
+                    : ((owners[0].name || '默认') + ' + ' + (owners.length-1) + '人');
                   return (
                     <tr
                       key={account.id}
@@ -1704,7 +2142,17 @@ export default function Accounts() {
                           }`}>
                             <Icon className="w-4 h-4" />
                           </div>
-                          <span className="font-medium text-gray-900 dark:text-white">{account.name}</span>
+                          <div className="flex flex-col">
+                            <span className="font-medium text-gray-900 dark:text-white">{account.name}</span>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${ownershipType==='multi' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
+                                {ownershipType==='multi' ? '多人' : '个人'}
+                              </span>
+                              <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                                {ownerSummaryText}
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td className="py-3 px-3">
@@ -1837,6 +2285,8 @@ export default function Accounts() {
               setShowCategoryDropdown(false);
               setShowSubDropdown(false);
               setShowTypeDropdown(false);
+              setOwnershipDropdownOpen(false);
+              setOwnerDropdownOpen(false);
               setAddingCategory(false);
               setAddingSub(false);
               setAddingType(false);
@@ -2121,6 +2571,455 @@ export default function Accounts() {
                     ))}
                   </select>
                 </div>
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    所属
+                  </label>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOwnershipDropdownOpen(!ownershipDropdownOpen);
+                      setOwnerDropdownOpen(false);
+                      setShowCategoryDropdown(false);
+                      setShowSubDropdown(false);
+                      setShowTypeDropdown(false);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-left flex items-center justify-between hover:border-primary-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    <span className="truncate">{formData.ownershipType === 'multi' ? '多人所有' : '个人所有'}</span>
+                    <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${ownershipDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {ownershipDropdownOpen && (
+                    <div className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg"
+                      onClick={(e) => e.stopPropagation()}>
+                      <div
+                        className={`px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 ${formData.ownershipType !== 'multi' ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+                        onClick={() => {
+                          const ownerName = lastPersonalOwner || allOwnerNames[0] || '默认';
+                          setFormData({
+                            ...formData,
+                            ownershipType: 'personal',
+                            owners: [{ name: ownerName, share: 100, isDefault: true }],
+                          });
+                          setTempMultiCheckedNames(new Set());
+                          setOwnershipDropdownOpen(false);
+                        }}
+                      >
+                        个人所有
+                      </div>
+                      <div
+                        className={`px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 ${formData.ownershipType === 'multi' ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+                        onClick={() => {
+                          let initialChecked;
+                          if (formData.ownershipType === 'multi' && Array.isArray(formData.owners)) {
+                            initialChecked = new Set(formData.owners.map(o => o.name));
+                          } else {
+                            initialChecked = new Set();
+                          }
+                          let multiOwners;
+                          if (formData.ownershipType === 'multi' && Array.isArray(formData.owners) && formData.owners.length > 0) {
+                            multiOwners = formData.owners;
+                          } else {
+                            multiOwners = [];
+                          }
+                          setTempMultiCheckedNames(initialChecked);
+                          setFormData({
+                            ...formData,
+                            ownershipType: 'multi',
+                            owners: multiOwners,
+                          });
+                          setOwnershipDropdownOpen(false);
+                        }}
+                      >
+                        多人所有
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {formData.ownershipType !== 'multi' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      所有者
+                    </label>
+                    <div className="flex items-start gap-2">
+                      <div className="relative flex-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOwnerDropdownOpen(!ownerDropdownOpen);
+                            setOwnershipDropdownOpen(false);
+                            setShowCategoryDropdown(false);
+                            setShowSubDropdown(false);
+                            setShowTypeDropdown(false);
+                          }}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-left flex items-center justify-between hover:border-primary-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        >
+                          <span className="truncate">{formData.owners?.[0]?.name || '-'}</span>
+                          <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${ownerDropdownOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {ownerDropdownOpen && (
+                          <div className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                            onClick={(e) => e.stopPropagation()}>
+                            {allOwnerNames.length === 0 ? (
+                              <div className="px-3 py-2 text-sm text-gray-400">暂无所有者，点击右侧 + 新增</div>
+                            ) : (
+                              allOwnerNames.map(name => (
+                                <div
+                                  key={name}
+                                  className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-slate-600"
+                                >
+                                  {editingOwner.oldName === name ? (
+                                    <input
+                                      type="text"
+                                      value={editingOwner.newName}
+                                      onChange={(e) => setEditingOwner({ ...editingOwner, newName: e.target.value })}
+                                      autoFocus
+                                      className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleRenameOwnerGlobal();
+                                        if (e.key === 'Escape') setEditingOwner({ oldName: '', newName: '' });
+                                      }}
+                                    />
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setFormData({
+                                          ...formData,
+                                          owners: [{ name, share: 100, isDefault: true }],
+                                        });
+                                        setLastPersonalOwner(name);
+                                        setOwnerDropdownOpen(false);
+                                      }}
+                                      className={`flex-1 text-left text-sm ${formData.owners?.[0]?.name === name ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
+                                    >
+                                      {name}
+                                    </button>
+                                  )}
+                                  {editingOwner.oldName === name ? (
+                                    <button
+                                      type="button"
+                                      onClick={handleRenameOwnerGlobal}
+                                      className="p-1 text-green-500 hover:text-green-600"
+                                    >
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  ) : (
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingOwner({ oldName: name, newName: name });
+                                        }}
+                                        className="p-1 text-gray-400 hover:text-primary-500"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeleteOwnerGlobal(name);
+                                        }}
+                                        className="p-1 text-gray-400 hover:text-red-500"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPersonalAdd(!showPersonalAdd);
+                          setPersonalNewName('');
+                        }}
+                        className="px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors shrink-0"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                    {showPersonalAdd && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <input
+                          type="text"
+                          value={personalNewName}
+                          onChange={(e) => setPersonalNewName(e.target.value)}
+                          placeholder="输入所有者姓名"
+                          autoFocus
+                          className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const trimmed = personalNewName.trim();
+                              if (trimmed) {
+                                const newExtra = Array.from(new Set([...(extraOwnerNames || []), trimmed]));
+                                setExtraOwnerNames(newExtra);
+                                setFormData({
+                                  ...formData,
+                                  owners: [{ name: trimmed, share: 100, isDefault: true }],
+                                });
+                                setLastPersonalOwner(trimmed);
+                              }
+                              setShowPersonalAdd(false);
+                              setPersonalNewName('');
+                            }
+                            if (e.key === 'Escape') {
+                              setShowPersonalAdd(false);
+                              setPersonalNewName('');
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const trimmed = personalNewName.trim();
+                            if (trimmed) {
+                              const newExtra = Array.from(new Set([...(extraOwnerNames || []), trimmed]));
+                              setExtraOwnerNames(newExtra);
+                              setFormData({
+                                ...formData,
+                                owners: [{ name: trimmed, share: 100, isDefault: true }],
+                              });
+                              setLastPersonalOwner(trimmed);
+                            }
+                            setShowPersonalAdd(false);
+                            setPersonalNewName('');
+                          }}
+                          className="px-3 py-2 text-sm rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors shrink-0"
+                        >
+                          保存
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {formData.ownershipType === 'multi' && (
+                  <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-3 border border-gray-200 dark:border-slate-600">
+                    <div
+                      className="flex items-center justify-between cursor-pointer select-none mb-2"
+                      onClick={() => setMultiOwnerPanelOpen(!multiOwnerPanelOpen)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">所有者（多人）</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">勾选后输入占比</span>
+                      </div>
+                      {multiOwnerPanelOpen ? (
+                        <ChevronUp className="w-4 h-4 text-gray-400" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-gray-400" />
+                      )}
+                    </div>
+                    {multiOwnerPanelOpen && (
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {allOwnerNames.map(name => {
+                          const isChecked = tempMultiCheckedNames.has(name);
+                          const ownerItem = Array.isArray(formData.owners) ? formData.owners.find(o => o.name === name) : null;
+                          const shareValue = ownerItem ? ownerItem.share : 0;
+                          return (
+                            <div key={name} className="flex items-center gap-2 flex-wrap bg-white dark:bg-slate-800 rounded-lg p-2 border border-gray-200 dark:border-slate-600">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  const newChecked = new Set(tempMultiCheckedNames);
+                                  let newOwners = Array.isArray(formData.owners) ? [...formData.owners] : [];
+                                  if (checked) {
+                                    newChecked.add(name);
+                                    if (!newOwners.find(o => o.name === name)) {
+                                      newOwners.push({ name, share: 0 });
+                                    }
+                                  } else {
+                                    newChecked.delete(name);
+                                    newOwners = newOwners.filter(o => o.name !== name);
+                                  }
+                                  setTempMultiCheckedNames(newChecked);
+                                  setFormData({ ...formData, owners: newOwners });
+                                }}
+                                className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 shrink-0"
+                              />
+                              {editingOwner.oldName === name ? (
+                                <div className="flex items-center gap-1 flex-1 min-w-[120px]">
+                                  <input
+                                    type="text"
+                                    value={editingOwner.newName}
+                                    onChange={(e) => setEditingOwner({ ...editingOwner, newName: e.target.value })}
+                                    autoFocus
+                                    className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleRenameOwnerGlobal();
+                                      if (e.key === 'Escape') setEditingOwner({ oldName: '', newName: '' });
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={handleRenameOwnerGlobal}
+                                    className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600"
+                                  >
+                                    保存
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-sm text-gray-700 dark:text-gray-300 flex-1 truncate">{name}</span>
+                              )}
+                              {isChecked && (
+                                <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                                  <input
+                                    type="radio"
+                                    name="default-owner"
+                                    checked={!!ownerItem?.isDefault}
+                                    onChange={() => handleSetDefaultOwner(name)}
+                                    className="w-3.5 h-3.5"
+                                  />
+                                  默认
+                                </label>
+                              )}
+                              <div className="flex items-center gap-1 shrink-0">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  step={0.01}
+                                  value={isChecked ? shareValue : ''}
+                                  disabled={!isChecked}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value);
+                                    const shareNum = isNaN(val) ? 0 : Math.max(0, Math.min(100, val));
+                                    const newOwners = (Array.isArray(formData.owners) ? [...formData.owners] : []).map(o =>
+                                      o.name === name ? { ...o, share: shareNum } : o
+                                    );
+                                    if (!newOwners.find(o => o.name === name) && tempMultiCheckedNames.has(name)) {
+                                      newOwners.push({ name, share: shareNum });
+                                    }
+                                    setFormData({ ...formData, owners: newOwners });
+                                  }}
+                                  className={`w-20 px-2 py-1 text-sm border rounded text-right tabular-nums ${isChecked ? 'border-gray-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white' : 'border-gray-200 dark:border-slate-600 bg-gray-100 dark:bg-slate-700/30 text-gray-400'}`}
+                                />
+                                <span className="text-xs text-gray-500 dark:text-gray-400">%</span>
+                              </div>
+                              {isChecked && (
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {editingOwner.oldName !== name && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingOwner({ oldName: name, newName: name });
+                                      }}
+                                      className="p-1 text-gray-400 hover:text-primary-500"
+                                    >
+                                      <Edit2 className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteOwnerGlobal(name);
+                                    }}
+                                    className="p-1 text-gray-400 hover:text-red-500"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <div className="flex items-center gap-2 pt-1">
+                          {!showMultiAdd ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowMultiAdd(true);
+                                setMultiNewName('');
+                              }}
+                              className="w-full px-3 py-2 text-sm text-primary-600 dark:text-primary-400 bg-white dark:bg-slate-800 rounded-lg border border-dashed border-primary-300 dark:border-primary-700 hover:bg-primary-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-1"
+                            >
+                              <Plus className="w-4 h-4" />
+                              新增所有者
+                            </button>
+                          ) : (
+                            <div className="flex-1 flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={multiNewName}
+                                onChange={(e) => setMultiNewName(e.target.value)}
+                                placeholder="输入姓名"
+                                autoFocus
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const trimmed = multiNewName.trim();
+                                    if (trimmed) {
+                                      const newExtra = Array.from(new Set([...(extraOwnerNames || []), trimmed]));
+                                      setExtraOwnerNames(newExtra);
+                                      const newChecked = new Set(tempMultiCheckedNames);
+                                      newChecked.add(trimmed);
+                                      const newOwners = [...(Array.isArray(formData.owners) ? formData.owners : []), { name: trimmed, share: 0 }];
+                                      setTempMultiCheckedNames(newChecked);
+                                      setFormData({ ...formData, owners: newOwners });
+                                    }
+                                    setShowMultiAdd(false);
+                                    setMultiNewName('');
+                                  }
+                                  if (e.key === 'Escape') {
+                                    setShowMultiAdd(false);
+                                    setMultiNewName('');
+                                  }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const trimmed = multiNewName.trim();
+                                  if (trimmed) {
+                                    const newExtra = Array.from(new Set([...(extraOwnerNames || []), trimmed]));
+                                    setExtraOwnerNames(newExtra);
+                                    const newChecked = new Set(tempMultiCheckedNames);
+                                    newChecked.add(trimmed);
+                                    const newOwners = [...(Array.isArray(formData.owners) ? formData.owners : []), { name: trimmed, share: 0 }];
+                                    setTempMultiCheckedNames(newChecked);
+                                    setFormData({ ...formData, owners: newOwners });
+                                  }
+                                  setShowMultiAdd(false);
+                                  setMultiNewName('');
+                                }}
+                                className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600 transition-colors shrink-0"
+                              >
+                                保存
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <div className="mt-3 pt-2 border-t border-gray-200 dark:border-slate-600 flex items-center justify-between">
+                      <span className="text-xs text-gray-600 dark:text-gray-400">
+                        合计占比：
+                        <span className={`font-semibold tabular-nums ${Math.abs((Array.isArray(formData.owners) ? formData.owners.reduce((s, o) => s + (parseFloat(o.share) || 0), 0) : 0) - 100) > 0.01 ? 'text-red-500' : 'text-green-600'}`}>
+                          {(Array.isArray(formData.owners) ? formData.owners.reduce((s, o) => s + (parseFloat(o.share) || 0), 0) : 0).toFixed(2)}%
+                        </span>
+                        / 100%
+                      </span>
+                    </div>
+                    {Math.abs((Array.isArray(formData.owners) ? formData.owners.reduce((s, o) => s + (parseFloat(o.share) || 0), 0) : 0) - 100) > 0.01 && (
+                      <div className="mt-1">
+                        <span className="text-red-500 text-xs">
+                          警告：当前合计 {(Array.isArray(formData.owners) ? formData.owners.reduce((s, o) => s + (parseFloat(o.share) || 0), 0) : 0).toFixed(2)}%，建议调整为 100%
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     类型
