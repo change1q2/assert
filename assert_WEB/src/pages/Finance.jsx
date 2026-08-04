@@ -2291,7 +2291,7 @@ export default function Finance({ onAssetPenetration }) {
           };
         });
       }
-      // 自动修复历史负现金类资产数据（currentValue/shares/quantity 为负数），并持久化
+      // 自动修复历史现金类资产数据：1)负数转非负 2)补全缺失的表单字段名 3)持久化
       if (data?.financeAssets && data.financeAssets.length > 0) {
         let cashDataDirty = false;
         data.financeAssets = data.financeAssets.map(asset => {
@@ -2307,13 +2307,18 @@ export default function Finance({ onAssetPenetration }) {
           const fixedQty = Number.isFinite(origQty) ? Math.max(0, origQty) : 0;
           const fixedCost = Number.isFinite(origCost) ? Math.max(0, origCost) : 0;
           const fixedBalance = Number.isFinite(origBalance) ? Math.max(0, origBalance) : 0;
-          const changed =
+          const hasNeg =
             (Number.isFinite(origCV) && origCV < 0) ||
             (Number.isFinite(origShares) && origShares < 0) ||
             (Number.isFinite(origQty) && origQty < 0) ||
             (Number.isFinite(origCost) && origCost < 0) ||
             (Number.isFinite(origBalance) && origBalance < 0);
-          if (changed) {
+          // 检查是否缺少表单字段名
+          const missingFormFields =
+            !asset.assetType || !asset.categoryL1 || !asset.categoryL2 ||
+            !asset.categoryL3 || !asset.positionType || !asset.account ||
+            !asset.quantity;
+          if (hasNeg || missingFormFields) {
             cashDataDirty = true;
             return {
               ...asset,
@@ -2323,6 +2328,13 @@ export default function Finance({ onAssetPenetration }) {
               cost: fixedCost,
               balance: fixedBalance,
               availableShares: Number.isFinite(parseFloat(asset.availableShares)) ? Math.max(0, parseFloat(asset.availableShares)) : (fixedShares || fixedCV),
+              // 补全表单字段名（使用已有存储字段的回退值）
+              assetType: asset.assetType || asset.kind || '现金',
+              categoryL1: asset.categoryL1 || asset.category || '现金类',
+              categoryL2: asset.categoryL2 || asset.subcategory || '',
+              categoryL3: asset.categoryL3 || asset.tertiaryCategory || '',
+              positionType: asset.positionType || asset.positionCategory || '',
+              account: asset.account || asset.accountId || '',
             };
           }
           return asset;
@@ -2480,13 +2492,19 @@ export default function Finance({ onAssetPenetration }) {
         currency: newAccount.currency || 'CNY',
         assetKind: newAccount.assetKind || '',
         kind: newAccount.assetType || '股票',
+        assetType: newAccount.assetType || '股票',
         accountId: newAccount.account || '',
+        account: newAccount.account || '',
         category: newAccount.categoryL1 || '',
+        categoryL1: newAccount.categoryL1 || '',
         subcategory: newAccount.categoryL2 || '',
+        categoryL2: newAccount.categoryL2 || '',
         tertiaryCategory: newAccount.categoryL3 || '',
+        categoryL3: newAccount.categoryL3 || '',
         categoryL4: newAccount.categoryL4 || '',
         positionGroup: newAccount.positionGroup || '',
         positionCategory: newAccount.positionType || '',
+        positionType: newAccount.positionType || '',
         name: newAccount.name,
         code: newAccount.code || '',
         costPrice: _costPrice,
@@ -2600,16 +2618,23 @@ export default function Finance({ onAssetPenetration }) {
             currency: payload.currency || 'CNY',
             assetKind: '现金',
             kind: '现金',
+            assetType: '现金',
             accountId: accountName,
+            account: accountName,
             category: '现金类',
+            categoryL1: '现金类',
             subcategory: marketSubcategoryMap[payload.market] || 'A股',
+            categoryL2: marketSubcategoryMap[payload.market] || 'A股',
             tertiaryCategory: '场内',
+            categoryL3: '场内',
             positionGroup: '现金仓位',
             positionCategory: '现金管理',
+            positionType: '现金管理',
             name: `${accountName}现金管理`,
             code: cashCode,
             costPrice: 1,
             shares: 0,
+            quantity: 0,
             cost: 0,
             availableShares: 0,
             currentPrice: 1,
@@ -2738,18 +2763,18 @@ export default function Finance({ onAssetPenetration }) {
       market: holding.market || '国内市场',
       currency: holding.currency || '',
       assetKind: holding.assetKind || '',
-      assetType: holding.assetType || '股票',
-      account: holding.account || '',
-      categoryL1: holding.categoryL1 || '',
-      categoryL2: holding.categoryL2 || '',
-      categoryL3: holding.categoryL3 || '',
+      assetType: holding.assetType || holding.kind || '股票',
+      account: holding.accountId || holding.account || '',
+      categoryL1: holding.categoryL1 || holding.category || '',
+      categoryL2: holding.categoryL2 || holding.subcategory || '',
+      categoryL3: holding.categoryL3 || holding.tertiaryCategory || '',
       categoryL4: holding.categoryL4 || '',
       positionGroup: holding.positionGroup || '',
-      positionType: holding.positionType || '',
+      positionType: holding.positionType || holding.positionCategory || '',
       name: holding.name || '',
       code: holding.code || '',
       cost: holding.costPrice || '',
-      quantity: holding.quantity || '',
+      quantity: holding.quantity || holding.shares || '',
       currentPrice: holding.currentPrice || '',
       prevPrice: holding.prevPrice || '',
       priceDate: holding.priceDate || '',

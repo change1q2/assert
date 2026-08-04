@@ -556,7 +556,7 @@ export default function Accounts() {
       } else {
         data.accounts = normalizeAccountsOwnership(data.accounts);
       }
-      // 自动修复历史负现金类资产数据（currentValue/shares/quantity 为负数），并持久化
+      // 自动修复历史现金类资产数据：1)负数转非负 2)补全缺失的表单字段名 3)持久化
       if (data?.financeAssets && data.financeAssets.length > 0) {
         let cashDataDirty = false;
         data.financeAssets = data.financeAssets.map(asset => {
@@ -572,13 +572,17 @@ export default function Accounts() {
           const fixedQty = Number.isFinite(origQty) ? Math.max(0, origQty) : 0;
           const fixedCost = Number.isFinite(origCost) ? Math.max(0, origCost) : 0;
           const fixedBalance = Number.isFinite(origBalance) ? Math.max(0, origBalance) : 0;
-          const changed =
+          const hasNeg =
             (Number.isFinite(origCV) && origCV < 0) ||
             (Number.isFinite(origShares) && origShares < 0) ||
             (Number.isFinite(origQty) && origQty < 0) ||
             (Number.isFinite(origCost) && origCost < 0) ||
             (Number.isFinite(origBalance) && origBalance < 0);
-          if (changed) {
+          const missingFormFields =
+            !asset.assetType || !asset.categoryL1 || !asset.categoryL2 ||
+            !asset.categoryL3 || !asset.positionType || !asset.account ||
+            !asset.quantity;
+          if (hasNeg || missingFormFields) {
             cashDataDirty = true;
             return {
               ...asset,
@@ -588,6 +592,12 @@ export default function Accounts() {
               cost: fixedCost,
               balance: fixedBalance,
               availableShares: Number.isFinite(parseFloat(asset.availableShares)) ? Math.max(0, parseFloat(asset.availableShares)) : (fixedShares || fixedCV),
+              assetType: asset.assetType || asset.kind || '现金',
+              categoryL1: asset.categoryL1 || asset.category || '现金类',
+              categoryL2: asset.categoryL2 || asset.subcategory || '',
+              categoryL3: asset.categoryL3 || asset.tertiaryCategory || '',
+              positionType: asset.positionType || asset.positionCategory || '',
+              account: asset.account || asset.accountId || '',
             };
           }
           return asset;
