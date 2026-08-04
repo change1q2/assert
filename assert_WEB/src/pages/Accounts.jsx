@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchState, saveState, fetchRealTimeExchangeRates, fetchFinanceQuotes } from '../api';
-import { getCurrencySymbol } from '../utils/currency';
+import { getCurrencySymbol, truncateNum } from '../utils/currency';
 import FinanceHoldingsTable from '../components/FinanceHoldingsTable';
 import {
   Wallet,
