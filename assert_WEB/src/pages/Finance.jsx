@@ -1936,7 +1936,7 @@ export default function Finance({ onAssetPenetration }) {
   const [newAssetTypeName, setNewAssetTypeName] = useState('');
 
   // 资产种类自定义管理
-  const DEFAULT_ASSET_KIND_OPTIONS = ['流动资产', '非流动资产'];
+  const DEFAULT_ASSET_KIND_OPTIONS = ['流动资产', '非流动资产', '现金'];
   const [assetKindOptions, setAssetKindOptions] = useState(() => {
     const saved = localStorage.getItem('finance_asset_kind_options');
     return saved ? JSON.parse(saved) : DEFAULT_ASSET_KIND_OPTIONS;
@@ -2759,24 +2759,38 @@ export default function Finance({ onAssetPenetration }) {
   };
 
   const handleEdit = (holding) => {
+    const isCashAsset = holding.assetType === '现金' || holding.kind === '现金' || holding.category === '现金类' || holding.categoryL1 === '现金类';
+    const marketSubcategoryMap = {
+      '国内市场': 'A股',
+      '港股市场': '港股',
+      '美股市场': '美股',
+    };
+    const resolvedAssetKind = holding.assetKind || (isCashAsset ? '现金' : '');
+    if (resolvedAssetKind && !assetKindOptions.includes(resolvedAssetKind)) {
+      const updated = [...assetKindOptions, resolvedAssetKind];
+      setAssetKindOptions(updated);
+      localStorage.setItem('finance_asset_kind_options', JSON.stringify(updated));
+    }
+    const resolvedQuantity = holding.quantity || holding.shares || 
+      (isCashAsset ? Math.max(0, parseFloat(holding.currentValue || holding.balance || 0)) : '');
     setNewAccount({
       market: holding.market || '国内市场',
       currency: holding.currency || '',
-      assetKind: holding.assetKind || '',
+      assetKind: holding.assetKind || (isCashAsset ? '现金' : ''),
       assetType: holding.assetType || holding.kind || '股票',
       account: holding.accountId || holding.account || '',
-      categoryL1: holding.categoryL1 || holding.category || '',
-      categoryL2: holding.categoryL2 || holding.subcategory || '',
-      categoryL3: holding.categoryL3 || holding.tertiaryCategory || '',
+      categoryL1: holding.categoryL1 || holding.category || (isCashAsset ? '现金类' : ''),
+      categoryL2: holding.categoryL2 || holding.subcategory || (isCashAsset ? (marketSubcategoryMap[holding.market || '国内市场'] || 'A股') : ''),
+      categoryL3: holding.categoryL3 || holding.tertiaryCategory || (isCashAsset ? '场内' : ''),
       categoryL4: holding.categoryL4 || '',
-      positionGroup: holding.positionGroup || '',
-      positionType: holding.positionType || holding.positionCategory || '',
+      positionGroup: holding.positionGroup || (isCashAsset ? '现金仓位' : ''),
+      positionType: holding.positionType || holding.positionCategory || (isCashAsset ? '现金管理' : ''),
       name: holding.name || '',
       code: holding.code || '',
-      cost: holding.costPrice || '',
-      quantity: holding.quantity || holding.shares || '',
-      currentPrice: holding.currentPrice || '',
-      prevPrice: holding.prevPrice || '',
+      cost: holding.costPrice || (isCashAsset ? 1 : ''),
+      quantity: resolvedQuantity,
+      currentPrice: holding.currentPrice || (isCashAsset ? 1 : ''),
+      prevPrice: holding.prevPrice || (isCashAsset ? 1 : ''),
       priceDate: holding.priceDate || '',
       avgBuyPrice: holding.avgBuyPrice || '',
       holdingDays: holding.holdingDays || '',
@@ -2784,7 +2798,7 @@ export default function Finance({ onAssetPenetration }) {
       holdingPnlRate: holding.holdingPnlRate || '',
       dailyPnl: holding.dailyPnl || '',
       dailyPnlRate: holding.dailyPnlRate || '',
-      currentValue: holding.currentValue || '',
+      currentValue: holding.currentValue || resolvedQuantity || '',
       tags: holding.tags || '',
     });
     setEditMode(true);
