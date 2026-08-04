@@ -3151,10 +3151,16 @@ export default function Finance({ onAssetPenetration }) {
 
   const handleSelectLookup = async (item) => {
     setShowLookupDropdown(false);
+    // 检查是否为港股通（HKD计价）
+    const isTonggupass = newAccount.categoryL2 === '港股通';
+    const hkdToCnyRate = exchangeRates?.HKD || 0.92;
+    
     setNewAccount(prev => {
       const qty = parseFloat(prev.quantity) || 0;
       const cost = parseFloat(prev.cost) || 0;
-      const price = item.price ? parseFloat(item.price) : parseFloat(prev.currentPrice) || 0;
+      let rawPrice = item.price ? parseFloat(item.price) : parseFloat(prev.currentPrice) || 0;
+      // 港股通：将HKD价格折算为CNY
+      let price = isTonggupass ? (rawPrice * hkdToCnyRate) : rawPrice;
       const currentValue = qty * price;
       const unitPnl = price - cost;
       const holdingPnl = unitPnl * qty;
@@ -3163,7 +3169,8 @@ export default function Finance({ onAssetPenetration }) {
         ...prev,
         code: item.code || prev.code,
         name: item.name || prev.name,
-        currentPrice: item.price ? String(item.price) : prev.currentPrice,
+        currency: isTonggupass ? 'CNY' : (item.currency || prev.currency),
+        currentPrice: price > 0 ? String(price.toFixed(4)) : (item.price || prev.currentPrice),
         currentValue: (qty && price) ? currentValue.toFixed(2) : prev.currentValue,
         holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : prev.holdingPnl,
         holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
@@ -3177,14 +3184,17 @@ export default function Finance({ onAssetPenetration }) {
           setNewAccount(prev => {
             const qty = parseFloat(prev.quantity) || 0;
             const cost = parseFloat(prev.cost) || 0;
-            const price = parseFloat(quotes[0].price) || 0;
+            let rawPrice = parseFloat(quotes[0].price) || 0;
+            // 港股通：将HKD价格折算为CNY
+            let price = isTonggupass ? (rawPrice * hkdToCnyRate) : rawPrice;
             const currentValue = qty * price;
             const unitPnl = price - cost;
             const holdingPnl = unitPnl * qty;
             const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
             return {
               ...prev,
-              currentPrice: String(quotes[0].price),
+              currency: isTonggupass ? 'CNY' : prev.currency,
+              currentPrice: price > 0 ? String(price.toFixed(4)) : String(quotes[0].price),
               currentValue: (qty && price) ? currentValue.toFixed(2) : prev.currentValue,
               holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : prev.holdingPnl,
               holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,

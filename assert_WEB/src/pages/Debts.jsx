@@ -462,6 +462,18 @@ export default function Debts() {
     loadData();
   }, []);
 
+  const normalizeDebtPayments = (debts) => {
+    if (!Array.isArray(debts)) return debts;
+    return debts.map(debt => {
+      if (!debt.payments) return debt;
+      const normalized = {};
+      for (const [k, v] of Object.entries(debt.payments)) {
+        normalized[k] = (v === true || v === 'true' || v === 1 || v === '1') ? true : false;
+      }
+      return { ...debt, payments: normalized };
+    });
+  };
+
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -477,6 +489,9 @@ export default function Debts() {
               /* ignore parse error */
             }
           }
+        }
+        if (data.debts) {
+          data.debts = normalizeDebtPayments(data.debts);
         }
         setStateData(data);
       }

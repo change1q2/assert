@@ -2098,6 +2098,7 @@ export default function Accounts() {
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">账户名称</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">大类</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类名</th>
+                  <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">所有人</th>
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">类型</th>
                   <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">当前市值</th>
                   <th className="text-right py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">持有成本</th>
@@ -2142,17 +2143,10 @@ export default function Accounts() {
                           }`}>
                             <Icon className="w-4 h-4" />
                           </div>
-                          <div className="flex flex-col">
-                            <span className="font-medium text-gray-900 dark:text-white">{account.name}</span>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${ownershipType==='multi' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
-                                {ownershipType==='multi' ? '多人' : '个人'}
-                              </span>
-                              <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-                                {ownerSummaryText}
-                              </span>
-                            </div>
-                          </div>
+                          <span className="font-medium text-gray-900 dark:text-white">{account.name}</span>
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${ownershipType==='multi' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
+                            {ownershipType==='multi' ? '多人' : '个人'}
+                          </span>
                         </div>
                       </td>
                       <td className="py-3 px-3">
@@ -2163,6 +2157,11 @@ export default function Accounts() {
                       <td className="py-3 px-3">
                         <span className="text-sm text-gray-600 dark:text-gray-400">
                           {account.subCategory || '-'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">
+                          {ownerSummaryText}
                         </span>
                       </td>
                       <td className="py-3 px-3">
@@ -2221,7 +2220,7 @@ export default function Accounts() {
                   const totalBalance = paginatedAccounts.reduce((sum, a) => sum + (calculateAccountBalance[a.id] || 0), 0);
                   return (
                     <tr className="border-b-2 border-gray-300 dark:border-slate-600 bg-gray-50 dark:bg-slate-700/50 font-semibold">
-                      <td className="py-3 px-3 text-gray-900 dark:text-white" colSpan={4}>合计（{paginatedAccounts.length} 条）</td>
+                      <td className="py-3 px-3 text-gray-900 dark:text-white" colSpan={5}>合计（{paginatedAccounts.length} 条）</td>
                       <td className="py-3 px-3 text-right tabular-nums text-gray-900 dark:text-white">{formatCurrency(totalMv)}</td>
                       <td className="py-3 px-3 text-right tabular-nums text-gray-900 dark:text-white">{formatCurrency(totalCost)}</td>
                       <td className={`py-3 px-3 text-right tabular-nums ${totalPl > 0 ? 'text-green-600' : totalPl < 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'}`}>{formatCurrency(totalPl)}</td>

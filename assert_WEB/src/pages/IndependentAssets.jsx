@@ -1777,11 +1777,18 @@ export default function IndependentAssets() {
                       purchaseCost += cost;
                       actualValue += cost;
                     } else if (assetType === 'equity') {
-                      const mv = parseFloat(item.marketValue || 0);
-                      marketValue += mv;
-                      purchaseCost += parseFloat(item.cost || item.marketValue || 0);
-                      profitLoss += parseFloat(item.pnl || 0);
-                      actualValue += mv;
+                      const _qty = parseFloat(item.quantity) || 0;
+                      const _unitCost = parseFloat(item.cost) || 0;
+                      const _totalCost = _unitCost * _qty;
+                      const q = item.code && equityQuotesMap[item.code] ? equityQuotesMap[item.code] : null;
+                      const _quotePrice = q && q.price != null ? parseFloat(q.price) : null;
+                      const _price = _quotePrice || parseFloat(item.currentPrice) || 0;
+                      const _currentValue = _price * _qty;
+                      const _holdingPnl = _currentValue - _totalCost;
+                      marketValue += _currentValue;
+                      purchaseCost += _totalCost;
+                      profitLoss += _holdingPnl;
+                      actualValue += _currentValue;
                     } else if (assetType === 'fixeddeposit') {
                       const amount = parseFloat(item.amount || 0);
                       const actualReturn = parseFloat(item.actualReturn || 0);

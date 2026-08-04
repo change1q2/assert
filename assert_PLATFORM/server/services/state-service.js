@@ -139,7 +139,7 @@ async function loadUserState(userId) {
     try {
       payments = Object.fromEntries(
         (await sqlAll(pool, "SELECT period, status FROM debt_payments WHERE user_id = ? AND debt_id = ?", [userId, row.id]))
-          .map((payment) => [payment.period, payment.status])
+          .map((payment) => [payment.period, payment.status === 1 || payment.status === true || payment.status === 'true' ? true : false])
       );
     } catch (e) {
       console.warn(`[state-service] debt_payments query failed for debt ${row.id}: ${e.message}`);
@@ -406,7 +406,7 @@ async function saveUserState(conn, userId, state) {
        debtOrder++]);
     for (const [period, status] of Object.entries(row.payments || {})) {
       await sqlRun(conn, "INSERT INTO debt_payments (user_id, debt_id, period, status) VALUES (?, ?, ?, ?)",
-        [userId, debtId, Number(period), text(status)]);
+        [userId, debtId, Number(period), status === true || status === 'true' ? 1 : 0]);
     }
   }
 

@@ -85,6 +85,10 @@ body {
   color: var(--color-foreground);
 }
 
+select, select option {
+  font-family: var(--font-body);
+}
+
 .shadow-soft {
   box-shadow: var(--shadow-md);
 }
