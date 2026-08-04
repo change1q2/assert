@@ -13,7 +13,7 @@ function tencentCodeFor(code, market) {
   market = String(market || "").toLowerCase();
   if (market === "domestic" || market === "国内市场" || market === "国内" || /^sh/i.test(code)) {
     const raw = code.replace(/^(sh|sz)/i, "");
-    return (raw.startsWith("6") || raw.startsWith("9") || raw.startsWith("11")) ? "sh" + raw : "sz" + raw;
+    return /^[569]/.test(raw) ? "sh" + raw : "sz" + raw;
   }
   if (market === "hk" || market === "港股市场" || market === "港股" || /^hk/i.test(code) || /^0[0-9]{4}$/.test(code)) {
     return "hk" + code.replace(/^hk/i, "").padStart(5, "0");
