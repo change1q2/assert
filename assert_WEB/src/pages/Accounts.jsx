@@ -34,10 +34,9 @@ function convertCurrency(value, fromCurrency, toCurrency, rates) {
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    minimumFractionDigits: 0,
-  }).format(value);
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(value, 3));
 }
 
 function migrateAccountOwnership(acc) {
@@ -117,9 +116,9 @@ function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
   const converted = convertCurrency(value, currency, targetCurrency, rates);
   const symbol = getCurrencySymbol(targetCurrency);
   return `${symbol}${new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: targetCurrency === 'JPY' ? 0 : 2,
-    maximumFractionDigits: targetCurrency === 'JPY' ? 0 : 2,
-  }).format(converted)}`;
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(converted, 3))}`;
 }
 
 const categoryIcons = {

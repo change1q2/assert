@@ -32,16 +32,17 @@ import {
   YAxis,
   CartesianGrid,
 } from 'recharts';
-import { DEFAULT_EXCHANGE_RATES } from '../utils/currency.js';
+import { DEFAULT_EXCHANGE_RATES, truncateNum } from '../utils/currency.js';
 
 function formatCurrency(value, currency = 'CNY') {
   const num = value == null || isNaN(value) ? 0 : Number(value);
   const options = {
     style: 'currency',
     currency,
-    minimumFractionDigits: 0,
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
   };
-  return new Intl.NumberFormat(currency === 'CNY' ? 'zh-CN' : 'en-US', options).format(num);
+  return new Intl.NumberFormat(currency === 'CNY' ? 'zh-CN' : 'en-US', options).format(truncateNum(num, 3));
 }
 
 function formatPercentage(value) {
@@ -54,7 +55,7 @@ function formatNum(value) {
   return new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
-  }).format(value);
+  }).format(truncateNum(value, 3));
 }
 
 const POS_CLASS = 'text-green-600 dark:text-green-400';

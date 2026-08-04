@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { fetchState, saveState } from '../api';
 import { calcCooperationFunds } from './Accounts';
 import { getCache, setCache } from '../utils/cache';
+import { truncateNum } from '../utils/currency';
 import { PieChart, Pie, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import {
   Wallet,
@@ -210,8 +211,9 @@ function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
     style: 'currency',
     currency: 'CNY',
-    minimumFractionDigits: 0,
-  }).format(value);
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(value, 3));
 }
 
 function formatPercentage(value) {

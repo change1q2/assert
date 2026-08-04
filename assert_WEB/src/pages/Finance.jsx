@@ -37,7 +37,7 @@ function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
-  }).format(value);
+  }).format(truncateNum(value, 3));
 }
 
 function convertCurrency(value, fromCurrency, toCurrency, rates) {
@@ -51,9 +51,9 @@ function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
   const converted = convertCurrency(value, currency, targetCurrency, rates);
   const symbol = getCurrencySymbol(targetCurrency);
   return `${symbol}${new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: targetCurrency === 'JPY' ? 0 : 2,
-    maximumFractionDigits: targetCurrency === 'JPY' ? 0 : 2,
-  }).format(converted)}`;
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(converted, 3))}`;
 }
 
 function formatPercentage(value) {

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { truncateNum } from '../../utils/currency';
 
 export default function SankeyChart({ data }) {
   const [isDark, setIsDark] = useState(false);
@@ -36,8 +37,9 @@ export default function SankeyChart({ data }) {
     return new Intl.NumberFormat('zh-CN', {
       style: 'currency',
       currency: 'CNY',
-      minimumFractionDigits: 0,
-    }).format(value);
+      minimumFractionDigits: 3,
+      maximumFractionDigits: 3,
+    }).format(truncateNum(value, 3));
   };
 
   return (

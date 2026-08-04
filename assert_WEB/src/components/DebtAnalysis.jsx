@@ -6,13 +6,15 @@ import {
 import {
   CreditCard, DollarSign, Percent, Calendar, TrendingUp, TrendingDown, PieChart as PieChartIcon, ArrowLeft
 } from 'lucide-react';
+import { truncateNum } from '../utils/currency';
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
     style: 'currency',
     currency: 'CNY',
-    minimumFractionDigits: 0,
-  }).format(value || 0);
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(value || 0, 3));
 }
 
 function formatPercentage(value) {

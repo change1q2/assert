@@ -23,16 +23,16 @@ import {
   Download,
   Wallet,
 } from 'lucide-react';
-import { CURRENCIES, getCurrencySymbol, DEFAULT_BASE_CURRENCY, convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency.js';
+import { CURRENCIES, getCurrencySymbol, DEFAULT_BASE_CURRENCY, convertAmount, DEFAULT_EXCHANGE_RATES, truncateNum } from '../utils/currency.js';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 function formatCurrency(value, currencyCode) {
   const symbol = getCurrencySymbol(currencyCode);
   const isNegative = (value || 0) < 0;
-  const absValue = Math.abs(value || 0);
+  const absValue = Math.abs(truncateNum(value || 0, 3));
   const formatted = absValue.toLocaleString('zh-CN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
   });
   return `${isNegative ? '-' : ''}${symbol}${formatted}`;
 }

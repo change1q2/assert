@@ -22,12 +22,13 @@ import {
   X,
   HelpCircle,
 } from 'lucide-react';
+import { truncateNum } from '../utils/currency';
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
-  }).format(value);
+  }).format(truncateNum(value, 3));
 }
 
 function getTimePnlRatio(range) {

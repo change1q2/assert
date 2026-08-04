@@ -18,13 +18,15 @@ import {
   Trash2,
   HelpCircle,
 } from 'lucide-react';
+import { truncateNum } from '../utils/currency';
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
     style: 'currency',
     currency: 'CNY',
-    minimumFractionDigits: 0,
-  }).format(value || 0);
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(value || 0, 3));
 }
 
 function formatNumber(value, digits = 2) {
@@ -34,10 +36,10 @@ function formatNumber(value, digits = 2) {
 function formatCurrencyShort(value) {
   const num = parseFloat(value) || 0;
   if (num >= 100000000) {
-    return `¥${(num / 100000000).toFixed(2)}亿`;
+    return `¥${truncateNum(num / 100000000, 3)}亿`;
   }
   if (num >= 10000) {
-    return `¥${(num / 10000).toFixed(2)}万`;
+    return `¥${truncateNum(num / 10000, 3)}万`;
   }
   return formatCurrency(num);
 }

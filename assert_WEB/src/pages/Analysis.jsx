@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { fetchState } from '../api';
-import { getCurrencySymbol, DEFAULT_BASE_CURRENCY, convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency';
+import { getCurrencySymbol, DEFAULT_BASE_CURRENCY, convertAmount, DEFAULT_EXCHANGE_RATES, truncateNum } from '../utils/currency';
 import FinanceAnalysis from '../components/FinanceAnalysis';
 import DebtAnalysis from '../components/DebtAnalysis';
 import IndependentAssetAnalysis from '../components/IndependentAssetAnalysis';
@@ -17,7 +17,7 @@ const TAG_COLORS = ['#2563EB', '#EC4899', '#10B981', '#F59E0B', '#06B6D4', '#F97
 
 function formatCurrency(value, currencyCode = DEFAULT_BASE_CURRENCY) {
   const symbol = getCurrencySymbol(currencyCode);
-  return `${symbol}${(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  return `${symbol}${truncateNum(value || 0, 3).toLocaleString('zh-CN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`;
 }
 
 function formatPercentage(value) {

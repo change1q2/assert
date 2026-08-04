@@ -1,11 +1,11 @@
-import { getCurrencySymbol } from '../utils/currency';
+import { getCurrencySymbol, truncateNum } from '../utils/currency';
 export { getCurrencySymbol };
 
 export function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
-  }).format(value);
+  }).format(truncateNum(value, 3));
 }
 
 export function convertCurrency(value, fromCurrency, toCurrency, rates) {
@@ -19,9 +19,9 @@ export function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
   const converted = convertCurrency(value, currency, targetCurrency, rates);
   const symbol = getCurrencySymbol(targetCurrency);
   return `${symbol}${new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: targetCurrency === 'JPY' ? 0 : 2,
-    maximumFractionDigits: targetCurrency === 'JPY' ? 0 : 2,
-  }).format(converted)}`;
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(converted, 3))}`;
 }
 
 export function formatPercentage(value) {
@@ -49,7 +49,7 @@ export function formatNum(value) {
   return new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
-  }).format(value);
+  }).format(truncateNum(value, 3));
 }
 
 export const POS_CLASS = 'text-green-600 dark:text-green-400';

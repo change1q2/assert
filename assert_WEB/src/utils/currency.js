@@ -23,12 +23,20 @@ export function getCurrencySymbol(code) {
   return currency ? currency.symbol : '¥';
 }
 
+// 截断到指定小数位，不四舍五入
+export function truncateNum(value, decimals = 3) {
+  const num = parseFloat(value);
+  if (isNaN(num) || num === 0) return 0;
+  const factor = Math.pow(10, decimals);
+  return Math.trunc(num * factor) / factor;
+}
+
 export function formatAmount(amount, currencyCode = DEFAULT_BASE_CURRENCY) {
   const symbol = getCurrencySymbol(currencyCode);
-  const absAmount = Math.abs(amount || 0);
+  const absAmount = Math.abs(truncateNum(amount || 0, 3));
   const formatted = absAmount.toLocaleString('zh-CN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
   });
   return `${symbol}${formatted}`;
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchState, saveState } from '../api';
+import { truncateNum } from '../utils/currency';
 import {
   Lightbulb,
   RefreshCw,
@@ -83,9 +84,9 @@ const COLOR_MAP = {
 function formatCurrency(value) {
   const num = parseFloat(value) || 0;
   return `¥${new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num)}`;
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(num, 3))}`;
 }
 
 function formatPercentage(value) {

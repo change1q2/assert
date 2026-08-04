@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchState, saveState } from '../api';
+import { truncateNum } from '../utils/currency';
 import {
   ArrowLeft,
   Plus,
@@ -17,9 +18,9 @@ function formatCurrency(value, currency = 'CNY') {
   const symbol = currency === 'CNY' ? '¥' : currency === 'USD' ? '$' : currency === 'HKD' ? 'HK$' : currency === 'JPY' ? '¥' : '¥';
   const num = parseFloat(value) || 0;
   return `${symbol}${new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(num)}`;
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(num, 3))}`;
 }
 
 function formatPercentage(value) {

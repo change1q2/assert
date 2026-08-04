@@ -24,6 +24,7 @@ import {
   Download,
 } from 'lucide-react';
 import { VEHICLE_TYPES, VEHICLE_BRANDS, VEHICLE_MODELS } from '../data/vehicle-data';
+import { truncateNum } from '../utils/currency';
 
 const CURRENCY_OPTIONS = [
   { code: 'CNY', symbol: '¥', label: '人民币 (CNY)' },
@@ -47,18 +48,18 @@ function formatCurrency(value, currency = 'CNY') {
   const option = CURRENCY_OPTIONS.find(c => c.code === currency) || CURRENCY_OPTIONS[0];
   const formatted = new Intl.NumberFormat('zh-CN', {
     style: 'decimal',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(value);
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(value, 3));
   return `${option.symbol}${formatted}`;
 }
 
 function formatNumber(value) {
   if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  }).format(truncateNum(value, 3));
 }
 
 function formatPercentage(value) {

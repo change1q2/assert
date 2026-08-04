@@ -41,15 +41,17 @@ import {
   Legend,
   LabelList,
 } from 'recharts';
+import { truncateNum } from '../utils/currency';
 
 function formatCurrency(value, currency = 'CNY') {
   const num = value == null || isNaN(value) ? 0 : Number(value);
   const options = {
     style: 'currency',
     currency,
-    minimumFractionDigits: 0,
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
   };
-  return new Intl.NumberFormat(currency === 'CNY' ? 'zh-CN' : 'en-US', options).format(num);
+  return new Intl.NumberFormat(currency === 'CNY' ? 'zh-CN' : 'en-US', options).format(truncateNum(num, 3));
 }
 
 function formatPercentage(value) {
