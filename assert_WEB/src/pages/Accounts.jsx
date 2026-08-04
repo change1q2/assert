@@ -368,12 +368,12 @@ export default function Accounts() {
     const isCashCategory = a.category === '现金类' || a.categoryL1 === '现金类';
     let _cashValue = 0;
     if (isCashCategory) {
-      _cashValue = parseFloat(a.currentValue) || 0;
+      _cashValue = Math.max(0, parseFloat(a.currentValue) || 0);
       if (_cashValue === 0) {
         const accId = a.accountId || a.account || '';
         const matchedAccount = accounts.find(acct => acct.id === accId || acct.name === accId);
         if (matchedAccount) {
-          _cashValue = parseFloat(matchedAccount.balance) || 0;
+          _cashValue = Math.max(0, parseFloat(matchedAccount.balance) || 0);
         }
       }
     }
@@ -1544,9 +1544,9 @@ export default function Accounts() {
         const _costPrice = buyTotalQty > 0 ? _computedCostPrice : (parseFloat(a.costPrice || a.cost) || 0);
 
         const isCash = isCashCategory(a);
-        let _cashValue = isCash ? (parseFloat(a.currentValue) || 0) : 0;
+        let _cashValue = isCash ? Math.max(0, parseFloat(a.currentValue) || 0) : 0;
         if (isCash && _cashValue === 0) {
-          _cashValue = parseFloat(account.balance) || 0;
+          _cashValue = Math.max(0, parseFloat(account.balance) || 0);
         }
         const _effectiveQty = _qty;
         const _quotePrice = parseFloat(quotesMap[a.code]?.price) || 0;

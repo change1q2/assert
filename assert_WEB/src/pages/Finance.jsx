@@ -243,7 +243,7 @@ const updateAccountBalance = (asset, record, accounts, fallbackAccounts, finance
       return a;
     }
 
-    const balance = parseFloat(targetAccount.balance) || 0;
+    const balance = Math.max(0, parseFloat(targetAccount.balance) || 0);
     return {
       ...a,
       currentValue: balance,
@@ -3578,13 +3578,13 @@ export default function Finance({ onAssetPenetration }) {
 
       // 现金类资产：直接使用存储的 currentValue（已与 account.balance 同步）
       const isCash = (a.category === '现金类' || a.categoryL1 === '现金类');
-      let _cashValue = isCash ? (parseFloat(a.currentValue) || 0) : 0;
+      let _cashValue = isCash ? Math.max(0, parseFloat(a.currentValue) || 0) : 0;
       // 若 currentValue 仍为 0，实时从 accounts 中查找关联账户的 balance 作为回退
       if (isCash && _cashValue === 0) {
         const accId = a.accountId || a.account || '';
         const linkedAccount = (stateData?.accounts || []).find(acc => acc.id === accId || acc.name === accId);
         if (linkedAccount) {
-          _cashValue = parseFloat(linkedAccount.balance) || 0;
+          _cashValue = Math.max(0, parseFloat(linkedAccount.balance) || 0);
         }
       }
       const _effectiveQty = isCash ? (parseFloat(a.shares || a.quantity) || _cashValue) : _qty;
