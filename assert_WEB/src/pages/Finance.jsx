@@ -2346,7 +2346,7 @@ export default function Finance({ onAssetPenetration }) {
       setStateData(data);
       const financeAssetsData = data?.financeAssets || [];
       if (financeAssetsData.length > 0) {
-        loadQuotes(financeAssetsData);
+        await loadQuotes(financeAssetsData, data);
         await loadFundNav(financeAssetsData, data);
       }
     } catch (err) {
@@ -2357,13 +2357,13 @@ export default function Finance({ onAssetPenetration }) {
     }
   };
 
-  const loadQuotes = async (financeAssetsData) => {
+  const loadQuotes = async (financeAssetsData, currentState) => {
     if (!financeAssetsData || financeAssetsData.length === 0) return;
     const codes = financeAssetsData
       .filter(a => {
         if (!a.code) return false;
         // 排除现金类资产
-        if (a.kind === 'cash' || a.categoryL2 === '现金') return false;
+        if (a.kind === 'cash' || a.categoryL2 === '现金' || a.assetType === '现金' || a.categoryL1 === '现金类') return false;
         // 排除场外基金（由 loadFundNav 单独处理）
         const catL3 = a.categoryL3 || a.tertiaryCategory;
         if (catL3 === '场外' || (!catL3 && a.market === '场外基金')) return false;
@@ -2381,6 +2381,45 @@ export default function Finance({ onAssetPenetration }) {
         }
       });
       setQuotesMap(map);
+      // 把最新行情数据回写到 financeAssets 并保存
+      if (currentState && Object.keys(map).length > 0) {
+        let changed = false;
+        const isHKStockConnect = (a) => a.categoryL2 === '港股通';
+        const updatedAssets = (currentState.financeAssets || []).map(a => {
+          const q = map[a.code];
+          if (!q) return a;
+          const rawPrice = Number.isFinite(Number(q.current)) ? Number(q.current) : null;
+          const rawPrev = Number.isFinite(Number(q.previousClose)) ? Number(q.previousClose) : null;
+          const _rate = Number(currentState.exchangeRates?.HKD) || 1;
+          const newPrice = isHKStockConnect(a) && rawPrice != null
+            ? Math.trunc(rawPrice * _rate * 10000) / 10000
+            : rawPrice;
+          const newPrev = isHKStockConnect(a) && rawPrev != null
+            ? Math.trunc(rawPrev * _rate * 10000) / 10000
+            : rawPrev;
+          const newDate = q.date || a.priceDate || '';
+          if (newPrice == null && newPrev == null) return a;
+          changed = true;
+          const qty = parseFloat(a.quantity) || parseFloat(a.shares) || 0;
+          const curVal = (newPrice != null) ? newPrice * qty : a.currentValue;
+          return {
+            ...a,
+            currentPrice: newPrice != null ? newPrice : a.currentPrice,
+            prevPrice: newPrev != null ? newPrev : a.prevPrice,
+            priceDate: newDate,
+            currentValue: curVal,
+          };
+        });
+        if (changed) {
+          const newState = { ...currentState, financeAssets: updatedAssets };
+          setStateData(newState);
+          try {
+            await saveState(newState);
+          } catch (e) {
+            console.warn('保存股票行情失败:', e);
+          }
+        }
+      }
     } catch (err) {
       console.error('Failed to load quotes:', err);
     } finally {
@@ -2589,90 +2628,8 @@ export default function Finance({ onAssetPenetration }) {
         payload.transactions = [buildRecord];
         updatedFinanceAssets = [...currentFinanceAssets, payload];
 
-        // 自动创建现金类持仓资产（若关联账户下不存在）
-        const accountName = payload.accountId || '';
-        const hasCashAsset = currentFinanceAssets.some(a =>
-          (a.accountId === accountName || a.account === accountName) &&
-          a.category === '现金类'
-        );
-        if (!hasCashAsset && accountName) {
-          // 生成资产代码：{账户名}01，若已存在则顺延
-          const existingCodes = currentFinanceAssets
-            .filter(a => a.category === '现金类' && a.code && a.code.startsWith(accountName))
-            .map(a => a.code);
-          let codeSuffix = 1;
-          let cashCode = `${accountName}01`;
-          while (existingCodes.includes(cashCode)) {
-            codeSuffix++;
-            cashCode = `${accountName}${String(codeSuffix).padStart(2, '0')}`;
-          }
-          // 市场映射二级分类
-          const marketSubcategoryMap = {
-            '国内市场': 'A股',
-            '港股市场': '港股',
-            '美股市场': '美股',
-          };
-          const cashAsset = {
-            id: `cash-asset-${Date.now()}`,
-            market: payload.market || '国内市场',
-            currency: payload.currency || 'CNY',
-            assetKind: '现金',
-            kind: '现金',
-            assetType: '现金',
-            accountId: accountName,
-            account: accountName,
-            category: '现金类',
-            categoryL1: '现金类',
-            subcategory: marketSubcategoryMap[payload.market] || 'A股',
-            categoryL2: marketSubcategoryMap[payload.market] || 'A股',
-            tertiaryCategory: '场内',
-            categoryL3: '场内',
-            positionGroup: '现金仓位',
-            positionCategory: '现金管理',
-            positionType: '现金管理',
-            name: `${accountName}现金管理`,
-            code: cashCode,
-            costPrice: 1,
-            shares: 0,
-            quantity: 0,
-            cost: 0,
-            availableShares: 0,
-            currentPrice: 1,
-            prevPrice: 1,
-            priceDate: '',
-            avgBuyPrice: 0,
-            holdingDays: 0,
-            holdingDaysBase: 0,
-            holdingDaysDate: new Date().toISOString().split('T')[0],
-            pnl: 0,
-            pnlPercent: 0,
-            todayPnl: 0,
-            todayPnlPercent: 0,
-            holdingPnl: 0,
-            holdingPnlRate: 0,
-            dailyPnl: 0,
-            dailyPnlRate: 0,
-            currentValue: 0,
-            positionWeight: 0,
-            totalFees: 0,
-            tags: '',
-            transactions: [],
-          };
-
-          // 任务 C：用所属账户当前 balance 初始化现金类资产
-          const linkedAccount = (stateData.accounts || []).find(a =>
-            a.name === accountName || a.id === accountName
-          );
-          if (linkedAccount && linkedAccount.balance !== undefined && linkedAccount.balance !== null) {
-            const _bal = parseFloat(linkedAccount.balance) || 0;
-            cashAsset.currentValue = _bal;
-            cashAsset.currentPrice = 1;
-          }
-
-          updatedFinanceAssets = [...updatedFinanceAssets, cashAsset];
-        }
-
         // 现金账户联动：建仓扣减现金
+        const accountName = payload.accountId || '';
         const cashAccountName = `${accountName} 现金账户`;
         const accountsForUpdate = JSON.parse(JSON.stringify(stateData.accounts || []));
         let cashAcct = accountsForUpdate.find(acc =>
