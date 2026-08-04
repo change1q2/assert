@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchRealTimeExchangeRates } from '../api';
-import { CURRENCIES, getCurrencySymbol, getCurrencyName } from '../utils/currency';
+import { CURRENCIES, getCurrencySymbol, getCurrencyName, truncateNum } from '../utils/currency';
 import {
   TrendingUp,
   TrendingDown,
