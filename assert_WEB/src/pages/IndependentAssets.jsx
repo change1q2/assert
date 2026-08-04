@@ -290,6 +290,7 @@ export default function IndependentAssets() {
   const [ocrResult, setOcrResult] = useState(null);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [selectedOcrRecords, setSelectedOcrRecords] = useState([]);
+  const [equityQuotesMap, setEquityQuotesMap] = useState({});
   // 股权模块字段选项（同步理财模块）
   const [equityAssetKindOptions, setEquityAssetKindOptions] = useState(() => {
     const saved = localStorage.getItem('ia_equity_asset_kind_options');
@@ -434,6 +435,35 @@ export default function IndependentAssets() {
   useEffect(() => {
     setFixedInvestmentCashflowPage(1);
   }, [fixedInvestmentCashflowStartDate, fixedInvestmentCashflowEndDate, fixedInvestmentCashflowEventType, fixedInvestmentCashflowSign]);
+
+  useEffect(() => {
+    const equityItems = stateData?.independentAssets?.equity || [];
+    if (equityItems.length === 0) {
+      setEquityQuotesMap({});
+      return;
+    }
+    const codes = [...new Set(equityItems.map(i => i.code).filter(Boolean))];
+    if (codes.length === 0) {
+      setEquityQuotesMap({});
+      return;
+    }
+    let cancelled = false;
+    const loadEquityQuotes = async () => {
+      try {
+        const quotes = await fetchFinanceQuotes(codes);
+        if (cancelled) return;
+        const map = {};
+        (quotes || []).forEach(q => {
+          if (q && q.code) map[q.code] = q;
+        });
+        setEquityQuotesMap(map);
+      } catch (e) {
+        console.error('Failed to load equity quotes:', e);
+      }
+    };
+    loadEquityQuotes();
+    return () => { cancelled = true; };
+  }, [stateData?.independentAssets?.equity]);
 
   const loadData = async () => {
     setLoading(true);
@@ -678,13 +708,23 @@ export default function IndependentAssets() {
       equity: {
         name: '',
         code: '',
+        market: '国内市场',
+        currency: 'CNY',
+        assetKind: '',
+        assetType: '股票',
+        categoryL1: '',
+        categoryL2: '',
+        categoryL3: '',
+        positionGroup: '',
+        positionType: '',
         cost: '',
         quantity: '',
         currentPrice: '',
+        prevPrice: '',
+        holdDate: '',
         marketValue: '',
         pnl: '',
         pnlRate: '',
-        currency: 'CNY',
         accountId: '',
         accountName: '',
       },
@@ -2392,6 +2432,7 @@ export default function IndependentAssets() {
 
   const renderEquityTable = () => {
     const items = getAssets('equity');
+    const totalCost = items.reduce((s, i) => s + (parseFloat(i.cost) || 0) * (parseFloat(i.quantity) || 0), 0);
     return (
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
@@ -2402,36 +2443,87 @@ export default function IndependentAssets() {
           </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[1800px]">
             <thead className="bg-gray-50 dark:bg-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">名称</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">代码</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">成本</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">数量</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">当前价格</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">市值</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">盈亏</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">盈亏比例</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">市场</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">货币</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">资产种类</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">资产类型</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">资产名称</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">代码</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">持仓成本</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">平均买入成本</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">数量</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">现价</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">天数</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">当前市值</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">持仓盈亏</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">持仓盈亏率</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">当日盈亏</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">当日收益率</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">仓位占比</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">所属账户</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
               {items.map(item => {
-                const pnlValue = parseFloat(item.pnl || 0);
-                const pnlClass = pnlValue >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
+                const q = item.code && equityQuotesMap[item.code] ? equityQuotesMap[item.code] : null;
+                const _quotePrice = q && q.price != null ? parseFloat(q.price) : null;
+                const _quotePrevClose = q && q.prevClose != null ? parseFloat(q.prevClose) : null;
+                const _price = _quotePrice || parseFloat(item.currentPrice) || 0;
+                const _prevClose = _quotePrevClose || parseFloat(item.prevPrice) || 0;
+                const _qty = parseFloat(item.quantity) || 0;
+                const _unitCost = parseFloat(item.cost) || 0;
+                const _totalCost = _unitCost * _qty;
+                const _avgCost = _qty > 0 ? _totalCost / _qty : _unitCost;
+                const _currentValue = _price * _qty;
+                const _holdingPnl = _currentValue - _totalCost;
+                const _holdingPnlRate = _totalCost > 0 ? (_holdingPnl / _totalCost) * 100 : 0;
+                const _dailyPnl = _prevClose > 0 ? (_price - _prevClose) * _qty : 0;
+                const _dailyPnlRate = _prevClose > 0 ? ((_price - _prevClose) / _prevClose) * 100 : 0;
+                const _positionRatio = totalCost > 0 ? (_totalCost / totalCost) * 100 : 0;
+
+                const _pnlClass = (v) => {
+                  const n = parseFloat(v);
+                  return isNaN(n) ? 'text-gray-600 dark:text-gray-400' : (n >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400');
+                };
+
+                let _holdingDays = 0;
+                if (item.holdDate) {
+                  const d1 = new Date(item.holdDate);
+                  const d2 = new Date();
+                  d2.setHours(0, 0, 0, 0);
+                  _holdingDays = Math.max(0, Math.floor((d2 - d1) / 86400000));
+                }
+
+                const _symbol = (item.currency && item.currency.length === 3)
+                  ? (item.currency === 'USD' ? '$' : item.currency === 'HKD' ? 'HK$' : item.currency === 'EUR' ? '€' : item.currency === 'JPY' ? '¥' : item.currency === 'GBP' ? '£' : '¥')
+                  : '¥';
+
                 return (
-                  <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.name}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">{item.code}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.cost, item.currency)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatNumber(item.quantity)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.currentPrice, item.currency)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.marketValue, item.currency)}</td>
-                    <td className={`px-4 py-3 text-sm font-medium ${pnlClass}`}>{formatCurrency(item.pnl, item.currency)}</td>
-                    <td className={`px-4 py-3 text-sm font-medium ${pnlClass}`}>{formatPercentage(item.pnlRate)}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="flex items-center gap-2">
+                  <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 whitespace-nowrap">
+                    <td className="px-3 py-3 text-sm text-gray-700 dark:text-gray-300 text-left">{item.market || '—'}</td>
+                    <td className="px-3 py-3 text-sm text-gray-700 dark:text-gray-300 text-left">{item.currency || '—'}</td>
+                    <td className="px-3 py-3 text-sm text-gray-700 dark:text-gray-300 text-left">{item.assetKind || '—'}</td>
+                    <td className="px-3 py-3 text-sm text-gray-700 dark:text-gray-300 text-left">{item.assetType || '股票'}</td>
+                    <td className="px-3 py-3 text-sm font-medium text-gray-900 dark:text-white text-left">{item.name}</td>
+                    <td className="px-3 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono text-left">{item.code}</td>
+                    <td className="px-3 py-3 text-sm text-left text-gray-900 dark:text-white">{_symbol}{_totalCost.toFixed(2)}</td>
+                    <td className="px-3 py-3 text-sm text-left text-gray-900 dark:text-white">{_symbol}{_avgCost.toFixed(3)}</td>
+                    <td className="px-3 py-3 text-sm text-left text-gray-900 dark:text-white">{_qty.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}</td>
+                    <td className={`px-3 py-3 text-sm text-left ${_quotePrice ? _pnlClass(_price - _prevClose) : 'text-gray-900 dark:text-white'}`}>{_symbol}{_price.toFixed(3)}</td>
+                    <td className="px-3 py-3 text-sm text-left text-gray-700 dark:text-gray-300">{_holdingDays > 0 ? _holdingDays : '—'}</td>
+                    <td className="px-3 py-3 text-sm text-left font-medium text-gray-900 dark:text-white">{_symbol}{_currentValue.toFixed(2)}</td>
+                    <td className={`px-3 py-3 text-sm text-left font-medium ${_pnlClass(_holdingPnl)}`}>{_holdingPnl >= 0 ? '+' : ''}{_symbol}{_holdingPnl.toFixed(2)}</td>
+                    <td className={`px-3 py-3 text-sm text-left font-medium ${_pnlClass(_holdingPnlRate)}`}>{_holdingPnlRate >= 0 ? '+' : ''}{_holdingPnlRate.toFixed(2)}%</td>
+                    <td className={`px-3 py-3 text-sm text-left font-medium ${_pnlClass(_dailyPnl)}`}>{_dailyPnl >= 0 ? '+' : ''}{_symbol}{_dailyPnl.toFixed(2)}</td>
+                    <td className={`px-3 py-3 text-sm text-left font-medium ${_pnlClass(_dailyPnlRate)}`}>{_dailyPnlRate >= 0 ? '+' : ''}{_dailyPnlRate.toFixed(2)}%</td>
+                    <td className="px-3 py-3 text-sm text-left text-gray-700 dark:text-gray-300">{_positionRatio.toFixed(2)}%</td>
+                    <td className="px-3 py-3 text-sm text-left text-gray-700 dark:text-gray-300">{item.accountName || '—'}</td>
+                    <td className="px-3 py-3 text-sm">
+                      <div className="flex items-center gap-1">
                         <button onClick={() => handleEdit(item)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
                           <Edit2 className="w-4 h-4" />
                         </button>
@@ -2445,7 +2537,7 @@ export default function IndependentAssets() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无股权数据</td>
+                  <td colSpan={19} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无股权数据</td>
                 </tr>
               )}
             </tbody>
@@ -3658,6 +3750,26 @@ export default function IndependentAssets() {
                     onChange={(e) => setFormData({ ...formData, pnlRate: e.target.value })}
                     placeholder="自动计算"
                     className={`w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">昨收价</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={formData.prevPrice || ''}
+                    onChange={(e) => setFormData({ ...formData, prevPrice: e.target.value })}
+                    placeholder="昨收盘价（用于计算当日盈亏）"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">持仓起始日期</label>
+                  <input
+                    type="date"
+                    value={formData.holdDate || ''}
+                    onChange={(e) => setFormData({ ...formData, holdDate: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>

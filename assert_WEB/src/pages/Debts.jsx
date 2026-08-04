@@ -884,18 +884,51 @@ export default function Debts() {
     setSaving(true);
     try {
       const plan = getRepaymentPlan();
-      const debtData = {
+      const existingDebt = editingDebt || null;
+
+      const mergedBase = existingDebt ? { ...existingDebt } : {};
+
+      const mergedForm = {
+        ...mergedBase,
         ...form,
         principal: parseFloat(form.principal) || 0,
         annualRate: parseFloat(form.annualRate) || 0,
         amount: parseFloat(form.amount) || 0,
-        paidAmount: parseFloat(form.paidAmount) || 0,
         penaltyInterest: parseFloat(form.penaltyInterest) || 0,
-        remainingAmount: plan ? plan.remainingAmount : parseFloat(form.amount) - (parseFloat(form.paidAmount) || 0),
         id: editingDebt ? editingDebt.id : Date.now(),
         name: form.creditor || '',
         creditorName: form.creditor || '',
         debtorName: form.debtor || '',
+        category: form.category || mergedBase.category || 'payable',
+        type: form.type || mergedBase.type || '借入',
+        debtCategory: form.debtCategory || mergedBase.debtCategory || '',
+        status: form.status || mergedBase.status || 'normal',
+        payments: mergedBase.payments || {},
+        periodPenalties: mergedBase.periodPenalties || {},
+        cardWidth: mergedBase.cardWidth || '100%',
+      };
+
+      const derivedPaidAmount = (() => {
+        const payments = mergedForm.payments || {};
+        const paymentPlan = plan || (
+          mergedForm.principal && mergedForm.annualRate !== undefined && mergedForm.startDate && mergedForm.dueDate
+            ? calculateRepayment(mergedForm.principal, mergedForm.annualRate, mergedForm.repaymentMethod, mergedForm.startDate, mergedForm.dueDate, 0, isConsumerLoan(mergedForm.debtCategory), mergedForm.investmentDays)
+            : null
+        );
+        if (paymentPlan?.schedule && Object.keys(payments).length > 0) {
+          return paymentPlan.schedule
+            .filter((s) => payments[s.period] === true)
+            .reduce((sum, s) => sum + (s.total || 0), 0);
+        }
+        return parseFloat(form.paidAmount) || 0;
+      })();
+
+      const debtData = {
+        ...mergedForm,
+        paidAmount: derivedPaidAmount,
+        remainingAmount: (plan?.remainingAmount !== undefined && plan?.remainingAmount !== null)
+          ? plan.remainingAmount
+          : mergedForm.amount - derivedPaidAmount,
       };
 
       let updatedDebts;
