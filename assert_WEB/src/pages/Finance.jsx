@@ -2291,6 +2291,46 @@ export default function Finance({ onAssetPenetration }) {
           };
         });
       }
+      // 自动修复历史负现金类资产数据（currentValue/shares/quantity 为负数），并持久化
+      if (data?.financeAssets && data.financeAssets.length > 0) {
+        let cashDataDirty = false;
+        data.financeAssets = data.financeAssets.map(asset => {
+          const isCash = asset.category === '现金类' || asset.categoryL1 === '现金类';
+          if (!isCash) return asset;
+          const origCV = parseFloat(asset.currentValue);
+          const origShares = parseFloat(asset.shares);
+          const origQty = parseFloat(asset.quantity);
+          const origCost = parseFloat(asset.cost);
+          const origBalance = parseFloat(asset.balance);
+          const fixedCV = Number.isFinite(origCV) ? Math.max(0, origCV) : 0;
+          const fixedShares = Number.isFinite(origShares) ? Math.max(0, origShares) : 0;
+          const fixedQty = Number.isFinite(origQty) ? Math.max(0, origQty) : 0;
+          const fixedCost = Number.isFinite(origCost) ? Math.max(0, origCost) : 0;
+          const fixedBalance = Number.isFinite(origBalance) ? Math.max(0, origBalance) : 0;
+          const changed =
+            (Number.isFinite(origCV) && origCV < 0) ||
+            (Number.isFinite(origShares) && origShares < 0) ||
+            (Number.isFinite(origQty) && origQty < 0) ||
+            (Number.isFinite(origCost) && origCost < 0) ||
+            (Number.isFinite(origBalance) && origBalance < 0);
+          if (changed) {
+            cashDataDirty = true;
+            return {
+              ...asset,
+              currentValue: fixedCV,
+              shares: fixedShares || fixedCV,
+              quantity: fixedQty || fixedCV,
+              cost: fixedCost,
+              balance: fixedBalance,
+              availableShares: Number.isFinite(parseFloat(asset.availableShares)) ? Math.max(0, parseFloat(asset.availableShares)) : (fixedShares || fixedCV),
+            };
+          }
+          return asset;
+        });
+        if (cashDataDirty) {
+          saveState({ ...data }).catch(err => console.error('Failed to sanitize cash assets:', err));
+        }
+      }
       setStateData(data);
       const financeAssetsData = data?.financeAssets || [];
       if (financeAssetsData.length > 0) {
@@ -3587,10 +3627,11 @@ export default function Finance({ onAssetPenetration }) {
           _cashValue = Math.max(0, parseFloat(linkedAccount.balance) || 0);
         }
       }
-      const _effectiveQty = isCash ? (parseFloat(a.shares || a.quantity) || _cashValue) : _qty;
+      // 现金类：强制使用 _cashValue（非负）作为有效数量和当前市值，避免原始负 shares/quantity/currentValue 污染显示
+      const _effectiveQty = isCash ? _cashValue : _qty;
       const _effectivePrice = isCash ? 1 : _price;
-      const _costTotal = isCash ? (_cost * _effectiveQty) : (_cost * _effectiveQty);
-      const _currentValue = isCash ? (_effectiveQty * _effectivePrice) : (parseFloat(a.currentValue) || (_price * _effectiveQty));
+      const _costTotal = isCash ? (Math.max(0, _cashValue) * 1) : (_cost * _effectiveQty);
+      const _currentValue = isCash ? _cashValue : (parseFloat(a.currentValue) || (_price * _effectiveQty));
 
       const _holdingPnl = isCash ? 0 : Math.round((_currentValue - _costTotal) * 100) / 100;
       const _holdingPnlRate = isCash ? 0 : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0);
