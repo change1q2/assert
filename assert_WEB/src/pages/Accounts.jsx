@@ -366,24 +366,14 @@ export default function Accounts() {
     const _costPrice = buyTotalQty > 0 ? _computedCostPrice : (parseFloat(a.costPrice || a.cost) || 0);
 
     const isCashCategory = a.category === '现金类' || a.categoryL1 === '现金类';
-    let _cashValue = 0;
-    if (isCashCategory) {
-      _cashValue = Math.max(0, parseFloat(a.currentValue) || 0);
-      if (_cashValue === 0) {
-        const accId = a.accountId || a.account || '';
-        const matchedAccount = accounts.find(acct => acct.id === accId || acct.name === accId);
-        if (matchedAccount) {
-          _cashValue = Math.max(0, parseFloat(matchedAccount.balance) || 0);
-        }
-      }
-    }
-    const _effectiveQty = isCashCategory ? _cashValue : _qty;
+    // 数量始终使用实际数量，不能用 currentValue 覆盖
+    const _effectiveQty = _qty;
     const _effectivePrice = isCashCategory ? 1 : (parseFloat(a.currentPrice) || 0);
 
     quantity = _effectiveQty;
     costPrice = isCashCategory ? 1 : _costPrice;
     currentPrice = _effectivePrice;
-    mv = isCashCategory ? _cashValue : (parseFloat(a.currentValue) || (_effectivePrice * _effectiveQty));
+    mv = isCashCategory ? (_effectivePrice * _effectiveQty) : (parseFloat(a.currentValue) || (_effectivePrice * _effectiveQty));
     cost = costPrice * quantity;
     holdingPnl = isCashCategory ? 0 : (mv - cost);
     holdingPnlRate = cost > 0 ? (holdingPnl / cost) * 100 : 0;
@@ -1595,18 +1585,14 @@ export default function Accounts() {
         const _costPrice = buyTotalQty > 0 ? _computedCostPrice : (parseFloat(a.costPrice || a.cost) || 0);
 
         const isCash = isCashCategory(a);
-        let _cashValue = isCash ? Math.max(0, parseFloat(a.currentValue) || 0) : 0;
-        if (isCash && _cashValue === 0) {
-          _cashValue = Math.max(0, parseFloat(account.balance) || 0);
-        }
-        // 现金类：强制使用 _cashValue（非负）作为有效数量和当前市值，避免原始负 shares/quantity/currentValue 污染显示
-        const _effectiveQty = isCash ? _cashValue : _qty;
+        // 数量始终使用实际数量，不能用 currentValue 覆盖
+        const _effectiveQty = _qty;
         const _quotePrice = parseFloat(quotesMap[a.code]?.price) || 0;
         const _effectivePrice = isCash ? 1 : (_quotePrice || parseFloat(a.currentPrice) || 0);
 
         const _unitCost = isCash ? 1 : _costPrice;
-        const _totalCost = isCash ? (Math.max(0, _cashValue) * 1) : (_unitCost * _effectiveQty);
-        const _currentValue = isCash ? _cashValue : (parseFloat(a.currentValue) || (_effectivePrice * _effectiveQty));
+        const _totalCost = isCash ? (_unitCost * _effectiveQty) : (_unitCost * _effectiveQty);
+        const _currentValue = isCash ? (_effectivePrice * _effectiveQty) : (parseFloat(a.currentValue) || (_effectivePrice * _effectiveQty));
         const _holdingPnl = isCash ? 0 : (_currentValue - _totalCost);
         const _holdingPnlRate = _totalCost > 0 ? (_holdingPnl / _totalCost) * 100 : 0;
 

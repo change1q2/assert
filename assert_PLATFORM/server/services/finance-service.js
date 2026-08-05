@@ -479,6 +479,36 @@ async function getQuotes(codes) {
     } catch (_) { }
   }));
 
+  // 东方财富港股行情接口（港股数据源）
+  const hkFallbackItems = queryItems.filter(({ index }) => results[index].price == null);
+  await Promise.all(hkFallbackItems.map(async ({ tencentCode, index }) => {
+    const prefix = tencentCode.slice(0, 2);
+    if (prefix !== "hk") return;
+    const hkCode = tencentCode.slice(2).padStart(5, "0");
+    const secid = `116.${hkCode}`;
+    try {
+      const emUrl = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f169,f170`;
+      const emRes = await fetch(emUrl, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(6000),
+      });
+      const data = (await emRes.json())?.data;
+      if (!data || !Number.isFinite(Number(data.f43))) return;
+      const scaled = (value) => Number.isFinite(Number(value)) ? Number(value) / 100 : null;
+      results[index] = {
+        ...results[index],
+        name: data.f58 || results[index].name,
+        price: scaled(data.f43),
+        prevClose: scaled(data.f60),
+        changeAmt: scaled(data.f169),
+        changePct: scaled(data.f170),
+        high: scaled(data.f44),
+        low: scaled(data.f45),
+        volume: Number.isFinite(Number(data.f47)) ? Number(data.f47) : null,
+      };
+    } catch (_) { }
+  }));
+
   return { quotes: results };
 }
 

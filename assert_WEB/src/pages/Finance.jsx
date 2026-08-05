@@ -2388,17 +2388,19 @@ export default function Finance({ onAssetPenetration }) {
       if (currentState && Object.keys(map).length > 0) {
         let changed = false;
         const isHKStockConnect = (a) => a.categoryL2 === '港股通';
+        // 使用组件最新的汇率（而非可能过时的存储数据）
+        const hkdRate = Number(exchangeRates?.HKD) || 0.92;
         const updatedAssets = (currentState.financeAssets || []).map(a => {
           const q = map[a.code];
           if (!q) return a;
           const rawPrice = Number.isFinite(Number(q.current)) ? Number(q.current) : null;
           const rawPrev = Number.isFinite(Number(q.previousClose)) ? Number(q.previousClose) : null;
-          const _rate = Number(currentState.exchangeRates?.HKD) || 1;
+          // 港股通：将 HKD 价格按实时汇率折算为 CNY
           const newPrice = isHKStockConnect(a) && rawPrice != null
-            ? Math.trunc(rawPrice * _rate * 10000) / 10000
+            ? Math.trunc(rawPrice * hkdRate * 10000) / 10000
             : rawPrice;
           const newPrev = isHKStockConnect(a) && rawPrev != null
-            ? Math.trunc(rawPrev * _rate * 10000) / 10000
+            ? Math.trunc(rawPrev * hkdRate * 10000) / 10000
             : rawPrev;
           const newDate = q.date || a.priceDate || '';
           if (newPrice == null && newPrev == null) return a;
