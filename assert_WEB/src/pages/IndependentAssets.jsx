@@ -2078,6 +2078,39 @@ export default function IndependentAssets() {
                   <td colSpan={13} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无保险资产数据</td>
                 </tr>
               )}
+              {items.length > 0 && (() => {
+                const totals = items.reduce((acc, item) => {
+                  const records = item.transactionRecords || [];
+                  const isAnnuity = item.insuranceType === '年金险';
+                  let p = parseFloat(item.paidAmount || 0);
+                  let c = parseFloat(item.cashValue || 0);
+                  let d = 0;
+                  if (isAnnuity) {
+                    p = records.reduce((s, r) => s + parseFloat(r.annualPremium || 0), 0);
+                    if (records.length > 0) {
+                      const lr = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop();
+                      c = parseFloat(lr.yearEndCashValue || 0);
+                    }
+                    d = records.reduce((s, r) => s + parseFloat(r.annualActualDividend || 0), 0);
+                  } else {
+                    d = records.reduce((s, r) => s + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0), 0);
+                  }
+                  const cur = item.currency || 'CNY';
+                  acc.paid += convertCurrency(p, cur, 'CNY');
+                  acc.cash += convertCurrency(c, cur, 'CNY');
+                  acc.dividend += convertCurrency(d, cur, 'CNY');
+                  return acc;
+                }, { paid: 0, cash: 0, dividend: 0 });
+                return (
+                  <tr className="bg-gray-50 dark:bg-slate-700/50 font-semibold border-t-2 border-gray-300 dark:border-slate-600">
+                    <td colSpan={8} className="px-4 py-3 text-sm text-gray-900 dark:text-white text-right">合计 (CNY)</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(totals.paid)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(totals.cash)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(totals.dividend)}</td>
+                    <td colSpan={2} className="px-4 py-3"></td>
+                  </tr>
+                );
+              })()}
             </tbody>
           </table>
         </div>
@@ -2171,6 +2204,32 @@ export default function IndependentAssets() {
           </div>
         )}
 
+        {selfUseItems.length > 0 && (
+          <div className="bg-gray-50 dark:bg-slate-700/30 rounded-xl px-4 py-2 border border-gray-200 dark:border-slate-600">
+            {(() => {
+              const t = selfUseItems.reduce((acc, item) => {
+                const cur = item.currency || 'CNY';
+                acc.purchase += convertCurrency(parseFloat(item.purchasePrice || 0), cur, 'CNY');
+                acc.tax += convertCurrency(parseFloat(item.taxAmount || 0), cur, 'CNY');
+                acc.agency += convertCurrency(parseFloat(item.agencyFeeAmount || 0), cur, 'CNY');
+                acc.market += convertCurrency(parseFloat(item.marketValue || 0), cur, 'CNY');
+                acc.profitLoss += convertCurrency(parseFloat(item.profitLossAmount || 0), cur, 'CNY');
+                return acc;
+              }, { purchase: 0, tax: 0, agency: 0, market: 0, profitLoss: 0 });
+              return (
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+                  <span className="font-semibold text-gray-900 dark:text-white">自用房产合计 (CNY):</span>
+                  <span className="text-gray-700 dark:text-gray-300">购买价 {formatCurrency(t.purchase)}</span>
+                  <span className="text-gray-700 dark:text-gray-300">税费 {formatCurrency(t.tax)}</span>
+                  <span className="text-gray-700 dark:text-gray-300">中介费 {formatCurrency(t.agency)}</span>
+                  <span className="text-gray-700 dark:text-gray-300">市场估值 {formatCurrency(t.market)}</span>
+                  <span className={t.profitLoss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}>涨跌额 {formatCurrency(t.profitLoss)}</span>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         {rentalItems.length > 0 && (
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
             <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
@@ -2239,6 +2298,29 @@ export default function IndependentAssets() {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {rentalItems.length > 0 && (
+          <div className="bg-gray-50 dark:bg-slate-700/30 rounded-xl px-4 py-2 border border-gray-200 dark:border-slate-600">
+            {(() => {
+              const t = rentalItems.reduce((acc, item) => {
+                const cur = item.currency || 'CNY';
+                acc.rent += convertCurrency(parseFloat(item.rentAmount || 0), cur, 'CNY');
+                acc.deposit += convertCurrency(parseFloat(item.depositAmount || 0), cur, 'CNY');
+                const stats = calculateRentalStats(item);
+                acc.income += convertCurrency(stats.cumulativeIncome || 0, cur, 'CNY');
+                return acc;
+              }, { rent: 0, deposit: 0, income: 0 });
+              return (
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+                  <span className="font-semibold text-gray-900 dark:text-white">出租房产合计 (CNY):</span>
+                  <span className="text-gray-700 dark:text-gray-300">租金 {formatCurrency(t.rent)}</span>
+                  <span className="text-gray-700 dark:text-gray-300">押金 {formatCurrency(t.deposit)}</span>
+                  <span className="text-orange-600 dark:text-orange-400">累计收益 {formatCurrency(t.income)}</span>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -2324,6 +2406,23 @@ export default function IndependentAssets() {
                   <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无车辆资产数据</td>
                 </tr>
               )}
+              {items.length > 0 && (() => {
+                const t = items.reduce((acc, item) => {
+                  const cur = item.currency || 'CNY';
+                  const { residualValue } = calculateVehicleResidualValue(item);
+                  acc.purchase += convertCurrency(parseFloat(item.purchasePrice || 0), cur, 'CNY');
+                  acc.residual += convertCurrency(residualValue, cur, 'CNY');
+                  return acc;
+                }, { purchase: 0, residual: 0 });
+                return (
+                  <tr className="bg-gray-50 dark:bg-slate-700/50 font-semibold border-t-2 border-gray-300 dark:border-slate-600">
+                    <td colSpan={3} className="px-4 py-3 text-sm text-gray-900 dark:text-white text-right">合计 (CNY)</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.purchase)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.residual)}</td>
+                    <td colSpan={3} className="px-4 py-3"></td>
+                  </tr>
+                );
+              })()}
             </tbody>
           </table>
         </div>
@@ -2548,6 +2647,26 @@ export default function IndependentAssets() {
                   <td colSpan={11} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无固定投资数据</td>
                 </tr>
               )}
+              {items.length > 0 && (() => {
+                const t = items.reduce((acc, item) => {
+                  const cur = item.currency || 'CNY';
+                  const stats = calculateFixedInvestmentStats(item);
+                  acc.cost += convertCurrency(parseFloat(item.investmentCost || 0), cur, 'CNY');
+                  acc.totalInvested += convertCurrency(stats.totalInvested, cur, 'CNY');
+                  acc.dividend += convertCurrency(stats.totalDividend, cur, 'CNY');
+                  return acc;
+                }, { cost: 0, totalInvested: 0, dividend: 0 });
+                return (
+                  <tr className="bg-gray-50 dark:bg-slate-700/50 font-semibold border-t-2 border-gray-300 dark:border-slate-600">
+                    <td colSpan={4} className="px-4 py-3 text-sm text-gray-900 dark:text-white text-right">合计 (CNY)</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.cost)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.totalInvested)}</td>
+                    <td className="px-4 py-3"></td>
+                    <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400">{formatCurrency(t.dividend)}</td>
+                    <td colSpan={3} className="px-4 py-3"></td>
+                  </tr>
+                );
+              })()}
             </tbody>
           </table>
         </div>
@@ -2665,6 +2784,39 @@ export default function IndependentAssets() {
                   <td colSpan={19} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无股权数据</td>
                 </tr>
               )}
+              {items.length > 0 && (() => {
+                const t = items.reduce((acc, item) => {
+                  const cur = item.currency || 'CNY';
+                  const q = item.code && equityQuotesMap[item.code] ? equityQuotesMap[item.code] : null;
+                  const _quotePrice = q && q.price != null ? parseFloat(q.price) : null;
+                  const _quotePrevClose = q && q.prevClose != null ? parseFloat(q.prevClose) : null;
+                  const _price = _quotePrice || parseFloat(item.currentPrice) || 0;
+                  const _prevClose = _quotePrevClose || parseFloat(item.prevPrice) || 0;
+                  const _qty = parseFloat(item.quantity) || 0;
+                  const _unitCost = parseFloat(item.cost) || 0;
+                  const _totalCost = _unitCost * _qty;
+                  const _currentValue = _price * _qty;
+                  const _holdingPnl = _currentValue - _totalCost;
+                  const _dailyPnl = _prevClose > 0 ? (_price - _prevClose) * _qty : 0;
+                  acc.cost += convertCurrency(_totalCost, cur, 'CNY');
+                  acc.marketValue += convertCurrency(_currentValue, cur, 'CNY');
+                  acc.holdingPnl += convertCurrency(_holdingPnl, cur, 'CNY');
+                  acc.dailyPnl += convertCurrency(_dailyPnl, cur, 'CNY');
+                  return acc;
+                }, { cost: 0, marketValue: 0, holdingPnl: 0, dailyPnl: 0 });
+                return (
+                  <tr className="bg-gray-50 dark:bg-slate-700/50 font-semibold border-t-2 border-gray-300 dark:border-slate-600 whitespace-nowrap">
+                    <td colSpan={6} className="px-3 py-3 text-sm text-gray-900 dark:text-white text-right">合计 (CNY)</td>
+                    <td className="px-3 py-3 text-sm text-left text-gray-900 dark:text-white">¥{t.cost.toFixed(2)}</td>
+                    <td colSpan={4} className="px-3 py-3"></td>
+                    <td className="px-3 py-3 text-sm text-left font-medium text-gray-900 dark:text-white">¥{t.marketValue.toFixed(2)}</td>
+                    <td className={`px-3 py-3 text-sm text-left font-medium ${t.holdingPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{t.holdingPnl >= 0 ? '+' : ''}¥{Math.abs(t.holdingPnl).toFixed(2)}</td>
+                    <td className="px-3 py-3"></td>
+                    <td className={`px-3 py-3 text-sm text-left font-medium ${t.dailyPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{t.dailyPnl >= 0 ? '+' : ''}¥{Math.abs(t.dailyPnl).toFixed(2)}</td>
+                    <td colSpan={4} className="px-3 py-3"></td>
+                  </tr>
+                );
+              })()}
             </tbody>
           </table>
         </div>
@@ -2751,6 +2903,36 @@ export default function IndependentAssets() {
                   <td colSpan={13} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无定期资产数据</td>
                 </tr>
               )}
+              {items.length > 0 && (() => {
+                const t = items.reduce((acc, item) => {
+                  const cur = item.currency || 'CNY';
+                  const calcAmount = parseFloat(item.amount || 0);
+                  const calcRate = parseFloat(item.interestRate !== undefined && item.interestRate !== '' ? item.interestRate : (item.interest || 0));
+                  const calcYears = (() => {
+                    if (!item.startDate || !item.endDate) return 0;
+                    const s = new Date(item.startDate);
+                    const e = new Date(item.endDate);
+                    if (e <= s) return 0;
+                    return (e - s) / (1000 * 60 * 60 * 24) / 365;
+                  })();
+                  const listTotalReturn = calcAmount > 0 && calcRate > 0 && calcYears > 0 ? calcAmount * (calcRate / 100) * calcYears : 0;
+                  const listTotalAmount = calcAmount > 0 ? calcAmount + listTotalReturn : 0;
+                  acc.amount += convertCurrency(calcAmount, cur, 'CNY');
+                  acc.totalReturn += convertCurrency(listTotalReturn, cur, 'CNY');
+                  acc.totalAmount += convertCurrency(listTotalAmount, cur, 'CNY');
+                  return acc;
+                }, { amount: 0, totalReturn: 0, totalAmount: 0 });
+                return (
+                  <tr className="bg-gray-50 dark:bg-slate-700/50 font-semibold border-t-2 border-gray-300 dark:border-slate-600">
+                    <td colSpan={5} className="px-4 py-3 text-sm text-gray-900 dark:text-white text-right">合计 (CNY)</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.amount)}</td>
+                    <td colSpan={3} className="px-4 py-3"></td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.totalReturn)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.totalAmount)}</td>
+                    <td colSpan={2} className="px-4 py-3"></td>
+                  </tr>
+                );
+              })()}
             </tbody>
           </table>
         </div>
