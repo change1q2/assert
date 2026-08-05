@@ -813,6 +813,17 @@ export default function IndependentAssets() {
     await updateAssets(activeTab, items.filter(i => i.id !== item.id));
   };
 
+  const handleCopy = async (item) => {
+    const items = getAssets(activeTab);
+    const copiedItem = JSON.parse(JSON.stringify(item));
+    copiedItem.id = Date.now().toString();
+    if (copiedItem.policyName) copiedItem.policyName = copiedItem.policyName + ' (副本)';
+    if (copiedItem.name) copiedItem.name = copiedItem.name + ' (副本)';
+    if (copiedItem.policyNumber) copiedItem.policyNumber = copiedItem.policyNumber + '-COPY';
+    const nextItems = [...items, copiedItem];
+    await updateAssets(activeTab, nextItems);
+  };
+
   const handleShowVehicleDetail = (item) => {
     setSelectedVehicle(item);
     setShowVehicleDetailModal(true);
@@ -2036,6 +2047,9 @@ export default function IndependentAssets() {
                         </button>
                         <button onClick={() => handleEdit(item)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded text-xs font-medium transition-colors">
                           编辑
+                        </button>
+                        <button onClick={() => handleCopy(item)} className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 px-2 py-1 rounded text-xs font-medium transition-colors">
+                          复制
                         </button>
                         <button onClick={() => handleDelete(item)} className="text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded text-xs font-medium transition-colors">
                           删除

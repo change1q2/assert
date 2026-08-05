@@ -2108,6 +2108,7 @@ export default function Finance({ onAssetPenetration }) {
   const [showEngineMenu, setShowEngineMenu] = useState(false);
   const [showAddEngine, setShowAddEngine] = useState(false);
   const [newEngine, setNewEngine] = useState({ name: '', url: '' });
+  const [engineToast, setEngineToast] = useState(null);
   const engineMenuRef = useRef(null);
 
   useEffect(() => {
@@ -2130,6 +2131,8 @@ export default function Finance({ onAssetPenetration }) {
   const openSearchEngine = (engine, query) => {
     const url = engine.url.replace('{q}', encodeURIComponent(query));
     window.open(url, '_blank', 'noopener,noreferrer');
+    setEngineToast({ message: `已切换到「${engine.name}」搜索源`, type: 'success' });
+    setTimeout(() => setEngineToast(null), 2500);
   };
 
   const addSearchEngine = () => {
@@ -2253,6 +2256,11 @@ export default function Finance({ onAssetPenetration }) {
           )}
         </div>
       </div>
+      {engineToast && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg transition-all duration-300 text-sm text-white ${engineToast.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
+          {engineToast.message}
+        </div>
+      )}
     </div>
   );
 
@@ -4867,7 +4875,7 @@ export default function Finance({ onAssetPenetration }) {
                                 lookupResults.map((item, idx) => (
                                   <div
                                     key={idx}
-                                    onClick={() => handleSelectLookup(item)}
+                                    onMouseDown={(e) => { e.preventDefault(); handleSelectLookup(item); }}
                                     className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
                                   >
                                     <div className="flex items-center justify-between gap-2">
@@ -4908,7 +4916,7 @@ export default function Finance({ onAssetPenetration }) {
                                 lookupResults.map((item, idx) => (
                                   <div
                                     key={idx}
-                                    onClick={() => handleSelectLookup(item)}
+                                    onMouseDown={(e) => { e.preventDefault(); handleSelectLookup(item); }}
                                     className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
                                   >
                                     <div className="flex items-center justify-between gap-2">
