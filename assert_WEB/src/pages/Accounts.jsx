@@ -368,10 +368,11 @@ export default function Accounts() {
     const isCashCategory = a.category === '现金类' || a.categoryL1 === '现金类';
     // 数量始终使用实际数量，不能用 currentValue 覆盖
     const _effectiveQty = _qty;
-    const _effectivePrice = isCashCategory ? 1 : (parseFloat(a.currentPrice) || 0);
+    // 允许现金类资产使用用户输入的价格，不再强制设为1
+    const _effectivePrice = parseFloat(a.currentPrice) || 0;
 
     quantity = _effectiveQty;
-    costPrice = isCashCategory ? 1 : _costPrice;
+    costPrice = _costPrice;
     currentPrice = _effectivePrice;
     mv = _effectivePrice * _effectiveQty;
     cost = costPrice * quantity;
@@ -1595,9 +1596,10 @@ export default function Accounts() {
         // 数量始终使用实际数量，不能用 currentValue 覆盖
         const _effectiveQty = _qty;
         const _quotePrice = parseFloat(quotesMap[a.code]?.price) || 0;
-        const _effectivePrice = isCash ? 1 : (_quotePrice || parseFloat(a.currentPrice) || 0);
+        // 允许现金类资产使用用户输入的价格，不再强制设为1
+        const _effectivePrice = _quotePrice || parseFloat(a.currentPrice) || 0;
 
-        const _unitCost = isCash ? 1 : _costPrice;
+        const _unitCost = _costPrice;
         const _totalCost = _unitCost * _effectiveQty;
         // 当前市值始终使用 price × qty 计算，不依赖存储的 currentValue
         const _currentValue = _effectivePrice * _effectiveQty;

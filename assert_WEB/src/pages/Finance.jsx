@@ -244,10 +244,16 @@ const updateAccountBalance = (asset, record, accounts, fallbackAccounts, finance
     }
 
     const balance = Math.max(0, parseFloat(targetAccount.balance) || 0);
+    // 不再强制覆盖 currentPrice，允许用户自定义价格
+    // 仅更新 currentValue 基于实际余额
+    const _currentPrice = a.currentPrice != null ? parseFloat(a.currentPrice) : 1;
+    const _shares = parseFloat(a.shares || a.quantity) || 0;
+    const _newShares = _currentPrice > 0 ? balance / _currentPrice : _shares;
     return {
       ...a,
       currentValue: balance,
-      currentPrice: 1,
+      shares: _newShares,
+      quantity: _newShares,
     };
   });
 
@@ -2251,9 +2257,9 @@ export default function Finance({ onAssetPenetration }) {
   const loadData = async () => {
     setLoading(true);
     setError(null);
-    // 每次手动刷新全局数据时强制获取最新汇率（必须 await 确保汇率先加载）
-    const latestRates = await loadExchangeRates(true);
     try {
+      // 每次手动刷新全局数据时强制获取最新汇率（必须 await 确保汇率先加载）
+      await loadExchangeRates(true);
       const data = await fetchState();
       // 补充账户数据：如果 state 中 accounts 为空，从 localStorage 缓存中读取
       if (!data.accounts || data.accounts.length === 0) {
@@ -3804,7 +3810,7 @@ export default function Finance({ onAssetPenetration }) {
         categoryL4: a.categoryL4 || '',
         positionGroup: a.positionGroup || '',
         positionType: a.positionCategory || a.positionType || '',
-        costPrice: isCash ? 1 : _cost,
+        costPrice: _cost,
         quantity: _effectiveQty,
         cost: _costTotal,
         currentPrice: _effectivePrice,

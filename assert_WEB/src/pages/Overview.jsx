@@ -94,7 +94,7 @@ function calcFinanceAssetMv(a, accounts) {
       if (matched) _cashValue = parseFloat(matched.balance) || 0;
     }
   }
-  const _effectivePrice = isCashCategory ? 1 : (parseFloat(a.currentPrice) || 0);
+  const _effectivePrice = parseFloat(a.currentPrice) || 0;
   return isCashCategory ? _cashValue : (parseFloat(a.currentValue) || (_effectivePrice * _qty));
 }
 
