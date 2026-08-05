@@ -174,7 +174,7 @@ async function loadUserState(userId) {
     targetProfit: row.target_profit,
     actualProfit: row.actual_profit,
   }));
-  return {
+  const result = {
     user: profile,
     rates,
     accounts,
@@ -201,6 +201,30 @@ async function loadUserState(userId) {
     yearlyRecords,
     accountCategories: settings ? maybeParseJson(settings.account_categories_json) || {} : {},
   };
+
+  // 过滤"??"乱码字段
+  const GARBLED_PATTERN = /^[?？�\s]+$/;
+  const sanitizeStr = (val, fallback = '') => {
+    if (val == null) return fallback;
+    const str = String(val).trim();
+    if (!str || GARBLED_PATTERN.test(str)) return fallback;
+    return val;
+  };
+
+  // 清理 financeAssets 中的乱码字段
+  if (result.financeAssets && result.financeAssets.length > 0) {
+    result.financeAssets = result.financeAssets.map(a => ({
+      ...a,
+      name: sanitizeStr(a.name),
+      market: sanitizeStr(a.market),
+      assetKind: sanitizeStr(a.assetKind),
+      category: sanitizeStr(a.category),
+      subcategory: sanitizeStr(a.subcategory),
+      tertiaryCategory: sanitizeStr(a.tertiaryCategory),
+    }));
+  }
+
+  return result;
 }
 
 async function saveUserState(conn, userId, state) {

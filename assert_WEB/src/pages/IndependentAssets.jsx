@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, lookupFinance, fetchFinanceQuotes } from '../api';
+import { fetchState, saveState, lookupFinance, fetchFinanceQuotes, fetchRealTimeExchangeRates } from '../api';
 import {
   Wallet,
   Plus,
@@ -261,6 +261,7 @@ const COUNTRY_REGION_DATA = {
 export default function IndependentAssets() {
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.15, JPY: 0.046, HKD: 0.86, EUR: 7.85 });
   const [activeTab, setActiveTab] = useState('insurance');
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -431,8 +432,19 @@ export default function IndependentAssets() {
 
   const { accounts = [], independentAssets = {} } = stateData || {};
 
+  const convertCurrency = (value, fromCurrency, toCurrency = 'CNY') => {
+    if (!value) return 0;
+    if (fromCurrency === toCurrency) return parseFloat(value);
+    const fromRate = exchangeRates[fromCurrency] || 1;
+    const toRate = exchangeRates[toCurrency] || 1;
+    return parseFloat(value) * (fromRate / toRate);
+  };
+
   useEffect(() => {
     loadData();
+    fetchRealTimeExchangeRates(false).then(rates => {
+      if (rates) setExchangeRates(rates);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -1650,71 +1662,73 @@ export default function IndependentAssets() {
     Object.keys(independentAssets).forEach(type => {
       const items = independentAssets[type] || [];
       items.forEach(item => {
+        const itemCurrency = item.currency || 'CNY';
+        const conv = (v) => convertCurrency(v, itemCurrency, 'CNY');
         if (type === 'insurance') {
           if (item.insuranceType === '年金险') {
             const records = item.transactionRecords || [];
             const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
             const latestRecord = sortedByYear.length > 0 ? sortedByYear[sortedByYear.length - 1] : null;
-            const cashValue = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
-            const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.annualActualDividend || 0), 0);
+            const cashValue = latestRecord ? conv(latestRecord.yearEndCashValue || 0) : conv(item.cashValue || 0);
+            const totalDividend = records.reduce((sum, r) => sum + conv(r.annualActualDividend || 0), 0);
             const currentValue = cashValue + totalDividend;
             totalValue += currentValue;
-            totalCost += parseFloat(item.paidAmount || 0);
-            demoProfit += parseFloat(item.demoProfitAmount || 0);
+            totalCost += conv(item.paidAmount || 0);
+            demoProfit += conv(item.demoProfitAmount || 0);
             actualProfit += totalDividend;
           } else {
             const records = item.transactionRecords || [];
-            const cashValue = parseFloat(item.cashValue || 0);
-            const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.actualProfitAmount || 0), 0);
+            const cashValue = conv(item.cashValue || 0);
+            const totalDividend = records.reduce((sum, r) => sum + conv(r.actualProfitAmount || 0), 0);
             const currentValue = cashValue + totalDividend;
             totalValue += currentValue;
-            totalCost += parseFloat(item.paidAmount || 0);
-            demoProfit += parseFloat(item.demoProfitAmount || 0);
+            totalCost += conv(item.paidAmount || 0);
+            demoProfit += conv(item.demoProfitAmount || 0);
             actualProfit += totalDividend;
           }
         } else if (type === 'realestate') {
           if (item.usage === '出租') {
-            totalValue += parseFloat(item.purchasePrice || 0);
+            totalValue += conv(item.purchasePrice || 0);
           } else {
-            const marketValue = parseFloat(item.marketValue || 0);
-            const taxAmount = parseFloat(item.taxAmount || 0);
-            const agencyFeeAmount = parseFloat(item.agencyFeeAmount || 0);
-            const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFeeAmount) : parseFloat(item.purchasePrice || 0);
+            const marketValue = conv(item.marketValue || 0);
+            const taxAmount = conv(item.taxAmount || 0);
+            const agencyFeeAmount = conv(item.agencyFeeAmount || 0);
+            const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFeeAmount) : conv(item.purchasePrice || 0);
             totalValue += actualValue;
           }
-          totalCost += parseFloat(item.purchasePrice || 0);
+          totalCost += conv(item.purchasePrice || 0);
         } else if (type === 'vehicle') {
           const { residualValue } = calculateVehicleResidualValue(item);
-          totalValue += residualValue;
-          totalCost += parseFloat(item.purchasePrice || 0);
+          totalValue += conv(residualValue);
+          totalCost += conv(item.purchasePrice || 0);
         } else if (type === 'fixedinvestment') {
-          totalValue += parseFloat(item.investmentCost || 0);
-          totalCost += parseFloat(item.investmentCost || 0);
+          totalValue += conv(item.investmentCost || 0);
+          totalCost += conv(item.investmentCost || 0);
           if (item.dividendRecords && Array.isArray(item.dividendRecords)) {
-            actualProfit += item.dividendRecords.reduce((sum, r) => sum + parseFloat(r.dividendAmount || 0), 0);
+            actualProfit += item.dividendRecords.reduce((sum, r) => sum + conv(r.dividendAmount || 0), 0);
           } else {
-            const cost = parseFloat(item.investmentCost || 0);
+            const cost = conv(item.investmentCost || 0);
             const rate = parseFloat(item.annualDividendRate || 0);
             if (cost && rate) {
               actualProfit += cost * rate / 100;
             } else {
-              actualProfit += parseFloat(item.dividendAmount || 0);
+              actualProfit += conv(item.dividendAmount || 0);
             }
           }
         } else if (type === 'equity') {
-          totalValue += parseFloat(item.marketValue || 0);
-          totalCost += parseFloat(item.investmentCost || 0);
-          actualProfit += parseFloat(item.pnl || 0);
+          totalValue += conv(item.marketValue || 0);
+          totalCost += conv(item.investmentCost || 0);
+          actualProfit += conv(item.pnl || 0);
         } else if (type === 'fixeddeposit') {
-          totalValue += parseFloat(item.amount || 0);
-          totalCost += parseFloat(item.amount || 0);
-          actualProfit += parseFloat(item.actualReturn || 0);
+          totalValue += conv(item.amount || 0);
+          totalCost += conv(item.amount || 0);
+          actualProfit += conv(item.actualReturn || 0);
         }
       });
     });
 
     return { totalValue, totalCost, demoProfit, actualProfit };
-  }, [independentAssets]);
+  }, [independentAssets, exchangeRates]);
 
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

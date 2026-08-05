@@ -1988,15 +1988,6 @@ export default function Accounts() {
               <p className="text-sm text-gray-600 mt-1">管理所有资产和负债账户</p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
-              <select
-                value={selectedCurrency}
-                onChange={(e) => setSelectedCurrency(e.target.value)}
-                className="px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-sm font-medium bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              >
-                {currencies.map(c => (
-                  <option key={c.value} value={c.value}>{c.label}</option>
-                ))}
-              </select>
               <button
                 onClick={loadData}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary-500 text-primary-500 text-sm font-medium hover:bg-primary-500 hover:text-white transition-colors"

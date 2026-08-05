@@ -1,3 +1,29 @@
+// 安全解码：按优先级尝试 GB18030 → GBK → UTF-8 → latin1
+// GB18030 覆盖所有汉字（包括生僻字），GBK 为兼容旧编码
+async function safeDecode(buffer) {
+  const iconv = (await import("iconv-lite")).default;
+  // 先尝试 GB18030（覆盖最全）
+  try {
+    const text = iconv.decode(buffer, "GB18030");
+    if (text && !text.includes("\uFFFD") && !/^[?？]/.test(text.trim())) {
+      return text;
+    }
+  } catch (_) {}
+  // 回退 GBK
+  try {
+    const text = iconv.decode(buffer, "GBK");
+    if (text && !text.includes("\uFFFD")) {
+      return text;
+    }
+  } catch (_) {}
+  // 回退 UTF-8
+  try {
+    return buffer.toString("utf-8");
+  } catch (_) {}
+  // 最后回退 latin1
+  return buffer.toString("latin1");
+}
+
 // 同花顺代码转换：仅支持 A 股 sh/sz
 function thsCodeFor(code) {
   code = String(code || "").trim().replace(/^(sh|sz)/i, "");
@@ -84,7 +110,7 @@ async function lookupSecurities(q) {
           signal: AbortSignal.timeout(6000),
         });
         const tsBuf = Buffer.from(await tsRes.arrayBuffer());
-        const tsText = new TextDecoder("gbk").decode(tsBuf);
+        const tsText = await safeDecode(tsBuf);
         const tsSegments = tsText.split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
         for (const segment of tsSegments) {
           const match = segment.match(/v_(\w+)="(.*)"/);
@@ -141,7 +167,7 @@ async function lookupSecurities(q) {
           signal: AbortSignal.timeout(6000),
         });
         const priceBuf = Buffer.from(await priceRes.arrayBuffer());
-        const priceText = new TextDecoder("gbk").decode(priceBuf);
+        const priceText = await safeDecode(priceBuf);
         const priceMap = new Map();
         const segments = priceText.split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
         for (const segment of segments) {
@@ -188,7 +214,7 @@ async function lookupSecurities(q) {
           signal: AbortSignal.timeout(5000),
         });
         const sinaBuf = Buffer.from(await sinaRes.arrayBuffer());
-        const sinaText = new TextDecoder("gbk").decode(sinaBuf);
+        const sinaText = await safeDecode(sinaBuf);
         for (const line of sinaText.split("\n")) {
           const match = line.match(/var hq_str_(\w+)="(.*)"/);
           if (!match || !match[2]) continue;
@@ -264,7 +290,7 @@ async function lookupSecurities(q) {
           signal: AbortSignal.timeout(6000),
         });
         const akBuf = Buffer.from(await akRes.arrayBuffer());
-        const akText = new TextDecoder("gbk").decode(akBuf);
+        const akText = await safeDecode(akBuf);
         const akSegments = akText.split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
         for (const segment of akSegments) {
           const match = segment.match(/v_(\w+)="(.*)"/);
@@ -324,7 +350,7 @@ async function getQuotes(codes) {
         signal: AbortSignal.timeout(8000),
       });
       const priceBuf = Buffer.from(await priceRes.arrayBuffer());
-      const priceText = new TextDecoder("gbk").decode(priceBuf);
+      const priceText = await safeDecode(priceBuf);
       const priceMap = new Map();
       const segments = priceText.split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
       for (const segment of segments) {
@@ -566,7 +592,7 @@ async function getQuotes(codes) {
         signal: AbortSignal.timeout(5000),
       });
       const buf = Buffer.from(await sinaRes.arrayBuffer());
-      const sinaText = new TextDecoder("gbk").decode(buf);
+      const sinaText = await safeDecode(buf);
       const match = sinaText.match(/var hq_str_hk\d+="(.*)"/);
       if (!match || !match[1]) return;
       const fields = match[1].split(",");
@@ -600,7 +626,7 @@ async function getQuotes(codes) {
         signal: AbortSignal.timeout(5000),
       });
       const buf = Buffer.from(await sinaRes.arrayBuffer());
-      const sinaText = new TextDecoder("gbk").decode(buf);
+      const sinaText = await safeDecode(buf);
       const match = sinaText.match(/var hq_str_gb_\w+="(.*)"/);
       if (!match || !match[1]) return;
       const fields = match[1].split(",");
@@ -1159,7 +1185,7 @@ async function getUSIndex(code) {
       signal: AbortSignal.timeout(8000),
     });
     const buf = Buffer.from(await resp.arrayBuffer());
-    const text = new TextDecoder("gbk").decode(buf);
+    const text = await safeDecode(buf);
     const match = text.match(/v_(\w+)="(.*)"/);
     if (match && match[2]) {
       const parts = match[2].split("~");
@@ -1219,7 +1245,7 @@ async function getCSIndex(code) {
       signal: AbortSignal.timeout(8000),
     });
     const buf = Buffer.from(await resp.arrayBuffer());
-    const text = new TextDecoder("gbk").decode(buf);
+    const text = await safeDecode(buf);
     const match = text.match(/v_(\w+)="(.*)"/);
     if (match && match[2]) {
       const parts = match[2].split("~");

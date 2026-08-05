@@ -397,22 +397,22 @@ export default function FinanceHoldingsTable({
   const paged = filteredWithRatio.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const summary = useMemo(() => {
-    const totalValue = filtered.reduce((s, h) => {
+    const totalValue = paged.reduce((s, h) => {
       const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
       const currency = h.currency || 'CNY';
       return s + convertCurrency(value, currency, 'CNY', exchangeRates);
     }, 0);
-    const totalCost = filtered.reduce((s, h) => {
+    const totalCost = paged.reduce((s, h) => {
       const cost = parseFloat(h.cost) || 0;
       const currency = h.currency || 'CNY';
       return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
     }, 0);
-    const totalPnl = filtered.reduce((s, h) => {
+    const totalPnl = paged.reduce((s, h) => {
       const pnl = parseFloat(h.holdingPnl) || 0;
       const currency = h.currency || 'CNY';
       return s + convertCurrency(pnl, currency, 'CNY', exchangeRates);
     }, 0);
-    const totalDailyPnl = filtered.reduce((s, h) => {
+    const totalDailyPnl = paged.reduce((s, h) => {
       const dailyPnl = parseFloat(h.dailyPnl) || 0;
       const currency = h.currency || 'CNY';
       return s + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
@@ -425,11 +425,11 @@ export default function FinanceHoldingsTable({
       dailyPnl: totalDailyPnl,
       dailyPnlRate: totalValue > 0 ? (totalDailyPnl / totalValue) * 100 : 0,
     };
-  }, [filtered, exchangeRates]);
+  }, [paged, exchangeRates]);
 
   const filteredSummary = useMemo(() => {
     if (categoryName === 'archived') {
-      const totalFinalPnl = filtered.reduce((sum, a) => {
+      const totalFinalPnl = paged.reduce((sum, a) => {
         const pnl = parseFloat(a.finalPnl) || 0;
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(pnl, currency, 'CNY', exchangeRates);
@@ -446,22 +446,22 @@ export default function FinanceHoldingsTable({
         totalFinalPnlRate: totalCostAll > 0 ? (totalFinalPnl / totalCostAll) * 100 : 0,
       };
     } else {
-      const totalCost = filtered.reduce((sum, a) => {
+      const totalCost = paged.reduce((sum, a) => {
         const cost = parseFloat(a.cost) || 0;
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(cost, currency, 'CNY', exchangeRates);
       }, 0);
-      const totalMarketValue = filtered.reduce((sum, a) => {
+      const totalMarketValue = paged.reduce((sum, a) => {
         const value = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(value, currency, 'CNY', exchangeRates);
       }, 0);
-      const totalPnl = filtered.reduce((sum, a) => {
+      const totalPnl = paged.reduce((sum, a) => {
         const pnl = parseFloat(a.holdingPnl) || 0;
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(pnl, currency, 'CNY', exchangeRates);
       }, 0);
-      const totalDailyPnl = filtered.reduce((sum, a) => {
+      const totalDailyPnl = paged.reduce((sum, a) => {
         const dailyPnl = parseFloat(a.dailyPnl) || 0;
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
@@ -475,7 +475,7 @@ export default function FinanceHoldingsTable({
         totalDailyPnlRate: totalMarketValue > 0 ? (totalDailyPnl / totalMarketValue) * 100 : 0,
       };
     }
-  }, [filtered, exchangeRates, categoryName, financeAccounts]);
+  }, [paged, exchangeRates, categoryName, financeAccounts]);
 
   const showCheckboxCol = !readOnly && showBatchEdit;
   const showOpsCol = !readOnly;
@@ -1018,7 +1018,7 @@ export default function FinanceHoldingsTable({
                         key={col.key}
                         className="py-2 px-1.5 text-xs text-gray-500"
                       >
-                        合计 ({filtered.length}项)
+                        合计 ({paged.length}项)
                       </td>
                     );
                   }

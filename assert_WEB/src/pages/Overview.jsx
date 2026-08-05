@@ -624,25 +624,41 @@ export default function Overview() {
   const financeTotalPnl = financeTotalValue - financeTotalCost;
   const financeTotalPnlRate = financeTotalCost > 0 ? (financeTotalPnl / financeTotalCost) * 100 : 0;
 
-  // 计算独立总资产
+  // 计算独立总资产（与 IndependentAssets.jsx 保持一致）
   let independentTotalValue = 0;
-  Object.values(independentAssets || {}).forEach(items => {
-    (items || []).forEach(item => {
-      const type = item.type || item.category;
+  Object.keys(independentAssets || {}).forEach(type => {
+    const items = independentAssets[type] || [];
+    items.forEach(item => {
       if (type === 'insurance') {
-        independentTotalValue += parseFloat(item.premiumTotal || 0);
+        if (item.insuranceType === '年金险') {
+          const records = item.transactionRecords || [];
+          const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
+          const latestRecord = sortedByYear.length > 0 ? sortedByYear[sortedByYear.length - 1] : null;
+          const cashValue = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
+          const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.annualActualDividend || 0), 0);
+          independentTotalValue += cashValue + totalDividend;
+        } else {
+          const records = item.transactionRecords || [];
+          const cashValue = parseFloat(item.cashValue || 0);
+          const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.actualProfitAmount || 0), 0);
+          independentTotalValue += cashValue + totalDividend;
+        }
       } else if (type === 'realestate') {
-        const marketValue = parseFloat(item.marketValue || 0);
-        const taxAmount = parseFloat(item.taxAmount || 0);
-        const agencyFee = parseFloat(item.agencyFee || 0);
-        const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFee) : parseFloat(item.purchasePrice || 0);
-        independentTotalValue += actualValue;
+        if (item.usage === '出租') {
+          independentTotalValue += parseFloat(item.purchasePrice || 0);
+        } else {
+          const marketValue = parseFloat(item.marketValue || 0);
+          const taxAmount = parseFloat(item.taxAmount || 0);
+          const agencyFee = parseFloat(item.agencyFeeAmount || 0);
+          const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFee) : parseFloat(item.purchasePrice || 0);
+          independentTotalValue += actualValue;
+        }
       } else if (type === 'vehicle') {
         const purchasePrice = parseFloat(item.purchasePrice || 0);
-        const depreciationRate = parseFloat(item.depreciationRate || 0);
-        const years = parseFloat(item.ownershipYears || 0);
-        const residualValue = purchasePrice * Math.pow(1 - depreciationRate / 100, years);
-        independentTotalValue += residualValue;
+        const purchaseDate = item.purchaseDate ? new Date(item.purchaseDate) : null;
+        const years = purchaseDate ? (new Date() - purchaseDate) / (1000 * 60 * 60 * 24 * 365) : 0;
+        const residualRate = Math.max(0, 1 - years * 0.1);
+        independentTotalValue += purchasePrice * residualRate;
       } else if (type === 'fixedinvestment') {
         independentTotalValue += parseFloat(item.investmentCost || 0);
       } else if (type === 'equity') {
@@ -655,11 +671,11 @@ export default function Overview() {
 
   // 计算独立资产总成本和总盈亏
   let independentTotalCost = 0;
-  Object.values(independentAssets || {}).forEach(items => {
-    (items || []).forEach(item => {
-      const type = item.type || item.category;
+  Object.keys(independentAssets || {}).forEach(type => {
+    const items = independentAssets[type] || [];
+    items.forEach(item => {
       if (type === 'insurance') {
-        independentTotalCost += parseFloat(item.premiumTotal || 0);
+        independentTotalCost += parseFloat(item.paidAmount || item.premiumTotal || 0);
       } else if (type === 'realestate') {
         independentTotalCost += parseFloat(item.purchasePrice || 0);
       } else if (type === 'vehicle') {

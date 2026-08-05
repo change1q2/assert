@@ -97,6 +97,14 @@ function pnlSign(n) {
   return n > 0 ? '+' : '';
 }
 
+const GARBLED_PATTERN = /^[?？�\s]+$/;
+const sanitizeChineseText = (val, fallback = '') => {
+  if (val == null) return fallback;
+  const str = String(val).trim();
+  if (!str || GARBLED_PATTERN.test(str)) return fallback;
+  return val;
+};
+
 // ── OCR 字段中文标签映射 ──
 const fieldLabelMap = {
   name: '资产名称',
@@ -243,7 +251,7 @@ const updateAccountBalance = (asset, record, accounts, fallbackAccounts, finance
       return a;
     }
 
-    const balance = Math.max(0, parseFloat(targetAccount.balance) || 0);
+    const balance = parseFloat(targetAccount.balance) || 0;
     // 不再强制覆盖 currentPrice，允许用户自定义价格
     // 仅更新 currentValue 基于实际余额
     const _currentPrice = a.currentPrice != null ? parseFloat(a.currentPrice) : 1;
@@ -1959,7 +1967,18 @@ export default function Finance({ onAssetPenetration }) {
   const DEFAULT_ASSET_KIND_OPTIONS = ['流动资产', '非流动资产', '现金'];
   const [assetKindOptions, setAssetKindOptions] = useState(() => {
     const saved = localStorage.getItem('finance_asset_kind_options');
-    return saved ? JSON.parse(saved) : DEFAULT_ASSET_KIND_OPTIONS;
+    const parsed = saved ? JSON.parse(saved) : DEFAULT_ASSET_KIND_OPTIONS;
+    const deduped = [...new Set(parsed)];
+    const garbledPattern = /^[?？�]+$/;
+    const filtered = deduped.filter(item =>
+      item && item.trim() && !garbledPattern.test(item.trim()) && item.trim() !== '??'
+    );
+    if (filtered.length !== deduped.length) {
+      localStorage.setItem('finance_asset_kind_options', JSON.stringify(filtered));
+    } else if (saved && deduped.length !== parsed.length) {
+      localStorage.setItem('finance_asset_kind_options', JSON.stringify(deduped));
+    }
+    return filtered;
   });
 
   // 一级分类自定义管理（从资产分类模块动态获取）
@@ -2554,17 +2573,15 @@ export default function Finance({ onAssetPenetration }) {
           const origQty = parseFloat(asset.quantity);
           const origCost = parseFloat(asset.cost);
           const origBalance = parseFloat(asset.balance);
-          const fixedCV = Number.isFinite(origCV) ? Math.max(0, origCV) : 0;
+          const fixedCV = Number.isFinite(origCV) ? origCV : 0;
           const fixedShares = Number.isFinite(origShares) ? Math.max(0, origShares) : 0;
           const fixedQty = Number.isFinite(origQty) ? Math.max(0, origQty) : 0;
           const fixedCost = Number.isFinite(origCost) ? Math.max(0, origCost) : 0;
-          const fixedBalance = Number.isFinite(origBalance) ? Math.max(0, origBalance) : 0;
+          const fixedBalance = Number.isFinite(origBalance) ? origBalance : 0;
           const hasNeg =
-            (Number.isFinite(origCV) && origCV < 0) ||
             (Number.isFinite(origShares) && origShares < 0) ||
             (Number.isFinite(origQty) && origQty < 0) ||
-            (Number.isFinite(origCost) && origCost < 0) ||
-            (Number.isFinite(origBalance) && origBalance < 0);
+            (Number.isFinite(origCost) && origCost < 0);
           // 检查是否缺少表单字段名（quantity 为 0 不算缺失，只检查 null/undefined/空串）
           const quantityMissing = asset.quantity == null || asset.quantity === '';
           const missingFormFields =
@@ -2578,8 +2595,8 @@ export default function Finance({ onAssetPenetration }) {
               currentValue: fixedCV,
               // 注意：quantity/shares 用存储值（若非有效数值则回退到 currentValue），
               // 绝不允许用 currentValue 覆盖已有的有效数量
-              shares: Number.isFinite(origShares) && origShares > 0 ? fixedShares : (fixedCV || fixedShares),
-              quantity: Number.isFinite(origQty) && origQty > 0 ? fixedQty : (fixedCV || fixedQty),
+              shares: Number.isFinite(origShares) ? fixedShares : Math.max(0, fixedCV || fixedShares),
+              quantity: Number.isFinite(origQty) ? fixedQty : Math.max(0, fixedCV || fixedQty),
               cost: fixedCost,
               balance: fixedBalance,
               availableShares: Number.isFinite(parseFloat(asset.availableShares)) ? Math.max(0, parseFloat(asset.availableShares)) : (fixedShares || fixedCV),
@@ -2598,17 +2615,42 @@ export default function Finance({ onAssetPenetration }) {
           saveState({ ...data }).catch(err => console.error('Failed to sanitize cash assets:', err));
         }
       }
+      // 修复 "??" 乱码字段
+      const GARBLED_PATTERN_LOCAL = /^[?？�\s]+$/;
+      const sanitizeField = (val, fallback) => {
+        if (!val || GARBLED_PATTERN_LOCAL.test(String(val).trim())) {
+          return fallback || '';
+        }
+        return val;
+      };
+      if (data?.financeAssets && data.financeAssets.length > 0) {
+        data.financeAssets = data.financeAssets.map(asset => ({
+          ...asset,
+          name: sanitizeField(asset.name, asset.name),
+          market: sanitizeField(asset.market, '国内市场'),
+          assetKind: sanitizeField(asset.assetKind || asset.kind, ''),
+          category: sanitizeField(asset.category, ''),
+          subcategory: sanitizeField(asset.subcategory, ''),
+          tertiaryCategory: sanitizeField(asset.tertiaryCategory, ''),
+          categoryL1: sanitizeField(asset.categoryL1 || asset.category, ''),
+          categoryL2: sanitizeField(asset.categoryL2 || asset.subcategory, ''),
+          categoryL3: sanitizeField(asset.categoryL3 || asset.tertiaryCategory, ''),
+        }));
+      }
       setStateData(data);
+      setLoading(false);
       const financeAssetsData = data?.financeAssets || [];
       if (financeAssetsData.length > 0) {
-        // 传入最新汇率确保港股通转换使用正确的汇率值
-        await loadQuotes(financeAssetsData, data, latestRates);
-        await loadFundNav(financeAssetsData, data);
+        loadQuotes(financeAssetsData, data, latestRates).catch(err =>
+          console.error('Background quotes load failed:', err)
+        );
+        loadFundNav(financeAssetsData, data).catch(err =>
+          console.error('Background fund nav load failed:', err)
+        );
       }
     } catch (err) {
       console.error('Failed to load finance data:', err);
       setError('加载数据失败');
-    } finally {
       setLoading(false);
     }
   };
@@ -2620,14 +2662,29 @@ export default function Finance({ onAssetPenetration }) {
         if (!a.code) return false;
         if (a.kind === 'cash' || a.categoryL2 === '现金' || a.assetType === '现金' || a.categoryL1 === '现金类') return false;
         const catL3 = a.categoryL3 || a.tertiaryCategory;
-        if (catL3 === '场外' || (!catL3 && a.market === '场外基金')) return false;
+        const isStock = a.assetType === '股票' || a.kind === '股票';
+        // 股票类资产无论场内/场外都获取实时行情
+        // 只有基金类且标记为场外的才过滤掉（由 loadFundNav 处理）
+        if (!isStock && (catL3 === '场外' || (!catL3 && a.market === '场外基金'))) return false;
         return true;
       })
       .map(a => ({ code: a.code, market: a.market || '国内市场' }));
     if (codes.length === 0) return;
     setQuotesLoading(true);
     try {
-      const quotes = await fetchFinanceQuotes(codes);
+      const BATCH_SIZE = 20;
+      const BATCH_DELAY = 100;
+      const allQuotes = [];
+      const firstBatch = codes.slice(0, BATCH_SIZE);
+      const firstQuotes = await fetchFinanceQuotes(firstBatch);
+      allQuotes.push(...firstQuotes);
+      if (codes.length > BATCH_SIZE) {
+        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+        const secondBatch = codes.slice(BATCH_SIZE);
+        const secondQuotes = await fetchFinanceQuotes(secondBatch);
+        allQuotes.push(...secondQuotes);
+      }
+      const quotes = allQuotes;
       const map = {};
       // 港股通汇率转换：优先使用传入的最新汇率，确保汇率值是最新的
       const hkdRate = Number(latestRates?.HKD || exchangeRates?.HKD) || 0.92;
@@ -2689,6 +2746,21 @@ export default function Finance({ onAssetPenetration }) {
           }
         }
       });
+      // 使用行情返回的正确名称覆盖"??"乱码
+      let nameFixed = false;
+      const fixedAssets = (currentState?.financeAssets || []).map(a => {
+        const quote = quotes.find(r => r && r.code === a.code);
+        if (quote?.name && (!a.name || GARBLED_PATTERN.test(String(a.name).trim()))) {
+          nameFixed = true;
+          return { ...a, name: quote.name };
+        }
+        return a;
+      });
+      if (nameFixed) {
+        currentState.financeAssets = fixedAssets;
+        setStateData({ ...currentState });
+        saveState({ ...currentState }).catch(() => {});
+      }
       setQuotesMap(map);
       // 把最新行情数据回写到 financeAssets 并保存
       if (currentState && Object.keys(map).length > 0) {
@@ -2741,9 +2813,9 @@ export default function Finance({ onAssetPenetration }) {
     if (!financeAssetsData || financeAssetsData.length === 0) return;
     const fundItems = financeAssetsData.filter(a => {
       if (!a.code || !/^\d{6}$/.test(String(a.code).trim())) return false;
-      // 场外基金（包含 债权类/场外、商品类/场外 等任意一级分类下三级为场外的基金）
       const catL3 = a.categoryL3 || a.tertiaryCategory;
-      return catL3 === '场外' || (!catL3 && a.market === '场外基金');
+      const isFundOrBond = a.assetType === '基金' || a.assetType === '债券' || a.kind === '基金' || a.kind === '债券';
+      return isFundOrBond && (catL3 === '场外' || (!catL3 && a.market === '场外基金'));
     });
     if (fundItems.length === 0) return;
     try {
@@ -2760,13 +2832,43 @@ export default function Finance({ onAssetPenetration }) {
         const newAccNav = Number.isFinite(Number(fund.accumulatedNav)) ? Number(fund.accumulatedNav) : null;
         const newDate = fund.navDate || a.priceDate || '';
         const newChangePct = Number.isFinite(Number(fund.dailyChangePct)) ? Number(fund.dailyChangePct) : null;
-        // 仅在 API 返回有效数据时更新
-        if (newNav == null && newPrevNav == null) return a;
+        const storedCurrentPrice = parseFloat(a.currentPrice) || 0;
+        // 回退链：
+        // 1. API返回有效nav -> 使用nav
+        // 2. nav无效但prevNav有效（上一交易日净值）-> 使用prevNav作为currentPrice
+        // 3. 都无效 -> 保留用户上次输入的currentPrice
+        let finalCurrentPrice = a.currentPrice;
+        let finalPrevPrice = a.prevPrice;
+        let finalPrevNavForPrev = null;
+        if (newNav != null && newNav > 0) {
+          // 正常获取到净值
+          finalCurrentPrice = String(newNav);
+          if (newPrevNav != null && newPrevNav > 0) {
+            finalPrevPrice = String(newPrevNav);
+          }
+          changed = true;
+        } else if (newPrevNav != null && newPrevNav > 0 && storedCurrentPrice === 0) {
+          // nav为0/无效，但prevNav有效且当前存储价也为0 -> 使用prevNav作为当前价（上一交易日净值）
+          finalCurrentPrice = String(newPrevNav);
+          changed = true;
+        } else if (storedCurrentPrice > 0) {
+          // API没返回数据，但有用户输入的历史价格 -> 保留
+          finalCurrentPrice = a.currentPrice;
+        }
+        if (newPrevNav != null && newPrevNav > 0) {
+          finalPrevNavForPrev = newPrevNav;
+          if (newNav == null || newNav === 0) {
+            // 当前nav无效时，用prevNav作为计算基础
+          } else {
+            finalPrevPrice = String(newPrevNav);
+          }
+        }
+        if (!changed && finalPrevPrice === a.prevPrice && finalCurrentPrice === a.currentPrice) return a;
         changed = true;
         return {
           ...a,
-          currentPrice: newNav != null ? String(newNav) : a.currentPrice,
-          prevPrice: newPrevNav != null ? String(newPrevNav) : a.prevPrice,
+          currentPrice: finalCurrentPrice,
+          prevPrice: finalPrevPrice,
           accumulatedNav: newAccNav != null ? newAccNav : a.accumulatedNav,
           priceDate: newDate,
           dailyChangePct: newChangePct != null ? newChangePct : a.dailyChangePct,
@@ -3039,7 +3141,7 @@ export default function Finance({ onAssetPenetration }) {
     };
     const resolvedAssetKind = holding.assetKind || (isCashAsset ? '现金' : '');
     if (resolvedAssetKind && !assetKindOptions.includes(resolvedAssetKind)) {
-      const updated = [...assetKindOptions, resolvedAssetKind];
+      const updated = [...new Set([...assetKindOptions, resolvedAssetKind])];
       setAssetKindOptions(updated);
       localStorage.setItem('finance_asset_kind_options', JSON.stringify(updated));
     }
@@ -3837,30 +3939,9 @@ export default function Finance({ onAssetPenetration }) {
     if (!newAccount.categoryL2) {
       return [];
     }
-    // 优先使用 CASCADE_OPTIONS 的资产类型+分类组合
-    const cascadeL3 = CASCADE_OPTIONS[newAccount.assetType]?.l3Options?.[newAccount.categoryL1]?.[newAccount.categoryL2] || [];
-    if (cascadeL3.length > 0) {
-      const merged = [...new Set([...cascadeL3, ...categoryL3CustomOptions])];
-      return merged;
-    }
-    // 基金类型特殊处理
-    if (newAccount.assetType === '基金') {
-      const defaults = ['场外', '场内'];
-      const merged = [...new Set([...defaults, ...categoryL3CustomOptions])];
-      return merged;
-    }
-    // 从 assetClasses 配置中查找
-    let defaults = [];
-    if (assetClasses && assetClasses.length > 0 && newAccount.categoryL1 && newAccount.categoryL2) {
-      const l1 = assetClasses.find(c => c.name === newAccount.categoryL1);
-      if (l1 && l1.children) {
-        const l2 = l1.children.find(c => c.name === newAccount.categoryL2);
-        if (l2 && l2.children && l2.children.length > 0) {
-          defaults = l2.children.map(c => c.name);
-        }
-      }
-    }
-    const merged = [...new Set([...defaults, ...categoryL3CustomOptions])];
+    // 资产分类三级统一为场内/场外
+    const standardL3 = ['场内', '场外'];
+    const merged = [...new Set([...standardL3, ...categoryL3CustomOptions])];
     return merged;
   }, [assetClasses, newAccount.categoryL1, newAccount.categoryL2, newAccount.assetType, categoryL3CustomOptions]);
 
@@ -4653,7 +4734,7 @@ export default function Finance({ onAssetPenetration }) {
                       <button onClick={() => {
                         const newKind = prompt('请输入新的资产种类名称');
                         if (newKind && newKind.trim() && !assetKindOptions.includes(newKind.trim())) {
-                          const updated = [...assetKindOptions, newKind.trim()];
+                          const updated = [...new Set([...assetKindOptions, newKind.trim()])];
                           setAssetKindOptions(updated);
                           localStorage.setItem('finance_asset_kind_options', JSON.stringify(updated));
                         }

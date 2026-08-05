@@ -140,13 +140,15 @@ export default function IndependentAssetAnalysis({ independentAssets }) {
   }, [assets]);
 
   const categoryDistribution = useMemo(() => {
-    return Object.keys(CATEGORY_CONFIG).map(type => {
+    const allTypes = new Set([...Object.keys(CATEGORY_CONFIG), ...Object.keys(assets)]);
+    return Array.from(allTypes).map(type => {
       const items = assets[type] || [];
+      const config = CATEGORY_CONFIG[type] || { name: type, color: '#999999' };
       const value = items.reduce((sum, item) => sum + getItemValue(type, item), 0);
       return {
-        name: CATEGORY_CONFIG[type].name,
+        name: config.name,
         value,
-        color: CATEGORY_CONFIG[type].color,
+        color: config.color,
       };
     }).filter(d => d.value > 0);
   }, [assets]);

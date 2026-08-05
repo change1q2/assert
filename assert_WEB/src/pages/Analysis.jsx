@@ -949,6 +949,15 @@ export default function Analysis({ onNavigate }) {
     } = customStats;
 
     const cCategory = customCategoryView === 'level1' ? cCategoryL1Data : cCategoryData;
+    const cExpenseTotal = cCategory.expense.reduce((s, d) => s + d.value, 0);
+    const filteredExpense = cExpenseTotal > 0
+      ? cCategory.expense.filter(d => (d.value / cExpenseTotal) >= 0.01)
+      : cCategory.expense;
+    const filteredExpenseTotal = filteredExpense.reduce((s, d) => s + d.value, 0);
+    const otherExpenseTotal = cExpenseTotal - filteredExpenseTotal;
+    const finalExpense = otherExpenseTotal > 0
+      ? [...filteredExpense, { name: '其他', value: otherExpenseTotal, color: '#999999', percent: (otherExpenseTotal / cExpenseTotal) * 100 }]
+      : filteredExpense;
     const filteredTagData = customTagFilter === 'all'
       ? cTagData
       : cTagData.filter(t => t.name === customTagFilter);
@@ -1152,11 +1161,11 @@ export default function Analysis({ onNavigate }) {
               </div>
             </div>
             <div className="w-full h-[320px]">
-              {cCategory.expense.length > 0 ? (
+              {finalExpense.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={cCategory.expense}
+                      data={finalExpense}
                       cx="50%"
                       cy="50%"
                       innerRadius={60}
@@ -1170,16 +1179,16 @@ export default function Analysis({ onNavigate }) {
                       )}
                       labelLine={false}
                     >
-                      {cCategory.expense.map((entry, index) => (
+                      {finalExpense.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value, name) => [formatCurrency(value), name]} />
                     <text x="50%" y="45%" textAnchor="middle" className="text-xs font-medium fill-gray-700 dark:fill-gray-300">
-                      {cCategory.expense[0]?.name || '支出'}
+                      {finalExpense[0]?.name || '支出'}
                     </text>
                     <text x="50%" y="60%" textAnchor="middle" className="text-sm font-bold fill-gray-900 dark:fill-white">
-                      {cCategory.expense[0] && cExpense > 0 ? `${(cCategory.expense[0].value / cExpense * 100).toFixed(1)}%` : '0%'}
+                      {finalExpense[0] && cExpense > 0 ? `${(finalExpense[0].value / cExpense * 100).toFixed(1)}%` : '0%'}
                     </text>
                   </PieChart>
                 </ResponsiveContainer>
@@ -2044,6 +2053,15 @@ export default function Analysis({ onNavigate }) {
   };
 
   const currentCategoryData = categoryView === 'level1' ? categoryL1Data : categoryData;
+  const _mainExpenseTotal = currentCategoryData.expense.reduce((s, d) => s + d.value, 0);
+  const _mainFilteredExpense = _mainExpenseTotal > 0
+    ? currentCategoryData.expense.filter(d => (d.value / _mainExpenseTotal) >= 0.01)
+    : currentCategoryData.expense;
+  const _mainFilteredTotal = _mainFilteredExpense.reduce((s, d) => s + d.value, 0);
+  const _mainOtherTotal = _mainExpenseTotal - _mainFilteredTotal;
+  const mainFinalExpense = _mainOtherTotal > 0
+    ? [..._mainFilteredExpense, { name: '其他', value: _mainOtherTotal, color: '#999999', percent: (_mainOtherTotal / _mainExpenseTotal) * 100 }]
+    : _mainFilteredExpense;
 
   const months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
   const today = new Date();
@@ -2481,7 +2499,7 @@ export default function Analysis({ onNavigate }) {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie 
-                    data={currentCategoryData.expense} 
+                    data={mainFinalExpense} 
                     cx="50%" 
                     cy="50%" 
                     innerRadius={50} 
@@ -2490,16 +2508,16 @@ export default function Analysis({ onNavigate }) {
                     dataKey="value" 
                     label={null}
                   >
-                    {currentCategoryData.expense.map((entry, index) => (
+                    {mainFinalExpense.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(value) => [formatCurrency(value), '']} />
                   <text x="50%" y="45%" textAnchor="middle" className="text-xs font-medium fill-gray-700 dark:fill-gray-300">
-                    {currentCategoryData.expense[0]?.name || '支出'}
+                    {mainFinalExpense[0]?.name || '支出'}
                   </text>
                   <text x="50%" y="60%" textAnchor="middle" className="text-sm font-bold fill-gray-900 dark:fill-white">
-                    {currentCategoryData.expense[0] ? `${(currentCategoryData.expense[0].value / totalExpense * 100).toFixed(1)}%` : '0%'}
+                    {mainFinalExpense[0] ? `${(mainFinalExpense[0].value / totalExpense * 100).toFixed(1)}%` : '0%'}
                   </text>
                 </PieChart>
               </ResponsiveContainer>
