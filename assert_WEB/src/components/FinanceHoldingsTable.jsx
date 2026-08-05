@@ -143,7 +143,7 @@ export default function FinanceHoldingsTable({
   };
   const [columns, setColumns] = useState(() => {
     try {
-      const saved = localStorage.getItem(`${storagePrefix}column_settings_${categoryName}`);
+      const saved = localStorage.getItem(`${storagePrefix}column_settings_v2_${categoryName}`);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -163,7 +163,7 @@ export default function FinanceHoldingsTable({
 
   useEffect(() => {
     try {
-      localStorage.setItem(`${storagePrefix}column_settings_${categoryName}`, JSON.stringify(columns));
+      localStorage.setItem(`${storagePrefix}column_settings_v2_${categoryName}`, JSON.stringify(columns));
     } catch (e) {
       console.error('Failed to save column settings:', e);
     }

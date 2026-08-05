@@ -476,10 +476,10 @@ export default function Accounts() {
   useEffect(() => {
     loadData();
     loadExchangeRates();
-    // 每5秒轮询获取最新汇率
+    // 每30秒轮询获取最新汇率
     const timer = setInterval(() => {
       loadExchangeRates();
-    }, 5000);
+    }, 30000);
     return () => clearInterval(timer);
   }, []);
 

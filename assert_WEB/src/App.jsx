@@ -308,7 +308,7 @@ export default function App() {
             </div>
             <div>
               <div className="font-bold text-gray-900 dark:text-white font-mono tracking-tight">Wealth OS</div>
-              <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">V1.0.31</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500 font-mono">V1.0.36</div>
             </div>
           </div>
         </div>

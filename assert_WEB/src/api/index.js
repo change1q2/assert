@@ -205,10 +205,11 @@ export async function fetchState() {
   try {
     const response = await request('/state')
     if (response.error && response.error.includes('未授权')) {
+      // token 失效：清除凭证，返回缓存/默认状态，不 reload 以避免中止其他请求导致 ERR_ABORTED
       localStorage.removeItem('token')
-      localStorage.removeItem('state')
-      window.location.reload()
-      return {}
+      const cached = getCache('state')
+      if (cached) return cached
+      return getDefaultState()
     }
     if (response.message && response.message.includes('登录')) {
       const cached = getCache('state')

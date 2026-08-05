@@ -28,6 +28,10 @@ function tencentCodeFor(code, market) {
   return null;
 }
 
+// 模块级缓存：记录每个 code 最后一次成功获取的非0行情数据
+// 当所有数据源都取不到有效价格时，回退使用上一次保留的不为0的数据
+const lastValidQuotesCache = new Map();
+
 async function lookupSecurities(q) {
   const normalizedQuery = q.trim().toUpperCase();
   const localInstruments = [
@@ -304,6 +308,7 @@ async function getQuotes(codes) {
     low: null,
     volume: null,
     name: null,
+    source: null,
   }));
   const queryItems = [];
   for (let i = 0; i < codes.length; i++) {
@@ -347,7 +352,7 @@ async function getQuotes(codes) {
       for (const { tencentCode, index } of queryItems) {
         const pm = priceMap.get(tencentCode);
         if (pm) {
-          results[index] = { ...results[index], ...pm };
+          results[index] = { ...results[index], ...pm, source: 'tencent' };
         }
       }
     } catch (_) { }
@@ -375,15 +380,50 @@ async function getQuotes(codes) {
         high: scaled(data.f44),
         low: scaled(data.f45),
         volume: Number.isFinite(Number(data.f47)) ? Number(data.f47) : null,
+        source: 'eastmoney',
       };
     } catch (_) { }
   }));
 
+  // 百度股市通 API（JSON 接口，比 HTML 解析更稳定）
+  const baiduApiFallbackItems = queryItems.filter(({ index }) => results[index].price == null);
+  await Promise.all(baiduApiFallbackItems.map(async ({ tencentCode, index }) => {
+    const prefix = tencentCode.slice(0, 2);
+    if (!["sh", "sz"].includes(prefix)) return;
+    const stockCode = tencentCode.slice(2);
+    const marketType = prefix === "sh" ? "ab" : "ab";
+    try {
+      const baiduApiUrl = `https://finance.pae.baidu.com/vapi/v1/getquotation?srcid=5352&pointType=string&group=quotation_minute_abline&query=${stockCode}&code=${stockCode}&market_type=${marketType}`;
+      const baiduApiRes = await fetch(baiduApiUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Referer": "https://finance.baidu.com/" },
+        signal: AbortSignal.timeout(6000),
+      });
+      const apiData = await baiduApiRes.json();
+      const result = apiData?.result;
+      if (!result) return;
+      const price = parseFloat(result.price || result.newprice);
+      if (price == null || !Number.isFinite(price)) return;
+      const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+      results[index] = {
+        ...results[index],
+        name: result.name || results[index].name,
+        price,
+        prevClose: num(result.yesterdayclose) || num(result.prevclose),
+        changeAmt: num(result.change),
+        changePct: num(result.percent) || num(result.changepercent),
+        high: num(result.high) || num(result.max),
+        low: num(result.low) || num(result.min),
+        volume: num(result.volume) || num(result.turnover),
+        source: 'baidu_api',
+      };
+    } catch (_) { }
+  }));
+
+  // 百度财经 HTML 页面（备用：API 失败时回退到 HTML 解析）
   const baiduFallbackItems = queryItems.filter(({ index }) => results[index].price == null);
   await Promise.all(baiduFallbackItems.map(async ({ tencentCode, index }) => {
     const prefix = tencentCode.slice(0, 2);
     if (!["sh", "sz"].includes(prefix)) return;
-    const stockCode = tencentCode.slice(2);
     try {
       const baiduUrl = `https://finance.baidu.com/stock/${tencentCode}.html`;
       const baiduRes = await fetch(baiduUrl, {
@@ -391,14 +431,14 @@ async function getQuotes(codes) {
         signal: AbortSignal.timeout(8000),
       });
       const baiduText = await baiduRes.text();
-      
+
       const priceMatch = baiduText.match(/最新价[\s\S]*?<span[^>]*>([\d.]+)<\/span>/);
       const changePctMatch = baiduText.match(/涨跌幅[\s\S]*?<span[^>]*>([\d.-]+)%<\/span>/);
       const prevCloseMatch = baiduText.match(/昨收[\s\S]*?<span[^>]*>([\d.]+)<\/span>/);
       const highMatch = baiduText.match(/最高[\s\S]*?<span[^>]*>([\d.]+)<\/span>/);
       const lowMatch = baiduText.match(/最低[\s\S]*?<span[^>]*>([\d.]+)<\/span>/);
       const nameMatch = baiduText.match(/<title>([^<]+?)_百度财经<\/title>/);
-      
+
       const price = priceMatch ? parseFloat(priceMatch[1]) : null;
       if (price != null) {
         results[index] = {
@@ -409,6 +449,7 @@ async function getQuotes(codes) {
           changePct: changePctMatch ? parseFloat(changePctMatch[1]) : null,
           high: highMatch ? parseFloat(highMatch[1]) : null,
           low: lowMatch ? parseFloat(lowMatch[1]) : null,
+          source: 'baidu_html',
         };
       }
     } catch (_) { }
@@ -445,6 +486,7 @@ async function getQuotes(codes) {
           prevClose,
           changePct: prevClose ? ((price - prevClose) / prevClose * 100) : null,
           name: data.name || results[index].name,
+          source: 'ths',
         };
       }
     } catch (_) { }
@@ -475,6 +517,7 @@ async function getQuotes(codes) {
         high: scaled(data.f44),
         low: scaled(data.f45),
         volume: Number.isFinite(Number(data.f47)) ? Number(data.f47) : null,
+        source: 'eastmoney_full',
       };
     } catch (_) { }
   }));
@@ -505,6 +548,7 @@ async function getQuotes(codes) {
         high: scaled(data.f44),
         low: scaled(data.f45),
         volume: Number.isFinite(Number(data.f47)) ? Number(data.f47) : null,
+        source: 'eastmoney_hk',
       };
     } catch (_) { }
   }));
@@ -538,6 +582,7 @@ async function getQuotes(codes) {
         changePct: parseFloat(fields[8]) || null,
         high: parseFloat(fields[4]) || null,
         low: parseFloat(fields[5]) || null,
+        source: 'sina_hk',
       };
     } catch (_) { }
   }));
@@ -571,6 +616,7 @@ async function getQuotes(codes) {
         prevClose: parseFloat(fields[3]) || null,
         high: parseFloat(fields[6]) || null,
         low: parseFloat(fields[7]) || null,
+        source: 'sina_us',
       };
     } catch (_) { }
   }));
@@ -603,11 +649,83 @@ async function getQuotes(codes) {
           high: scaled(data.f44),
           low: scaled(data.f45),
           volume: Number.isFinite(Number(data.f47)) ? Number(data.f47) : null,
+          source: 'eastmoney_us',
         };
         break; // 成功获取后跳出循环
       } catch (_) { }
     }
   }));
+
+  // 网易财经（最后备用源，覆盖 A股/港股/美股）
+  // 代码规则：A股 SH→1+code，SZ→0+code；港股→1+5位code；美股→US.CODE
+  const neteaseFallbackItems = queryItems.filter(({ index }) => results[index].price == null);
+  await Promise.all(neteaseFallbackItems.map(async ({ tencentCode, index }) => {
+    const prefix = tencentCode.slice(0, 2);
+    let neteaseCode = null;
+    if (prefix === "sh") {
+      neteaseCode = "1" + tencentCode.slice(2);
+    } else if (prefix === "sz") {
+      neteaseCode = "0" + tencentCode.slice(2);
+    } else if (prefix === "hk") {
+      neteaseCode = "1" + tencentCode.slice(2).padStart(5, "0");
+    } else if (prefix === "us") {
+      neteaseCode = "US." + tencentCode.slice(2).toUpperCase();
+    }
+    if (!neteaseCode) return;
+    try {
+      const neteaseUrl = `http://api.money.126.net/data/feed/${neteaseCode}?callback=a`;
+      const neteaseRes = await fetch(neteaseUrl, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(5000),
+      });
+      const text = await neteaseRes.text();
+      // 解析 JSONP: a({...});
+      const jsonMatch = text.match(/^a\((.*)\);?\s*$/s);
+      if (!jsonMatch || !jsonMatch[1]) return;
+      const data = JSON.parse(jsonMatch[1]);
+      const quote = data[neteaseCode];
+      if (!quote || quote.price == null) return;
+      const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+      results[index] = {
+        ...results[index],
+        name: quote.name || results[index].name,
+        price: num(quote.price),
+        prevClose: num(quote.yesterdayclose),
+        changeAmt: num(quote.change),
+        changePct: num(quote.percent),
+        high: num(quote.high),
+        low: num(quote.low),
+        volume: num(quote.volume),
+        source: 'netease',
+      };
+    } catch (_) { }
+  }));
+
+  // 当现价取不到最新值或为0时，使用上一次保留不为0的数据
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.price != null && r.price !== 0) {
+      // 有效数据，更新缓存
+      lastValidQuotesCache.set(r.code, { ...r });
+    } else {
+      // 无效数据，尝试从缓存恢复上一次保留的不为0的数据
+      const cached = lastValidQuotesCache.get(r.code);
+      if (cached) {
+        results[i] = {
+          ...r,
+          price: cached.price,
+          prevClose: r.prevClose ?? cached.prevClose,
+          changePct: r.changePct ?? cached.changePct,
+          changeAmt: r.changeAmt ?? cached.changeAmt,
+          high: r.high ?? cached.high,
+          low: r.low ?? cached.low,
+          volume: r.volume ?? cached.volume,
+          name: r.name || cached.name,
+          source: (r.source ? r.source + '+' : '') + 'cache',
+        };
+      }
+    }
+  }
 
   return { quotes: results };
 }

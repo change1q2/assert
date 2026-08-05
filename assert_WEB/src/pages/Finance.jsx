@@ -1898,6 +1898,8 @@ export default function Finance({ onAssetPenetration }) {
   const [editingId, setEditingId] = useState(null);
   const [quotesMap, setQuotesMap] = useState({});
   const [quotesLoading, setQuotesLoading] = useState(false);
+  // 缓存上次成功获取的不为0的行情数据，当现价取不到最新值或为0时回退使用
+  const lastValidQuotesRef = useRef({});
 
   // 汇率和币种切换状态
   const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.15, JPY: 0.046, HKD: 0.86, EUR: 7.85 });
@@ -2085,6 +2087,175 @@ export default function Finance({ onAssetPenetration }) {
   const [lookupLoading, setLookupLoading] = useState(false);
   const lookupTimerRef = useRef(null);
 
+  // 搜索源配置：默认源 + 用户自定义源
+  const DEFAULT_SEARCH_ENGINES = [
+    { id: 'baidu', name: '百度财经', url: 'https://finance.baidu.com/search?keyword={q}' },
+    { id: 'eastmoney', name: '东方财富', url: 'https://so.eastmoney.com/web/s?keyword={q}' },
+    { id: 'xueqiu', name: '雪球', url: 'https://xueqiu.com/query/v1/search/web.json?q={q}' },
+    { id: '10jqka', name: '同花顺', url: 'https://search.10jqka.com.cn/search?word={q}' },
+    { id: 'sina', name: '新浪财经', url: 'https://search.sina.com.cn/news?q={q}' },
+  ];
+  const [searchEngines, setSearchEngines] = useState(() => {
+    try {
+      const saved = localStorage.getItem('finance_search_engines');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return DEFAULT_SEARCH_ENGINES;
+  });
+  const [showEngineMenu, setShowEngineMenu] = useState(false);
+  const [showAddEngine, setShowAddEngine] = useState(false);
+  const [newEngine, setNewEngine] = useState({ name: '', url: '' });
+  const engineMenuRef = useRef(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('finance_search_engines', JSON.stringify(searchEngines));
+    } catch (e) {}
+  }, [searchEngines]);
+
+  useEffect(() => {
+    if (!showEngineMenu) return;
+    const handler = (e) => {
+      if (engineMenuRef.current && !engineMenuRef.current.contains(e.target)) {
+        setShowEngineMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showEngineMenu]);
+
+  const openSearchEngine = (engine, query) => {
+    const url = engine.url.replace('{q}', encodeURIComponent(query));
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const addSearchEngine = () => {
+    if (!newEngine.name.trim() || !newEngine.url.trim()) return;
+    if (!newEngine.url.includes('{q}')) return;
+    setSearchEngines(prev => [...prev, {
+      id: 'custom_' + Date.now(),
+      name: newEngine.name.trim(),
+      url: newEngine.url.trim(),
+    }]);
+    setNewEngine({ name: '', url: '' });
+    setShowAddEngine(false);
+  };
+
+  const removeSearchEngine = (id) => {
+    setSearchEngines(prev => prev.filter(e => e.id !== id || DEFAULT_SEARCH_ENGINES.some(d => d.id === id)));
+  };
+
+  const resetSearchEngines = () => {
+    setSearchEngines(DEFAULT_SEARCH_ENGINES);
+  };
+
+  const renderNoMatchWithEngineSearch = (query) => (
+    <div className="px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm text-gray-400 dark:text-gray-500">无匹配结果</span>
+        <div className="relative">
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onClick={(e) => { e.stopPropagation(); setShowEngineMenu(!showEngineMenu); }}
+            className="flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 px-2 py-1 rounded hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+          >
+            <Search className="w-3 h-3" />
+            换源搜索
+          </button>
+          {showEngineMenu && (
+            <div
+              ref={engineMenuRef}
+              className="absolute right-0 top-full mt-1 w-56 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg z-50 py-1"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div className="px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-slate-600">
+                外部搜索源
+              </div>
+              {searchEngines.map(engine => (
+                <div key={engine.id} className="flex items-center group">
+                  <button
+                    type="button"
+                    onClick={() => openSearchEngine(engine, query)}
+                    className="flex-1 text-left px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-600 flex items-center gap-2"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 dark:bg-indigo-500 flex-shrink-0" />
+                    {engine.name}
+                  </button>
+                  {DEFAULT_SEARCH_ENGINES.some(d => d.id === engine.id) ? null : (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); removeSearchEngine(engine.id); }}
+                      className="opacity-0 group-hover:opacity-100 pr-2 py-1 text-gray-400 hover:text-red-500 transition-opacity"
+                      title="删除"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <div className="border-t border-gray-100 dark:border-slate-600 mt-1 pt-1">
+                {showAddEngine ? (
+                  <div className="px-3 py-2 space-y-1.5">
+                    <input
+                      type="text"
+                      value={newEngine.name}
+                      onChange={e => setNewEngine({ ...newEngine, name: e.target.value })}
+                      placeholder="名称"
+                      className="w-full px-2 py-1 text-xs border border-gray-200 dark:border-slate-500 rounded bg-white dark:bg-slate-600 text-gray-800 dark:text-white"
+                    />
+                    <input
+                      type="text"
+                      value={newEngine.url}
+                      onChange={e => setNewEngine({ ...newEngine, url: e.target.value })}
+                      placeholder="URL (用 {q} 代表关键词)"
+                      className="w-full px-2 py-1 text-xs border border-gray-200 dark:border-slate-500 rounded bg-white dark:bg-slate-600 text-gray-800 dark:text-white"
+                    />
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={addSearchEngine}
+                        className="flex-1 px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                      >
+                        添加
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowAddEngine(false); setNewEngine({ name: '', url: '' }); }}
+                        className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddEngine(true)}
+                    className="w-full text-left px-3 py-1.5 text-sm text-indigo-600 dark:text-indigo-400 hover:bg-gray-50 dark:hover:bg-slate-600 flex items-center gap-2"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    添加搜索源
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={resetSearchEngines}
+                  className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-600 flex items-center gap-2 border-t border-gray-100 dark:border-slate-600"
+                >
+                  恢复默认
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   const { accounts = [], assetClasses = [], financeAssets = [] } = stateData || {};
 
   // 页面级分页（账户本区域）
@@ -2108,7 +2279,7 @@ export default function Finance({ onAssetPenetration }) {
   useEffect(() => {
     const timer = setInterval(() => {
       loadExchangeRates();
-    }, 5000);
+    }, 30000);
     return () => clearInterval(timer);
   }, []);
 
@@ -2466,7 +2637,23 @@ export default function Finance({ onAssetPenetration }) {
       }
       quotes.forEach(q => {
         if (q && q.code) {
-          const isHKConnect = hkStockConnectCodes.has(String(q.code));
+          const codeKey = String(q.code);
+          const prev = lastValidQuotesRef.current[codeKey];
+          // 当现价取不到最新值或为0时，使用上一次保留不为0的数据
+          if ((q.price == null || Number(q.price) === 0) && prev && prev.price != null && prev.price !== 0) {
+            q = {
+              ...prev,
+              ...q,
+              price: prev.price,
+              prevClose: q.prevClose ?? prev.prevClose,
+              changePct: q.changePct ?? prev.changePct,
+              changeAmt: q.changeAmt ?? prev.changeAmt,
+              high: q.high ?? prev.high,
+              low: q.low ?? prev.low,
+              name: q.name || prev.name,
+            };
+          }
+          const isHKConnect = hkStockConnectCodes.has(codeKey);
           if (isHKConnect) {
             // 港股通资产：存储原始 HKD 价格 + 转换后的 CNY 价格
             const converted = { ...q };
@@ -2484,9 +2671,13 @@ export default function Finance({ onAssetPenetration }) {
               converted.changePct = Number(q.changePct);
             }
             console.log('[DEBUG] 港股转换:', q.code, 'rawPrice=', q.price, 'hkdRate=', hkdRate, 'convertedPrice=', converted.price);
-            map[String(q.code)] = converted;
+            map[codeKey] = converted;
           } else {
-            map[String(q.code)] = q;
+            map[codeKey] = q;
+          }
+          // 仅当 price 有效（非0非null）时更新缓存
+          if (q.price != null && Number(q.price) !== 0) {
+            lastValidQuotesRef.current[codeKey] = { ...q };
           }
         }
       });
@@ -2509,10 +2700,12 @@ export default function Finance({ onAssetPenetration }) {
           if (newPrice == null && newPrev == null) return a;
           changed = true;
           const qty = parseFloat(a.quantity) || parseFloat(a.shares) || 0;
-          const curVal = (newPrice != null) ? newPrice * qty : a.currentValue;
+          // 当现价取不到最新值或为0时，保留上一次不为0的 currentPrice，不覆盖为0
+          const effectivePrice = (newPrice != null && newPrice !== 0) ? newPrice : a.currentPrice;
+          const curVal = (effectivePrice != null && effectivePrice !== 0) ? effectivePrice * qty : a.currentValue;
           return {
             ...a,
-            currentPrice: newPrice != null ? newPrice : a.currentPrice,
+            currentPrice: effectivePrice,
             prevPrice: newPrev != null ? newPrev : a.prevPrice,
             priceDate: newDate,
             currentValue: curVal,
@@ -3852,6 +4045,7 @@ export default function Finance({ onAssetPenetration }) {
         status: a.status || 'active',
         archiveDate: a.archiveDate || '',
         isArchived: a.status === 'archived',
+        tags: Array.isArray(a.tags) ? a.tags : (a.tags ? [a.tags] : []),
       };
     });
 
@@ -4659,7 +4853,7 @@ export default function Finance({ onAssetPenetration }) {
                               handleCodeSearch(e.target.value);
                             }}
                             onFocus={() => newAccount.name && handleCodeSearch(newAccount.name)}
-                            onBlur={() => setTimeout(() => setShowLookupDropdown(false), 200)}
+                            onBlur={() => { setShowLookupDropdown(false); setShowEngineMenu(false); }}
                             placeholder="基金、股票或自定义资产名称"
                             className={FORM_INPUT}
                           />
@@ -4668,7 +4862,7 @@ export default function Finance({ onAssetPenetration }) {
                               {lookupLoading ? (
                                 <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">搜索中...</div>
                               ) : lookupResults.length === 0 ? (
-                                <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">无匹配结果</div>
+                                renderNoMatchWithEngineSearch(newAccount.name || newAccount.code || '')
                               ) : (
                                 lookupResults.map((item, idx) => (
                                   <div
@@ -4700,7 +4894,7 @@ export default function Finance({ onAssetPenetration }) {
                               handleCodeSearch(e.target.value);
                             }}
                             onFocus={() => newAccount.code && handleCodeSearch(newAccount.code)}
-                            onBlur={() => setTimeout(() => setShowLookupDropdown(false), 200)}
+                            onBlur={() => { setShowLookupDropdown(false); setShowEngineMenu(false); }}
                             placeholder="输入代码如 600519"
                             className={`${FORM_INPUT} font-mono`}
                           />
@@ -4709,7 +4903,7 @@ export default function Finance({ onAssetPenetration }) {
                               {lookupLoading ? (
                                 <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">搜索中...</div>
                               ) : lookupResults.length === 0 ? (
-                                <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">无匹配结果</div>
+                                renderNoMatchWithEngineSearch(newAccount.code || newAccount.name || '')
                               ) : (
                                 lookupResults.map((item, idx) => (
                                   <div

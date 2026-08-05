@@ -105,7 +105,7 @@ export const DEFAULT_COLUMNS = [
   { key: 'dailyPnlRate', label: '当日收益率', visible: true, align: 'right', pnl: true },
   { key: 'positionRatio', label: '仓位占比', visible: true, align: 'right' },
   { key: 'account', label: '所属账户', visible: true, align: 'left' },
-  { key: 'tags', label: '标签', visible: false, align: 'left' },
+  { key: 'tags', label: '标签', visible: true, align: 'left' },
 ];
 
 export const ARCHIVED_COLUMNS = [
@@ -136,6 +136,7 @@ export const DEFAULT_FILTERS = [
   { key: 'positionGroup', label: '持仓分组', visible: true },
   { key: 'positionType', label: '持仓分类', visible: true },
   { key: 'account', label: '所属账户', visible: true },
+  { key: 'tag', label: '标签', visible: true },
 ];
 
 export const ARCHIVED_FILTERS = [

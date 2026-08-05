@@ -1592,10 +1592,10 @@ export default function Overview() {
                       growthData.push({ month: monthLabel, value: monthNet, monthNum: i });
                     }
                     
-                    const values = growthData.map((d) => d.value);
+                    const values = growthData.map((d) => d.value).map(v => Number.isFinite(v) ? v : 0);
                     const maxVal = Math.max(...values, 0) * 1.15 || 1;
                     const minVal = Math.min(...values, 0) * 0.95 || 0;
-                    const range = maxVal - minVal || 1;
+                    const range = (maxVal - minVal) || 1;
                     
                     const paddingLeft = 60;
                     const paddingRight = 20;
@@ -1682,22 +1682,23 @@ export default function Overview() {
                         return <text x="290" y="60" textAnchor="middle" fontSize="11" fill="#9CA3AF">暂无数据</text>;
                       }
                       
-                      const values = yearsData.map((d) => d.value);
+                      const values = yearsData.map((d) => d.value).map(v => Number.isFinite(v) ? v : 0);
                       const maxVal = Math.max(...values, 0) * 1.15 || 1;
                       const minVal = Math.min(...values, 0) * 0.95 || 0;
-                      const range = maxVal - minVal || 1;
-                      
+                      const range = (maxVal - minVal) || 1;
+
                       const paddingLeft = 50;
                       const paddingRight = 20;
                       const paddingTop = 15;
                       const paddingBottom = 25;
                       const chartWidth = 580 - paddingLeft - paddingRight;
                       const chartHeight = 120 - paddingTop - paddingBottom;
-                      
+
                       const yTicks = 4;
-                      
+                      const denom = yearsData.length > 1 ? (yearsData.length - 1) : 1;
+
                       const points = values.map((v, i) => {
-                        const x = paddingLeft + (i / (yearsData.length - 1)) * chartWidth;
+                        const x = paddingLeft + (i / denom) * chartWidth;
                         const y = paddingTop + chartHeight - ((v - minVal) / range) * chartHeight;
                         return `${x},${y}`;
                       });
@@ -1734,7 +1735,7 @@ export default function Overview() {
                           )}
                           {yearsData.length > 1 && values.map((v, i) => {
                             if (v === 0) return null;
-                            const x = paddingLeft + (i / (yearsData.length - 1)) * chartWidth;
+                            const x = paddingLeft + (i / denom) * chartWidth;
                             const y = paddingTop + chartHeight - ((v - minVal) / range) * chartHeight;
                             return (
                               <g key={i}>
@@ -1746,7 +1747,7 @@ export default function Overview() {
                             );
                           })}
                           {yearsData.map((d, i) => {
-                            const x = paddingLeft + (i / (yearsData.length - 1)) * chartWidth;
+                            const x = paddingLeft + (i / denom) * chartWidth;
                             return (
                               <text key={i} x={x} y={paddingTop + chartHeight + 15} textAnchor="middle" fontSize="8" fill="#9CA3AF">
                                 {d.year}
@@ -1780,6 +1781,7 @@ export default function Overview() {
                     );
                   }
                   const maxVal = Math.max(...years.map((d) => d.value)) * 1.1;
+                  const safeMaxVal = (Number.isFinite(maxVal) && maxVal > 0) ? maxVal : 1;
                   const barWidth = 50;
                   const gap = 40;
                   const startX = 40;
@@ -1805,7 +1807,8 @@ export default function Overview() {
                         );
                       })}
                       {years.map((d, i) => {
-                        const barHeight = (d.value / maxVal) * chartHeight;
+                        const safeValue = Number.isFinite(d.value) ? d.value : 0;
+                        const barHeight = (safeValue / safeMaxVal) * chartHeight;
                         const x = startX + i * (barWidth + gap);
                         const y = chartBottom - barHeight;
                         return (
@@ -1827,7 +1830,7 @@ export default function Overview() {
                               fontSize="10"
                               fill="#6B7280"
                             >
-                              {(d.value / 10000).toFixed(1)}万
+                              {(safeValue / 10000).toFixed(1)}万
                             </text>
                           </g>
                         );
