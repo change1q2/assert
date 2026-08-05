@@ -6,6 +6,7 @@ import {
 import {
   getCurrencySymbol,
   formatCurrencyWithRate,
+  formatPriceValue,
   formatPercentage,
   computeHoldingDays,
   formatNum,
@@ -281,7 +282,7 @@ export default function FinanceHoldingsTable({
         let colorClass = '';
         if (h.priceChange === 'up') colorClass = 'text-green-600 dark:text-green-400';
         else if (h.priceChange === 'down') colorClass = 'text-red-500 dark:text-red-400';
-        return <span className={colorClass}>{formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates).replace(getCurrencySymbol(h.currency || 'CNY'), '')}</span>;
+        return <span className={colorClass}>{formatPriceValue(val)}</span>;
       case 'holdingDays':
         return computeHoldingDays(h) || '-';
       case 'archiveDate':

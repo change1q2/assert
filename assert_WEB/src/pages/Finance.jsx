@@ -1894,7 +1894,7 @@ export default function Finance({ onAssetPenetration }) {
   const [quotesLoading, setQuotesLoading] = useState(false);
 
   // 汇率和币种切换状态
-  const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.2, JPY: 0.048, HKD: 0.92, EUR: 7.8 });
+  const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.15, JPY: 0.046, HKD: 0.86, EUR: 7.85 });
   const [selectedCurrency, setSelectedCurrency] = useState('CNY');
 
   // 标签管理状态
@@ -1923,7 +1923,7 @@ export default function Finance({ onAssetPenetration }) {
     '固收类': ['债券', '银行理财'],
     '现金类': ['现金', '银行理财'],
     '另类投资': ['房产', '实体投资', '数字货币', '其他'],
-    '商品': ['黄金', '白银', '原油'],
+    '商品类': ['黄金', '白银', '原油'],
     '债权类': ['债券'],
     '分红类': ['股票', '基金'],
   };
@@ -1959,18 +1959,21 @@ export default function Finance({ onAssetPenetration }) {
   const [categoryL1ToEdit, setCategoryL1ToEdit] = useState(null);
   const [newCategoryL1Name, setNewCategoryL1Name] = useState('');
 
-  // 二级分类自定义管理（按一级分类分组）
+  // 二级分类自定义管理（按一级分类 + 资产类型分组，key格式: `${l1}__${assetType}`）
   const [categoryL2OptionsMap, setCategoryL2OptionsMap] = useState(() => {
-    const saved = localStorage.getItem('finance_category_l2_options');
+    const saved = localStorage.getItem('finance_category_l2_options_v2');
     if (saved) return JSON.parse(saved);
+    // 初始化默认值（按一级分类 + 资产类型组合）
     return {
-      '权益类': ['A股', '港股', '美股', '其他'],
-      '债权类': ['A股', '中债', '美债', '其他'],
-      '现金类': ['活期存款', '定期存款', 'A股', '其他'],
-      '商品类': ['A股', '其他'],
-      '分红类': ['A股', '固定投资', '其他'],
-      '固收类': ['A股', '其他'],
-      '另类投资': ['A股', '其他'],
+      '权益类__股票': ['A股', '港股', '美股', '其他'],
+      '债权类__债券': ['中债', '美债', '其他'],
+      '现金类__现金': ['活期存款', '定期存款'],
+      '商品类__黄金': ['场内黄金', '场外黄金'],
+      '商品类__白银': ['场内白银', '场外白银'],
+      '商品类__原油': ['场内原油', '场外原油'],
+      '分红类__股票': ['A股', '固定投资', '其他'],
+      '固收类__债券': ['中债', '其他'],
+      '另类投资__其他': ['其他'],
     };
   });
   const [showCategoryL2Modal, setShowCategoryL2Modal] = useState(false);
@@ -2017,7 +2020,7 @@ export default function Finance({ onAssetPenetration }) {
     market: '国内市场',
     currency: 'CNY',
     assetKind: '',
-    assetType: '股票',
+    assetType: '',
     account: '',
     categoryL1: '',
     categoryL2: '',
@@ -2087,16 +2090,66 @@ export default function Finance({ onAssetPenetration }) {
   useEffect(() => {
     const timer = setInterval(() => {
       loadExchangeRates();
-    }, 30 * 60 * 1000);
+    }, 5000);
     return () => clearInterval(timer);
   }, []);
 
-  const loadExchangeRates = async () => {
+  // 每30秒轮询行情数据（含港股通汇率转换 + 场外基金净值）
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      if (!stateData?.financeAssets || stateData.financeAssets.length === 0) return;
+      try {
+        const latestRates = await loadExchangeRates(false);
+        await loadQuotes(stateData.financeAssets, stateData, latestRates);
+        await loadFundNav(stateData.financeAssets, stateData);
+      } catch (e) {
+        console.warn('定时行情刷新失败:', e);
+      }
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [stateData]);
+
+  // 汇率变化时，使用原始 HKD 价格重新计算港股通资产的折算价格
+  useEffect(() => {
+    if (!exchangeRates?.HKD || !stateData?.financeAssets) return;
+    const hkdRate = Number(exchangeRates.HKD) || 0.86;
+    const hkAssets = stateData.financeAssets.filter(a => a.categoryL2 === '港股通');
+    if (hkAssets.length === 0) return;
+    setQuotesMap(prev => {
+      const next = { ...prev };
+      let changed = false;
+      hkAssets.forEach(asset => {
+        const key = String(asset.code);
+        const q = prev[key];
+        if (q && q.rawCurrent != null) {
+          const newPrice = Math.trunc(q.rawCurrent * hkdRate * 10000) / 10000;
+          const newPrevClose = q.rawPreviousClose != null
+            ? Math.trunc(q.rawPreviousClose * hkdRate * 10000) / 10000
+            : null;
+          if (Math.abs(newPrice - q.price) > 0.0001) {
+            next[key] = {
+              ...q,
+              current: newPrice,
+              price: newPrice,
+              previousClose: newPrevClose,
+              prevClose: newPrevClose,
+            };
+            changed = true;
+          }
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [exchangeRates?.HKD]);
+
+  const loadExchangeRates = async (force = false) => {
     try {
-      const rates = await fetchRealTimeExchangeRates();
+      const rates = await fetchRealTimeExchangeRates(force);
       setExchangeRates(rates);
+      return rates;
     } catch (err) {
       console.error('Failed to load exchange rates:', err);
+      return null;
     }
   };
 
@@ -2198,6 +2251,8 @@ export default function Finance({ onAssetPenetration }) {
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    // 每次手动刷新全局数据时强制获取最新汇率（必须 await 确保汇率先加载）
+    const latestRates = await loadExchangeRates(true);
     try {
       const data = await fetchState();
       // 补充账户数据：如果 state 中 accounts 为空，从 localStorage 缓存中读取
@@ -2349,7 +2404,8 @@ export default function Finance({ onAssetPenetration }) {
       setStateData(data);
       const financeAssetsData = data?.financeAssets || [];
       if (financeAssetsData.length > 0) {
-        await loadQuotes(financeAssetsData, data);
+        // 传入最新汇率确保港股通转换使用正确的汇率值
+        await loadQuotes(financeAssetsData, data, latestRates);
         await loadFundNav(financeAssetsData, data);
       }
     } catch (err) {
@@ -2360,14 +2416,12 @@ export default function Finance({ onAssetPenetration }) {
     }
   };
 
-  const loadQuotes = async (financeAssetsData, currentState) => {
+  const loadQuotes = async (financeAssetsData, currentState, latestRates = null) => {
     if (!financeAssetsData || financeAssetsData.length === 0) return;
     const codes = financeAssetsData
       .filter(a => {
         if (!a.code) return false;
-        // 排除现金类资产
         if (a.kind === 'cash' || a.categoryL2 === '现金' || a.assetType === '现金' || a.categoryL1 === '现金类') return false;
-        // 排除场外基金（由 loadFundNav 单独处理）
         const catL3 = a.categoryL3 || a.tertiaryCategory;
         if (catL3 === '场外' || (!catL3 && a.market === '场外基金')) return false;
         return true;
@@ -2378,30 +2432,61 @@ export default function Finance({ onAssetPenetration }) {
     try {
       const quotes = await fetchFinanceQuotes(codes);
       const map = {};
+      // 港股通汇率转换：优先使用传入的最新汇率，确保汇率值是最新的
+      const hkdRate = Number(latestRates?.HKD || exchangeRates?.HKD) || 0.92;
+      const hkStockConnectCodes = new Set(
+        (financeAssetsData || [])
+          .filter(a => a.categoryL2 === '港股通')
+          .map(a => String(a.code))
+      );
+      // 调试日志
+      const hkAssets = (financeAssetsData || []).filter(a => a.categoryL2 === '港股通');
+      if (hkAssets.length > 0) {
+        console.log('[DEBUG] 港股通资产:', JSON.stringify(hkAssets.map(a => ({ code: a.code, codeType: typeof a.code, categoryL2: a.categoryL2 }))));
+        console.log('[DEBUG] 汇率 hkdRate:', hkdRate, 'latestRates:', latestRates?.HKD, 'state HKD:', exchangeRates?.HKD);
+        console.log('[DEBUG] 获取到的行情数据:', JSON.stringify(quotes.filter(q => q && q.code)));
+      }
       quotes.forEach(q => {
         if (q && q.code) {
-          map[q.code] = q;
+          const isHKConnect = hkStockConnectCodes.has(String(q.code));
+          if (isHKConnect) {
+            // 港股通资产：存储原始 HKD 价格 + 转换后的 CNY 价格
+            const converted = { ...q };
+            converted.rawCurrent = q.price != null ? Number(q.price) : null;
+            converted.rawPreviousClose = q.prevClose != null ? Number(q.prevClose) : null;
+            if (q.price != null && Number.isFinite(Number(q.price))) {
+              converted.current = Math.trunc(Number(q.price) * hkdRate * 10000) / 10000;
+              converted.price = converted.current;
+            }
+            if (q.prevClose != null && Number.isFinite(Number(q.prevClose))) {
+              converted.previousClose = Math.trunc(Number(q.prevClose) * hkdRate * 10000) / 10000;
+              converted.prevClose = converted.previousClose;
+            }
+            if (q.changePct != null && Number.isFinite(Number(q.changePct))) {
+              converted.changePct = Number(q.changePct);
+            }
+            console.log('[DEBUG] 港股转换:', q.code, 'rawPrice=', q.price, 'hkdRate=', hkdRate, 'convertedPrice=', converted.price);
+            map[String(q.code)] = converted;
+          } else {
+            map[String(q.code)] = q;
+          }
         }
       });
       setQuotesMap(map);
       // 把最新行情数据回写到 financeAssets 并保存
       if (currentState && Object.keys(map).length > 0) {
         let changed = false;
-        const isHKStockConnect = (a) => a.categoryL2 === '港股通';
-        // 使用组件最新的汇率（而非可能过时的存储数据）
-        const hkdRate = Number(exchangeRates?.HKD) || 0.92;
         const updatedAssets = (currentState.financeAssets || []).map(a => {
-          const q = map[a.code];
+          const key = String(a.code);
+          const q = map[key];
           if (!q) return a;
-          const rawPrice = Number.isFinite(Number(q.current)) ? Number(q.current) : null;
-          const rawPrev = Number.isFinite(Number(q.previousClose)) ? Number(q.previousClose) : null;
-          // 港股通：将 HKD 价格按实时汇率折算为 CNY
-          const newPrice = isHKStockConnect(a) && rawPrice != null
-            ? Math.trunc(rawPrice * hkdRate * 10000) / 10000
-            : rawPrice;
-          const newPrev = isHKStockConnect(a) && rawPrev != null
-            ? Math.trunc(rawPrev * hkdRate * 10000) / 10000
-            : rawPrev;
+          let newPrice = Number.isFinite(Number(q.price)) ? Number(q.price) : null;
+          // 备用：如果 price 为 0 但有 rawCurrent，用 rawCurrent * hkdRate 重算
+          if ((newPrice == null || newPrice === 0) && q.rawCurrent != null) {
+            newPrice = Math.trunc(Number(q.rawCurrent) * hkdRate * 10000) / 10000;
+            console.log('[DEBUG] 使用备用计算:', a.code, 'rawCurrent=', q.rawCurrent, 'newPrice=', newPrice);
+          }
+          const newPrev = Number.isFinite(Number(q.prevClose)) ? Number(q.prevClose) : null;
           const newDate = q.date || a.priceDate || '';
           if (newPrice == null && newPrev == null) return a;
           changed = true;
@@ -2836,9 +2921,9 @@ export default function Finance({ onAssetPenetration }) {
   };
 
   // ─ 账本管理 ──
-  const handleSaveBooks = async () => {
+  const handleSaveBooks = async (booksToSave) => {
     try {
-      await saveBooks(books);
+      await saveBooks(booksToSave || books);
       loadBooksAndTags();
     } catch (err) {
       console.error('Failed to save books:', err);
@@ -2852,12 +2937,12 @@ export default function Finance({ onAssetPenetration }) {
     const newTags = [...tags, newTagName.trim()].sort();
     setTags(newTags);
     setNewTagName('');
-    // 更新所有账本的标签列表
-    setBooks(books.map(book => ({
+    const updatedBooks = books.map(book => ({
       ...book,
       tags: Array.from(new Set([...(book.tags || []), newTagName.trim()])),
-    })));
-    handleSaveBooks();
+    }));
+    setBooks(updatedBooks);
+    handleSaveBooks(updatedBooks);
   };
 
   const handleEditTag = (tagName) => {
@@ -2871,29 +2956,29 @@ export default function Finance({ onAssetPenetration }) {
     const newTags = tags.map(t => t === tagToEdit ? newTagName.trim() : t).sort();
     setTags(newTags);
     
-    // 更新所有账本中的标签引用
-    setBooks(books.map(book => ({
+    const updatedBooks = books.map(book => ({
       ...book,
       tags: (book.tags || []).map(t => t === tagToEdit ? newTagName.trim() : t),
-    })));
+    }));
+    setBooks(updatedBooks);
     
     setTagToEdit(null);
     setNewTagName('');
-    handleSaveBooks();
+    handleSaveBooks(updatedBooks);
   };
 
   const handleDeleteTag = async (tagName) => {
     const newTags = tags.filter(t => t !== tagName);
     setTags(newTags);
     
-    // 从所有账本中移除该标签
-    setBooks(books.map(book => ({
+    const updatedBooks = books.map(book => ({
       ...book,
       tags: (book.tags || []).filter(t => t !== tagName),
-    })));
+    }));
+    setBooks(updatedBooks);
     
     setDeleteConfirm(null);
-    handleSaveBooks();
+    handleSaveBooks(updatedBooks);
   };
 
   // ── 资产类型管理 ──
@@ -2946,35 +3031,40 @@ export default function Finance({ onAssetPenetration }) {
     setDeleteConfirm(null);
   };
 
-  // ── 二级分类管理（按一级分类分组）──
+  // ── 二级分类管理（按一级分类 + 资产类型分组，key: `${l1}__${assetType}`）──
+  const getL2Key = () => {
+    const l1 = newAccount.categoryL1;
+    const at = newAccount.assetType;
+    return l1 && at ? `${l1}__${at}` : l1 || '';
+  };
   const handleAddCategoryL2 = () => {
     if (!newCategoryL2Name.trim() || !newAccount.categoryL1) return;
-    const key = newAccount.categoryL1;
+    const key = getL2Key();
     const currentOptions = categoryL2OptionsMap[key] || [];
     if (currentOptions.includes(newCategoryL2Name.trim())) return;
     const newOptions = [...currentOptions, newCategoryL2Name.trim()].sort();
     setCategoryL2OptionsMap(prev => ({ ...prev, [key]: newOptions }));
-    localStorage.setItem('finance_category_l2_options', JSON.stringify({ ...categoryL2OptionsMap, [key]: newOptions }));
+    localStorage.setItem('finance_category_l2_options_v2', JSON.stringify({ ...categoryL2OptionsMap, [key]: newOptions }));
     setNewCategoryL2Name('');
   };
   const handleSaveCategoryL2Edit = () => {
     if (!categoryL2ToEdit || !newCategoryL2Name.trim() || !newAccount.categoryL1) return;
-    const key = newAccount.categoryL1;
+    const key = getL2Key();
     const currentOptions = categoryL2OptionsMap[key] || [];
     if (currentOptions.includes(newCategoryL2Name.trim()) && newCategoryL2Name.trim() !== categoryL2ToEdit) return;
     const newOptions = currentOptions.map(o => o === categoryL2ToEdit ? newCategoryL2Name.trim() : o).sort();
     setCategoryL2OptionsMap(prev => ({ ...prev, [key]: newOptions }));
-    localStorage.setItem('finance_category_l2_options', JSON.stringify({ ...categoryL2OptionsMap, [key]: newOptions }));
+    localStorage.setItem('finance_category_l2_options_v2', JSON.stringify({ ...categoryL2OptionsMap, [key]: newOptions }));
     setCategoryL2ToEdit(null);
     setNewCategoryL2Name('');
   };
   const handleDeleteCategoryL2 = (name) => {
     if (!newAccount.categoryL1) return;
-    const key = newAccount.categoryL1;
+    const key = getL2Key();
     const currentOptions = categoryL2OptionsMap[key] || [];
     const newOptions = currentOptions.filter(o => o !== name);
     setCategoryL2OptionsMap(prev => ({ ...prev, [key]: newOptions }));
-    localStorage.setItem('finance_category_l2_options', JSON.stringify({ ...categoryL2OptionsMap, [key]: newOptions }));
+    localStorage.setItem('finance_category_l2_options_v2', JSON.stringify({ ...categoryL2OptionsMap, [key]: newOptions }));
     setDeleteConfirm(null);
   };
 
@@ -3272,11 +3362,11 @@ export default function Finance({ onAssetPenetration }) {
     '债券': {
       l1Options: ['债权类'],
       l1Default: '债权类',
-      l2Options: { '债权类': ['A股'] },
-      l2Default: { '债权类': 'A股' },
-      l3Options: { '债权类': { 'A股': ['场内', '场外'] } },
-      l3Default: { '债权类': { 'A股': '场内' } },
-      l4Options: { '债权类': { 'A股': { '场内': ['国债', '可转债'], '场外': ['纯债', '混合债', '地方债', '企业债', '固收+'] } } }
+      l2Options: { '债权类': ['中债', '美债', '其他'] },
+      l2Default: { '债权类': '中债' },
+      l3Options: { '债权类': { '中债': ['场内', '场外'], '美债': ['场内', '场外'], '其他': ['场内', '场外'] } },
+      l3Default: { '债权类': { '中债': '场内', '美债': '场内', '其他': '场内' } },
+      l4Options: { '债权类': { '中债': { '场内': ['国债', '可转债'], '场外': ['纯债', '混合债', '地方债', '企业债', '固收+'] }, '美债': { '场内': [], '场外': [] }, '其他': { '场内': [], '场外': [] } } }
     },
     '现金': {
       l1Options: ['现金类'],
@@ -3327,21 +3417,21 @@ export default function Finance({ onAssetPenetration }) {
     },
     '黄金': {
       l1Options: ['商品类'], l1Default: '商品类',
-      l2Options: { '商品类': ['A股'] }, l2Default: { '商品类': 'A股' },
-      l3Options: { '商品类': { 'A股': ['场内', '场外'] } }, l3Default: { '商品类': { 'A股': '场内' } },
-      l4Options: { '商品类': { 'A股': { '场内': ['黄金股', '黄金ETF/LOF'], '场外': ['实物黄金', '银行积存金', '纸黄金'] } } }
+      l2Options: { '商品类': ['场内黄金', '场外黄金'] }, l2Default: { '商品类': '场内黄金' },
+      l3Options: { '商品类': { '场内黄金': ['黄金股', '黄金ETF/LOF'], '场外黄金': ['实物黄金', '银行积存金', '纸黄金'] } }, l3Default: { '商品类': { '场内黄金': '黄金ETF/LOF', '场外黄金': '实物黄金' } },
+      l4Options: { '商品类': { '场内黄金': { '黄金股': [], '黄金ETF/LOF': [] }, '场外黄金': { '实物黄金': [], '银行积存金': [], '纸黄金': [] } } }
     },
     '白银': {
       l1Options: ['商品类'], l1Default: '商品类',
-      l2Options: { '商品类': ['A股'] }, l2Default: { '商品类': 'A股' },
-      l3Options: { '商品类': { 'A股': ['场内'] } }, l3Default: { '商品类': { 'A股': '场内' } },
-      l4Options: { '商品类': { 'A股': { '场内': ['白银股', '白银ETF/LOF'] } } }
+      l2Options: { '商品类': ['场内白银', '场外白银'] }, l2Default: { '商品类': '场内白银' },
+      l3Options: { '商品类': { '场内白银': ['白银股', '白银ETF/LOF'], '场外白银': ['实物白银', '银行积存银'] } }, l3Default: { '商品类': { '场内白银': '白银ETF/LOF', '场外白银': '实物白银' } },
+      l4Options: { '商品类': { '场内白银': { '白银股': [], '白银ETF/LOF': [] }, '场外白银': { '实物白银': [], '银行积存银': [] } } }
     },
     '原油': {
       l1Options: ['商品类'], l1Default: '商品类',
-      l2Options: { '商品类': ['A股'] }, l2Default: { '商品类': 'A股' },
-      l3Options: { '商品类': { 'A股': ['场内'] } }, l3Default: { '商品类': { 'A股': '场内' } },
-      l4Options: { '商品类': { 'A股': { '场内': ['原油股', '原油ETF/LOF'] } } }
+      l2Options: { '商品类': ['场内原油', '场外原油'] }, l2Default: { '商品类': '场内原油' },
+      l3Options: { '商品类': { '场内原油': ['原油股', '原油ETF/LOF'], '场外原油': ['实物原油', '银行积存油'] } }, l3Default: { '商品类': { '场内原油': '原油ETF/LOF', '场外原油': '实物原油' } },
+      l4Options: { '商品类': { '场内原油': { '原油股': [], '原油ETF/LOF': [] }, '场外原油': { '实物原油': [], '银行积存油': [] } } }
     },
     '数字货币': {
       l1Options: ['另类投资'], l1Default: '另类投资',
@@ -3439,6 +3529,16 @@ export default function Finance({ onAssetPenetration }) {
   }, [assetClasses]);
 
   const categoryL2Options = useMemo(() => {
+    // 商品类 + 黄金/白银/原油：优先级最高
+    if (newAccount.categoryL1 === '商品类') {
+      if (newAccount.assetType === '黄金') return ['场内黄金', '场外黄金'];
+      if (newAccount.assetType === '白银') return ['场内白银', '场外白银'];
+      if (newAccount.assetType === '原油') return ['场内原油', '场外原油'];
+    }
+    // 债券 + 债权类
+    if (newAccount.assetType === '债券' && newAccount.categoryL1 === '债权类') {
+      return ['中债', '美债', '其他'];
+    }
     if (newAccount.market === '港股市场') {
       return ['港股'];
     }
@@ -3457,22 +3557,25 @@ export default function Finance({ onAssetPenetration }) {
     if (newAccount.assetType === '商品') {
       return ['黄金', '白银', '原油', '其他'];
     }
+    // 债权类默认
     if (newAccount.categoryL1 === '债权类') {
-      return ['中债', '美债'];
+      return ['中债', '美债', '其他'];
     }
-    // 合并资产分类模块数据和 localStorage 自定义数据
+    // 其他合并逻辑
     const l1Key = newAccount.categoryL1;
+    const atKey = newAccount.assetType;
+    const l2Key = l1Key && atKey ? `${l1Key}__${atKey}` : l1Key;
     const moduleL2 = assetClasses && assetClasses.length > 0 && l1Key
       ? (() => {
           const l1 = assetClasses.find(c => c.name === l1Key);
           return l1?.children?.map(c => c.name) || [];
         })()
       : [];
-    const customL2 = (categoryL2OptionsMap[l1Key] || []);
+    const customL2 = (categoryL2OptionsMap[l2Key] || []);
     const cascadeL2 = newAccount.assetType && CASCADE_OPTIONS[newAccount.assetType]?.l2Options?.[l1Key]
       ? CASCADE_OPTIONS[newAccount.assetType].l2Options[l1Key]
       : [];
-    return [...new Set([...moduleL2, ...customL2, ...cascadeL2, ...DEFAULT_CATEGORY_L2])];
+    return [...new Set([...cascadeL2, ...moduleL2, ...customL2, ...DEFAULT_CATEGORY_L2])];
   }, [assetClasses, newAccount.categoryL1, newAccount.assetType, newAccount.market, categoryL2OptionsMap]);
 
   const allCategoryL2Options = useMemo(() => {
@@ -3501,10 +3604,25 @@ export default function Finance({ onAssetPenetration }) {
   }, [assetClasses, categoryL2OptionsMap]);
 
   const categoryL3Options = useMemo(() => {
-    let defaults = [];
+    // 必须先选 L2 才能选 L3
+    if (!newAccount.categoryL2) {
+      return [];
+    }
+    // 优先使用 CASCADE_OPTIONS 的资产类型+分类组合
+    const cascadeL3 = CASCADE_OPTIONS[newAccount.assetType]?.l3Options?.[newAccount.categoryL1]?.[newAccount.categoryL2] || [];
+    if (cascadeL3.length > 0) {
+      const merged = [...new Set([...cascadeL3, ...categoryL3CustomOptions])];
+      return merged;
+    }
+    // 基金类型特殊处理
     if (newAccount.assetType === '基金') {
-      defaults = ['场外', '场内'];
-    } else if (assetClasses && assetClasses.length > 0 && newAccount.categoryL1 && newAccount.categoryL2) {
+      const defaults = ['场外', '场内'];
+      const merged = [...new Set([...defaults, ...categoryL3CustomOptions])];
+      return merged;
+    }
+    // 从 assetClasses 配置中查找
+    let defaults = [];
+    if (assetClasses && assetClasses.length > 0 && newAccount.categoryL1 && newAccount.categoryL2) {
       const l1 = assetClasses.find(c => c.name === newAccount.categoryL1);
       if (l1 && l1.children) {
         const l2 = l1.children.find(c => c.name === newAccount.categoryL2);
@@ -3522,9 +3640,18 @@ export default function Finance({ onAssetPenetration }) {
   // ══════════════════════════════════════
   const computed = useMemo(() => {
     const getDailyPnl = (a) => {
-      const q = a.code && quotesMap[a.code] ? quotesMap[a.code] : null;
+      const qKey = String(a.code);
+      const q = quotesMap[qKey] ? quotesMap[qKey] : null;
+      const catL3 = a.categoryL3 || a.tertiaryCategory;
+      const isOTC = catL3 === '场外' || (!catL3 && a.market === '场外基金');
       const isUSMarket = a.market === '美股市场' || a.market === '美股';
       const _storedPrevPrice = parseFloat(a.prevPrice) || 0;
+      // 场外基金：优先用存储的 currentPrice/prevPrice（基金净值）
+      const _curr = parseFloat(a.currentPrice) || 0;
+      if (isOTC && _storedPrevPrice > 0 && _curr > 0) {
+        const qty = parseFloat(a.shares || a.quantity) || 0;
+        return (_curr - _storedPrevPrice) * qty;
+      }
       if (q && q.price != null && q.prevClose != null && q.prevClose !== 0) {
         const qty = parseFloat(a.shares || a.quantity) || 0;
         // 美股市场：当实时价等于昨收价（盘外时间），改用昨收价与前一日收盘价计算
@@ -3555,9 +3682,17 @@ export default function Finance({ onAssetPenetration }) {
     };
 
     const getDailyPnlRate = (a) => {
-      const q = a.code && quotesMap[a.code] ? quotesMap[a.code] : null;
+      const qKey = String(a.code);
+      const q = quotesMap[qKey] ? quotesMap[qKey] : null;
+      const catL3 = a.categoryL3 || a.tertiaryCategory;
+      const isOTC = catL3 === '场外' || (!catL3 && a.market === '场外基金');
       const isUSMarket = a.market === '美股市场' || a.market === '美股';
       const _storedPrevPrice = parseFloat(a.prevPrice) || 0;
+      // 场外基金：优先用存储的 currentPrice/prevPrice 计算日收益率
+      const _currPrice = parseFloat(a.currentPrice) || 0;
+      if (isOTC && _storedPrevPrice > 0 && _currPrice > 0) {
+        return ((_currPrice - _storedPrevPrice) / _storedPrevPrice) * 100;
+      }
       if (q && q.changePct != null) {
         // 美股市场：当实时价等于昨收价（盘外时间），changePct为0，改用昨收价与前一日收盘价计算
         if (isUSMarket && q.price != null && q.prevClose != null && Math.abs(q.price - q.prevClose) < 0.0001 && _storedPrevPrice > 0 && q.prevClose > 0) {
@@ -3570,7 +3705,6 @@ export default function Finance({ onAssetPenetration }) {
         return ((q.prevClose - _storedPrevPrice) / _storedPrevPrice) * 100;
       }
       const _prevPrice = _storedPrevPrice;
-      const _currPrice = parseFloat(a.currentPrice) || 0;
       // 对于场外基金，使用 (currentPrice - prevPrice) / prevPrice 计算日涨幅
       if (_prevPrice > 0 && _currPrice > 0) {
         return ((_currPrice - _prevPrice) / _prevPrice) * 100;
@@ -3585,8 +3719,33 @@ export default function Finance({ onAssetPenetration }) {
 
     // 将 financeAssets 映射到前端 holding 结构（倒序排列，最新数据在最上面）
     const financeAccounts = (financeAssets || []).slice().reverse().map(a => {
-      const _price = parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0;
-      const _prevClose = parseFloat(quotesMap[a.code]?.prevClose) || parseFloat(a.prevPrice) || 0;
+      const qKey = String(a.code);
+      const quoteData = quotesMap[qKey];
+      const catL3 = a.categoryL3 || a.tertiaryCategory;
+      const isOTC = catL3 === '场外' || (!catL3 && a.market === '场外基金');
+
+      // 价格计算优先级：
+      // 1. 场外基金 → 使用存储的 currentPrice/prevPrice（基金净值，即上一交易日收盘价，由 loadFundNav 更新）
+      // 2. 港股通等 → 优先使用 quotesMap（实时转换价），无效时用 rawCurrent*汇率 重算
+      // 3. 其他 → 优先 quotesMap.price，回退到存储的 currentPrice
+      let _price = 0;
+      let _prevClose = 0;
+      if (isOTC) {
+        // 场外：用基金净值（由 loadFundNav 存入 currentPrice/prevPrice），确保显示上一交易日收盘价
+        _price = parseFloat(a.currentPrice) || parseFloat(quoteData?.price) || 0;
+        _prevClose = parseFloat(a.prevPrice) || parseFloat(quoteData?.prevClose) || 0;
+      } else {
+        _price = parseFloat(quoteData?.price);
+        // 如果 price 为 0 但有 rawCurrent（港股通），用原始价格 * 当前汇率重算
+        if ((!_price || _price === 0) && quoteData?.rawCurrent != null) {
+          const hkdRate = Number(exchangeRates?.HKD) || 0.86;
+          _price = Math.trunc(Number(quoteData.rawCurrent) * hkdRate * 10000) / 10000;
+        }
+        if (!_price || _price === 0) {
+          _price = parseFloat(a.currentPrice) || 0;
+        }
+        _prevClose = parseFloat(quoteData?.prevClose) || parseFloat(a.prevPrice) || 0;
+      }
       const _priceChange = _price > _prevClose ? 'up' : _price < _prevClose ? 'down' : 'unchanged';
 
       // 从交易明细动态计算持仓数据
@@ -3622,9 +3781,11 @@ export default function Finance({ onAssetPenetration }) {
       // 现金类资产：currentValue 必须基于实际数量（_effectiveQty × 价格）计算，
       // 不能用存储的 currentValue 覆盖数量，避免数据错乱
       const _effectiveQty = _qty;
-      const _effectivePrice = isCash ? 1 : _price;
-      const _costTotal = isCash ? (_cost * _effectiveQty) : (_cost * _effectiveQty);
-      const _currentValue = isCash ? (_effectiveQty * _effectivePrice) : (parseFloat(a.currentValue) || (_price * _effectiveQty));
+      // 允许现金类资产使用用户输入的价格，不再强制设为1
+      const _effectivePrice = _price;
+      const _costTotal = _cost * _effectiveQty;
+      // 当前市值始终使用 price × qty 计算，确保与数量字段一致
+      const _currentValue = _effectivePrice * _effectiveQty;
 
       const _holdingPnl = isCash ? 0 : Math.round((_currentValue - _costTotal) * 100) / 100;
       const _holdingPnlRate = isCash ? 0 : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0);
@@ -3800,10 +3961,11 @@ export default function Finance({ onAssetPenetration }) {
       // 优先使用交易明细实时计算结果；只有明细为空时才回退到数据库存档值
       const finalPnl = (txs.length > 0) ? computedFinalPnl : (parseFloat(a.finalPnl) || 0);
       const finalPnlPercent = (txs.length > 0) ? computedFinalPnlPercent : (parseFloat(a.finalPnlPercent) || 0);
-      // 现金类归档资产成本和现价固定为1
+      // 现金类归档资产成本和现价不再强制为1，允许用户自定义
       const isCashArchive = (a.category === '现金类' || a.kind === '现金');
-      const _archiveCostPrice = isCashArchive ? 1 : (parseFloat(a.costPrice) || 0);
+      const _archiveCostPrice = parseFloat(a.costPrice) || 0;
       const _archiveShares = parseFloat(a.shares) || 0;
+      const _archiveCurrentPrice = parseFloat(a.currentPrice) || 0;
       return {
         id: a.originalAssetId || a.id,
         market: a.market || '国内市场',
@@ -3821,12 +3983,12 @@ export default function Finance({ onAssetPenetration }) {
         costPrice: _archiveCostPrice,
         quantity: _archiveShares,
         cost: _archiveCostPrice * _archiveShares,
-        currentPrice: isCashArchive ? 1 : 0,
-        prevPrice: isCashArchive ? 1 : 0,
+        currentPrice: _archiveCurrentPrice,
+        prevPrice: parseFloat(a.prevPrice) || 0,
         priceDate: a.archiveDate || '',
         prevClose: 0,
         priceChange: 'unchanged',
-        avgBuyPrice: isCashArchive ? 1 : 0,
+        avgBuyPrice: parseFloat(a.avgBuyPrice) || 0,
         holdingDays: 0,
         balance: 0,
         currentValue: isCashArchive ? _archiveShares : 0,
@@ -3973,12 +4135,16 @@ export default function Finance({ onAssetPenetration }) {
 
         {/* ═══ 实时汇率卡片 ═══ */}
         <section className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-4 shadow-soft border border-gray-100/80 dark:border-slate-700/50">
-          <div className="flex items-center gap-2 mb-3">
-            <RefreshCw className="w-4 h-4 text-indigo-500" />
+          <div
+            className="flex items-center gap-2 mb-3 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors select-none"
+            onClick={() => loadExchangeRates(true)}
+            title="点击刷新汇率"
+          >
+            <RefreshCw className={`w-4 h-4 text-indigo-500 ${quotesLoading ? 'animate-spin' : ''}`} />
             <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">实时汇率</span>
-            <span className="text-xs text-gray-400">基准：人民币(CNY)</span>
+            <span className="text-xs text-gray-400">基准：人民币(CNY) · 点击刷新</span>
           </div>
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-4 mb-2">
             {Object.entries(exchangeRates).filter(([code]) => ['USD', 'JPY', 'HKD', 'EUR'].includes(code)).map(([code, rate]) => (
               <div key={code} className="flex items-center gap-3">
                 <span className="text-sm font-medium text-gray-600 dark:text-gray-400">{getCurrencyName(code)}</span>
@@ -3988,6 +4154,20 @@ export default function Finance({ onAssetPenetration }) {
                 </span>
               </div>
             ))}
+          </div>
+          {/* 反向汇率：1人民币对应多少其他货币 */}
+          <div className="flex flex-wrap gap-4 pt-2 border-t border-gray-100 dark:border-slate-700/50">
+            {Object.entries(exchangeRates).filter(([code]) => ['USD', 'JPY', 'HKD', 'EUR'].includes(code)).map(([code, rate]) => {
+              const inverseRate = rate > 0 ? 1 / rate : 0;
+              return (
+                <div key={`inv-${code}`} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400">1 CNY</span>
+                  <span className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 tabular-nums">
+                    = {inverseRate.toFixed(code === 'JPY' ? 2 : 4)} {code}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </section>
 
@@ -4258,12 +4438,12 @@ export default function Finance({ onAssetPenetration }) {
                       <select value={newAccount.categoryL1} onChange={e => {
                         const l1 = e.target.value;
                         const cascade = CASCADE_OPTIONS[newAccount.assetType];
-                        if (newAccount.market === '国内市场' && cascade && cascade.l2Default[l1]) {
+                        if (cascade && cascade.l2Default && cascade.l2Default[l1]) {
                           const l2 = cascade.l2Default[l1];
-                          const l3 = cascade.l3Default[l1][l2];
-                          setNewAccount({ ...newAccount, categoryL1: l1, assetType: '', categoryL2: l2, categoryL3: l3, categoryL4: '' });
+                          const l3 = cascade.l3Default?.[l1]?.[l2] || '';
+                          setNewAccount({ ...newAccount, categoryL1: l1, categoryL2: l2, categoryL3: l3, categoryL4: '' });
                         } else {
-                          setNewAccount({ ...newAccount, categoryL1: l1, assetType: '', categoryL2: '', categoryL3: '', categoryL4: '' });
+                          setNewAccount({ ...newAccount, categoryL1: l1, categoryL2: '', categoryL3: '', categoryL4: '' });
                         }
                       }}
                         className={`${FORM_SELECT} flex-1`}>
@@ -4282,19 +4462,27 @@ export default function Finance({ onAssetPenetration }) {
                       <select value={newAccount.assetType} onChange={e => {
                         const assetType = e.target.value;
                         const isCash = assetType === '现金';
-                        // 切换资产类型时清空持仓分组和持仓分类；现金类强制成本和现价为1
-                        setNewAccount({
-                          ...newAccount,
+                        const cascade = CASCADE_OPTIONS[assetType];
+                        let updates = {
                           assetType: assetType,
                           positionGroup: '',
                           positionType: '',
-                          cost: isCash ? '1' : newAccount.cost,
-                          currentPrice: isCash ? '1' : newAccount.currentPrice,
-                        });
+                        };
+                        if (cascade) {
+                          const currentL1 = newAccount.categoryL1;
+                          const l1Options = cascade.l1Options || [];
+                          const l1Valid = currentL1 && l1Options.includes(currentL1);
+                          const l1 = l1Valid ? currentL1 : (cascade.l1Default || currentL1 || '');
+                          if (l1) {
+                            const l2 = cascade.l2Default?.[l1] || '';
+                            const l3 = cascade.l3Default?.[l1]?.[l2] || '';
+                            updates = { ...updates, categoryL1: l1, categoryL2: l2, categoryL3: l3, categoryL4: '' };
+                          }
+                        }
+                        setNewAccount({ ...newAccount, ...updates });
                       }}
-                        disabled={!newAccount.categoryL1}
-                        className={`${FORM_SELECT} flex-1 ${!newAccount.categoryL1 ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                        <option value="">{newAccount.categoryL1 ? '请选择资产类型' : '请先选择资产分类一级'}</option>
+                        className={`${FORM_SELECT} flex-1`}>
+                        <option value="">请选择资产类型</option>
                         {(() => {
                           const mapped = CATEGORY_L1_ASSET_TYPES[newAccount.categoryL1];
                           if (mapped) {
@@ -4326,7 +4514,7 @@ export default function Finance({ onAssetPenetration }) {
                       <select value={newAccount.categoryL2} onChange={e => {
                         const l2 = e.target.value;
                         const cascade = CASCADE_OPTIONS[newAccount.assetType];
-                        if (newAccount.market === '国内市场' && cascade && cascade.l3Default[newAccount.categoryL1] && cascade.l3Default[newAccount.categoryL1][l2]) {
+                        if (cascade && cascade.l3Default && cascade.l3Default[newAccount.categoryL1] && cascade.l3Default[newAccount.categoryL1][l2]) {
                           const l3 = cascade.l3Default[newAccount.categoryL1][l2];
                           setNewAccount({ ...newAccount, categoryL2: l2, categoryL3: l3, categoryL4: '' });
                         } else {
@@ -4351,20 +4539,7 @@ export default function Finance({ onAssetPenetration }) {
                       <select value={newAccount.categoryL3} onChange={e => setNewAccount({ ...newAccount, categoryL3: e.target.value, categoryL4: '' })}
                         className={`${FORM_SELECT} flex-1`}>
                         <option value="">请选择</option>
-                        {(() => {
-                          const cascade = CASCADE_OPTIONS[newAccount.assetType];
-                          const l1 = newAccount.categoryL1;
-                          const l2 = newAccount.categoryL2;
-                          const key = `${l1}__${l2}`;
-                          const customOptions = categoryL3OptionsMap[key] || [];
-                          const cascadeL3 = (cascade?.l3Options?.[l1]?.[l2]) || [];
-                          const marketL3 = (newAccount.market === '国内市场') ? ['场内', '场外'] : ['场内', '场外'];
-                          const allOptions = [...new Set([...cascadeL3, ...marketL3, ...customOptions])];
-                          if (newAccount.market === '国内市场' && cascadeL3.length > 0) {
-                            return cascadeL3.map(o => <option key={o} value={o}>{o}</option>);
-                          }
-                          return allOptions.map(o => <option key={o} value={o}>{o}</option>);
-                        })()}
+                        {categoryL3Options.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                       <button onClick={() => { if (newAccount.categoryL2) setShowCategoryL3Modal(true); }} disabled={!newAccount.categoryL2} className={`p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors ${!newAccount.categoryL2 ? 'opacity-50 cursor-not-allowed' : ''}`} title="管理三级分类">
                         <Settings className="w-4 h-4" />
@@ -4960,38 +5135,57 @@ export default function Finance({ onAssetPenetration }) {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400 mb-3">当前一级分类: {newAccount.categoryL1 || '未选择'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                当前一级分类: {newAccount.categoryL1 || '未选择'}
+                {newAccount.assetType && <span className="ml-2">资产类型: {newAccount.assetType}</span>}
+              </div>
               <div className="space-y-3">
                 <div className="flex gap-2">
                   <input type="text" value={newCategoryL2Name} onChange={e => setNewCategoryL2Name(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddCategoryL2()} placeholder="输入二级分类名称" className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
-                  <button onClick={handleAddCategoryL2} className="px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors"><Plus className="w-4 h-4" /></button>
+                  <button onClick={handleAddCategoryL2} disabled={!newAccount.categoryL1 || !newAccount.assetType} className={`px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors ${(!newAccount.categoryL1 || !newAccount.assetType) ? 'opacity-50 cursor-not-allowed' : ''}`}><Plus className="w-4 h-4" /></button>
                 </div>
                 <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {((categoryL2OptionsMap[newAccount.categoryL1] || []).length > 0) ? (
-                    (categoryL2OptionsMap[newAccount.categoryL1] || []).map((item) => (
-                      <div key={item} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
-                        {categoryL2ToEdit === item ? (
-                          <>
-                            <input type="text" value={newCategoryL2Name || item} onChange={e => setNewCategoryL2Name(e.target.value)} className="flex-1 px-2 py-1 border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-600 dark:text-white" autoFocus />
-                            <button onClick={handleSaveCategoryL2Edit} className="p-1 text-green-600 hover:bg-green-100 rounded"><Edit2 className="w-4 h-4" /></button>
-                            <button onClick={() => { setCategoryL2ToEdit(null); setNewCategoryL2Name(''); }} className="p-1 text-gray-500 hover:bg-gray-200 rounded"><X className="w-4 h-4" /></button>
-                          </>
-                        ) : (
-                          <>
-                            <span className="flex-1 text-gray-700 dark:text-gray-300">{item}</span>
-                            <button onClick={() => { setCategoryL2ToEdit(item); setNewCategoryL2Name(item); }} className="p-1 text-blue-600 hover:bg-blue-100 rounded"><Edit2 className="w-4 h-4" /></button>
-                            {deleteConfirm === `catL2-${item}` ? (
-                              <button onClick={() => handleDeleteCategoryL2(item)} className="p-1 text-red-600 hover:bg-red-100 rounded">确认</button>
-                            ) : (
-                              <button onClick={() => setDeleteConfirm(`catL2-${item}`)} className="p-1 text-red-500 hover:bg-red-100 rounded"><Trash2 className="w-4 h-4" /></button>
-                            )}
-                          </>
-                        )}
+                  {(() => {
+                    const l2Key = getL2Key();
+                    const options = categoryL2OptionsMap[l2Key] || [];
+                    // 合并 cascade 默认值（作为基础选项，不可删除）
+                    const cascadeDefaults = CASCADE_OPTIONS[newAccount.assetType]?.l2Options?.[newAccount.categoryL1] || [];
+                    const allItems = [...new Set([...cascadeDefaults, ...options])];
+                    return allItems.length > 0 ? (
+                      allItems.map((item) => (
+                        <div key={item} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                          {categoryL2ToEdit === item ? (
+                            <>
+                              <input type="text" value={newCategoryL2Name || item} onChange={e => setNewCategoryL2Name(e.target.value)} className="flex-1 px-2 py-1 border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-600 dark:text-white" autoFocus />
+                              <button onClick={handleSaveCategoryL2Edit} className="p-1 text-green-600 hover:bg-green-100 rounded"><Edit2 className="w-4 h-4" /></button>
+                              <button onClick={() => { setCategoryL2ToEdit(null); setNewCategoryL2Name(''); }} className="p-1 text-gray-500 hover:bg-gray-200 rounded"><X className="w-4 h-4" /></button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="flex-1 text-gray-700 dark:text-gray-300">
+                                {item}
+                                {cascadeDefaults.includes(item) && !options.includes(item) && (
+                                  <span className="ml-1 text-xs text-gray-400">(默认)</span>
+                                )}
+                              </span>
+                              <button onClick={() => { setCategoryL2ToEdit(item); setNewCategoryL2Name(item); }} className="p-1 text-blue-600 hover:bg-blue-100 rounded"><Edit2 className="w-4 h-4" /></button>
+                              {(options.includes(item) || !cascadeDefaults.includes(item)) && (
+                                deleteConfirm === `catL2-${item}` ? (
+                                  <button onClick={() => handleDeleteCategoryL2(item)} className="p-1 text-red-600 hover:bg-red-100 rounded">确认</button>
+                                ) : (
+                                  <button onClick={() => setDeleteConfirm(`catL2-${item}`)} className="p-1 text-red-500 hover:bg-red-100 rounded"><Trash2 className="w-4 h-4" /></button>
+                                )
+                              )}
+                            </>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-gray-400 text-sm">
+                        {newAccount.assetType ? '暂无二级分类，可添加新选项' : '请先选择资产类型'}
                       </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8 text-gray-400 text-sm">暂无二级分类</div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             </div>

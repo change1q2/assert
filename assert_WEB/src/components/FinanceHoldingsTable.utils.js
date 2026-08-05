@@ -24,6 +24,21 @@ export function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
   }).format(truncateNum(converted, 3))}`;
 }
 
+export function formatPriceValue(value) {
+  if (value == null || value === '') return '—';
+  const num = parseFloat(value);
+  if (isNaN(num)) return '—';
+  const str = typeof value === 'string' ? value : String(num);
+  const dotIndex = str.indexOf('.');
+  if (dotIndex !== -1) {
+    const decLen = str.length - dotIndex - 1;
+    if (decLen >= 3) {
+      return num.toFixed(4);
+    }
+  }
+  return num.toFixed(2);
+}
+
 export function formatPercentage(value) {
   if (value === null || value === undefined) return '—';
   const n = parseFloat(value);

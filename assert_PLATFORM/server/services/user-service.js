@@ -28,7 +28,7 @@ function defaultState(profile) {
       dataMask: "已开启",
       deviceName: "PC / APP / 小程序",
     },
-    rates: { CNY: 1, CNH: 1, USD: 7.22, HKD: 0.92, EUR: 7.82, JPY: 0.046, GBP: 9.18 },
+    rates: { CNY: 1, CNH: 1, USD: 7.15, HKD: 0.86, EUR: 7.85, JPY: 0.046, GBP: 9.25 },
     accounts: [{
       id: "default-cash",
       name: "默认现金账户",

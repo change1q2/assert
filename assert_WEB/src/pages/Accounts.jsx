@@ -243,7 +243,7 @@ export default function Accounts() {
   const [balanceCardExpanded, setBalanceCardExpanded] = useState(true);
   // 来自暂存：跨币种显示
   const [selectedCurrency, setSelectedCurrency] = useState('CNY');
-  const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.2, JPY: 0.048, HKD: 0.92, EUR: 7.8 });
+  const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.15, JPY: 0.046, HKD: 0.86, EUR: 7.85 });
   const [quotesMap, setQuotesMap] = useState({});
 
   const { accounts = [], records = [], finance = {}, debts = [], accountCategories = {}, independentAssets = {}, accountTypes = [], financeAssets = [] } = stateData || {};
@@ -373,7 +373,7 @@ export default function Accounts() {
     quantity = _effectiveQty;
     costPrice = isCashCategory ? 1 : _costPrice;
     currentPrice = _effectivePrice;
-    mv = isCashCategory ? (_effectivePrice * _effectiveQty) : (parseFloat(a.currentValue) || (_effectivePrice * _effectiveQty));
+    mv = _effectivePrice * _effectiveQty;
     cost = costPrice * quantity;
     holdingPnl = isCashCategory ? 0 : (mv - cost);
     holdingPnlRate = cost > 0 ? (holdingPnl / cost) * 100 : 0;
@@ -475,6 +475,11 @@ export default function Accounts() {
   useEffect(() => {
     loadData();
     loadExchangeRates();
+    // 每5秒轮询获取最新汇率
+    const timer = setInterval(() => {
+      loadExchangeRates();
+    }, 5000);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -510,9 +515,9 @@ export default function Accounts() {
     }
   };
 
-  const loadExchangeRates = async () => {
+  const loadExchangeRates = async (force = false) => {
     try {
-      const rates = await fetchRealTimeExchangeRates();
+      const rates = await fetchRealTimeExchangeRates(force);
       setExchangeRates({ CNY: 1, ...rates });
     } catch (err) {
       console.error('Failed to load exchange rates:', err);
@@ -522,6 +527,8 @@ export default function Accounts() {
   const loadData = async () => {
     setLoading(true);
     setError(null);
+    // 每次手动刷新全局数据时强制获取最新汇率（必须 await 确保汇率先加载）
+    await loadExchangeRates(true);
     try {
       const data = await fetchState();
       const cachedAccounts = localStorage.getItem('wealth_os_accounts');
@@ -1591,8 +1598,9 @@ export default function Accounts() {
         const _effectivePrice = isCash ? 1 : (_quotePrice || parseFloat(a.currentPrice) || 0);
 
         const _unitCost = isCash ? 1 : _costPrice;
-        const _totalCost = isCash ? (_unitCost * _effectiveQty) : (_unitCost * _effectiveQty);
-        const _currentValue = isCash ? (_effectivePrice * _effectiveQty) : (parseFloat(a.currentValue) || (_effectivePrice * _effectiveQty));
+        const _totalCost = _unitCost * _effectiveQty;
+        // 当前市值始终使用 price × qty 计算，不依赖存储的 currentValue
+        const _currentValue = _effectivePrice * _effectiveQty;
         const _holdingPnl = isCash ? 0 : (_currentValue - _totalCost);
         const _holdingPnlRate = _totalCost > 0 ? (_holdingPnl / _totalCost) * 100 : 0;
 

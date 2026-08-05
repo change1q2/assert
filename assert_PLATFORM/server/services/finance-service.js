@@ -509,6 +509,106 @@ async function getQuotes(codes) {
     } catch (_) { }
   }));
 
+  // 新浪财经港股行情（第三备用源）
+  const hkSinaFallbackItems = queryItems.filter(({ index }) => results[index].price == null);
+  await Promise.all(hkSinaFallbackItems.map(async ({ tencentCode, index }) => {
+    const prefix = tencentCode.slice(0, 2);
+    if (prefix !== "hk") return;
+    const hkCode = tencentCode.slice(2).padStart(5, "0");
+    try {
+      const sinaUrl = `https://hq.sinajs.cn/list=hk${hkCode}`;
+      const sinaRes = await fetch(sinaUrl, {
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn" },
+        signal: AbortSignal.timeout(5000),
+      });
+      const buf = Buffer.from(await sinaRes.arrayBuffer());
+      const sinaText = new TextDecoder("gbk").decode(buf);
+      const match = sinaText.match(/var hq_str_hk\d+="(.*)"/);
+      if (!match || !match[1]) return;
+      const fields = match[1].split(",");
+      if (fields.length < 9) return;
+      const price = parseFloat(fields[6]) || null;
+      if (price === null) return;
+      results[index] = {
+        ...results[index],
+        name: fields[1] || fields[0] || results[index].name,
+        price,
+        prevClose: parseFloat(fields[3]) || null,
+        changeAmt: parseFloat(fields[7]) || null,
+        changePct: parseFloat(fields[8]) || null,
+        high: parseFloat(fields[4]) || null,
+        low: parseFloat(fields[5]) || null,
+      };
+    } catch (_) { }
+  }));
+
+  // 新浪财经美股行情（美股数据源）
+  const usFallbackItems = queryItems.filter(({ index }) => results[index].price == null);
+  await Promise.all(usFallbackItems.map(async ({ tencentCode, index }) => {
+    const prefix = tencentCode.slice(0, 2);
+    if (prefix !== "us") return;
+    const usCode = tencentCode.slice(2).toLowerCase();
+    try {
+      const sinaUrl = `https://hq.sinajs.cn/list=gb_${usCode}`;
+      const sinaRes = await fetch(sinaUrl, {
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn" },
+        signal: AbortSignal.timeout(5000),
+      });
+      const buf = Buffer.from(await sinaRes.arrayBuffer());
+      const sinaText = new TextDecoder("gbk").decode(buf);
+      const match = sinaText.match(/var hq_str_gb_\w+="(.*)"/);
+      if (!match || !match[1]) return;
+      const fields = match[1].split(",");
+      if (fields.length < 5) return;
+      const price = parseFloat(fields[1]) || null;
+      if (price === null) return;
+      results[index] = {
+        ...results[index],
+        name: fields[0] || results[index].name,
+        price,
+        changePct: parseFloat(fields[2]) || null,
+        changeAmt: parseFloat(fields[4]) || null,
+        prevClose: parseFloat(fields[3]) || null,
+        high: parseFloat(fields[6]) || null,
+        low: parseFloat(fields[7]) || null,
+      };
+    } catch (_) { }
+  }));
+
+  // 东方财富美股行情接口（美股备用源）
+  const usEmFallbackItems = queryItems.filter(({ index }) => results[index].price == null);
+  await Promise.all(usEmFallbackItems.map(async ({ tencentCode, index }) => {
+    const prefix = tencentCode.slice(0, 2);
+    if (prefix !== "us") return;
+    const usSymbol = tencentCode.slice(2).toUpperCase();
+    // 尝试 NASDAQ (105) 和 NYSE (106)
+    for (const marketCode of ['105', '106']) {
+      const secid = `${marketCode}.${usSymbol}`;
+      try {
+        const emUrl = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f169,f170`;
+        const emRes = await fetch(emUrl, {
+          headers: { "User-Agent": "Mozilla/5.0" },
+          signal: AbortSignal.timeout(6000),
+        });
+        const data = (await emRes.json())?.data;
+        if (!data || !Number.isFinite(Number(data.f43))) continue;
+        const scaled = (value) => Number.isFinite(Number(value)) ? Number(value) / 100 : null;
+        results[index] = {
+          ...results[index],
+          name: data.f58 || results[index].name,
+          price: scaled(data.f43),
+          prevClose: scaled(data.f60),
+          changeAmt: scaled(data.f169),
+          changePct: scaled(data.f170),
+          high: scaled(data.f44),
+          low: scaled(data.f45),
+          volume: Number.isFinite(Number(data.f47)) ? Number(data.f47) : null,
+        };
+        break; // 成功获取后跳出循环
+      } catch (_) { }
+    }
+  }));
+
   return { quotes: results };
 }
 

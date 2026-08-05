@@ -41,7 +41,7 @@ async function handler(req, res, body, origin, pathname, url) {
     const force = url.searchParams.get("refresh") === "1";
     const cache = getExchangeRateCache();
     const now = Date.now();
-    const shouldRefresh = force || now - cache.cachedAt > 30 * 60 * 1000;
+    const shouldRefresh = force || now - cache.cachedAt > 60 * 1000;
     
     if (!shouldRefresh && cache.rates) {
       json(res, 200, {

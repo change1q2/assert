@@ -10,11 +10,11 @@ export const CURRENCIES = [
 export const DEFAULT_BASE_CURRENCY = 'CNY';
 
 export const DEFAULT_EXCHANGE_RATES = {
-  USD: 7.2,
-  EUR: 7.8,
-  GBP: 9.1,
-  JPY: 0.048,
-  HKD: 0.92,
+  USD: 7.15,
+  EUR: 7.85,
+  GBP: 9.25,
+  JPY: 0.046,
+  HKD: 0.86,
   CNY: 1,
 };
 

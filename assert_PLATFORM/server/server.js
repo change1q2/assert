@@ -51,7 +51,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && pathname === "/api/tools/premium") {
+    if (req.method === "GET" && (pathname === "/api/tools/premium" || pathname === "/api/tools/exchange-rates")) {
       await toolsRoute.handler(req, res, body, origin, pathname, url);
       return;
     }

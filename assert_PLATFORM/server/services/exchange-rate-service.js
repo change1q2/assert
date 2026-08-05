@@ -1,17 +1,53 @@
 import https from "node:https";
 
 const DEFAULT_RATES = {
-  USD: 7.2,
-  JPY: 0.048,
-  HKD: 0.92,
-  EUR: 7.8,
+  USD: 7.15,
+  JPY: 0.046,
+  HKD: 0.86,
+  EUR: 7.85,
   CNY: 1,
 };
 
 let cachedRates = { ...DEFAULT_RATES };
 let cachedAt = 0;
-const CACHE_TTL = 30 * 60 * 1000;
+const CACHE_TTL = 60 * 1000; // 1分钟缓存
 
+// 数据源1：exchangerate-api.com（免费、无需密钥、返回 JSON）
+function fetchFromExchangeRateAPI() {
+  return new Promise((resolve) => {
+    const req = https.get('https://api.exchangerate-api.com/v4/latest/CNY', (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed && parsed.rates) {
+            const rates = { ...DEFAULT_RATES };
+            // API 返回 1 CNY = x 外币，需要转换为 1 外币 = x CNY
+            for (const code of ['USD', 'JPY', 'HKD', 'EUR']) {
+              const cnyToForeign = parsed.rates[code];
+              if (cnyToForeign && cnyToForeign > 0) {
+                rates[code] = Math.round((1 / cnyToForeign) * 10000) / 10000;
+              }
+            }
+            // 验证 HKD 汇率在合理范围内
+            if (rates.HKD > 0.7 && rates.HKD < 1.0) {
+              resolve(rates);
+              return;
+            }
+          }
+          resolve(null);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.setTimeout(8000, () => { req.destroy(); resolve(null); });
+  });
+}
+
+// 数据源2：shishihuilv.com（HTML 解析）
 function parseExchangeRates(html) {
   const rates = { ...DEFAULT_RATES };
   const ratePatterns = {
@@ -20,7 +56,6 @@ function parseExchangeRates(html) {
     HKD: /港元.*?([\d.]+)/i,
     EUR: /欧元.*?([\d.]+)/i,
   };
-
   for (const [code, pattern] of Object.entries(ratePatterns)) {
     const match = html.match(pattern);
     if (match && match[1]) {
@@ -30,10 +65,8 @@ function parseExchangeRates(html) {
       }
     }
   }
-
   const tablePattern = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
   const rows = html.match(tablePattern) || [];
-  
   for (const row of rows) {
     for (const [code, name] of [['USD', '美元'], ['JPY', '日元'], ['HKD', '港元'], ['EUR', '欧元']]) {
       if (row.includes(name)) {
@@ -53,38 +86,45 @@ function parseExchangeRates(html) {
       }
     }
   }
-
   return rates;
 }
 
-async function fetchExchangeRatesFromSource() {
+function fetchFromShishi() {
   return new Promise((resolve) => {
     const req = https.get('https://www.shishihuilv.com/zuixin/', (res) => {
       let data = '';
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
+      res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
         try {
-          const rates = parseExchangeRates(data);
-          resolve(rates);
-        } catch (err) {
-          console.error('Failed to parse exchange rates:', err);
-          resolve({ ...DEFAULT_RATES });
+          resolve(parseExchangeRates(data));
+        } catch {
+          resolve(null);
         }
       });
     });
-
-    req.on('error', (err) => {
-      console.error('Failed to fetch exchange rates:', err);
-      resolve({ ...DEFAULT_RATES });
-    });
-
-    req.setTimeout(10000, () => {
-      req.destroy();
-      resolve({ ...DEFAULT_RATES });
-    });
+    req.on('error', () => resolve(null));
+    req.setTimeout(10000, () => { req.destroy(); resolve(null); });
   });
+}
+
+async function fetchExchangeRatesFromSource() {
+  // 优先使用 exchangerate-api.com
+  try {
+    const apiRates = await fetchFromExchangeRateAPI();
+    if (apiRates) return apiRates;
+    console.warn('ExchangeRateAPI failed, trying fallback');
+  } catch (err) {
+    console.error('ExchangeRateAPI error:', err);
+  }
+  // 备用：shishihuilv.com
+  try {
+    const shishiRates = await fetchFromShishi();
+    if (shishiRates) return shishiRates;
+  } catch (err) {
+    console.error('Shishihuilv error:', err);
+  }
+  // 最终回退到默认值
+  return { ...DEFAULT_RATES };
 }
 
 async function getExchangeRates() {
