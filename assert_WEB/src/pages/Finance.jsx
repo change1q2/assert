@@ -2514,10 +2514,10 @@ export default function Finance({ onAssetPenetration }) {
     }
     setSaving(true);
     try {
-      const isCashAsset = newAccount.assetType === '现金';
-      const _costPrice = isCashAsset ? 1 : (parseFloat(newAccount.cost) || 0);
+      const isCashAsset = newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类';
+      const _costPrice = parseFloat(newAccount.cost) || 0;
       const _quantity = parseFloat(newAccount.quantity) || 0;
-      const _currentPrice = isCashAsset ? 1 : (parseFloat(newAccount.currentPrice) || 0);
+      const _currentPrice = parseFloat(newAccount.currentPrice) || 0;
       const _prevPrice = parseFloat(newAccount.prevPrice) || 0;
       const _unitPnl = _currentPrice - _costPrice;
       const _holdingPnl = Math.round(_unitPnl * _quantity * 100) / 100;
@@ -2744,10 +2744,10 @@ export default function Finance({ onAssetPenetration }) {
       positionType: holding.positionType || holding.positionCategory || (isCashAsset ? '现金管理' : ''),
       name: holding.name || '',
       code: holding.code || '',
-      cost: holding.costPrice || (isCashAsset ? 1 : ''),
+      cost: holding.costPrice || '',
       quantity: resolvedQuantity,
-      currentPrice: holding.currentPrice || (isCashAsset ? 1 : ''),
-      prevPrice: holding.prevPrice || (isCashAsset ? 1 : ''),
+      currentPrice: holding.currentPrice || '',
+      prevPrice: holding.prevPrice || '',
       priceDate: holding.priceDate || '',
       avgBuyPrice: holding.avgBuyPrice || '',
       holdingDays: holding.holdingDays || '',
@@ -4533,8 +4533,7 @@ export default function Finance({ onAssetPenetration }) {
                       {/* 平均买入成本 */}
                       <FormField label="平均买入成本" required>
                         <input type="number" step="0.001"
-                          value={(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? '1' : newAccount.cost}
-                          disabled={newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类'}
+                          value={newAccount.cost}
                           onChange={e => {
                             const val = e.target.value;
                             setNewAccount(p => {
@@ -4555,7 +4554,7 @@ export default function Finance({ onAssetPenetration }) {
                             });
                           }}
                           placeholder="0.00"
-                          className={`${FORM_INPUT} ${(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? 'bg-gray-100 dark:bg-slate-600 cursor-not-allowed opacity-70' : ''}`} />
+                          className={FORM_INPUT} />
                       </FormField>
 
                       {/* 份额/数量 - 根据资产类型动态显示标签 */}
@@ -4597,8 +4596,7 @@ export default function Finance({ onAssetPenetration }) {
                       {/* 现价 — 所有场景都显示，支持自动获取和手动输入 */}
                       <FormField label="现价">
                         <input type="number" step="0.0001"
-                          value={(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? '1' : newAccount.currentPrice}
-                          disabled={newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类'}
+                          value={newAccount.currentPrice}
                           onChange={e => {
                             const val = e.target.value;
                             setNewAccount(p => {
@@ -4618,7 +4616,7 @@ export default function Finance({ onAssetPenetration }) {
                               };
                             });
                           }} placeholder="搜索资产自动获取，或手动输入"
-                          className={`${FORM_INPUT} ${(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? 'bg-gray-100 dark:bg-slate-600 cursor-not-allowed opacity-70' : ''}`} />
+                          className={FORM_INPUT} />
                       </FormField>
 
                       {/* 以下字段仅在非国内市场简单模式（股票/基金场内/基金场外）时显示 */}
