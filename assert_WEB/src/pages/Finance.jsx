@@ -2313,18 +2313,21 @@ export default function Finance({ onAssetPenetration }) {
             (Number.isFinite(origQty) && origQty < 0) ||
             (Number.isFinite(origCost) && origCost < 0) ||
             (Number.isFinite(origBalance) && origBalance < 0);
-          // 检查是否缺少表单字段名
+          // 检查是否缺少表单字段名（quantity 为 0 不算缺失，只检查 null/undefined/空串）
+          const quantityMissing = asset.quantity == null || asset.quantity === '';
           const missingFormFields =
             !asset.assetType || !asset.categoryL1 || !asset.categoryL2 ||
             !asset.categoryL3 || !asset.positionType || !asset.account ||
-            !asset.quantity;
+            quantityMissing;
           if (hasNeg || missingFormFields) {
             cashDataDirty = true;
             return {
               ...asset,
               currentValue: fixedCV,
-              shares: fixedShares || fixedCV,
-              quantity: fixedQty || fixedCV,
+              // 注意：quantity/shares 用存储值（若非有效数值则回退到 currentValue），
+              // 绝不允许用 currentValue 覆盖已有的有效数量
+              shares: Number.isFinite(origShares) && origShares > 0 ? fixedShares : (fixedCV || fixedShares),
+              quantity: Number.isFinite(origQty) && origQty > 0 ? fixedQty : (fixedCV || fixedQty),
               cost: fixedCost,
               balance: fixedBalance,
               availableShares: Number.isFinite(parseFloat(asset.availableShares)) ? Math.max(0, parseFloat(asset.availableShares)) : (fixedShares || fixedCV),
@@ -3612,22 +3615,14 @@ export default function Finance({ onAssetPenetration }) {
       const _computedCostPrice = buyTotalQty > 0 ? buyTotalAmount / buyTotalQty : 0;
       const _cost = buyTotalQty > 0 ? _computedCostPrice : (parseFloat(a.costPrice || a.cost) || 0);
 
-      // 现金类资产：直接使用存储的 currentValue（已与 account.balance 同步）
       const isCash = (a.category === '现金类' || a.categoryL1 === '现金类');
-      let _cashValue = isCash ? Math.max(0, parseFloat(a.currentValue) || 0) : 0;
-      // 若 currentValue 仍为 0，实时从 accounts 中查找关联账户的 balance 作为回退
-      if (isCash && _cashValue === 0) {
-        const accId = a.accountId || a.account || '';
-        const linkedAccount = (stateData?.accounts || []).find(acc => acc.id === accId || acc.name === accId);
-        if (linkedAccount) {
-          _cashValue = Math.max(0, parseFloat(linkedAccount.balance) || 0);
-        }
-      }
-      // 现金类：强制使用 _cashValue（非负）作为有效数量和当前市值，避免原始负 shares/quantity/currentValue 污染显示
-      const _effectiveQty = isCash ? _cashValue : _qty;
+
+      // 现金类资产：currentValue 必须基于实际数量（_effectiveQty × 价格）计算，
+      // 不能用存储的 currentValue 覆盖数量，避免数据错乱
+      const _effectiveQty = _qty;
       const _effectivePrice = isCash ? 1 : _price;
-      const _costTotal = isCash ? (Math.max(0, _cashValue) * 1) : (_cost * _effectiveQty);
-      const _currentValue = isCash ? _cashValue : (parseFloat(a.currentValue) || (_price * _effectiveQty));
+      const _costTotal = isCash ? (_cost * _effectiveQty) : (_cost * _effectiveQty);
+      const _currentValue = isCash ? (_effectiveQty * _effectivePrice) : (parseFloat(a.currentValue) || (_price * _effectiveQty));
 
       const _holdingPnl = isCash ? 0 : Math.round((_currentValue - _costTotal) * 100) / 100;
       const _holdingPnlRate = isCash ? 0 : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0);

@@ -578,17 +578,18 @@ export default function Accounts() {
             (Number.isFinite(origQty) && origQty < 0) ||
             (Number.isFinite(origCost) && origCost < 0) ||
             (Number.isFinite(origBalance) && origBalance < 0);
+          const quantityMissing = asset.quantity == null || asset.quantity === '';
           const missingFormFields =
             !asset.assetType || !asset.categoryL1 || !asset.categoryL2 ||
             !asset.categoryL3 || !asset.positionType || !asset.account ||
-            !asset.quantity;
+            quantityMissing;
           if (hasNeg || missingFormFields) {
             cashDataDirty = true;
             return {
               ...asset,
               currentValue: fixedCV,
-              shares: fixedShares || fixedCV,
-              quantity: fixedQty || fixedCV,
+              shares: Number.isFinite(origShares) && origShares > 0 ? fixedShares : (fixedCV || fixedShares),
+              quantity: Number.isFinite(origQty) && origQty > 0 ? fixedQty : (fixedCV || fixedQty),
               cost: fixedCost,
               balance: fixedBalance,
               availableShares: Number.isFinite(parseFloat(asset.availableShares)) ? Math.max(0, parseFloat(asset.availableShares)) : (fixedShares || fixedCV),
