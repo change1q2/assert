@@ -1905,7 +1905,19 @@ export default function Finance({ onAssetPenetration }) {
 
   // 标签管理状态
   const [books, setBooks] = useState([]);
-  const [tags, setTags] = useState([]);
+  const _LS_TAGS_KEY = 'finance_tags_global';
+  const [tags, setTags] = useState(() => {
+    try {
+      const saved = localStorage.getItem(_LS_TAGS_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  // 将标签变更持久化到 localStorage
+  useEffect(() => {
+    try { localStorage.setItem(_LS_TAGS_KEY, JSON.stringify(tags)); } catch {}
+  }, [tags, _LS_TAGS_KEY]);
   const [showTagModal, setShowTagModal] = useState(false);
   const [tagToEdit, setTagToEdit] = useState(null);
   const [newTagName, setNewTagName] = useState('');
@@ -2576,14 +2588,20 @@ export default function Finance({ onAssetPenetration }) {
     try {
       const booksData = await fetchBooks();
       setBooks(booksData || []);
-      // 从账本中提取所有唯一的标签
+      // 从账本中提取所有唯一的标签，同时合并 localStorage 中的标签（避免账本无标签时丢失）
       const allTags = new Set();
       booksData?.forEach(book => {
         if (book.tags && Array.isArray(book.tags)) {
           book.tags.forEach(tag => allTags.add(tag));
         }
       });
-      setTags(Array.from(allTags).sort());
+      // 合并 localStorage 中的已有标签
+      try {
+        const saved = localStorage.getItem(_LS_TAGS_KEY);
+        if (saved) JSON.parse(saved).forEach(t => t && allTags.add(t));
+      } catch {}
+      const mergedTags = Array.from(allTags).sort();
+      setTags(mergedTags);
     } catch (err) {
       console.error('Failed to load books and tags:', err);
     }
@@ -2665,7 +2683,7 @@ export default function Finance({ onAssetPenetration }) {
         currentValue: _currentPrice * _quantity,
         positionWeight: 0,
         totalFees: 0,
-        tags: newAccount.tags || '',
+        tags: newAccount.tags ? [newAccount.tags] : [],
       };
 
       // 获取当前的 financeAssets 数组
@@ -2789,7 +2807,7 @@ export default function Finance({ onAssetPenetration }) {
           ...(batchEditData.categoryL3 ? { tertiaryCategory: batchEditData.categoryL3 } : {}),
           ...(batchEditData.positionGroup ? { positionGroup: batchEditData.positionGroup } : {}),
           ...(batchEditData.positionType ? { positionCategory: batchEditData.positionType } : {}),
-          ...(batchEditData.tag ? { tags: batchEditData.tag } : {}),
+          ...(batchEditData.tag ? { tags: [batchEditData.tag] } : {}),
         };
       });
 
@@ -2852,7 +2870,7 @@ export default function Finance({ onAssetPenetration }) {
       dailyPnl: holding.dailyPnl || '',
       dailyPnlRate: holding.dailyPnlRate || '',
       currentValue: holding.currentValue || resolvedQuantity || '',
-      tags: holding.tags || '',
+      tags: Array.isArray(holding.tags) ? holding.tags[0] || '' : (holding.tags || ''),
     });
     setEditMode(true);
     setEditingId(holding.id);
