@@ -589,26 +589,37 @@ export default function Overview() {
   // 计算理财总资产（与理财模块的总市值计算保持一致：currentValue = currentPrice × shares，货币汇率折算）
   const exchangeRates = stateData?.exchangeRates || { CNY: 1 };
   const financeTotalValue = (financeAssets || []).reduce((sum, a) => {
-    const _price = parseFloat(a.currentPrice) || parseFloat(a.costPrice) || parseFloat(a.cost) || 0;
-    const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
-    const value = _price * _qty;
+    const _price = parseFloat(a.currentPrice);
+    const _costPrice = parseFloat(a.costPrice);
+    const _cost = parseFloat(a.cost);
+    const safePrice = !isNaN(_price) ? _price : (!isNaN(_costPrice) ? _costPrice : (!isNaN(_cost) ? _cost : 0));
+    const _qty = parseFloat(a.shares);
+    const _qty2 = parseFloat(a.quantity);
+    const safeQty = !isNaN(_qty) ? _qty : (!isNaN(_qty2) ? _qty2 : 0);
+    const value = safePrice * safeQty;
+    if (isNaN(value)) return sum;
     const currency = a.currency || 'CNY';
     const fromRate = exchangeRates[currency] ?? 1;
     const toRate = exchangeRates['CNY'] ?? 1;
     const rmbValue = currency === 'CNY' ? value : (value * fromRate) / toRate;
-    return sum + rmbValue;
+    return sum + (isNaN(rmbValue) ? 0 : rmbValue);
   }, 0);
 
   // 计算理财总成本和总盈亏
   const financeTotalCost = (financeAssets || []).reduce((sum, a) => {
-    const _cost = parseFloat(a.cost) || parseFloat(a.costPrice) || 0;
-    const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
-    const cost = _cost * _qty;
+    const _cost = parseFloat(a.cost);
+    const _costPrice = parseFloat(a.costPrice);
+    const safeCost = !isNaN(_cost) ? _cost : (!isNaN(_costPrice) ? _costPrice : 0);
+    const _qty = parseFloat(a.shares);
+    const _qty2 = parseFloat(a.quantity);
+    const safeQty = !isNaN(_qty) ? _qty : (!isNaN(_qty2) ? _qty2 : 0);
+    const cost = safeCost * safeQty;
+    if (isNaN(cost)) return sum;
     const currency = a.currency || 'CNY';
     const fromRate = exchangeRates[currency] ?? 1;
     const toRate = exchangeRates['CNY'] ?? 1;
     const rmbCost = currency === 'CNY' ? cost : (cost * fromRate) / toRate;
-    return sum + rmbCost;
+    return sum + (isNaN(rmbCost) ? 0 : rmbCost);
   }, 0);
   const financeTotalPnl = financeTotalValue - financeTotalCost;
   const financeTotalPnlRate = financeTotalCost > 0 ? (financeTotalPnl / financeTotalCost) * 100 : 0;
@@ -754,24 +765,35 @@ export default function Overview() {
 
   const categoryStats = Object.entries(categoryGroups).map(([category, items]) => {
     const value = items.reduce((sum, a) => {
-      const _price = parseFloat(a.currentPrice) || parseFloat(a.costPrice) || parseFloat(a.cost) || 0;
-      const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
-      const val = _price * _qty;
+      const _price = parseFloat(a.currentPrice);
+      const _costPrice = parseFloat(a.costPrice);
+      const _cost = parseFloat(a.cost);
+      const safePrice = !isNaN(_price) ? _price : (!isNaN(_costPrice) ? _costPrice : (!isNaN(_cost) ? _cost : 0));
+      const _qty = parseFloat(a.shares);
+      const _qty2 = parseFloat(a.quantity);
+      const safeQty = !isNaN(_qty) ? _qty : (!isNaN(_qty2) ? _qty2 : 0);
+      const val = safePrice * safeQty;
+      if (isNaN(val)) return sum;
       const currency = a.currency || 'CNY';
       const fromRate = exchangeRates && exchangeRates[currency] ? exchangeRates[currency] : 1;
       const toRate = exchangeRates && exchangeRates['CNY'] ? exchangeRates['CNY'] : 1;
       const rate = currency === 'CNY' ? 1 : (fromRate / toRate);
-      return sum + (isNaN(val) ? 0 : val) * rate;
+      return sum + val * rate;
     }, 0);
     const cost = items.reduce((sum, a) => {
-      const _cost = parseFloat(a.cost) || parseFloat(a.costPrice) || 0;
-      const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
-      const c = _cost * _qty;
+      const _cost = parseFloat(a.cost);
+      const _costPrice = parseFloat(a.costPrice);
+      const safeCost = !isNaN(_cost) ? _cost : (!isNaN(_costPrice) ? _costPrice : 0);
+      const _qty = parseFloat(a.shares);
+      const _qty2 = parseFloat(a.quantity);
+      const safeQty = !isNaN(_qty) ? _qty : (!isNaN(_qty2) ? _qty2 : 0);
+      const c = safeCost * safeQty;
+      if (isNaN(c)) return sum;
       const currency = a.currency || 'CNY';
       const fromRate = exchangeRates && exchangeRates[currency] ? exchangeRates[currency] : 1;
       const toRate = exchangeRates && exchangeRates['CNY'] ? exchangeRates['CNY'] : 1;
       const rate = currency === 'CNY' ? 1 : (fromRate / toRate);
-      return sum + (isNaN(c) ? 0 : c) * rate;
+      return sum + c * rate;
     }, 0);
     return {
       category,
@@ -801,13 +823,20 @@ export default function Overview() {
     (financeAssets || []).forEach(asset => {
       const category = asset.category || asset.kind || '其他理财';
       const label = financeKindLabels[asset.kind] || category;
-      const _price = parseFloat(asset.currentPrice) || parseFloat(asset.costPrice) || parseFloat(asset.cost) || 0;
-      const _qty = parseFloat(asset.shares) || parseFloat(asset.quantity) || 0;
-      const value = _price * _qty;
+      const _price = parseFloat(asset.currentPrice);
+      const _costPrice = parseFloat(asset.costPrice);
+      const _cost = parseFloat(asset.cost);
+      const safePrice = !isNaN(_price) ? _price : (!isNaN(_costPrice) ? _costPrice : (!isNaN(_cost) ? _cost : 0));
+      const _qty = parseFloat(asset.shares);
+      const _qty2 = parseFloat(asset.quantity);
+      const safeQty = !isNaN(_qty) ? _qty : (!isNaN(_qty2) ? _qty2 : 0);
+      const value = safePrice * safeQty;
+      if (isNaN(value)) return;
       const currency = asset.currency || 'CNY';
       const fromRate = exchangeRates[currency] ?? 1;
       const toRate = exchangeRates['CNY'] ?? 1;
       const rmbValue = currency === 'CNY' ? value : (value * fromRate) / toRate;
+      if (isNaN(rmbValue)) return;
       allocation[label] = (allocation[label] || 0) + rmbValue;
     });
 
