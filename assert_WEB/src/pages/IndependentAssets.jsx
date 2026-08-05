@@ -467,9 +467,25 @@ export default function IndependentAssets() {
       try {
         const quotes = await fetchFinanceQuotes(codes);
         if (cancelled) return;
+        const hkdRate = exchangeRates?.HKD || 0.92;
         const map = {};
         (quotes || []).forEach(q => {
-          if (q && q.code) map[q.code] = q;
+          if (q && q.code) {
+            const eqItem = equityItems.find(i => String(i.code) === String(q.code));
+            const isHK = eqItem && (eqItem.market === '港股市场' || eqItem.currency === 'HKD');
+            if (isHK) {
+              const converted = { ...q };
+              if (q.price != null && Number.isFinite(Number(q.price))) {
+                converted.price = Math.trunc(Number(q.price) * hkdRate * 10000) / 10000;
+              }
+              if (q.prevClose != null && Number.isFinite(Number(q.prevClose))) {
+                converted.prevClose = Math.trunc(Number(q.prevClose) * hkdRate * 10000) / 10000;
+              }
+              map[q.code] = converted;
+            } else {
+              map[q.code] = q;
+            }
+          }
         });
         setEquityQuotesMap(map);
       } catch (e) {
@@ -485,7 +501,7 @@ export default function IndependentAssets() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [stateData?.independentAssets?.equity]);
+  }, [stateData?.independentAssets?.equity, exchangeRates]);
 
   const loadData = async () => {
     setLoading(true);
@@ -2676,7 +2692,11 @@ export default function IndependentAssets() {
 
   const renderEquityTable = () => {
     const items = getAssets('equity');
-    const totalCost = items.reduce((s, i) => s + (parseFloat(i.cost) || 0) * (parseFloat(i.quantity) || 0), 0);
+    const totalCost = items.reduce((s, i) => {
+      const isHK = i.market === '港股市场' || i.currency === 'HKD';
+      const cost = isHK ? convertCurrency(parseFloat(i.cost) || 0, 'HKD', 'CNY') : parseFloat(i.cost) || 0;
+      return s + cost * (parseFloat(i.quantity) || 0);
+    }, 0);
     return (
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
@@ -2714,12 +2734,15 @@ export default function IndependentAssets() {
             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
               {items.map(item => {
                 const q = item.code && equityQuotesMap[item.code] ? equityQuotesMap[item.code] : null;
+                const _isHK = item.market === '港股市场' || item.currency === 'HKD';
+                const _cur = item.currency || 'CNY';
+                const _conv = (v) => _isHK ? convertCurrency(v, 'HKD', 'CNY') : parseFloat(v);
                 const _quotePrice = q && q.price != null ? parseFloat(q.price) : null;
                 const _quotePrevClose = q && q.prevClose != null ? parseFloat(q.prevClose) : null;
-                const _price = _quotePrice || parseFloat(item.currentPrice) || 0;
-                const _prevClose = _quotePrevClose || parseFloat(item.prevPrice) || 0;
+                const _price = _quotePrice || _conv(parseFloat(item.currentPrice) || 0);
+                const _prevClose = _quotePrevClose || _conv(parseFloat(item.prevPrice) || 0);
                 const _qty = parseFloat(item.quantity) || 0;
-                const _unitCost = parseFloat(item.cost) || 0;
+                const _unitCost = _conv(parseFloat(item.cost) || 0);
                 const _totalCost = _unitCost * _qty;
                 const _avgCost = _qty > 0 ? _totalCost / _qty : _unitCost;
                 const _currentValue = _price * _qty;
@@ -2742,9 +2765,10 @@ export default function IndependentAssets() {
                   _holdingDays = Math.max(0, Math.floor((d2 - d1) / 86400000));
                 }
 
-                const _symbol = (item.currency && item.currency.length === 3)
+                // 港股通已转换为人民币显示，统一使用¥符号
+                const _symbol = _isHK ? '¥' : ((item.currency && item.currency.length === 3)
                   ? (item.currency === 'USD' ? '$' : item.currency === 'HKD' ? 'HK$' : item.currency === 'EUR' ? '€' : item.currency === 'JPY' ? '¥' : item.currency === 'GBP' ? '£' : '¥')
-                  : '¥';
+                  : '¥');
 
                 return (
                   <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 whitespace-nowrap">
@@ -2786,22 +2810,23 @@ export default function IndependentAssets() {
               )}
               {items.length > 0 && (() => {
                 const t = items.reduce((acc, item) => {
-                  const cur = item.currency || 'CNY';
+                  const isHK = item.market === '港股市场' || item.currency === 'HKD';
+                  const _conv = (v) => isHK ? convertCurrency(v, 'HKD', 'CNY') : parseFloat(v);
                   const q = item.code && equityQuotesMap[item.code] ? equityQuotesMap[item.code] : null;
                   const _quotePrice = q && q.price != null ? parseFloat(q.price) : null;
                   const _quotePrevClose = q && q.prevClose != null ? parseFloat(q.prevClose) : null;
-                  const _price = _quotePrice || parseFloat(item.currentPrice) || 0;
-                  const _prevClose = _quotePrevClose || parseFloat(item.prevPrice) || 0;
+                  const _price = _quotePrice || _conv(parseFloat(item.currentPrice) || 0);
+                  const _prevClose = _quotePrevClose || _conv(parseFloat(item.prevPrice) || 0);
                   const _qty = parseFloat(item.quantity) || 0;
-                  const _unitCost = parseFloat(item.cost) || 0;
+                  const _unitCost = _conv(parseFloat(item.cost) || 0);
                   const _totalCost = _unitCost * _qty;
                   const _currentValue = _price * _qty;
                   const _holdingPnl = _currentValue - _totalCost;
                   const _dailyPnl = _prevClose > 0 ? (_price - _prevClose) * _qty : 0;
-                  acc.cost += convertCurrency(_totalCost, cur, 'CNY');
-                  acc.marketValue += convertCurrency(_currentValue, cur, 'CNY');
-                  acc.holdingPnl += convertCurrency(_holdingPnl, cur, 'CNY');
-                  acc.dailyPnl += convertCurrency(_dailyPnl, cur, 'CNY');
+                  acc.cost += _totalCost;
+                  acc.marketValue += _currentValue;
+                  acc.holdingPnl += _holdingPnl;
+                  acc.dailyPnl += _dailyPnl;
                   return acc;
                 }, { cost: 0, marketValue: 0, holdingPnl: 0, dailyPnl: 0 });
                 return (
