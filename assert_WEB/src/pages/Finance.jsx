@@ -3537,9 +3537,13 @@ export default function Finance({ onAssetPenetration }) {
   const categoryL2Options = useMemo(() => {
     // 商品类 + 黄金/白银/原油：优先级最高
     if (newAccount.categoryL1 === '商品类') {
-      if (newAccount.assetType === '黄金') return ['场内黄金', '场外黄金'];
-      if (newAccount.assetType === '白银') return ['场内白银', '场外白银'];
-      if (newAccount.assetType === '原油') return ['场内原油', '场外原油'];
+      const _commodityMap = { '黄金': ['场内黄金', '场外黄金'], '白银': ['场内白银', '场外白银'], '原油': ['场内原油', '场外原油'] };
+      const _defaults = _commodityMap[newAccount.assetType];
+      if (_defaults) {
+        const _l2Key = `商品类__${newAccount.assetType}`;
+        const _custom = categoryL2OptionsMap[_l2Key] || [];
+        return [...new Set([..._defaults, ..._custom])];
+      }
     }
     // 债券 + 债权类
     if (newAccount.assetType === '债券' && newAccount.categoryL1 === '债权类') {
