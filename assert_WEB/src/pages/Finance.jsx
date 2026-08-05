@@ -2259,7 +2259,7 @@ export default function Finance({ onAssetPenetration }) {
     setError(null);
     try {
       // 每次手动刷新全局数据时强制获取最新汇率（必须 await 确保汇率先加载）
-      await loadExchangeRates(true);
+      const latestRates = await loadExchangeRates(true);
       const data = await fetchState();
       // 补充账户数据：如果 state 中 accounts 为空，从 localStorage 缓存中读取
       if (!data.accounts || data.accounts.length === 0) {
