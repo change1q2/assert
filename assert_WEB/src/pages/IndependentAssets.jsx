@@ -282,6 +282,8 @@ export default function IndependentAssets() {
   const [customFixedDepositTypes, setCustomFixedDepositTypes] = useState([]);
   const [showInsuranceDetailModal, setShowInsuranceDetailModal] = useState(false);
   const [selectedInsurance, setSelectedInsurance] = useState(null);
+  // 保险明细草稿：onChange 只改此草稿，关闭时一次性保存，避免每次输入强制刷新
+  const [draftInsurance, setDraftInsurance] = useState(null);
   const [showCalculationModal, setShowCalculationModal] = useState(false);
   const [calculationData, setCalculationData] = useState(null);
   const [showInsuranceTransactionModal, setShowInsuranceTransactionModal] = useState(false);
@@ -463,7 +465,14 @@ export default function IndependentAssets() {
       }
     };
     loadEquityQuotes();
-    return () => { cancelled = true; };
+    // 30秒轮询获取最新股权行情
+    const timer = setInterval(() => {
+      if (!cancelled) loadEquityQuotes();
+    }, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [stateData?.independentAssets?.equity]);
 
   const loadData = async () => {
@@ -782,7 +791,7 @@ export default function IndependentAssets() {
   const handleEdit = (item) => {
     const defaults = getDefaultFormData(activeTab);
     if (activeTab === 'insurance' && showInsuranceDetailModal && selectedInsurance && selectedInsurance.id === item.id) {
-      setShowInsuranceDetailModal(false);
+      saveInsuranceDraftAndClose();
     }
     const editData = { ...defaults, ...item };
     if (activeTab === 'insurance' && item.insuranceType === '年金险') {
@@ -811,6 +820,8 @@ export default function IndependentAssets() {
 
   const handleShowInsuranceDetail = (item) => {
     setSelectedInsurance(item);
+    // 深拷贝选中的保险作为草稿（后续 onChange 只改草稿，关闭时一次性保存）
+    setDraftInsurance(JSON.parse(JSON.stringify(item)));
     setShowInsuranceDetailModal(true);
   };
 
@@ -1009,6 +1020,14 @@ export default function IndependentAssets() {
         }
       }
       setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+      // 同步 OCR 新增后的 transactionRecords 到草稿
+      const ocrSavedItem = nextItems.find(i => i.id === selectedInsurance.id);
+      if (ocrSavedItem && draftInsurance) {
+        setDraftInsurance(prev => ({
+          ...(prev || {}),
+          transactionRecords: ocrSavedItem.transactionRecords || [],
+        }));
+      }
     } finally {
       setOcrImage(null);
       setOcrResult(null);
@@ -1020,7 +1039,7 @@ export default function IndependentAssets() {
 
   const handleCalculateProjection = () => {
     if (!selectedInsurance) return;
-    const records = selectedInsurance.transactionRecords || [];
+    const records = draftInsurance?.transactionRecords || [];
     if (records.length === 0) {
       alert('暂无交易记录，无法测算');
       return;
@@ -1178,6 +1197,14 @@ export default function IndependentAssets() {
       }
     }
     setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+    // 同步删除后的 transactionRecords 到草稿
+    const delItem = nextItems.find(i => i.id === selectedInsurance.id);
+    if (delItem && draftInsurance) {
+      setDraftInsurance(prev => ({
+        ...(prev || {}),
+        transactionRecords: delItem.transactionRecords || [],
+      }));
+    }
   };
 
   const handleSaveInsuranceTransaction = async () => {
@@ -1221,6 +1248,14 @@ export default function IndependentAssets() {
         }
       }
       setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+      // 同步保存后的 transactionRecords 到草稿，避免草稿中的旧数据覆盖新数据
+      const savedItem = nextItems.find(i => i.id === selectedInsurance.id);
+      if (savedItem && draftInsurance) {
+        setDraftInsurance(prev => ({
+          ...(prev || {}),
+          transactionRecords: savedItem.transactionRecords || [],
+        }));
+      }
     } finally {
       setShowInsuranceTransactionModal(false);
       setEditingTransaction(null);
@@ -1228,12 +1263,26 @@ export default function IndependentAssets() {
     }
   };
 
-  const handleUpdateTransactionField = async (newRecords) => {
-    if (!selectedInsurance) return;
+  const handleUpdateTransactionField = (newRecords) => {
+    if (!draftInsurance) return;
+    // 只更新本地草稿，不调用保存，避免每次输入强制刷新
+    setDraftInsurance(prev => ({
+      ...(prev || {}),
+      transactionRecords: newRecords,
+    }));
+  };
+
+  // 关闭保险明细时，一次性将草稿保存到后端并更新 state
+  const saveInsuranceDraftAndClose = async () => {
+    if (!selectedInsurance || !draftInsurance) {
+      setShowInsuranceDetailModal(false);
+      setDraftInsurance(null);
+      return;
+    }
     const currentItems = independentAssets.insurance || [];
     const nextItems = currentItems.map(item => {
       if (item.id === selectedInsurance.id) {
-        return { ...item, transactionRecords: newRecords };
+        return draftInsurance;
       }
       return item;
     });
@@ -1241,7 +1290,7 @@ export default function IndependentAssets() {
       try {
         await updateAssets('insurance', nextItems);
       } catch (err) {
-        console.error('Failed to update transaction field:', err);
+        console.error('Failed to save insurance draft on close:', err);
         try {
           const saved = localStorage.getItem('wealth_os_independent_assets');
           const localAssets = saved ? JSON.parse(saved) : {};
@@ -1256,12 +1305,15 @@ export default function IndependentAssets() {
             },
           });
         } catch (storageErr) {
-          console.error('Failed to write fallback to localStorage:', storageErr);
+          console.error('Failed to write fallback to localStorage on close:', storageErr);
         }
       }
       setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
     } catch (err) {
-      console.error('Error updating transaction field:', err);
+      console.error('Error saving insurance draft on close:', err);
+    } finally {
+      setShowInsuranceDetailModal(false);
+      setDraftInsurance(null);
     }
   };
 
@@ -1314,6 +1366,14 @@ export default function IndependentAssets() {
       }
     }
     setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+    // 同步附件字段到草稿（保留草稿中的交易记录输入不丢失）
+    const updatedItem = nextItems.find(i => i.id === selectedInsurance.id);
+    if (updatedItem && draftInsurance) {
+      setDraftInsurance(prev => ({
+        ...(prev || {}),
+        attachments: updatedItem.attachments || [],
+      }));
+    }
   };
 
   const handleDeleteAttachment = async (index) => {
@@ -1353,6 +1413,14 @@ export default function IndependentAssets() {
       }
     }
     setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+    // 同步附件字段到草稿（保留草稿中的交易记录输入不丢失）
+    const updatedDelItem = nextItems.find(i => i.id === selectedInsurance.id);
+    if (updatedDelItem && draftInsurance) {
+      setDraftInsurance(prev => ({
+        ...(prev || {}),
+        attachments: updatedDelItem.attachments || [],
+      }));
+    }
   };
 
   const handleShowPropertyDetails = (item) => {
@@ -1574,20 +1642,24 @@ export default function IndependentAssets() {
         if (type === 'insurance') {
           if (item.insuranceType === '年金险') {
             const records = item.transactionRecords || [];
-            const sumAnnualPremium = records.reduce((sum, r) => sum + parseFloat(r.annualPremium || 0), 0);
-            const latestRecord = records.length > 0
-              ? [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop()
-              : null;
-            const latestCashValue = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
-            totalValue += sumAnnualPremium > 0 ? sumAnnualPremium : parseFloat(item.paidAmount || 0);
-            totalCost += sumAnnualPremium > 0 ? sumAnnualPremium : parseFloat(item.paidAmount || 0);
-            demoProfit += parseFloat(item.demoProfitAmount || 0);
-            actualProfit += parseFloat(item.actualProfitAmount || 0);
-          } else {
-            totalValue += parseFloat(item.paidAmount || 0);
+            const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
+            const latestRecord = sortedByYear.length > 0 ? sortedByYear[sortedByYear.length - 1] : null;
+            const cashValue = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
+            const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.annualActualDividend || 0), 0);
+            const currentValue = cashValue + totalDividend;
+            totalValue += currentValue;
             totalCost += parseFloat(item.paidAmount || 0);
             demoProfit += parseFloat(item.demoProfitAmount || 0);
-            actualProfit += parseFloat(item.actualProfitAmount || 0);
+            actualProfit += totalDividend;
+          } else {
+            const records = item.transactionRecords || [];
+            const cashValue = parseFloat(item.cashValue || 0);
+            const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.actualProfitAmount || 0), 0);
+            const currentValue = cashValue + totalDividend;
+            totalValue += currentValue;
+            totalCost += parseFloat(item.paidAmount || 0);
+            demoProfit += parseFloat(item.demoProfitAmount || 0);
+            actualProfit += totalDividend;
           }
         } else if (type === 'realestate') {
           if (item.usage === '出租') {
@@ -1769,9 +1841,26 @@ export default function IndependentAssets() {
                       actualValue += residualValue;
                     } else if (assetType === 'insurance') {
                       const paid = parseFloat(item.paidAmount || 0);
-                      marketValue += paid;
-                      purchaseCost += paid;
-                      actualValue += paid;
+                      const records = item.transactionRecords || [];
+                      if (item.insuranceType === '年金险') {
+                        const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
+                        const latestRecord = sortedByYear.length > 0 ? sortedByYear[sortedByYear.length - 1] : null;
+                        const cashValue = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
+                        const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.annualActualDividend || 0), 0);
+                        const currentValue = cashValue + totalDividend;
+                        marketValue += currentValue;
+                        purchaseCost += paid;
+                        actualValue += currentValue;
+                        profitLoss += totalDividend;
+                      } else {
+                        const cashValue = parseFloat(item.cashValue || 0);
+                        const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.actualProfitAmount || 0), 0);
+                        const currentValue = cashValue + totalDividend;
+                        marketValue += currentValue;
+                        purchaseCost += paid;
+                        actualValue += currentValue;
+                        profitLoss += totalDividend;
+                      }
                     } else if (assetType === 'fixedinvestment') {
                       const cost = parseFloat(item.investmentCost || 0);
                       marketValue += cost;
@@ -4047,7 +4136,8 @@ export default function IndependentAssets() {
 
   const renderInsuranceDetailModal = () => {
     if (!showInsuranceDetailModal || !selectedInsurance) return null;
-    const item = selectedInsurance;
+    // 显示和编辑均基于草稿，保存只在关闭时一次性执行
+    const item = draftInsurance || selectedInsurance;
 
     const paidAmount = parseFloat(item.paidAmount || 0);
     const cashValue = parseFloat(item.cashValue || 0);
@@ -4089,7 +4179,7 @@ export default function IndependentAssets() {
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
           <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">保险明细 - {item.policyName || item.policyNumber || '保单'}</h2>
-            <button onClick={() => setShowInsuranceDetailModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
+            <button onClick={saveInsuranceDraftAndClose} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
               <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
@@ -4241,7 +4331,7 @@ export default function IndependentAssets() {
                         const cumulativeActualDividend = parseFloat(record.cumulativeActualDividend || 0);
 
                         const toggleStatus = () => {
-                          const newRecords = selectedInsurance.transactionRecords.map(r => {
+                          const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                             if (r.id === record.id) {
                               return { ...r, status: record.status === '达成' ? '未达成' : '达成' };
                             }
@@ -4255,7 +4345,7 @@ export default function IndependentAssets() {
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{record.year || '—'}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.annualPremium || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) return { ...r, annualPremium: e.target.value };
                                   return r;
                                 });
@@ -4264,7 +4354,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.cumulativePremium || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) return { ...r, cumulativePremium: e.target.value };
                                   return r;
                                 });
@@ -4273,7 +4363,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.annualGuaranteedAnnuity || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) return { ...r, annualGuaranteedAnnuity: e.target.value };
                                   return r;
                                 });
@@ -4282,7 +4372,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.cumulativeGuaranteedReceived || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) return { ...r, cumulativeGuaranteedReceived: e.target.value };
                                   return r;
                                 });
@@ -4291,7 +4381,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.yearEndCashValue || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) return { ...r, yearEndCashValue: e.target.value };
                                   return r;
                                 });
@@ -4300,7 +4390,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.annualDividendDemo || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) return { ...r, annualDividendDemo: e.target.value };
                                   return r;
                                 });
@@ -4309,7 +4399,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.cumulativeDividendDemo || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) return { ...r, cumulativeDividendDemo: e.target.value };
                                   return r;
                                 });
@@ -4319,7 +4409,7 @@ export default function IndependentAssets() {
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">{formatCurrency(totalBenefit, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.annualActualDividend || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) return { ...r, annualActualDividend: e.target.value };
                                   return r;
                                 });
@@ -4328,7 +4418,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.cumulativeActualDividend || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) return { ...r, cumulativeActualDividend: e.target.value };
                                   return r;
                                 });
@@ -4455,7 +4545,7 @@ export default function IndependentAssets() {
                         
                         const toggleStatus = () => {
                           const newStatus = status === '达成' ? '未达成' : (status === '未达成' ? '未开始' : '达成');
-                          const newRecords = selectedInsurance.transactionRecords.map(r => {
+                          const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                             if (r.id === record.id) {
                               return { ...r, status: newStatus };
                             }
@@ -4480,7 +4570,7 @@ export default function IndependentAssets() {
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{irrReturn !== null ? irrReturn.toFixed(2) + '%' : '—'}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="date" value={record.date || ''} onChange={(e) => {
-                                const allRecords = selectedInsurance.transactionRecords || [];
+                                const allRecords = draftInsurance?.transactionRecords || [];
                                 const sortedAllRecords = allRecords.slice().sort((a, b) => {
                                   const yearA = parseInt(a.year) || 0;
                                   const yearB = parseInt(b.year) || 0;
@@ -4519,7 +4609,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.age || ''} onChange={(e) => {
-                                const allRecords = selectedInsurance.transactionRecords || [];
+                                const allRecords = draftInsurance?.transactionRecords || [];
                                 const sortedAllRecords = allRecords.slice().sort((a, b) => {
                                   const yearA = parseInt(a.year) || 0;
                                   const yearB = parseInt(b.year) || 0;
@@ -4554,7 +4644,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.actualProfitAmount || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) {
                                     return { ...r, actualProfitAmount: e.target.value };
                                   }
@@ -4565,7 +4655,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.cashFlowAmount || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
                                   if (r.id === record.id) {
                                     return { ...r, cashFlowAmount: e.target.value };
                                   }
@@ -4607,7 +4697,7 @@ export default function IndependentAssets() {
           </div>
 
           <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end">
-            <button onClick={() => setShowInsuranceDetailModal(false)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+            <button onClick={saveInsuranceDraftAndClose} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
               关闭
             </button>
           </div>

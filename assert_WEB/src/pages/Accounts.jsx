@@ -483,6 +483,23 @@ export default function Accounts() {
     return () => clearInterval(timer);
   }, []);
 
+  // 30秒轮询获取最新行情
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!selectedAccountId) return;
+      const account = accounts.find(a => a.id === selectedAccountId);
+      if (!account) return;
+      const accountAssets = (financeAssets || []).filter(a => {
+        const accId = a.accountId || a.account || '';
+        return (accId === account.id || accId === account.name) && a.status !== 'archived';
+      });
+      if (accountAssets.length > 0) {
+        loadQuotes(accountAssets);
+      }
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [selectedAccountId, accounts, financeAssets]);
+
   useEffect(() => {
     if (!selectedAccountId) return;
     const account = accounts.find(a => a.id === selectedAccountId);
@@ -1606,7 +1623,9 @@ export default function Accounts() {
         const _holdingPnl = isCash ? 0 : (_currentValue - _totalCost);
         const _holdingPnlRate = _totalCost > 0 ? (_holdingPnl / _totalCost) * 100 : 0;
 
-        const _prevPrice = parseFloat(a.prevPrice) || 0;
+        // 使用行情数据中的 prevClose（昨收价）判断涨跌颜色，优先级：行情prevClose > 存储prevPrice
+        const _quotePrevClose = parseFloat(quotesMap[a.code]?.prevClose) || 0;
+        const _prevPrice = _quotePrevClose > 0 ? _quotePrevClose : (parseFloat(a.prevPrice) || 0);
         const _dailyPnl = isCash ? 0 : ((_prevPrice > 0 && _effectivePrice > 0)
           ? (_effectivePrice - _prevPrice) * _effectiveQty
           : (parseFloat(a.todayPnl) || parseFloat(a.dailyPnl) || 0));
@@ -1614,7 +1633,10 @@ export default function Accounts() {
           ? ((_effectivePrice - _prevPrice) / _prevPrice) * 100
           : (parseFloat(a.todayPnlPercent) || parseFloat(a.dailyPnlRate) || 0));
 
-        const _priceChange = _effectivePrice > _prevPrice ? 'up' : _effectivePrice < _prevPrice ? 'down' : 'unchanged';
+        // 涨跌颜色基于昨收价判断：现价 > 昨收 = 绿色（涨），现价 < 昨收 = 红色（跌）
+        const _priceChange = _effectivePrice > 0 && _prevPrice > 0
+          ? (_effectivePrice > _prevPrice ? 'up' : _effectivePrice < _prevPrice ? 'down' : 'unchanged')
+          : 'unchanged';
 
         return {
           id: a.id,
