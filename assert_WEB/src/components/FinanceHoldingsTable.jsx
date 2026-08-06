@@ -47,10 +47,22 @@ export default function FinanceHoldingsTable({
   exchangeRates = {},
   financeAccounts = [],
   assetKindOptions = [],
+  moneyFundMap = {},
 }) {
   const storagePrefix = readOnly ? 'accounts_table_' : 'finance_';
 
-  const [filterText, setFilterText] = useState('');
+  const filtersStorageKey = `${storagePrefix}filters_${categoryName}`;
+  const persistedFilters = (() => {
+    try {
+      const saved = sessionStorage.getItem(filtersStorageKey);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error('Failed to load filters:', e);
+    }
+    return {};
+  })();
+
+  const [filterText, setFilterText] = useState(persistedFilters.filterText || '');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(() => {
     try {
@@ -66,19 +78,19 @@ export default function FinanceHoldingsTable({
     }
     return defaultPageSize;
   });
-  const [filterAccount, setFilterAccount] = useState(defaultAccountFilter);
-  const [filterMarket, setFilterMarket] = useState('');
-  const [filterCurrency, setFilterCurrency] = useState('');
-  const [filterAssetKind, setFilterAssetKind] = useState('');
+  const [filterAccount, setFilterAccount] = useState(persistedFilters.filterAccount ?? defaultAccountFilter);
+  const [filterMarket, setFilterMarket] = useState(persistedFilters.filterMarket || '');
+  const [filterCurrency, setFilterCurrency] = useState(persistedFilters.filterCurrency || '');
+  const [filterAssetKind, setFilterAssetKind] = useState(persistedFilters.filterAssetKind || '');
 
-  const [filterAssetType, setFilterAssetType] = useState('');
-  const [filterCategoryL1, setFilterCategoryL1] = useState('');
-  const [filterCategoryL2, setFilterCategoryL2] = useState('');
-  const [filterCategoryL3, setFilterCategoryL3] = useState('');
-  const [filterCategoryL4, setFilterCategoryL4] = useState('');
-  const [filterPositionGroup, setFilterPositionGroup] = useState('');
-  const [filterPositionType, setFilterPositionType] = useState('');
-  const [filterTag, setFilterTag] = useState('');
+  const [filterAssetType, setFilterAssetType] = useState(persistedFilters.filterAssetType || '');
+  const [filterCategoryL1, setFilterCategoryL1] = useState(persistedFilters.filterCategoryL1 || '');
+  const [filterCategoryL2, setFilterCategoryL2] = useState(persistedFilters.filterCategoryL2 || '');
+  const [filterCategoryL3, setFilterCategoryL3] = useState(persistedFilters.filterCategoryL3 || '');
+  const [filterCategoryL4, setFilterCategoryL4] = useState(persistedFilters.filterCategoryL4 || '');
+  const [filterPositionGroup, setFilterPositionGroup] = useState(persistedFilters.filterPositionGroup || '');
+  const [filterPositionType, setFilterPositionType] = useState(persistedFilters.filterPositionType || '');
+  const [filterTag, setFilterTag] = useState(persistedFilters.filterTag || '');
   const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [showFilterSettings, setShowFilterSettings] = useState(false);
   const [columnSettingsPosition, setColumnSettingsPosition] = useState('bottom');
@@ -209,6 +221,28 @@ export default function FinanceHoldingsTable({
     }
   }, [pageSize, categoryName, storagePrefix]);
 
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(filtersStorageKey, JSON.stringify({
+        filterText,
+        filterAccount,
+        filterMarket,
+        filterCurrency,
+        filterAssetKind,
+        filterAssetType,
+        filterCategoryL1,
+        filterCategoryL2,
+        filterCategoryL3,
+        filterCategoryL4,
+        filterPositionGroup,
+        filterPositionType,
+        filterTag,
+      }));
+    } catch (e) {
+      console.error('Failed to save filters:', e);
+    }
+  }, [filterText, filterAccount, filterMarket, filterCurrency, filterAssetKind, filterAssetType, filterCategoryL1, filterCategoryL2, filterCategoryL3, filterCategoryL4, filterPositionGroup, filterPositionType, filterTag, filtersStorageKey]);
+
   const handlePageSizeChange = (newSize) => {
     setPageSize(newSize);
     setPage(1);
@@ -279,13 +313,37 @@ export default function FinanceHoldingsTable({
       case 'currentValue':
         return formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
       case 'currentPrice':
-        if (h.positionType === '货币基金') {
-          return <span className="text-gray-600 dark:text-gray-400">¥1.000</span>;
+        // 货币基金：现价默认为1（每份净值1元）
+        if (h.categoryL2 === '货币型' || h.categoryL4 === '货币基金' || h.positionType === '货币基金' || (h.name && h.name.includes('货币'))) {
+          const mfPrice = parseFloat(val) || 1;
+          return <span className="text-gray-700 dark:text-gray-200 tabular-nums">{mfPrice.toFixed(4)}</span>;
         }
         let colorClass = '';
         if (h.priceChange === 'up') colorClass = 'text-green-600 dark:text-green-400';
         else if (h.priceChange === 'down') colorClass = 'text-red-500 dark:text-red-400';
         return <span className={colorClass}>{formatPriceValue(val)}</span>;
+      case 'navPer10k': {
+        // 优先使用用户手动填写的 navPer10k；其次使用 moneyFundMap 网络获取的值
+        const userNav = parseFloat(h.navPer10k) || 0;
+        if (userNav > 0) {
+          return <span className="text-gray-700 dark:text-gray-200 tabular-nums" title="手动输入">{userNav.toFixed(4)}</span>;
+        }
+        const mf = h.code && moneyFundMap ? moneyFundMap[h.code] : null;
+        if (!mf || mf.nav_per_10k == null) return <span className="text-gray-300 dark:text-slate-600">—</span>;
+        return <span className="text-gray-700 dark:text-gray-200 tabular-nums" title={mf.date ? `日期: ${mf.date}` : ''}>{Number(mf.nav_per_10k).toFixed(4)}</span>;
+      }
+      case 'annualized7d': {
+        // 优先使用用户手动填写的 annualized7d；其次使用 moneyFundMap 网络获取的值
+        const userAnn = parseFloat(h.annualized7d) || 0;
+        if (userAnn > 0) {
+          return <span className="text-green-600 dark:text-green-400 tabular-nums" title="手动输入">{userAnn.toFixed(4)}%</span>;
+        }
+        const mf = h.code && moneyFundMap ? moneyFundMap[h.code] : null;
+        if (!mf || mf.annualized_7d == null) return <span className="text-gray-300 dark:text-slate-600">—</span>;
+        const av = parseFloat(mf.annualized_7d);
+        const cls = isNaN(av) ? '' : (av >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400');
+        return <span className={`${cls} tabular-nums`} title={mf.date ? `日期: ${mf.date}` : ''}>{isNaN(av) ? '—' : `${av.toFixed(4)}%`}</span>;
+      }
       case 'holdingDays':
         return computeHoldingDays(h) || '-';
       case 'archiveDate':
@@ -386,13 +444,21 @@ export default function FinanceHoldingsTable({
     setFilterAccount('');
     setFilterMarket('');
     setFilterCurrency('');
+    setFilterAssetKind('');
     setFilterAssetType('');
     setFilterCategoryL1('');
     setFilterCategoryL2('');
+    setFilterCategoryL3('');
+    setFilterCategoryL4('');
     setFilterPositionGroup('');
     setFilterPositionType('');
     setFilterTag('');
     setPage(1);
+    try {
+      sessionStorage.removeItem(filtersStorageKey);
+    } catch (e) {
+      console.error('Failed to clear filters:', e);
+    }
   };
 
   const handleExportToCSV = () => {

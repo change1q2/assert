@@ -99,7 +99,8 @@ export const DEFAULT_COLUMNS = [
   { key: 'avgCost', label: '平均买入成本', visible: true, align: 'right' },
   { key: 'quantity', label: '数量', visible: true, align: 'right' },
   { key: 'currentPrice', label: '现价', visible: true, align: 'right' },
-
+  { key: 'navPer10k', label: '每万份收益', visible: false, align: 'right' },
+  { key: 'annualized7d', label: '7日年化', visible: false, align: 'right' },
   { key: 'holdingDays', label: '天数', visible: true, align: 'right' },
   { key: 'currentValue', label: '当前市值', visible: true, align: 'right', bold: true },
   { key: 'holdingPnl', label: '持仓盈亏', visible: true, align: 'right', bold: true, pnl: true },

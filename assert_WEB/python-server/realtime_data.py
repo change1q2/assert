@@ -10,6 +10,7 @@
 import sys
 import json
 import os
+import re
 import time
 import pickle
 from datetime import datetime
@@ -144,7 +145,36 @@ def get_a_stock_realtime(symbol: str):
         df = _ak_a_spot_df()
         row = df[df["代码"].str.contains(symbol, na=False)]
         if row.empty:
-            print(f"  ❌ 未找到代码 {symbol}")
+            print(f"  ⚠️ AkShare A股列表未找到代码 {symbol}，尝试东方财富直连...")
+            # 对于基金代码（50xxxx/15xxxx/16xxxx/51xxxx/52xxxx等），AkShare股票列表不含基金
+            # 直接调用东方财富接口获取实时行情
+            em_data = _fetch_eastmoney("a", symbol)
+            if em_data and em_data.get("price") not in (None, "", "-"):
+                result = {
+                    "name": em_data.get("name", symbol),
+                    "code": em_data.get("code", symbol),
+                    "price": em_data.get("price"),
+                    "open": em_data.get("open", "-"),
+                    "high": em_data.get("high", "-"),
+                    "low": em_data.get("low", "-"),
+                    "prev_close": em_data.get("prev_close", "-"),
+                    "chg_amt": em_data.get("chg_amt", "-"),
+                    "chg_pct": em_data.get("chg_pct", "-"),
+                    "volume": em_data.get("volume", "-"),
+                    "turnover": em_data.get("turnover", "-"),
+                    "pe": em_data.get("pe", "-"),
+                    "market_cap": em_data.get("market_cap", "-"),
+                    "high_52w": "-",
+                    "low_52w": "-",
+                    "turnover_rate": em_data.get("turnover_rate", "-"),
+                    "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                for label, val in result.items():
+                    if label not in ("code",):
+                        print(f"  {label:14s} {val}")
+                result = _enrich_data("a", symbol, result)
+                return result
+            print(f"  ❌ 东方财富也未找到代码 {symbol}")
             return None
         row = row.iloc[0]
         data = row.to_dict()
@@ -311,6 +341,7 @@ def _fetch_eastmoney(market: str, symbol: str) -> dict:
                         "open": d.get("f46"),
                         "high": d.get("f44"),
                         "low": d.get("f45"),
+                        "prev_close": d.get("f60"),
                         "chg_pct": d.get("f170"),
                         "volume": d.get("f47"),
                         "turnover": d.get("f48"),
@@ -680,8 +711,179 @@ def _enrich_data(market: str, symbol: str, primary_data: dict) -> dict:
     
     if missing:
         print(f"    ⚠️ 仍未补全: {missing} (将留空)")
-    
+
     return result
+
+
+# ---------------------------------------------------------------------------
+# 货币基金：每万份收益 + 7日年化收益率（东方财富 pingzhongdata）
+# ---------------------------------------------------------------------------
+def _fetch_money_fund(code: str) -> dict:
+    """货币基金：每万份收益 + 7日年化收益率.
+
+    数据源: https://fund.eastmoney.com/pingzhongdata/{code}.js
+        - Data_millionCopiesIncome: 历史每万份收益 [[ts, val], ...]
+        - Data_sevenDaysYearIncome: 历史7日年化(%) [[ts, val], ...]
+        - fS_name: 基金名称
+
+    Returns:
+        dict: { symbol, name, nav_per_10k, annualized_7d, date } 或 None
+    """
+    code = str(code).strip()
+    if not re.match(r"^\d{6}$", code):
+        return None
+
+    cached = _cache_get(f"mf_{code}")
+    if cached is not None:
+        return cached
+
+    try:
+        url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js"
+        r = requests.get(url, timeout=8, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://fund.eastmoney.com/",
+        })
+        if r.status_code != 200:
+            return None
+        text = r.text
+
+        name_m = re.search(r'var fS_name = "(.*?)";', text)
+        inc_m = re.search(r"var Data_millionCopiesIncome = (\[\[.*?\]\]);", text, re.S)
+        sev_m = re.search(r"var Data_sevenDaysYearIncome = (\[\[.*?\]\]);", text, re.S)
+
+        name = name_m.group(1) if name_m else ""
+
+        nav_per_10k = None
+        annualized_7d = None
+        date_str = ""
+
+        if inc_m:
+            try:
+                arr = json.loads(inc_m.group(1))
+                if arr:
+                    ts, val = arr[-1]
+                    nav_per_10k = val
+                    date_str = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d")
+            except (ValueError, IndexError):
+                nav_per_10k = None
+
+        if sev_m:
+            try:
+                arr = json.loads(sev_m.group(1))
+                if arr:
+                    ts, val = arr[-1]
+                    annualized_7d = val
+                    if not date_str:
+                        date_str = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d")
+            except (ValueError, IndexError):
+                annualized_7d = None
+
+        # 非货币基金页面不含这两个字段，直接返回 None
+        if nav_per_10k is None and annualized_7d is None:
+            return None
+
+        result = {
+            "symbol": code,
+            "name": name,
+            "nav_per_10k": nav_per_10k,
+            "annualized_7d": annualized_7d,
+            "date": date_str,
+        }
+        _cache_put(f"mf_{code}", result)
+        return result
+    except Exception as e:
+        print(f"  ❌ 货币基金数据获取失败 {code}: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 通用基金净值（LOF/ETF/场外基金）：最新净值 + 前一日净值（pingzhongdata）
+# ---------------------------------------------------------------------------
+def _fetch_fund_nav(code: str) -> dict:
+    """通用基金净值：最新净值 + 前一日净值 + 累计净值.
+
+    数据源: https://fund.eastmoney.com/pingzhongdata/{code}.js
+        - Data_netWorthTrend: 历史单位净值 [{"x": ts, "y": nav, ...}, ...]
+        - Data_ACWorthTrend: 历史累计净值 [[ts, accum_nav], ...]
+        - fS_name: 基金名称
+
+    Returns:
+        dict: { symbol, name, nav, prev_nav, accumulated_nav, nav_date, daily_change_pct } 或 None
+    """
+    code = str(code).strip()
+    if not re.match(r"^\d{6}$", code):
+        return None
+
+    cached = _cache_get(f"fn_{code}")
+    if cached is not None:
+        return cached
+
+    try:
+        url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js"
+        r = requests.get(url, timeout=8, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://fund.eastmoney.com/",
+        })
+        if r.status_code != 200:
+            return None
+        text = r.text
+
+        name_m = re.search(r'var fS_name = "(.*?)";', text)
+        # Data_netWorthTrend 格式: [{"x": ts, "y": nav, ...}, ...]
+        nwt_m = re.search(r'var Data_netWorthTrend = (\[.*?\]);', text, re.S)
+        # Data_ACWorthTrend 格式: [[ts, accum_nav], ...]
+        acw_m = re.search(r"var Data_ACWorthTrend = (\[\[.*?\]\]);", text, re.S)
+
+        name = name_m.group(1) if name_m else ""
+
+        nav = None
+        prev_nav = None
+        nav_date = ""
+
+        if nwt_m:
+            try:
+                arr = json.loads(nwt_m.group(1))
+                if arr and len(arr) >= 1:
+                    last = arr[-1]
+                    nav = last.get("y")
+                    ts = last.get("x", 0)
+                    if ts:
+                        nav_date = datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d")
+                if arr and len(arr) >= 2:
+                    prev_nav = arr[-2].get("y")
+            except (ValueError, IndexError, KeyError):
+                pass
+
+        accumulated_nav = None
+        if acw_m:
+            try:
+                arr = json.loads(acw_m.group(1))
+                if arr:
+                    accumulated_nav = arr[-1][1]
+            except (ValueError, IndexError):
+                pass
+
+        if nav is None:
+            return None
+
+        daily_change_pct = None
+        if nav and prev_nav and prev_nav > 0:
+            daily_change_pct = round((nav - prev_nav) / prev_nav * 100, 4)
+
+        result = {
+            "symbol": code,
+            "name": name,
+            "nav": nav,
+            "prev_nav": prev_nav,
+            "accumulated_nav": accumulated_nav,
+            "nav_date": nav_date,
+            "daily_change_pct": daily_change_pct,
+        }
+        _cache_put(f"fn_{code}", result)
+        return result
+    except Exception as e:
+        print(f"  ❌ 基金净值获取失败 {code}: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------

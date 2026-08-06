@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, lookupFinance, fetchFinanceQuotes, fetchRealTimeExchangeRates, fetchHkConnectRate } from '../api';
+import { fetchState, saveState, lookupFinance, fetchFinanceQuotes } from '../api';
 import {
   Wallet,
   Plus,
@@ -24,7 +24,6 @@ import {
   Download,
 } from 'lucide-react';
 import { VEHICLE_TYPES, VEHICLE_BRANDS, VEHICLE_MODELS } from '../data/vehicle-data';
-import { truncateNum } from '../utils/currency';
 
 const CURRENCY_OPTIONS = [
   { code: 'CNY', symbol: '¥', label: '人民币 (CNY)' },
@@ -43,47 +42,23 @@ const FIXED_INVESTMENT_EVENT_TYPES = [
 
 const FIXED_INVESTMENT_OUTFLOW_EVENTS = ['投入本金', '追加'];
 
-function formatCurrency(value, currency = 'CNY', exchangeRates = null) {
+function formatCurrency(value, currency = 'CNY') {
   if (value === null || value === undefined) return '—';
-  const numValue = parseFloat(value);
-  if (isNaN(numValue)) return '—';
   const option = CURRENCY_OPTIONS.find(c => c.code === currency) || CURRENCY_OPTIONS[0];
   const formatted = new Intl.NumberFormat('zh-CN', {
     style: 'decimal',
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
-  }).format(truncateNum(numValue, 4));
-  
-  // 如果货币不是CNY且有汇率数据，同时显示原币和CNY转换值
-  if (currency !== 'CNY' && exchangeRates) {
-    const convertedToCNY = convertCurrencyStatic(numValue, currency, 'CNY', exchangeRates);
-    const cnyFormatted = new Intl.NumberFormat('zh-CN', {
-      style: 'decimal',
-      minimumFractionDigits: 4,
-      maximumFractionDigits: 4,
-    }).format(truncateNum(convertedToCNY, 4));
-    return `${option.symbol}${formatted} (¥${cnyFormatted})`;
-  }
-  
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value);
   return `${option.symbol}${formatted}`;
-}
-
-// 静态汇率转换函数，用于组件外部
-function convertCurrencyStatic(value, fromCurrency, toCurrency = 'CNY', exchangeRates = null) {
-  if (!value) return 0;
-  if (fromCurrency === toCurrency) return parseFloat(value);
-  const rates = exchangeRates || { CNY: 1, USD: 7.15, HKD: 0.86, EUR: 7.85, JPY: 0.046, GBP: 9.25 };
-  const fromRate = rates[fromCurrency] || 1;
-  const toRate = rates[toCurrency] || 1;
-  return parseFloat(value) * (fromRate / toRate);
 }
 
 function formatNumber(value) {
   if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
-  }).format(truncateNum(value, 4));
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function formatPercentage(value) {
@@ -285,8 +260,6 @@ const COUNTRY_REGION_DATA = {
 export default function IndependentAssets() {
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.15, JPY: 0.046, HKD: 0.86, EUR: 7.85 });
-  const [hkConnectRate, setHkConnectRate] = useState(null);
   const [activeTab, setActiveTab] = useState('insurance');
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -308,8 +281,6 @@ export default function IndependentAssets() {
   const [customFixedDepositTypes, setCustomFixedDepositTypes] = useState([]);
   const [showInsuranceDetailModal, setShowInsuranceDetailModal] = useState(false);
   const [selectedInsurance, setSelectedInsurance] = useState(null);
-  // 保险明细草稿：onChange 只改此草稿，关闭时一次性保存，避免每次输入强制刷新
-  const [draftInsurance, setDraftInsurance] = useState(null);
   const [showCalculationModal, setShowCalculationModal] = useState(false);
   const [calculationData, setCalculationData] = useState(null);
   const [showInsuranceTransactionModal, setShowInsuranceTransactionModal] = useState(false);
@@ -319,7 +290,6 @@ export default function IndependentAssets() {
   const [ocrResult, setOcrResult] = useState(null);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [selectedOcrRecords, setSelectedOcrRecords] = useState([]);
-  const [equityQuotesMap, setEquityQuotesMap] = useState({});
   // 股权模块字段选项（同步理财模块）
   const [equityAssetKindOptions, setEquityAssetKindOptions] = useState(() => {
     const saved = localStorage.getItem('ia_equity_asset_kind_options');
@@ -457,86 +427,25 @@ export default function IndependentAssets() {
 
   const { accounts = [], independentAssets = {} } = stateData || {};
 
-  const convertCurrency = (value, fromCurrency, toCurrency = 'CNY') => {
-    if (!value) return 0;
-    if (fromCurrency === toCurrency) return parseFloat(value);
-    // 港股通使用参考汇率中间价
-    if (fromCurrency === 'HKD' && toCurrency === 'CNY' && hkConnectRate?.mid) {
-      return parseFloat(value) * hkConnectRate.mid;
-    }
-    const fromRate = exchangeRates[fromCurrency] || 1;
-    const toRate = exchangeRates[toCurrency] || 1;
-    return parseFloat(value) * (fromRate / toRate);
-  };
+  // 防止并发重复加载（mount、window focus、saveData 触发可能重叠）
+  const loadingRef = useRef(false);
 
+  // mount 时加载一次，并监听 window focus：从 Accounts 等其他页面切回时会触发 focus，
+  // 从而重新拉取 accounts，保证账户本下拉与账户管理同步。
   useEffect(() => {
     loadData();
-    fetchRealTimeExchangeRates(false).then(rates => {
-      if (rates) setExchangeRates(rates);
-    }).catch(() => {});
-    fetchHkConnectRate(false).then(rate => {
-      if (rate) setHkConnectRate(rate);
-    }).catch(() => {});
+    const onFocus = () => loadData();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, []);
 
   useEffect(() => {
     setFixedInvestmentCashflowPage(1);
   }, [fixedInvestmentCashflowStartDate, fixedInvestmentCashflowEndDate, fixedInvestmentCashflowEventType, fixedInvestmentCashflowSign]);
 
-  useEffect(() => {
-    const equityItems = stateData?.independentAssets?.equity || [];
-    if (equityItems.length === 0) {
-      setEquityQuotesMap({});
-      return;
-    }
-    const codes = [...new Set(equityItems.map(i => i.code).filter(Boolean))];
-    if (codes.length === 0) {
-      setEquityQuotesMap({});
-      return;
-    }
-    let cancelled = false;
-    const loadEquityQuotes = async () => {
-      try {
-        const quotes = await fetchFinanceQuotes(codes);
-        if (cancelled) return;
-        // 港股通使用参考汇率中间价
-        const hkdRate = hkConnectRate?.mid || exchangeRates?.HKD || 0.92;
-        const map = {};
-        (quotes || []).forEach(q => {
-          if (q && q.code) {
-            const eqItem = equityItems.find(i => String(i.code) === String(q.code));
-            const isHK = eqItem && (eqItem.market === '港股市场' || eqItem.currency === 'HKD');
-            if (isHK) {
-              const converted = { ...q };
-              if (q.price != null && Number.isFinite(Number(q.price))) {
-                converted.price = Math.trunc(Number(q.price) * hkdRate * 10000) / 10000;
-              }
-              if (q.prevClose != null && Number.isFinite(Number(q.prevClose))) {
-                converted.prevClose = Math.trunc(Number(q.prevClose) * hkdRate * 10000) / 10000;
-              }
-              map[q.code] = converted;
-            } else {
-              map[q.code] = q;
-            }
-          }
-        });
-        setEquityQuotesMap(map);
-      } catch (e) {
-        console.error('Failed to load equity quotes:', e);
-      }
-    };
-    loadEquityQuotes();
-    // 30秒轮询获取最新股权行情
-    const timer = setInterval(() => {
-      if (!cancelled) loadEquityQuotes();
-    }, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [stateData?.independentAssets?.equity, exchangeRates, hkConnectRate]);
-
   const loadData = async () => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
     try {
       const data = await fetchState();
@@ -565,55 +474,25 @@ export default function IndependentAssets() {
       try {
         const savedAccounts = localStorage.getItem('wealth_os_accounts');
         const savedAssets = localStorage.getItem('wealth_os_independent_assets');
-        const otherState = (() => {
-          try {
-            const raw = localStorage.getItem('wealth_os_full_state');
-            if (raw) return JSON.parse(raw);
-          } catch (e) {}
-          return {};
-        })();
         setStateData({
-          ...otherState,
-          accounts: savedAccounts ? JSON.parse(savedAccounts) : (otherState.accounts || []),
-          independentAssets: savedAssets ? JSON.parse(savedAssets) : (otherState.independentAssets || {}),
+          accounts: savedAccounts ? JSON.parse(savedAccounts) : [],
+          independentAssets: savedAssets ? JSON.parse(savedAssets) : {},
         });
       } catch (e) {
         console.error('Failed to restore data from localStorage:', e);
       }
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
   };
 
   const saveData = async (data) => {
     const newState = { ...stateData, ...data };
-    
-    // 先保存到 localStorage 作为备份，确保数据不会丢失
-    try {
-      localStorage.setItem('wealth_os_independent_assets', JSON.stringify(newState.independentAssets || {}));
-      localStorage.setItem('wealth_os_full_state', JSON.stringify(newState));
-    } catch (e) {
-      console.warn('Failed to save to localStorage backup:', e);
-    }
-    
-    // 优先保存到数据库
-    let result;
-    try {
-      result = await saveState(newState);
-    } catch (err) {
-      console.error('保存到数据库失败:', err.message);
-      // 数据已保存到 localStorage 作为备份
-      setStateData(newState);
-      alert('保存失败：' + (err.message || '网络异常') + '。数据已保存到本地缓存，请刷新页面后重试。');
-      return;
-    }
+    const result = await saveState(newState);
+    localStorage.setItem('wealth_os_independent_assets', JSON.stringify(newState.independentAssets || {}));
     setStateData(newState);
-    
-    // 如果是缓存模式（离线），标记为待同步
-    if (result.cached) {
-      console.warn('Data saved to local cache, will sync when online');
-    } else {
-      // 保存成功后，重新从服务器加载数据以确保数据一致性
+    if (!result.cached) {
       await loadData();
     }
   };
@@ -810,23 +689,13 @@ export default function IndependentAssets() {
       equity: {
         name: '',
         code: '',
-        market: '国内市场',
-        currency: 'CNY',
-        assetKind: '',
-        assetType: '股票',
-        categoryL1: '',
-        categoryL2: '',
-        categoryL3: '',
-        positionGroup: '',
-        positionType: '',
         cost: '',
         quantity: '',
         currentPrice: '',
-        prevPrice: '',
-        holdDate: '',
         marketValue: '',
         pnl: '',
         pnlRate: '',
+        currency: 'CNY',
         accountId: '',
         accountName: '',
       },
@@ -883,7 +752,7 @@ export default function IndependentAssets() {
   const handleEdit = (item) => {
     const defaults = getDefaultFormData(activeTab);
     if (activeTab === 'insurance' && showInsuranceDetailModal && selectedInsurance && selectedInsurance.id === item.id) {
-      saveInsuranceDraftAndClose();
+      setShowInsuranceDetailModal(false);
     }
     const editData = { ...defaults, ...item };
     if (activeTab === 'insurance' && item.insuranceType === '年金险') {
@@ -905,17 +774,6 @@ export default function IndependentAssets() {
     await updateAssets(activeTab, items.filter(i => i.id !== item.id));
   };
 
-  const handleCopy = async (item) => {
-    const items = getAssets(activeTab);
-    const copiedItem = JSON.parse(JSON.stringify(item));
-    copiedItem.id = Date.now().toString();
-    if (copiedItem.policyName) copiedItem.policyName = copiedItem.policyName + ' (副本)';
-    if (copiedItem.name) copiedItem.name = copiedItem.name + ' (副本)';
-    if (copiedItem.policyNumber) copiedItem.policyNumber = copiedItem.policyNumber + '-COPY';
-    const nextItems = [...items, copiedItem];
-    await updateAssets(activeTab, nextItems);
-  };
-
   const handleShowVehicleDetail = (item) => {
     setSelectedVehicle(item);
     setShowVehicleDetailModal(true);
@@ -923,8 +781,6 @@ export default function IndependentAssets() {
 
   const handleShowInsuranceDetail = (item) => {
     setSelectedInsurance(item);
-    // 深拷贝选中的保险作为草稿（后续 onChange 只改草稿，关闭时一次性保存）
-    setDraftInsurance(JSON.parse(JSON.stringify(item)));
     setShowInsuranceDetailModal(true);
   };
 
@@ -1123,14 +979,6 @@ export default function IndependentAssets() {
         }
       }
       setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
-      // 同步 OCR 新增后的 transactionRecords 到草稿
-      const ocrSavedItem = nextItems.find(i => i.id === selectedInsurance.id);
-      if (ocrSavedItem && draftInsurance) {
-        setDraftInsurance(prev => ({
-          ...(prev || {}),
-          transactionRecords: ocrSavedItem.transactionRecords || [],
-        }));
-      }
     } finally {
       setOcrImage(null);
       setOcrResult(null);
@@ -1142,7 +990,7 @@ export default function IndependentAssets() {
 
   const handleCalculateProjection = () => {
     if (!selectedInsurance) return;
-    const records = draftInsurance?.transactionRecords || [];
+    const records = selectedInsurance.transactionRecords || [];
     if (records.length === 0) {
       alert('暂无交易记录，无法测算');
       return;
@@ -1300,14 +1148,6 @@ export default function IndependentAssets() {
       }
     }
     setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
-    // 同步删除后的 transactionRecords 到草稿
-    const delItem = nextItems.find(i => i.id === selectedInsurance.id);
-    if (delItem && draftInsurance) {
-      setDraftInsurance(prev => ({
-        ...(prev || {}),
-        transactionRecords: delItem.transactionRecords || [],
-      }));
-    }
   };
 
   const handleSaveInsuranceTransaction = async () => {
@@ -1351,14 +1191,6 @@ export default function IndependentAssets() {
         }
       }
       setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
-      // 同步保存后的 transactionRecords 到草稿，避免草稿中的旧数据覆盖新数据
-      const savedItem = nextItems.find(i => i.id === selectedInsurance.id);
-      if (savedItem && draftInsurance) {
-        setDraftInsurance(prev => ({
-          ...(prev || {}),
-          transactionRecords: savedItem.transactionRecords || [],
-        }));
-      }
     } finally {
       setShowInsuranceTransactionModal(false);
       setEditingTransaction(null);
@@ -1366,26 +1198,12 @@ export default function IndependentAssets() {
     }
   };
 
-  const handleUpdateTransactionField = (newRecords) => {
-    if (!draftInsurance) return;
-    // 只更新本地草稿，不调用保存，避免每次输入强制刷新
-    setDraftInsurance(prev => ({
-      ...(prev || {}),
-      transactionRecords: newRecords,
-    }));
-  };
-
-  // 关闭保险明细时，一次性将草稿保存到后端并更新 state
-  const saveInsuranceDraftAndClose = async () => {
-    if (!selectedInsurance || !draftInsurance) {
-      setShowInsuranceDetailModal(false);
-      setDraftInsurance(null);
-      return;
-    }
+  const handleUpdateTransactionField = async (newRecords) => {
+    if (!selectedInsurance) return;
     const currentItems = independentAssets.insurance || [];
     const nextItems = currentItems.map(item => {
       if (item.id === selectedInsurance.id) {
-        return draftInsurance;
+        return { ...item, transactionRecords: newRecords };
       }
       return item;
     });
@@ -1393,7 +1211,7 @@ export default function IndependentAssets() {
       try {
         await updateAssets('insurance', nextItems);
       } catch (err) {
-        console.error('Failed to save insurance draft on close:', err);
+        console.error('Failed to update transaction field:', err);
         try {
           const saved = localStorage.getItem('wealth_os_independent_assets');
           const localAssets = saved ? JSON.parse(saved) : {};
@@ -1408,15 +1226,12 @@ export default function IndependentAssets() {
             },
           });
         } catch (storageErr) {
-          console.error('Failed to write fallback to localStorage on close:', storageErr);
+          console.error('Failed to write fallback to localStorage:', storageErr);
         }
       }
       setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
     } catch (err) {
-      console.error('Error saving insurance draft on close:', err);
-    } finally {
-      setShowInsuranceDetailModal(false);
-      setDraftInsurance(null);
+      console.error('Error updating transaction field:', err);
     }
   };
 
@@ -1469,14 +1284,6 @@ export default function IndependentAssets() {
       }
     }
     setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
-    // 同步附件字段到草稿（保留草稿中的交易记录输入不丢失）
-    const updatedItem = nextItems.find(i => i.id === selectedInsurance.id);
-    if (updatedItem && draftInsurance) {
-      setDraftInsurance(prev => ({
-        ...(prev || {}),
-        attachments: updatedItem.attachments || [],
-      }));
-    }
   };
 
   const handleDeleteAttachment = async (index) => {
@@ -1516,14 +1323,6 @@ export default function IndependentAssets() {
       }
     }
     setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
-    // 同步附件字段到草稿（保留草稿中的交易记录输入不丢失）
-    const updatedDelItem = nextItems.find(i => i.id === selectedInsurance.id);
-    if (updatedDelItem && draftInsurance) {
-      setDraftInsurance(prev => ({
-        ...(prev || {}),
-        attachments: updatedDelItem.attachments || [],
-      }));
-    }
   };
 
   const handleShowPropertyDetails = (item) => {
@@ -1687,6 +1486,30 @@ export default function IndependentAssets() {
       newItem.transactionRecords = [firstYearRecord];
     }
 
+    if (activeTab === 'insurance' && !editingItem && itemData.insuranceType === '储蓄险') {
+      const policyDate = itemData.policyDate ? new Date(itemData.policyDate) : new Date();
+      const firstYearEnd = new Date(policyDate);
+      firstYearEnd.setFullYear(firstYearEnd.getFullYear() + 1);
+      const dateStr = firstYearEnd.toISOString().split('T')[0];
+
+      const firstYearRecord = {
+        id: Date.now().toString(),
+        year: 1,
+        premiumPaid: itemData.paidAmount || '',
+        guaranteedCashValue: '',
+        bonusDividend: '',
+        midTermDividend: '',
+        demoProfitAmount: '',
+        demoProfitRate: '',
+        actualProfitAmount: '',
+        actualProfitRate: '',
+        irr: '',
+        dividendRealizationRate: '',
+        date: dateStr,
+      };
+      newItem.transactionRecords = [firstYearRecord];
+    }
+
     const nextItems = editingItem
       ? items.map(i => i.id === newItem.id ? newItem : i)
       : [...items, newItem];
@@ -1742,73 +1565,67 @@ export default function IndependentAssets() {
     Object.keys(independentAssets).forEach(type => {
       const items = independentAssets[type] || [];
       items.forEach(item => {
-        const itemCurrency = item.currency || 'CNY';
-        const conv = (v) => convertCurrency(v, itemCurrency, 'CNY');
         if (type === 'insurance') {
           if (item.insuranceType === '年金险') {
             const records = item.transactionRecords || [];
-            const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
-            const latestRecord = sortedByYear.length > 0 ? sortedByYear[sortedByYear.length - 1] : null;
-            const cashValue = latestRecord ? conv(latestRecord.yearEndCashValue || 0) : conv(item.cashValue || 0);
-            const totalDividend = records.reduce((sum, r) => sum + conv(r.annualActualDividend || 0), 0);
-            const currentValue = cashValue + totalDividend;
-            totalValue += currentValue;
-            totalCost += conv(item.paidAmount || 0);
-            demoProfit += conv(item.demoProfitAmount || 0);
-            actualProfit += totalDividend;
+            const sumAnnualPremium = records.reduce((sum, r) => sum + parseFloat(r.annualPremium || 0), 0);
+            const latestRecord = records.length > 0
+              ? [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop()
+              : null;
+            const latestCashValue = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
+            totalValue += sumAnnualPremium > 0 ? sumAnnualPremium : parseFloat(item.paidAmount || 0);
+            totalCost += sumAnnualPremium > 0 ? sumAnnualPremium : parseFloat(item.paidAmount || 0);
+            demoProfit += parseFloat(item.demoProfitAmount || 0);
+            actualProfit += parseFloat(item.actualProfitAmount || 0);
           } else {
-            const records = item.transactionRecords || [];
-            const cashValue = conv(item.cashValue || 0);
-            const totalDividend = records.reduce((sum, r) => sum + conv(r.actualProfitAmount || 0), 0);
-            const currentValue = cashValue + totalDividend;
-            totalValue += currentValue;
-            totalCost += conv(item.paidAmount || 0);
-            demoProfit += conv(item.demoProfitAmount || 0);
-            actualProfit += totalDividend;
+            totalValue += parseFloat(item.paidAmount || 0);
+            totalCost += parseFloat(item.paidAmount || 0);
+            demoProfit += parseFloat(item.demoProfitAmount || 0);
+            actualProfit += parseFloat(item.actualProfitAmount || 0);
           }
         } else if (type === 'realestate') {
           if (item.usage === '出租') {
-            totalValue += conv(item.purchasePrice || 0);
+            totalValue += parseFloat(item.purchasePrice || 0);
           } else {
-            const marketValue = conv(item.marketValue || 0);
-            const taxAmount = conv(item.taxAmount || 0);
-            const agencyFeeAmount = conv(item.agencyFeeAmount || 0);
-            const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFeeAmount) : conv(item.purchasePrice || 0);
+            const marketValue = parseFloat(item.marketValue || 0);
+            const taxAmount = parseFloat(item.taxAmount || 0);
+            const agencyFeeAmount = parseFloat(item.agencyFeeAmount || 0);
+            const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFeeAmount) : parseFloat(item.purchasePrice || 0);
             totalValue += actualValue;
           }
-          totalCost += conv(item.purchasePrice || 0);
+          totalCost += parseFloat(item.purchasePrice || 0);
         } else if (type === 'vehicle') {
           const { residualValue } = calculateVehicleResidualValue(item);
-          totalValue += conv(residualValue);
-          totalCost += conv(item.purchasePrice || 0);
+          totalValue += residualValue;
+          totalCost += parseFloat(item.purchasePrice || 0);
         } else if (type === 'fixedinvestment') {
-          totalValue += conv(item.investmentCost || 0);
-          totalCost += conv(item.investmentCost || 0);
+          totalValue += parseFloat(item.investmentCost || 0);
+          totalCost += parseFloat(item.investmentCost || 0);
           if (item.dividendRecords && Array.isArray(item.dividendRecords)) {
-            actualProfit += item.dividendRecords.reduce((sum, r) => sum + conv(r.dividendAmount || 0), 0);
+            actualProfit += item.dividendRecords.reduce((sum, r) => sum + parseFloat(r.dividendAmount || 0), 0);
           } else {
-            const cost = conv(item.investmentCost || 0);
+            const cost = parseFloat(item.investmentCost || 0);
             const rate = parseFloat(item.annualDividendRate || 0);
             if (cost && rate) {
               actualProfit += cost * rate / 100;
             } else {
-              actualProfit += conv(item.dividendAmount || 0);
+              actualProfit += parseFloat(item.dividendAmount || 0);
             }
           }
         } else if (type === 'equity') {
-          totalValue += conv(item.marketValue || 0);
-          totalCost += conv(item.investmentCost || 0);
-          actualProfit += conv(item.pnl || 0);
+          totalValue += parseFloat(item.marketValue || 0);
+          totalCost += parseFloat(item.investmentCost || 0);
+          actualProfit += parseFloat(item.pnl || 0);
         } else if (type === 'fixeddeposit') {
-          totalValue += conv(item.amount || 0);
-          totalCost += conv(item.amount || 0);
-          actualProfit += conv(item.actualReturn || 0);
+          totalValue += parseFloat(item.amount || 0);
+          totalCost += parseFloat(item.amount || 0);
+          actualProfit += parseFloat(item.actualReturn || 0);
         }
       });
     });
 
     return { totalValue, totalCost, demoProfit, actualProfit };
-  }, [independentAssets, exchangeRates]);
+  }, [independentAssets]);
 
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -1946,44 +1763,20 @@ export default function IndependentAssets() {
                       actualValue += residualValue;
                     } else if (assetType === 'insurance') {
                       const paid = parseFloat(item.paidAmount || 0);
-                      const records = item.transactionRecords || [];
-                      if (item.insuranceType === '年金险') {
-                        const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
-                        const latestRecord = sortedByYear.length > 0 ? sortedByYear[sortedByYear.length - 1] : null;
-                        const cashValue = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
-                        const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.annualActualDividend || 0), 0);
-                        const currentValue = cashValue + totalDividend;
-                        marketValue += currentValue;
-                        purchaseCost += paid;
-                        actualValue += currentValue;
-                        profitLoss += totalDividend;
-                      } else {
-                        const cashValue = parseFloat(item.cashValue || 0);
-                        const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.actualProfitAmount || 0), 0);
-                        const currentValue = cashValue + totalDividend;
-                        marketValue += currentValue;
-                        purchaseCost += paid;
-                        actualValue += currentValue;
-                        profitLoss += totalDividend;
-                      }
+                      marketValue += paid;
+                      purchaseCost += paid;
+                      actualValue += paid;
                     } else if (assetType === 'fixedinvestment') {
                       const cost = parseFloat(item.investmentCost || 0);
                       marketValue += cost;
                       purchaseCost += cost;
                       actualValue += cost;
                     } else if (assetType === 'equity') {
-                      const _qty = parseFloat(item.quantity) || 0;
-                      const _unitCost = parseFloat(item.cost) || 0;
-                      const _totalCost = _unitCost * _qty;
-                      const q = item.code && equityQuotesMap[item.code] ? equityQuotesMap[item.code] : null;
-                      const _quotePrice = q && q.price != null ? parseFloat(q.price) : null;
-                      const _price = _quotePrice || parseFloat(item.currentPrice) || 0;
-                      const _currentValue = _price * _qty;
-                      const _holdingPnl = _currentValue - _totalCost;
-                      marketValue += _currentValue;
-                      purchaseCost += _totalCost;
-                      profitLoss += _holdingPnl;
-                      actualValue += _currentValue;
+                      const mv = parseFloat(item.marketValue || 0);
+                      marketValue += mv;
+                      purchaseCost += parseFloat(item.cost || item.marketValue || 0);
+                      profitLoss += parseFloat(item.pnl || 0);
+                      actualValue += mv;
                     } else if (assetType === 'fixeddeposit') {
                       const amount = parseFloat(item.amount || 0);
                       const actualReturn = parseFloat(item.actualReturn || 0);
@@ -2130,9 +1923,9 @@ export default function IndependentAssets() {
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyDate || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyStatus || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.paymentMethod || '—'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listPaidAmount, item.currency, exchangeRates)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listCashValue, item.currency, exchangeRates)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listDividend, item.currency, exchangeRates)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listPaidAmount, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listCashValue, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listDividend, item.currency)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.currency || '—'}</td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
@@ -2141,9 +1934,6 @@ export default function IndependentAssets() {
                         </button>
                         <button onClick={() => handleEdit(item)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded text-xs font-medium transition-colors">
                           编辑
-                        </button>
-                        <button onClick={() => handleCopy(item)} className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 px-2 py-1 rounded text-xs font-medium transition-colors">
-                          复制
                         </button>
                         <button onClick={() => handleDelete(item)} className="text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded text-xs font-medium transition-colors">
                           删除
@@ -2158,39 +1948,6 @@ export default function IndependentAssets() {
                   <td colSpan={13} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无保险资产数据</td>
                 </tr>
               )}
-              {items.length > 0 && (() => {
-                const totals = items.reduce((acc, item) => {
-                  const records = item.transactionRecords || [];
-                  const isAnnuity = item.insuranceType === '年金险';
-                  let p = parseFloat(item.paidAmount || 0);
-                  let c = parseFloat(item.cashValue || 0);
-                  let d = 0;
-                  if (isAnnuity) {
-                    p = records.reduce((s, r) => s + parseFloat(r.annualPremium || 0), 0);
-                    if (records.length > 0) {
-                      const lr = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop();
-                      c = parseFloat(lr.yearEndCashValue || 0);
-                    }
-                    d = records.reduce((s, r) => s + parseFloat(r.annualActualDividend || 0), 0);
-                  } else {
-                    d = records.reduce((s, r) => s + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0), 0);
-                  }
-                  const cur = item.currency || 'CNY';
-                  acc.paid += convertCurrency(p, cur, 'CNY');
-                  acc.cash += convertCurrency(c, cur, 'CNY');
-                  acc.dividend += convertCurrency(d, cur, 'CNY');
-                  return acc;
-                }, { paid: 0, cash: 0, dividend: 0 });
-                return (
-                  <tr className="bg-gray-50 dark:bg-slate-700/50 font-semibold border-t-2 border-gray-300 dark:border-slate-600">
-                    <td colSpan={8} className="px-4 py-3 text-sm text-gray-900 dark:text-white text-right">合计 (CNY)</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(totals.paid)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(totals.cash)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(totals.dividend)}</td>
-                    <td colSpan={2} className="px-4 py-3"></td>
-                  </tr>
-                );
-              })()}
             </tbody>
           </table>
         </div>
@@ -2284,32 +2041,6 @@ export default function IndependentAssets() {
           </div>
         )}
 
-        {selfUseItems.length > 0 && (
-          <div className="bg-gray-50 dark:bg-slate-700/30 rounded-xl px-4 py-2 border border-gray-200 dark:border-slate-600">
-            {(() => {
-              const t = selfUseItems.reduce((acc, item) => {
-                const cur = item.currency || 'CNY';
-                acc.purchase += convertCurrency(parseFloat(item.purchasePrice || 0), cur, 'CNY');
-                acc.tax += convertCurrency(parseFloat(item.taxAmount || 0), cur, 'CNY');
-                acc.agency += convertCurrency(parseFloat(item.agencyFeeAmount || 0), cur, 'CNY');
-                acc.market += convertCurrency(parseFloat(item.marketValue || 0), cur, 'CNY');
-                acc.profitLoss += convertCurrency(parseFloat(item.profitLossAmount || 0), cur, 'CNY');
-                return acc;
-              }, { purchase: 0, tax: 0, agency: 0, market: 0, profitLoss: 0 });
-              return (
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-                  <span className="font-semibold text-gray-900 dark:text-white">自用房产合计 (CNY):</span>
-                  <span className="text-gray-700 dark:text-gray-300">购买价 {formatCurrency(t.purchase)}</span>
-                  <span className="text-gray-700 dark:text-gray-300">税费 {formatCurrency(t.tax)}</span>
-                  <span className="text-gray-700 dark:text-gray-300">中介费 {formatCurrency(t.agency)}</span>
-                  <span className="text-gray-700 dark:text-gray-300">市场估值 {formatCurrency(t.market)}</span>
-                  <span className={t.profitLoss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}>涨跌额 {formatCurrency(t.profitLoss)}</span>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
         {rentalItems.length > 0 && (
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
             <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
@@ -2378,29 +2109,6 @@ export default function IndependentAssets() {
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
-
-        {rentalItems.length > 0 && (
-          <div className="bg-gray-50 dark:bg-slate-700/30 rounded-xl px-4 py-2 border border-gray-200 dark:border-slate-600">
-            {(() => {
-              const t = rentalItems.reduce((acc, item) => {
-                const cur = item.currency || 'CNY';
-                acc.rent += convertCurrency(parseFloat(item.rentAmount || 0), cur, 'CNY');
-                acc.deposit += convertCurrency(parseFloat(item.depositAmount || 0), cur, 'CNY');
-                const stats = calculateRentalStats(item);
-                acc.income += convertCurrency(stats.cumulativeIncome || 0, cur, 'CNY');
-                return acc;
-              }, { rent: 0, deposit: 0, income: 0 });
-              return (
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-                  <span className="font-semibold text-gray-900 dark:text-white">出租房产合计 (CNY):</span>
-                  <span className="text-gray-700 dark:text-gray-300">租金 {formatCurrency(t.rent)}</span>
-                  <span className="text-gray-700 dark:text-gray-300">押金 {formatCurrency(t.deposit)}</span>
-                  <span className="text-orange-600 dark:text-orange-400">累计收益 {formatCurrency(t.income)}</span>
-                </div>
-              );
-            })()}
           </div>
         )}
 
@@ -2486,23 +2194,6 @@ export default function IndependentAssets() {
                   <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无车辆资产数据</td>
                 </tr>
               )}
-              {items.length > 0 && (() => {
-                const t = items.reduce((acc, item) => {
-                  const cur = item.currency || 'CNY';
-                  const { residualValue } = calculateVehicleResidualValue(item);
-                  acc.purchase += convertCurrency(parseFloat(item.purchasePrice || 0), cur, 'CNY');
-                  acc.residual += convertCurrency(residualValue, cur, 'CNY');
-                  return acc;
-                }, { purchase: 0, residual: 0 });
-                return (
-                  <tr className="bg-gray-50 dark:bg-slate-700/50 font-semibold border-t-2 border-gray-300 dark:border-slate-600">
-                    <td colSpan={3} className="px-4 py-3 text-sm text-gray-900 dark:text-white text-right">合计 (CNY)</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.purchase)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.residual)}</td>
-                    <td colSpan={3} className="px-4 py-3"></td>
-                  </tr>
-                );
-              })()}
             </tbody>
           </table>
         </div>
@@ -2727,26 +2418,6 @@ export default function IndependentAssets() {
                   <td colSpan={11} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无固定投资数据</td>
                 </tr>
               )}
-              {items.length > 0 && (() => {
-                const t = items.reduce((acc, item) => {
-                  const cur = item.currency || 'CNY';
-                  const stats = calculateFixedInvestmentStats(item);
-                  acc.cost += convertCurrency(parseFloat(item.investmentCost || 0), cur, 'CNY');
-                  acc.totalInvested += convertCurrency(stats.totalInvested, cur, 'CNY');
-                  acc.dividend += convertCurrency(stats.totalDividend, cur, 'CNY');
-                  return acc;
-                }, { cost: 0, totalInvested: 0, dividend: 0 });
-                return (
-                  <tr className="bg-gray-50 dark:bg-slate-700/50 font-semibold border-t-2 border-gray-300 dark:border-slate-600">
-                    <td colSpan={4} className="px-4 py-3 text-sm text-gray-900 dark:text-white text-right">合计 (CNY)</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.cost)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.totalInvested)}</td>
-                    <td className="px-4 py-3"></td>
-                    <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400">{formatCurrency(t.dividend)}</td>
-                    <td colSpan={3} className="px-4 py-3"></td>
-                  </tr>
-                );
-              })()}
             </tbody>
           </table>
         </div>
@@ -2756,11 +2427,6 @@ export default function IndependentAssets() {
 
   const renderEquityTable = () => {
     const items = getAssets('equity');
-    const totalCost = items.reduce((s, i) => {
-      const isHK = i.market === '港股市场' || i.currency === 'HKD';
-      const cost = isHK ? convertCurrency(parseFloat(i.cost) || 0, 'HKD', 'CNY') : parseFloat(i.cost) || 0;
-      return s + cost * (parseFloat(i.quantity) || 0);
-    }, 0);
     return (
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
@@ -2771,91 +2437,36 @@ export default function IndependentAssets() {
           </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1800px]">
+          <table className="w-full">
             <thead className="bg-gray-50 dark:bg-slate-700">
               <tr>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">市场</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">货币</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">资产种类</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">资产类型</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">资产名称</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">代码</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">持仓成本</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">平均买入成本</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">数量</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">现价</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">天数</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">当前市值</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">持仓盈亏</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">持仓盈亏率</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">当日盈亏</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">当日收益率</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">仓位占比</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">所属账户</th>
-                <th className="px-3 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">操作</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">名称</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">代码</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">成本</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">数量</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">当前价格</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">市值</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">盈亏</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">盈亏比例</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
               {items.map(item => {
-                const q = item.code && equityQuotesMap[item.code] ? equityQuotesMap[item.code] : null;
-                const _isHK = item.market === '港股市场' || item.currency === 'HKD';
-                const _cur = item.currency || 'CNY';
-                const _conv = (v) => _isHK ? convertCurrency(v, 'HKD', 'CNY') : parseFloat(v);
-                const _quotePrice = q && q.price != null ? parseFloat(q.price) : null;
-                const _quotePrevClose = q && q.prevClose != null ? parseFloat(q.prevClose) : null;
-                const _price = _quotePrice || _conv(parseFloat(item.currentPrice) || 0);
-                const _prevClose = _quotePrevClose || _conv(parseFloat(item.prevPrice) || 0);
-                const _qty = parseFloat(item.quantity) || 0;
-                const _unitCost = _conv(parseFloat(item.cost) || 0);
-                const _totalCost = _unitCost * _qty;
-                const _avgCost = _qty > 0 ? _totalCost / _qty : _unitCost;
-                const _currentValue = _price * _qty;
-                const _holdingPnl = _currentValue - _totalCost;
-                const _holdingPnlRate = _totalCost > 0 ? (_holdingPnl / _totalCost) * 100 : 0;
-                const _dailyPnl = _prevClose > 0 ? (_price - _prevClose) * _qty : 0;
-                const _dailyPnlRate = _prevClose > 0 ? ((_price - _prevClose) / _prevClose) * 100 : 0;
-                const _positionRatio = totalCost > 0 ? (_totalCost / totalCost) * 100 : 0;
-
-                const _pnlClass = (v) => {
-                  const n = parseFloat(v);
-                  return isNaN(n) ? 'text-gray-600 dark:text-gray-400' : (n >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400');
-                };
-
-                let _holdingDays = 0;
-                if (item.holdDate) {
-                  const d1 = new Date(item.holdDate);
-                  const d2 = new Date();
-                  d2.setHours(0, 0, 0, 0);
-                  _holdingDays = Math.max(0, Math.floor((d2 - d1) / 86400000));
-                }
-
-                // 港股通已转换为人民币显示，统一使用¥符号
-                const _symbol = _isHK ? '¥' : ((item.currency && item.currency.length === 3)
-                  ? (item.currency === 'USD' ? '$' : item.currency === 'HKD' ? 'HK$' : item.currency === 'EUR' ? '€' : item.currency === 'JPY' ? '¥' : item.currency === 'GBP' ? '£' : '¥')
-                  : '¥');
-
+                const pnlValue = parseFloat(item.pnl || 0);
+                const pnlClass = pnlValue >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
                 return (
-                  <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 whitespace-nowrap">
-                    <td className="px-3 py-3 text-sm text-gray-700 dark:text-gray-300 text-left">{item.market || '—'}</td>
-                    <td className="px-3 py-3 text-sm text-gray-700 dark:text-gray-300 text-left">{item.currency || '—'}</td>
-                    <td className="px-3 py-3 text-sm text-gray-700 dark:text-gray-300 text-left">{item.assetKind || '—'}</td>
-                    <td className="px-3 py-3 text-sm text-gray-700 dark:text-gray-300 text-left">{item.assetType || '股票'}</td>
-                    <td className="px-3 py-3 text-sm font-medium text-gray-900 dark:text-white text-left">{item.name}</td>
-                    <td className="px-3 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono text-left">{item.code}</td>
-                    <td className="px-3 py-3 text-sm text-left text-gray-900 dark:text-white">{_symbol}{_totalCost.toFixed(2)}</td>
-                    <td className="px-3 py-3 text-sm text-left text-gray-900 dark:text-white">{_symbol}{_avgCost.toFixed(3)}</td>
-                    <td className="px-3 py-3 text-sm text-left text-gray-900 dark:text-white">{_qty.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}</td>
-                    <td className={`px-3 py-3 text-sm text-left ${_quotePrice ? _pnlClass(_price - _prevClose) : 'text-gray-900 dark:text-white'}`}>{_symbol}{_price.toFixed(3)}</td>
-                    <td className="px-3 py-3 text-sm text-left text-gray-700 dark:text-gray-300">{_holdingDays > 0 ? _holdingDays : '—'}</td>
-                    <td className="px-3 py-3 text-sm text-left font-medium text-gray-900 dark:text-white">{_symbol}{_currentValue.toFixed(2)}</td>
-                    <td className={`px-3 py-3 text-sm text-left font-medium ${_pnlClass(_holdingPnl)}`}>{_holdingPnl >= 0 ? '+' : ''}{_symbol}{_holdingPnl.toFixed(2)}</td>
-                    <td className={`px-3 py-3 text-sm text-left font-medium ${_pnlClass(_holdingPnlRate)}`}>{_holdingPnlRate >= 0 ? '+' : ''}{_holdingPnlRate.toFixed(2)}%</td>
-                    <td className={`px-3 py-3 text-sm text-left font-medium ${_pnlClass(_dailyPnl)}`}>{_dailyPnl >= 0 ? '+' : ''}{_symbol}{_dailyPnl.toFixed(2)}</td>
-                    <td className={`px-3 py-3 text-sm text-left font-medium ${_pnlClass(_dailyPnlRate)}`}>{_dailyPnlRate >= 0 ? '+' : ''}{_dailyPnlRate.toFixed(2)}%</td>
-                    <td className="px-3 py-3 text-sm text-left text-gray-700 dark:text-gray-300">{_positionRatio.toFixed(2)}%</td>
-                    <td className="px-3 py-3 text-sm text-left text-gray-700 dark:text-gray-300">{item.accountName || '—'}</td>
-                    <td className="px-3 py-3 text-sm">
-                      <div className="flex items-center gap-1">
+                  <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.name}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">{item.code}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.cost, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatNumber(item.quantity)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.currentPrice, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.marketValue, item.currency)}</td>
+                    <td className={`px-4 py-3 text-sm font-medium ${pnlClass}`}>{formatCurrency(item.pnl, item.currency)}</td>
+                    <td className={`px-4 py-3 text-sm font-medium ${pnlClass}`}>{formatPercentage(item.pnlRate)}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex items-center gap-2">
                         <button onClick={() => handleEdit(item)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
                           <Edit2 className="w-4 h-4" />
                         </button>
@@ -2869,43 +2480,9 @@ export default function IndependentAssets() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={19} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无股权数据</td>
+                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无股权数据</td>
                 </tr>
               )}
-              {items.length > 0 && (() => {
-                const t = items.reduce((acc, item) => {
-                  const isHK = item.market === '港股市场' || item.currency === 'HKD';
-                  const _conv = (v) => isHK ? convertCurrency(v, 'HKD', 'CNY') : parseFloat(v);
-                  const q = item.code && equityQuotesMap[item.code] ? equityQuotesMap[item.code] : null;
-                  const _quotePrice = q && q.price != null ? parseFloat(q.price) : null;
-                  const _quotePrevClose = q && q.prevClose != null ? parseFloat(q.prevClose) : null;
-                  const _price = _quotePrice || _conv(parseFloat(item.currentPrice) || 0);
-                  const _prevClose = _quotePrevClose || _conv(parseFloat(item.prevPrice) || 0);
-                  const _qty = parseFloat(item.quantity) || 0;
-                  const _unitCost = _conv(parseFloat(item.cost) || 0);
-                  const _totalCost = _unitCost * _qty;
-                  const _currentValue = _price * _qty;
-                  const _holdingPnl = _currentValue - _totalCost;
-                  const _dailyPnl = _prevClose > 0 ? (_price - _prevClose) * _qty : 0;
-                  acc.cost += _totalCost;
-                  acc.marketValue += _currentValue;
-                  acc.holdingPnl += _holdingPnl;
-                  acc.dailyPnl += _dailyPnl;
-                  return acc;
-                }, { cost: 0, marketValue: 0, holdingPnl: 0, dailyPnl: 0 });
-                return (
-                  <tr className="bg-gray-50 dark:bg-slate-700/50 font-semibold border-t-2 border-gray-300 dark:border-slate-600 whitespace-nowrap">
-                    <td colSpan={6} className="px-3 py-3 text-sm text-gray-900 dark:text-white text-right">合计 (CNY)</td>
-                    <td className="px-3 py-3 text-sm text-left text-gray-900 dark:text-white">¥{t.cost.toFixed(2)}</td>
-                    <td colSpan={4} className="px-3 py-3"></td>
-                    <td className="px-3 py-3 text-sm text-left font-medium text-gray-900 dark:text-white">¥{t.marketValue.toFixed(2)}</td>
-                    <td className={`px-3 py-3 text-sm text-left font-medium ${t.holdingPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{t.holdingPnl >= 0 ? '+' : ''}¥{Math.abs(t.holdingPnl).toFixed(2)}</td>
-                    <td className="px-3 py-3"></td>
-                    <td className={`px-3 py-3 text-sm text-left font-medium ${t.dailyPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{t.dailyPnl >= 0 ? '+' : ''}¥{Math.abs(t.dailyPnl).toFixed(2)}</td>
-                    <td colSpan={4} className="px-3 py-3"></td>
-                  </tr>
-                );
-              })()}
             </tbody>
           </table>
         </div>
@@ -2992,36 +2569,6 @@ export default function IndependentAssets() {
                   <td colSpan={13} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无定期资产数据</td>
                 </tr>
               )}
-              {items.length > 0 && (() => {
-                const t = items.reduce((acc, item) => {
-                  const cur = item.currency || 'CNY';
-                  const calcAmount = parseFloat(item.amount || 0);
-                  const calcRate = parseFloat(item.interestRate !== undefined && item.interestRate !== '' ? item.interestRate : (item.interest || 0));
-                  const calcYears = (() => {
-                    if (!item.startDate || !item.endDate) return 0;
-                    const s = new Date(item.startDate);
-                    const e = new Date(item.endDate);
-                    if (e <= s) return 0;
-                    return (e - s) / (1000 * 60 * 60 * 24) / 365;
-                  })();
-                  const listTotalReturn = calcAmount > 0 && calcRate > 0 && calcYears > 0 ? calcAmount * (calcRate / 100) * calcYears : 0;
-                  const listTotalAmount = calcAmount > 0 ? calcAmount + listTotalReturn : 0;
-                  acc.amount += convertCurrency(calcAmount, cur, 'CNY');
-                  acc.totalReturn += convertCurrency(listTotalReturn, cur, 'CNY');
-                  acc.totalAmount += convertCurrency(listTotalAmount, cur, 'CNY');
-                  return acc;
-                }, { amount: 0, totalReturn: 0, totalAmount: 0 });
-                return (
-                  <tr className="bg-gray-50 dark:bg-slate-700/50 font-semibold border-t-2 border-gray-300 dark:border-slate-600">
-                    <td colSpan={5} className="px-4 py-3 text-sm text-gray-900 dark:text-white text-right">合计 (CNY)</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.amount)}</td>
-                    <td colSpan={3} className="px-4 py-3"></td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.totalReturn)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(t.totalAmount)}</td>
-                    <td colSpan={2} className="px-4 py-3"></td>
-                  </tr>
-                );
-              })()}
             </tbody>
           </table>
         </div>
@@ -4148,26 +3695,6 @@ export default function IndependentAssets() {
                     className={`w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">昨收价</label>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={formData.prevPrice || ''}
-                    onChange={(e) => setFormData({ ...formData, prevPrice: e.target.value })}
-                    placeholder="昨收盘价（用于计算当日盈亏）"
-                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">持仓起始日期</label>
-                  <input
-                    type="date"
-                    value={formData.holdDate || ''}
-                    onChange={(e) => setFormData({ ...formData, holdDate: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
               </div>
             </div>
           ) : (
@@ -4435,8 +3962,7 @@ export default function IndependentAssets() {
 
   const renderInsuranceDetailModal = () => {
     if (!showInsuranceDetailModal || !selectedInsurance) return null;
-    // 显示和编辑均基于草稿，保存只在关闭时一次性执行
-    const item = draftInsurance || selectedInsurance;
+    const item = selectedInsurance;
 
     const paidAmount = parseFloat(item.paidAmount || 0);
     const cashValue = parseFloat(item.cashValue || 0);
@@ -4463,6 +3989,13 @@ export default function IndependentAssets() {
       totalDividend = records.reduce((sum, r) => {
         return sum + parseFloat(r.annualActualDividend || 0);
       }, 0);
+    } else if (item.insuranceType === '储蓄险') {
+      if (records.length > 0) {
+        const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
+        const latestRecord = sortedByYear[sortedByYear.length - 1];
+        displayPaidAmount = parseFloat(latestRecord.premiumPaid || 0);
+        displayCashValue = parseFloat(latestRecord.guaranteedCashValue || 0);
+      }
     }
 
     const dividendRate = displayPaidAmount > 0 && totalDividend > 0
@@ -4478,7 +4011,7 @@ export default function IndependentAssets() {
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
           <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">保险明细 - {item.policyName || item.policyNumber || '保单'}</h2>
-            <button onClick={saveInsuranceDraftAndClose} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
+            <button onClick={() => setShowInsuranceDetailModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
               <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
@@ -4524,15 +4057,15 @@ export default function IndependentAssets() {
             <div className="grid grid-cols-5 gap-3 mb-6">
               <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">已交保费</div>
-                <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(displayPaidAmount, item.currency, exchangeRates)}</div>
+                <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(displayPaidAmount, item.currency)}</div>
               </div>
               <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">现金价值</div>
-                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(displayCashValue, item.currency, exchangeRates)}</div>
+                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(displayCashValue, item.currency)}</div>
               </div>
               <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">累计分红额</div>
-                <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{formatCurrency(totalDividend, item.currency, exchangeRates)}</div>
+                <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{formatCurrency(totalDividend, item.currency)}</div>
               </div>
               <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">累计分红收益率</div>
@@ -4630,7 +4163,7 @@ export default function IndependentAssets() {
                         const cumulativeActualDividend = parseFloat(record.cumulativeActualDividend || 0);
 
                         const toggleStatus = () => {
-                          const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                          const newRecords = selectedInsurance.transactionRecords.map(r => {
                             if (r.id === record.id) {
                               return { ...r, status: record.status === '达成' ? '未达成' : '达成' };
                             }
@@ -4644,7 +4177,7 @@ export default function IndependentAssets() {
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{record.year || '—'}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.annualPremium || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) return { ...r, annualPremium: e.target.value };
                                   return r;
                                 });
@@ -4653,7 +4186,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.cumulativePremium || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) return { ...r, cumulativePremium: e.target.value };
                                   return r;
                                 });
@@ -4662,7 +4195,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.annualGuaranteedAnnuity || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) return { ...r, annualGuaranteedAnnuity: e.target.value };
                                   return r;
                                 });
@@ -4671,7 +4204,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.cumulativeGuaranteedReceived || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) return { ...r, cumulativeGuaranteedReceived: e.target.value };
                                   return r;
                                 });
@@ -4680,7 +4213,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.yearEndCashValue || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) return { ...r, yearEndCashValue: e.target.value };
                                   return r;
                                 });
@@ -4689,7 +4222,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.annualDividendDemo || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) return { ...r, annualDividendDemo: e.target.value };
                                   return r;
                                 });
@@ -4698,7 +4231,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.cumulativeDividendDemo || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) return { ...r, cumulativeDividendDemo: e.target.value };
                                   return r;
                                 });
@@ -4708,7 +4241,7 @@ export default function IndependentAssets() {
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">{formatCurrency(totalBenefit, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.annualActualDividend || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) return { ...r, annualActualDividend: e.target.value };
                                   return r;
                                 });
@@ -4717,7 +4250,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.cumulativeActualDividend || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) return { ...r, cumulativeActualDividend: e.target.value };
                                   return r;
                                 });
@@ -4844,7 +4377,7 @@ export default function IndependentAssets() {
                         
                         const toggleStatus = () => {
                           const newStatus = status === '达成' ? '未达成' : (status === '未达成' ? '未开始' : '达成');
-                          const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                          const newRecords = selectedInsurance.transactionRecords.map(r => {
                             if (r.id === record.id) {
                               return { ...r, status: newStatus };
                             }
@@ -4869,7 +4402,7 @@ export default function IndependentAssets() {
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{irrReturn !== null ? irrReturn.toFixed(2) + '%' : '—'}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="date" value={record.date || ''} onChange={(e) => {
-                                const allRecords = draftInsurance?.transactionRecords || [];
+                                const allRecords = selectedInsurance.transactionRecords || [];
                                 const sortedAllRecords = allRecords.slice().sort((a, b) => {
                                   const yearA = parseInt(a.year) || 0;
                                   const yearB = parseInt(b.year) || 0;
@@ -4908,7 +4441,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.age || ''} onChange={(e) => {
-                                const allRecords = draftInsurance?.transactionRecords || [];
+                                const allRecords = selectedInsurance.transactionRecords || [];
                                 const sortedAllRecords = allRecords.slice().sort((a, b) => {
                                   const yearA = parseInt(a.year) || 0;
                                   const yearB = parseInt(b.year) || 0;
@@ -4943,7 +4476,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.actualProfitAmount || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) {
                                     return { ...r, actualProfitAmount: e.target.value };
                                   }
@@ -4954,7 +4487,7 @@ export default function IndependentAssets() {
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                               <input type="number" value={record.cashFlowAmount || ''} onChange={(e) => {
-                                const newRecords = (draftInsurance?.transactionRecords || []).map(r => {
+                                const newRecords = selectedInsurance.transactionRecords.map(r => {
                                   if (r.id === record.id) {
                                     return { ...r, cashFlowAmount: e.target.value };
                                   }
@@ -4996,7 +4529,7 @@ export default function IndependentAssets() {
           </div>
 
           <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end">
-            <button onClick={saveInsuranceDraftAndClose} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+            <button onClick={() => setShowInsuranceDetailModal(false)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
               关闭
             </button>
           </div>

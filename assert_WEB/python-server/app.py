@@ -1065,6 +1065,30 @@ def deep_report():
     })
 
 
+@app.route("/api/fund/money/<code>", methods=["GET"])
+def fund_money(code):
+    """货币基金每万份收益与7日年化收益率.
+
+    返回: { symbol, name, nav_per_10k, annualized_7d, date }
+    """
+    data = rt._fetch_money_fund(code)
+    if data is None:
+        return jsonify({"error": f"未获取到货币基金 {code} 数据"}), 404
+    return jsonify(data)
+
+
+@app.route("/api/fund/nav/<code>", methods=["GET"])
+def fund_nav(code):
+    """通用基金净值（LOF/ETF/场外基金）: 最新净值 + 前一日净值.
+
+    返回: { symbol, name, nav, prev_nav, accumulated_nav, nav_date, daily_change_pct }
+    """
+    data = rt._fetch_fund_nav(code)
+    if data is None:
+        return jsonify({"error": f"未获取到基金 {code} 净值数据"}), 404
+    return jsonify(data)
+
+
 @app.route("/api/symbols", methods=["GET"])
 def get_symbols():
     """获取快速查询的示例代码。"""
