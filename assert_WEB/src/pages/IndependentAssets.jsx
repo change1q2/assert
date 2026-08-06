@@ -4278,12 +4278,11 @@ export default function IndependentAssets() {
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保单年度终结</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">缴付保费总额</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保证现金价值</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">复归红利</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">终期红利</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">总额</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">分红额</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保证红利</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保证现金价值</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">非保证红利</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">预期红利</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">演示收益率</th>
@@ -4390,12 +4389,11 @@ export default function IndependentAssets() {
                           <tr key={record.id || index} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{record.year || '—'}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(record.premiumPaid, item.currency)}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(guaranteedCashValue, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(bonusDividend, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(midTermDividend, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">{formatCurrency(totalAmount, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(guaranteedCashValue - premiumPaid + bonusDividend + midTermDividend, item.currency)}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(guaranteedBonus, item.currency)}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(guaranteedCashValue, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(nonGuaranteedBonus, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(expectedBonus, item.currency)}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{demoRate.toFixed(2)}%</td>
