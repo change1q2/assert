@@ -3070,7 +3070,8 @@ export default function Finance({ onAssetPenetration }) {
       const payload = {
         id: editMode ? editingId : `fa${Date.now()}`,
         market: newAccount.market || '国内市场',
-        currency: newAccount.currency || 'CNY',
+        // 港股通：价格已按汇率折算为CNY，强制货币为CNY
+        currency: newAccount.categoryL2 === '港股通' ? 'CNY' : (newAccount.currency || 'CNY'),
         assetKind: newAccount.assetKind || '',
         kind: newAccount.assetType || '股票',
         assetType: newAccount.assetType || '股票',
@@ -5092,11 +5093,13 @@ export default function Finance({ onAssetPenetration }) {
                       <select value={newAccount.categoryL2} onChange={e => {
                         const l2 = e.target.value;
                         const cascade = CASCADE_OPTIONS[newAccount.assetType];
+                        // 港股通：自动设置货币为 CNY（价格已按汇率折算）
+                        const currencyUpdate = l2 === '港股通' ? { currency: 'CNY' } : {};
                         if (cascade && cascade.l3Default && cascade.l3Default[newAccount.categoryL1] && cascade.l3Default[newAccount.categoryL1][l2]) {
                           const l3 = cascade.l3Default[newAccount.categoryL1][l2];
-                          setNewAccount({ ...newAccount, categoryL2: l2, categoryL3: l3, categoryL4: '' });
+                          setNewAccount({ ...newAccount, categoryL2: l2, categoryL3: l3, categoryL4: '', ...currencyUpdate });
                         } else {
-                          setNewAccount({ ...newAccount, categoryL2: l2, categoryL3: '', categoryL4: '' });
+                          setNewAccount({ ...newAccount, categoryL2: l2, categoryL3: '', categoryL4: '', ...currencyUpdate });
                         }
                       }}
                         className={`${FORM_SELECT} flex-1`}>
