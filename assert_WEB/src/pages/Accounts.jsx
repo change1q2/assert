@@ -115,10 +115,13 @@ export function calcCooperationFunds(accounts, getAccountAmount) {
 function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
   const converted = convertCurrency(value, currency, targetCurrency, rates);
   const symbol = getCurrencySymbol(targetCurrency);
-  return `${symbol}${new Intl.NumberFormat('zh-CN', {
+  const n = truncateNum(converted, 3);
+  const isNeg = n < 0;
+  const absFormatted = new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
-  }).format(truncateNum(converted, 3))}`;
+  }).format(Math.abs(n));
+  return `${symbol}${isNeg ? '-' : ''}${absFormatted}`;
 }
 
 const categoryIcons = {
@@ -291,9 +294,23 @@ export default function Accounts() {
     let mv = 0;
     let cost = 0;
     if (!item) return { mv, cost };
+    const itemCurrency = item.currency || 'CNY';
+    const conv = (v) => convertCurrency(parseFloat(v) || 0, itemCurrency, 'CNY', exchangeRates);
     if (type === 'insurance') {
-      mv = parseFloat(item.cashValue) || 0;
-      cost = parseFloat(item.paidAmount) || 0;
+      const records = item.transactionRecords || [];
+      const isAnnuity = item.insuranceType === '年金险';
+      let cashValue = parseFloat(item.cashValue) || 0;
+      let paidAmount = parseFloat(item.paidAmount) || 0;
+      if (isAnnuity) {
+        paidAmount = records.reduce((sum, r) => sum + (parseFloat(r.annualPremium) || 0), 0);
+        if (records.length > 0) {
+          const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
+          const latestRecord = sortedByYear[sortedByYear.length - 1];
+          cashValue = parseFloat(latestRecord.yearEndCashValue) || 0;
+        }
+      }
+      mv = conv(cashValue);
+      cost = conv(paidAmount);
     } else if (type === 'realestate') {
       if (item.type === '自用') {
         const perSqm = parseFloat(item.selfUseMarketPricePerSqm) || 0;
@@ -304,9 +321,11 @@ export default function Accounts() {
         mv = parseFloat(item.marketValue) || 0;
       }
       cost = parseFloat(item.purchasePrice) || 0;
+      mv = conv(mv);
+      cost = conv(cost);
     } else if (type === 'vehicle') {
-      mv = parseFloat(item.residualValue) || 0;
-      cost = parseFloat(item.purchasePrice) || 0;
+      mv = conv(parseFloat(item.residualValue) || 0);
+      cost = conv(parseFloat(item.purchasePrice) || 0);
     } else if (type === 'fixedinvestment') {
       const baseCost = parseFloat(item.investmentCost) || 0;
       const annual = parseFloat(item.annualContribution) || 0;
@@ -317,15 +336,15 @@ export default function Accounts() {
           years = Math.max(0, new Date().getFullYear() - startYear);
         }
       }
-      mv = baseCost + annual * years;
+      mv = conv(baseCost + annual * years);
       cost = mv;
     } else if (type === 'equity') {
       const qty = parseFloat(item.quantity) || 0;
-      mv = qty * (parseFloat(item.currentPrice) || 0);
-      cost = qty * (parseFloat(item.cost) || 0);
+      mv = conv(qty * (parseFloat(item.currentPrice) || 0));
+      cost = conv(qty * (parseFloat(item.cost) || 0));
     } else if (type === 'fixeddeposit') {
-      mv = parseFloat(item.amount) || 0;
-      cost = parseFloat(item.amount) || 0;
+      mv = conv(parseFloat(item.amount) || 0);
+      cost = conv(parseFloat(item.amount) || 0);
     }
     return { mv, cost };
   };
@@ -443,7 +462,7 @@ export default function Accounts() {
     });
 
     return stats;
-  }, [accounts, independentAssets, finance, financeAssets, records, debts]);
+  }, [accounts, independentAssets, finance, financeAssets, records, debts, exchangeRates]);
 
   const cooperationFunds = useMemo(() => {
     return calcCooperationFunds(accounts, acc => {

@@ -123,7 +123,8 @@ export default function App() {
 
     doSync();
 
-    const interval = setInterval(doSync, 30000);
+    // 每30分钟同步一次
+    const interval = setInterval(doSync, 30 * 60 * 1000);
     const handleOnline = () => {
       console.log('📶 网络已恢复，检查待同步数据...');
       doSync();

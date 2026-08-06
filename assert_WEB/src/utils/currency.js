@@ -24,7 +24,7 @@ export function getCurrencySymbol(code) {
 }
 
 // 截断到指定小数位，不四舍五入
-export function truncateNum(value, decimals = 3) {
+export function truncateNum(value, decimals = 4) {
   const num = parseFloat(value);
   if (isNaN(num) || num === 0) return 0;
   const factor = Math.pow(10, decimals);
@@ -33,10 +33,10 @@ export function truncateNum(value, decimals = 3) {
 
 export function formatAmount(amount, currencyCode = DEFAULT_BASE_CURRENCY) {
   const symbol = getCurrencySymbol(currencyCode);
-  const absAmount = Math.abs(truncateNum(amount || 0, 3));
+  const absAmount = Math.abs(truncateNum(amount || 0, 4));
   const formatted = absAmount.toLocaleString('zh-CN', {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
   });
   return `${symbol}${formatted}`;
 }

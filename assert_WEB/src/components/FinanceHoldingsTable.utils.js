@@ -3,9 +3,9 @@ export { getCurrencySymbol };
 
 export function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  }).format(truncateNum(value, 3));
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(truncateNum(value, 4));
 }
 
 export function convertCurrency(value, fromCurrency, toCurrency, rates) {
@@ -18,10 +18,13 @@ export function convertCurrency(value, fromCurrency, toCurrency, rates) {
 export function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
   const converted = convertCurrency(value, currency, targetCurrency, rates);
   const symbol = getCurrencySymbol(targetCurrency);
-  return `${symbol}${new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  }).format(truncateNum(converted, 3))}`;
+  const n = truncateNum(converted, 4);
+  const isNeg = n < 0;
+  const absFormatted = new Intl.NumberFormat('zh-CN', {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(Math.abs(n));
+  return `${symbol}${isNeg ? '-' : ''}${absFormatted}`;
 }
 
 export function formatPriceValue(value) {
@@ -62,9 +65,9 @@ export function computeHoldingDays(account) {
 export function formatNum(value) {
   if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  }).format(truncateNum(value, 3));
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(truncateNum(value, 4));
 }
 
 export const POS_CLASS = 'text-green-600 dark:text-green-400';

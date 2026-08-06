@@ -24,6 +24,17 @@ async function safeDecode(buffer) {
   return buffer.toString("latin1");
 }
 
+// 清洗名称：移除东方财富等数据源附加的特殊符号
+// 保留：中英文、数字、Unicode 字母组合、常见标点、空格、括号等
+function cleanName(name) {
+  if (!name) return '';
+  return String(name)
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2000-\u200F\u2028-\u202F\u2055-\u205F\u2060-\u206F\u3000-\u303F]/g, '')
+    .replace(/[●◆◇○◎△□■▲▼◉◐◑◒◓◔◕◖◗★☆☇☈☉☊☋☌☍☎☏♠♣♥♡¤¦¨©®°±²³´µ¶·¸¹º»¼½¾¿À-ÿØ-ÿ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // 同花顺代码转换：仅支持 A 股 sh/sz
 function thsCodeFor(code) {
   code = String(code || "").trim().replace(/^(sh|sz)/i, "");
@@ -88,14 +99,27 @@ async function lookupSecurities(q) {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
       signal: AbortSignal.timeout(8000),
     });
-    const searchData = await searchRes.json();
+    const searchText = await searchRes.text();
+    // 东方财富接口返回可能是 JSONP 格式 (如 jQuery3510({...}))
+    let searchData;
+    try {
+      searchData = JSON.parse(searchText);
+    } catch {
+      // 尝试解析 JSONP 格式
+      const jsonpMatch = searchText.match(/^[^(]+\((.*)\)[^)]*$/s);
+      if (jsonpMatch) {
+        searchData = JSON.parse(jsonpMatch[1]);
+      } else {
+        throw new Error('Failed to parse search response');
+      }
+    }
     const rows = searchData?.QuotationCodeTable?.Data || [];
     const items = rows
       .filter((r) => ["AStock", "OTCFUND", "ETF", "Index", "HK", "UsStock", "UsADR"].includes(r.Classify))
       .slice(0, 8)
       .map((r) => ({
         code: r.Code,
-        name: r.Name,
+        name: cleanName(r.Name),
         classify: r.Classify,
         typeName: r.SecurityTypeName,
         marketType: r.MarketType,
@@ -130,7 +154,7 @@ async function lookupSecurities(q) {
             if (!items.some((entry) => entry.code === code)) {
               items.push({
                 code,
-                name: parts[1],
+                name: cleanName(parts[1]),
                 classify: "ETF",
                 typeName: "ETF",
                 marketType: prefix === "sh" ? "1" : "2",

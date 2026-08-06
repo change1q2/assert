@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Search, Settings, Edit2, Trash2, Plus, X,
-  Filter, Save, ChevronUp, ChevronDown, Check,
+  Filter, Save, ChevronUp, ChevronDown, Check, Download,
 } from 'lucide-react';
 import {
   getCurrencySymbol,
@@ -279,6 +279,9 @@ export default function FinanceHoldingsTable({
       case 'currentValue':
         return formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
       case 'currentPrice':
+        if (h.positionType === '货币基金') {
+          return <span className="text-gray-600 dark:text-gray-400">¥1.000</span>;
+        }
         let colorClass = '';
         if (h.priceChange === 'up') colorClass = 'text-green-600 dark:text-green-400';
         else if (h.priceChange === 'down') colorClass = 'text-red-500 dark:text-red-400';
@@ -390,6 +393,51 @@ export default function FinanceHoldingsTable({
     setFilterPositionType('');
     setFilterTag('');
     setPage(1);
+  };
+
+  const handleExportToCSV = () => {
+    const headers = ['代码', '名称', '市场', '货币', '资产类型', '持仓成本', '现价', '数量', '当前市值', '持仓盈亏', '持仓收益率'];
+
+    const escapeCSV = (value) => {
+      if (value === null || value === undefined) return '';
+      const str = String(value);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const rows = filtered.map(h => {
+      const totalCost = (parseFloat(h.costPrice) || 0) * (parseFloat(h.quantity) || 0);
+      const pnlRate = parseFloat(h.holdingPnlRate);
+      return [
+        h.code || '',
+        h.name || '',
+        h.market || '',
+        h.currency || '',
+        h.assetType || '',
+        totalCost.toFixed(2),
+        h.currentPrice || '',
+        h.quantity || '',
+        h.currentValue || h.balance || '',
+        h.holdingPnl || 0,
+        isNaN(pnlRate) ? '' : `${pnlRate.toFixed(2)}%`,
+      ];
+    });
+
+    const csvContent = [headers, ...rows].map(row => row.map(escapeCSV).join(',')).join('\r\n');
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    link.href = url;
+    link.download = `持仓数据_${dateStr}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -848,6 +896,13 @@ export default function FinanceHoldingsTable({
               </div>
             )}
           </div>
+
+          <button
+            onClick={handleExportToCSV}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" /> 导出
+          </button>
 
           <div className="relative w-44 shrink-0">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />

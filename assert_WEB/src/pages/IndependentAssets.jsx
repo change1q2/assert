@@ -43,23 +43,47 @@ const FIXED_INVESTMENT_EVENT_TYPES = [
 
 const FIXED_INVESTMENT_OUTFLOW_EVENTS = ['投入本金', '追加'];
 
-function formatCurrency(value, currency = 'CNY') {
+function formatCurrency(value, currency = 'CNY', exchangeRates = null) {
   if (value === null || value === undefined) return '—';
+  const numValue = parseFloat(value);
+  if (isNaN(numValue)) return '—';
   const option = CURRENCY_OPTIONS.find(c => c.code === currency) || CURRENCY_OPTIONS[0];
   const formatted = new Intl.NumberFormat('zh-CN', {
     style: 'decimal',
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  }).format(truncateNum(value, 3));
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(truncateNum(numValue, 4));
+  
+  // 如果货币不是CNY且有汇率数据，同时显示原币和CNY转换值
+  if (currency !== 'CNY' && exchangeRates) {
+    const convertedToCNY = convertCurrencyStatic(numValue, currency, 'CNY', exchangeRates);
+    const cnyFormatted = new Intl.NumberFormat('zh-CN', {
+      style: 'decimal',
+      minimumFractionDigits: 4,
+      maximumFractionDigits: 4,
+    }).format(truncateNum(convertedToCNY, 4));
+    return `${option.symbol}${formatted} (¥${cnyFormatted})`;
+  }
+  
   return `${option.symbol}${formatted}`;
+}
+
+// 静态汇率转换函数，用于组件外部
+function convertCurrencyStatic(value, fromCurrency, toCurrency = 'CNY', exchangeRates = null) {
+  if (!value) return 0;
+  if (fromCurrency === toCurrency) return parseFloat(value);
+  const rates = exchangeRates || { CNY: 1, USD: 7.15, HKD: 0.86, EUR: 7.85, JPY: 0.046, GBP: 9.25 };
+  const fromRate = rates[fromCurrency] || 1;
+  const toRate = rates[toCurrency] || 1;
+  return parseFloat(value) * (fromRate / toRate);
 }
 
 function formatNumber(value) {
   if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  }).format(truncateNum(value, 3));
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(truncateNum(value, 4));
 }
 
 function formatPercentage(value) {
@@ -546,10 +570,23 @@ export default function IndependentAssets() {
 
   const saveData = async (data) => {
     const newState = { ...stateData, ...data };
+    
+    // 先保存到 localStorage 作为备份，确保数据不会丢失
+    try {
+      localStorage.setItem('wealth_os_independent_assets', JSON.stringify(newState.independentAssets || {}));
+    } catch (e) {
+      console.warn('Failed to save to localStorage backup:', e);
+    }
+    
+    // 优先保存到数据库
     const result = await saveState(newState);
-    localStorage.setItem('wealth_os_independent_assets', JSON.stringify(newState.independentAssets || {}));
     setStateData(newState);
-    if (!result.cached) {
+    
+    // 如果是缓存模式（离线），标记为待同步
+    if (result.cached) {
+      console.warn('Data saved to local cache, will sync when online');
+    } else {
+      // 保存成功后，重新从服务器加载数据以确保数据一致性
       await loadData();
     }
   };
@@ -2066,9 +2103,9 @@ export default function IndependentAssets() {
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyDate || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyStatus || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.paymentMethod || '—'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listPaidAmount, item.currency)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listCashValue, item.currency)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listDividend, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listPaidAmount, item.currency, exchangeRates)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listCashValue, item.currency, exchangeRates)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listDividend, item.currency, exchangeRates)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.currency || '—'}</td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
@@ -4460,15 +4497,15 @@ export default function IndependentAssets() {
             <div className="grid grid-cols-5 gap-3 mb-6">
               <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">已交保费</div>
-                <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(displayPaidAmount, item.currency)}</div>
+                <div className="text-lg font-bold text-green-600 dark:text-green-400">{formatCurrency(displayPaidAmount, item.currency, exchangeRates)}</div>
               </div>
               <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">现金价值</div>
-                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(displayCashValue, item.currency)}</div>
+                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(displayCashValue, item.currency, exchangeRates)}</div>
               </div>
               <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">累计分红额</div>
-                <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{formatCurrency(totalDividend, item.currency)}</div>
+                <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{formatCurrency(totalDividend, item.currency, exchangeRates)}</div>
               </div>
               <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 dark:text-gray-400">累计分红收益率</div>

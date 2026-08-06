@@ -14,10 +14,13 @@ function convertCurrency(value, fromCurrency, toCurrency, rates) {
 function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
   const converted = convertCurrency(value, currency, targetCurrency, rates);
   const symbol = getCurrencySymbol(targetCurrency);
-  return `${symbol}${new Intl.NumberFormat('zh-CN', {
+  const n = truncateNum(converted, 3);
+  const isNeg = n < 0;
+  const absFormatted = new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
-  }).format(truncateNum(converted, 3))}`;
+  }).format(Math.abs(n));
+  return `${symbol}${isNeg ? '-' : ''}${absFormatted}`;
 }
 
 function formatCurrency(value) {
