@@ -172,6 +172,17 @@ export default function Analysis({ onNavigate }) {
     return expenseCategories.includes(category) ? category : '其他支出';
   };
 
+  const GARBLED_PATTERN = /^[?？�\s]+$/;
+  const sanitizeCategory = (name, fallback = '未分类') => {
+    if (!name || typeof name !== 'string') return fallback;
+    const trimmed = name.trim();
+    if (!trimmed || GARBLED_PATTERN.test(trimmed)) return fallback;
+    // 包含过多问号或替换字符也视为乱码
+    const qCount = (trimmed.match(/[?？�]/g) || []).length;
+    if (qCount > trimmed.length * 0.3) return fallback;
+    return trimmed;
+  };
+
   const monthDays = useMemo(() => {
     const days = [];
     const today = new Date();
@@ -208,27 +219,29 @@ export default function Analysis({ onNavigate }) {
       if (record.type === 'income') {
         totalIncome += amount;
         dateMap[dateKey].income += amount;
-        const category = record.category || '其他收入';
+        const category = sanitizeCategory(record.category, '其他收入');
         const categoryL1 = getCategoryL1(record);
         categoryMap.income[category] = (categoryMap.income[category] || 0) + amount;
         categoryL1Map.income[categoryL1] = (categoryL1Map.income[categoryL1] || 0) + amount;
         
         if (record.tags && record.tags.length > 0) {
           record.tags.forEach(tag => {
-            tagMap[tag] = (tagMap[tag] || 0) + amount;
+            const cleanTag = sanitizeCategory(tag, '其他');
+            tagMap[cleanTag] = (tagMap[cleanTag] || 0) + amount;
           });
         }
       } else if (record.type === 'expense') {
         totalExpense += amount;
         dateMap[dateKey].expense += amount;
-        const category = record.category || '其他支出';
+        const category = sanitizeCategory(record.category, '其他支出');
         const categoryL1 = getCategoryL1(record);
         categoryMap.expense[category] = (categoryMap.expense[category] || 0) + amount;
         categoryL1Map.expense[categoryL1] = (categoryL1Map.expense[categoryL1] || 0) + amount;
         
         if (record.tags && record.tags.length > 0) {
           record.tags.forEach(tag => {
-            tagMap[tag] = (tagMap[tag] || 0) + amount;
+            const cleanTag = sanitizeCategory(tag, '其他');
+            tagMap[cleanTag] = (tagMap[cleanTag] || 0) + amount;
           });
         }
       }
@@ -452,25 +465,27 @@ export default function Analysis({ onNavigate }) {
 
       if (record.type === 'income') {
         totalIncome += amount;
-        const category = record.category || '其他收入';
+        const category = sanitizeCategory(record.category, '其他收入');
         const categoryL1 = getCategoryL1(record);
         categoryMap.income[category] = (categoryMap.income[category] || 0) + amount;
         categoryL1Map.income[categoryL1] = (categoryL1Map.income[categoryL1] || 0) + amount;
         (record.tags || []).forEach(tag => {
-          if (!tagAgg[tag]) tagAgg[tag] = { income: 0, expense: 0, count: 0 };
-          tagAgg[tag].income += amount;
-          tagAgg[tag].count += 1;
+          const cleanTag = sanitizeCategory(tag, '其他');
+          if (!tagAgg[cleanTag]) tagAgg[cleanTag] = { income: 0, expense: 0, count: 0 };
+          tagAgg[cleanTag].income += amount;
+          tagAgg[cleanTag].count += 1;
         });
       } else if (record.type === 'expense') {
         totalExpense += amount;
-        const category = record.category || '其他支出';
+        const category = sanitizeCategory(record.category, '其他支出');
         const categoryL1 = getCategoryL1(record);
         categoryMap.expense[category] = (categoryMap.expense[category] || 0) + amount;
         categoryL1Map.expense[categoryL1] = (categoryL1Map.expense[categoryL1] || 0) + amount;
         (record.tags || []).forEach(tag => {
-          if (!tagAgg[tag]) tagAgg[tag] = { income: 0, expense: 0, count: 0 };
-          tagAgg[tag].expense += amount;
-          tagAgg[tag].count += 1;
+          const cleanTag = sanitizeCategory(tag, '其他');
+          if (!tagAgg[cleanTag]) tagAgg[cleanTag] = { income: 0, expense: 0, count: 0 };
+          tagAgg[cleanTag].expense += amount;
+          tagAgg[cleanTag].count += 1;
         });
       }
     });
@@ -625,31 +640,33 @@ export default function Analysis({ onNavigate }) {
         totalIncome += amount;
         monthMap[month].income += amount;
         dateMap[dateKey].income += amount;
-        const category = record.category || '其他收入';
+        const category = sanitizeCategory(record.category, '其他收入');
         const categoryL1 = getCategoryL1(record);
         categoryMap.income[category] = (categoryMap.income[category] || 0) + amount;
         categoryL1Map.income[categoryL1] = (categoryL1Map.income[categoryL1] || 0) + amount;
         categoryCountMap.income[category] = (categoryCountMap.income[category] || 0) + 1;
         categoryL1CountMap.income[categoryL1] = (categoryL1CountMap.income[categoryL1] || 0) + 1;
         (record.tags || []).forEach(tag => {
-          if (!tagAgg[tag]) tagAgg[tag] = { income: 0, expense: 0, count: 0 };
-          tagAgg[tag].income += amount;
-          tagAgg[tag].count += 1;
+          const cleanTag = sanitizeCategory(tag, '其他');
+          if (!tagAgg[cleanTag]) tagAgg[cleanTag] = { income: 0, expense: 0, count: 0 };
+          tagAgg[cleanTag].income += amount;
+          tagAgg[cleanTag].count += 1;
         });
       } else if (record.type === 'expense') {
         totalExpense += amount;
         monthMap[month].expense += amount;
         dateMap[dateKey].expense += amount;
-        const category = record.category || '其他支出';
+        const category = sanitizeCategory(record.category, '其他支出');
         const categoryL1 = getCategoryL1(record);
         categoryMap.expense[category] = (categoryMap.expense[category] || 0) + amount;
         categoryL1Map.expense[categoryL1] = (categoryL1Map.expense[categoryL1] || 0) + amount;
         categoryCountMap.expense[category] = (categoryCountMap.expense[category] || 0) + 1;
         categoryL1CountMap.expense[categoryL1] = (categoryL1CountMap.expense[categoryL1] || 0) + 1;
         (record.tags || []).forEach(tag => {
-          if (!tagAgg[tag]) tagAgg[tag] = { income: 0, expense: 0, count: 0 };
-          tagAgg[tag].expense += amount;
-          tagAgg[tag].count += 1;
+          const cleanTag = sanitizeCategory(tag, '其他');
+          if (!tagAgg[cleanTag]) tagAgg[cleanTag] = { income: 0, expense: 0, count: 0 };
+          tagAgg[cleanTag].expense += amount;
+          tagAgg[cleanTag].count += 1;
         });
       }
     });
@@ -1172,22 +1189,27 @@ export default function Analysis({ onNavigate }) {
                       outerRadius={100}
                       paddingAngle={2}
                       dataKey="value"
-                      label={({ name, payload, x, y, textAnchor }) => (
-                        <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={pieLabelFontSize}>
-                          {name} {payload.percent?.toFixed(1) || 0}%
-                        </text>
-                      )}
-                      labelLine={false}
+                      minAngle={1}
+                      label={({ name, payload, x, y, textAnchor }) => {
+                        const pct = payload.percent != null ? payload.percent : 0;
+                        if (pct < 1) return null;
+                        return (
+                          <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={pieLabelFontSize} fontFamily="system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif, SimHei">
+                            {name} {pct.toFixed(1)}%
+                          </text>
+                        );
+                      }}
+                      labelLine={{ length: 12, length2: 8, strokeWidth: 1, stroke: '#94a3b8' }}
                     >
                       {finalExpense.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value, name) => [formatCurrency(value), name]} />
-                    <text x="50%" y="45%" textAnchor="middle" className="text-xs font-medium fill-gray-700 dark:fill-gray-300">
+                    <text x="50%" y="45%" textAnchor="middle" className="text-xs font-medium fill-gray-700 dark:fill-gray-300" fontFamily="system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif">
                       {finalExpense[0]?.name || '支出'}
                     </text>
-                    <text x="50%" y="60%" textAnchor="middle" className="text-sm font-bold fill-gray-900 dark:fill-white">
+                    <text x="50%" y="60%" textAnchor="middle" className="text-sm font-bold fill-gray-900 dark:fill-white" fontFamily="system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif">
                       {finalExpense[0] && cExpense > 0 ? `${(finalExpense[0].value / cExpense * 100).toFixed(1)}%` : '0%'}
                     </text>
                   </PieChart>
@@ -1418,12 +1440,17 @@ export default function Analysis({ onNavigate }) {
                   outerRadius={100} 
                   paddingAngle={2} 
                   dataKey="spent"
-                  label={({ name, percent, x, y, textAnchor }) => (
-                        <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={pieLabelFontSize}>
-                          {name} {(percent * 100).toFixed(1)}%
-                        </text>
-                      )}
-                  labelLine={true}
+                  minAngle={1}
+                  label={({ name, percent, x, y, textAnchor }) => {
+                    const pct = (percent * 100);
+                    if (pct < 1) return null;
+                    return (
+                      <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={pieLabelFontSize} fontFamily="system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif, SimHei">
+                        {name} {pct.toFixed(1)}%
+                      </text>
+                    );
+                  }}
+                  labelLine={{ length: 12, length2: 8, strokeWidth: 1, stroke: '#94a3b8' }}
                 >
                   {dailyBudgetData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
@@ -1835,12 +1862,17 @@ export default function Analysis({ onNavigate }) {
                       outerRadius={90}
                       paddingAngle={2}
                       dataKey="value"
-                      label={({ name, value, percent, x, y, textAnchor }) => (
-                        <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={pieLabelFontSize}>
-                          {name} {percent.toFixed(1)}%
-                        </text>
-                      )}
-                      labelLine={{ length: 10, strokeWidth: 1 }}
+                      minAngle={1}
+                      label={({ name, value, percent, x, y, textAnchor }) => {
+                        const pct = percent || 0;
+                        if (pct < 1) return null;
+                        return (
+                          <text x={x} y={y} textAnchor={textAnchor} fill="#374151" fontSize={pieLabelFontSize} fontFamily="system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif, SimHei">
+                            {name} {pct.toFixed(1)}%
+                          </text>
+                        );
+                      }}
+                      labelLine={{ length: 12, length2: 8, strokeWidth: 1, stroke: '#94a3b8' }}
                     >
                       {(yearPieType === 'expense' ? yCategory.expense : yCategory.income).map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
