@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchRealTimeExchangeRates } from '../api';
+import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchMoneyFundData, fetchRealTimeExchangeRates } from '../api';
 import { CURRENCIES, getCurrencySymbol, getCurrencyName, truncateNum } from '../utils/currency';
 import {
   TrendingUp,
@@ -378,19 +378,21 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           const _computedQty = buyTotalQty - sellTotalQty;
           const _computedCostPrice = buyTotalQty > 0 ? buyTotalAmount / buyTotalQty : 0;
           const currentPrice = parseFloat(item.currentPrice) || 0;
-          const shares = buyTotalQty > 0 ? _computedQty : (parseFloat(item.shares || item.quantity) || 0);
+          const userQty = parseFloat(item.quantity ?? item.shares);
+          const shares = buyTotalQty > 0 ? _computedQty : (Number.isFinite(userQty) ? userQty : 0);
           const costPrice = buyTotalQty > 0 ? _computedCostPrice : (parseFloat(item.costPrice || item.cost) || 0);
           const cost = costPrice * shares;
-          const currentValue = currentPrice * _computedQty;
+          const currentValue = buyTotalQty > 0 ? currentPrice * _computedQty : (Number.isFinite(userQty) ? userQty * currentPrice : 0);
           const holdingPnl = Math.round((currentValue - cost) * 100) / 100;
           const holdingPnlRate = cost > 0 ? Math.round(((currentValue - cost) / cost) * 100 * 100) / 100 : 0;
           return {
             ...item,
             transactions: records,
             shares,
+            quantity: shares,
             costPrice,
             cost,
-            availableShares: _computedQty,
+            availableShares: shares,
             totalFees,
             currentValue,
             holdingPnl,
@@ -495,7 +497,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   const costPrice = parseFloat(latestData.costPrice || latestData.cost) || 0;
   const quantity = parseFloat(latestData.shares || latestData.quantity) || 0;
   const isBondFund = latestData.categoryL1 === '债权类' && latestData.categoryL3 === '场外';
-  const isMoneyFund = latestData.positionType === '货币基金';
+  const isMoneyFund = latestData.positionType === '货币基金' || latestData.positionCategory === '货币基金';
   const isStock = latestData.kind === '股票' || latestData.assetType === '股票';
   const isDomesticIndoor = (latestData.market === '国内市场') && (latestData.tertiaryCategory === '场内' || latestData.categoryL3 === '场内');
   const isDomesticOutdoor = (latestData.market === '国内市场') && (latestData.tertiaryCategory === '场外' || latestData.categoryL3 === '场外');
@@ -2443,6 +2445,7 @@ export default function Finance({ onAssetPenetration }) {
         const latestRates = await loadExchangeRates(false);
         await loadQuotes(stateData.financeAssets, stateData, latestRates);
         await loadFundNav(stateData.financeAssets, stateData);
+        await loadMoneyFundData(stateData.financeAssets, stateData);
       } catch (e) {
         console.warn('定时行情刷新失败:', e);
       }
@@ -2718,14 +2721,12 @@ export default function Finance({ onAssetPenetration }) {
             return {
               ...asset,
               currentValue: fixedCV,
-              // 注意：quantity/shares 用存储值（若非有效数值则回退到 currentValue），
-              // 绝不允许用 currentValue 覆盖已有的有效数量
               shares: Number.isFinite(origShares) ? fixedShares : Math.max(0, fixedCV || fixedShares),
-              quantity: Number.isFinite(origQty) ? fixedQty : Math.max(0, fixedCV || fixedQty),
+              // quantity 优先使用存储的 quantity，其次使用 shares（数据库真正存的是 shares）
+              quantity: Number.isFinite(origQty) ? fixedQty : Math.max(0, fixedShares || fixedCV),
               cost: fixedCost,
               balance: fixedBalance,
               availableShares: Number.isFinite(parseFloat(asset.availableShares)) ? Math.max(0, parseFloat(asset.availableShares)) : (fixedShares || fixedCV),
-              // 补全表单字段名（使用已有存储字段的回退值）
               assetType: asset.assetType || asset.kind || '现金',
               categoryL1: asset.categoryL1 || asset.category || '现金类',
               categoryL2: asset.categoryL2 || asset.subcategory || '',
@@ -2790,6 +2791,9 @@ export default function Finance({ onAssetPenetration }) {
         loadFundNav(financeAssetsData, data).catch(err =>
           console.error('Background fund nav load failed:', err)
         );
+        loadMoneyFundData(financeAssetsData, data).catch(err =>
+          console.error('Background money fund data load failed:', err)
+        );
       }
     } catch (err) {
       console.error('Failed to load finance data:', err);
@@ -2804,7 +2808,7 @@ export default function Finance({ onAssetPenetration }) {
       .filter(a => {
         if (!a.code) return false;
         if (a.kind === 'cash' || a.categoryL2 === '现金' || a.assetType === '现金' || a.categoryL1 === '现金类') return false;
-        if (a.positionType === '货币基金') return false;
+        if (a.positionType === '货币基金' || a.positionCategory === '货币基金') return false;
         const catL3 = a.categoryL3 || a.tertiaryCategory;
         const isStock = a.assetType === '股票' || a.kind === '股票';
         // 股票类资产无论场内/场外都获取实时行情
@@ -2956,10 +2960,10 @@ export default function Finance({ onAssetPenetration }) {
         let finalAssets = updatedAssets;
 
         // 货币基金：强制现价为1，重新计算盈亏
-        const hasMoneyFund = (currentState.financeAssets || []).some(a => a.positionType === '货币基金');
+        const hasMoneyFund = (currentState.financeAssets || []).some(a => a.positionType === '货币基金' || a.positionCategory === '货币基金');
         if (hasMoneyFund) {
           finalAssets = finalAssets.map(a => {
-            if (a.positionType !== '货币基金') return a;
+            if (a.positionType !== '货币基金' && a.positionCategory !== '货币基金') return a;
             const qty = parseFloat(a.quantity) || parseFloat(a.shares) || 0;
             const cost = parseFloat(a.costPrice) || 0;
             const holdingPnl = Math.round((1 - cost) * qty * 100) / 100;
@@ -3001,7 +3005,7 @@ export default function Finance({ onAssetPenetration }) {
     if (!financeAssetsData || financeAssetsData.length === 0) return;
     const fundItems = financeAssetsData.filter(a => {
       if (!a.code) return false;
-      if (a.positionType === '货币基金') return false;
+      if (a.positionType === '货币基金' || a.positionCategory === '货币基金') return false;
       const catL3 = a.categoryL3 || a.tertiaryCategory;
       return catL3 === '场外' || (!catL3 && a.market === '场外基金');
     });
@@ -3142,6 +3146,73 @@ export default function Finance({ onAssetPenetration }) {
     }
   };
 
+  // 货币基金数据加载
+  const loadMoneyFundData = async (financeAssetsData, currentState) => {
+    if (!financeAssetsData || financeAssetsData.length === 0) return;
+    // 筛选货币基金
+    const moneyFunds = financeAssetsData.filter(a => {
+      if (!a.code) return false;
+      return a.positionType === '货币基金' || a.positionCategory === '货币基金';
+    });
+    if (moneyFunds.length === 0) return;
+
+    try {
+      const codes = moneyFunds.map(a => ({ code: a.code }));
+      const funds = await fetchMoneyFundData(codes);
+      console.log('[DEBUG] 货币基金数据:', JSON.stringify(funds, null, 2));
+
+      if (!funds || funds.length === 0) return;
+
+      let changed = false;
+      const updatedAssets = (currentState?.financeAssets || []).map(a => {
+        if (a.positionType !== '货币基金' && a.positionCategory !== '货币基金') return a;
+        const fund = funds.find(f => f.code === a.code);
+        if (!fund) return a;
+
+        const updates = {};
+        if (fund.annualizedRate7d != null) {
+          updates.annualizedRate7d = String(fund.annualizedRate7d);
+          changed = true;
+        }
+        if (fund.perTenThousandIncome != null) {
+          updates.perTenThousandIncome = String(fund.perTenThousandIncome);
+          changed = true;
+        }
+        if (fund.name) {
+          updates.name = fund.name;
+          changed = true;
+        }
+        if (fund.navDate) {
+          updates.priceDate = fund.navDate;
+          changed = true;
+        }
+
+        // 计算累计收益 = 持有份额 × 万份收益 / 10000
+        const quantity = parseFloat(a.shares || a.quantity) || 0;
+        if (quantity > 0 && fund.perTenThousandIncome != null) {
+          const totalIncome = quantity * fund.perTenThousandIncome / 10000;
+          updates.totalIncome = String(totalIncome.toFixed(2));
+          changed = true;
+        }
+
+        if (!changed) return a;
+        return { ...a, ...updates };
+      });
+
+      if (changed) {
+        const newState = { ...(currentState || {}), financeAssets: updatedAssets };
+        setStateData(newState);
+        try {
+          await saveState(newState);
+        } catch (e) {
+          console.warn('保存货币基金数据失败:', e);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load money fund data:', err);
+    }
+  };
+
   const loadBooksAndTags = async () => {
     try {
       const booksData = await fetchBooks();
@@ -3187,7 +3258,7 @@ export default function Finance({ onAssetPenetration }) {
     setSaving(true);
     try {
       const isCashAsset = newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类';
-      const isMoneyFund = newAccount.positionType === '货币基金';
+      const isMoneyFund = newAccount.positionType === '货币基金' || newAccount.positionCategory === '货币基金';
       const _costPrice = parseFloat(newAccount.cost) || 0;
       const _quantity = parseFloat(newAccount.quantity) || 0;
       let _currentPrice = parseFloat(newAccount.currentPrice) || 0;
@@ -4027,7 +4098,7 @@ export default function Finance({ onAssetPenetration }) {
     setNewAccount(prev => {
       const qty = parseFloat(prev.quantity) || 0;
       const cost = parseFloat(prev.cost) || 0;
-      const isMoneyFund = prev.positionType === '货币基金';
+      const isMoneyFund = prev.positionType === '货币基金' || prev.positionCategory === '货币基金';
       let rawPrice = item.price ? parseFloat(item.price) : parseFloat(prev.currentPrice) || 0;
       // 港股通：将HKD价格折算为CNY
       let price = isTonggupass ? (rawPrice * hkdToCnyRate) : rawPrice;
@@ -4055,7 +4126,7 @@ export default function Finance({ onAssetPenetration }) {
           setNewAccount(prev => {
             const qty = parseFloat(prev.quantity) || 0;
             const cost = parseFloat(prev.cost) || 0;
-            const isMoneyFund = prev.positionType === '货币基金';
+            const isMoneyFund = prev.positionType === '货币基金' || prev.positionCategory === '货币基金';
             let rawPrice = parseFloat(quotes[0].price) || 0;
             // 港股通：将HKD价格折算为CNY
             let price = isTonggupass ? (rawPrice * hkdToCnyRate) : rawPrice;
@@ -4530,6 +4601,7 @@ export default function Finance({ onAssetPenetration }) {
         positionGroup: a.positionGroup || '',
         positionType: a.positionCategory || a.positionType || '',
         costPrice: _cost,
+        shares: _effectiveQty,
         quantity: _effectiveQty,
         cost: _costTotal,
         currentPrice: _effectivePrice,
@@ -5454,7 +5526,7 @@ export default function Finance({ onAssetPenetration }) {
                             setNewAccount(p => {
                               const qty = parseFloat(p.quantity) || 0;
                               const cost = parseFloat(val) || 0;
-                              const isMoneyFund = p.positionType === '货币基金';
+                              const isMoneyFund = p.positionType === '货币基金' || p.positionCategory === '货币基金';
                               if (isMoneyFund) {
                                 const holdingPnl = qty * (1 - cost);
                                 const holdingPnlRate = (qty > 0 && cost > 0) ? (holdingPnl / (cost * qty)) * 100 : 0;
@@ -5496,7 +5568,7 @@ export default function Finance({ onAssetPenetration }) {
                           setNewAccount(p => {
                             const qty = parseFloat(val) || 0;
                             const cost = parseFloat(p.cost) || 0;
-                            const isMoneyFund = p.positionType === '货币基金';
+                            const isMoneyFund = p.positionType === '货币基金' || p.positionCategory === '货币基金';
                             if (isMoneyFund) {
                               const holdingPnl = qty * (1 - cost);
                               const holdingPnlRate = (qty > 0 && cost > 0) ? (holdingPnl / (qty * cost)) * 100 : 0;

@@ -1,5 +1,5 @@
 import { json } from "../utils/http.js";
-import { lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getCSIndex, getIndexHistory } from "../services/finance-service.js";
+import { lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getCSIndex, getIndexHistory, getMoneyFundData } from "../services/finance-service.js";
 
 async function handler(req, res, body, origin, pathname, url) {
   if (req.method === "GET" && pathname === "/api/finance/lookup") {
@@ -86,6 +86,22 @@ async function handler(req, res, body, origin, pathname, url) {
       json(res, 200, result, origin);
     } catch (err) {
       json(res, 502, { error: "fund nav history unavailable", detail: err.message }, origin);
+    }
+    return;
+  }
+
+  // 货币基金数据接口：获取7日年化、万份收益等
+  if (req.method === "POST" && pathname === "/api/finance/money-fund") {
+    const codes = Array.isArray(body.codes) ? body.codes : [];
+    if (!codes.length) {
+      json(res, 200, { funds: [] }, origin);
+      return;
+    }
+    try {
+      const result = await getMoneyFundData(codes);
+      json(res, 200, { funds: result }, origin);
+    } catch (err) {
+      json(res, 200, { funds: [], error: err.message }, origin);
     }
     return;
   }

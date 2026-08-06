@@ -519,3 +519,15 @@ export async function fetchFundNavDetail(code) {
     return null
   }
 }
+
+export async function fetchMoneyFundData(codes) {
+  try {
+    const response = await request('/finance/money-fund', {
+      method: 'POST',
+      body: JSON.stringify({ codes }),
+    })
+    return response.funds || []
+  } catch {
+    return []
+  }
+}

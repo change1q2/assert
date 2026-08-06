@@ -1507,4 +1507,114 @@ async function getCpiData(year) {
   }
 }
 
-export { tencentCodeFor, lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getCSIndex, getIndexHistory, getCpiData };
+// 货币基金数据获取：7日年化、万份收益等
+async function getMoneyFundData(codes) {
+  const results = Array.isArray(codes) ? codes.map(c => ({
+    code: typeof c === 'string' ? c : (c.code || ''),
+    name: null,
+    annualizedRate7d: null,
+    perTenThousandIncome: null,
+    totalIncome: null,
+    nav: null,
+    navDate: null,
+  })) : [];
+
+  await Promise.all(results.map(async (item) => {
+    const code = String(item.code || '').trim();
+    if (!/^\d{6}$/.test(code)) return;
+
+    // 方法1：从天天基金网基金详情页面解析数据
+    try {
+      const url = `https://fund.eastmoney.com/${code}.html`;
+      const resp = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": "https://fund.eastmoney.com/",
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      const text = await resp.text();
+      
+      // 检查是否为货币基金页面
+      if (text.includes('货币') || text.includes(' Money') || text.includes('money')) {
+        // 解析基金名称
+        const titleMatch = text.match(/<title>([^<]+)<\/title>/);
+        if (titleMatch) {
+          item.name = titleMatch[1].replace(/\(.*?\)/g, '').replace(/行情走势.*$/, '').replace(/—.*$/, '').trim();
+        }
+        
+        // 解析7日年化 - 尝试多种模式
+        const annualRatePatterns = [
+          /7日年化<\/a><\/span>\s*<\/span>[^<]*<\/p><\/dt><dd[^>]*><span[^>]*>([0-9]+\.[0-9]+)/,
+          /7日年化[^0-9<]*([0-9]+\.[0-9]+)/,
+          /年化收益[^0-9]*([0-9]+\.[0-9]+)/,
+          /annualRate[^0-9]*([0-9]+\.[0-9]+)/,
+        ];
+        for (const pattern of annualRatePatterns) {
+          const match = text.match(pattern);
+          if (match) {
+            item.annualizedRate7d = Number.parseFloat(match[1]);
+            break;
+          }
+        }
+        
+        // 解析万份收益 - 尝试多种模式
+        const wanFenPatterns = [
+          /每万份收益<\/a><\/span><span[^>]*>[^<]*<\/span><span[^>]*>([0-9]+\.[0-9]+)/,
+          /万份收益[^0-9<]*([0-9]+\.[0-9]+)/,
+          /每万份收益[^0-9<]*([0-9]+\.[0-9]+)/,
+          /perTenThousand[^0-9]*([0-9]+\.[0-9]+)/,
+        ];
+        for (const pattern of wanFenPatterns) {
+          const match = text.match(pattern);
+          if (match) {
+            item.perTenThousandIncome = Number.parseFloat(match[1]);
+            break;
+          }
+        }
+        
+        // 货币基金净值固定为1
+        item.nav = 1;
+        
+        // 解析净值日期
+        const dateMatch = text.match(/净值日期[^0-9]*([0-9]{4}[-/][0-9]{2}[-/][0-9]{2})/);
+        if (dateMatch) {
+          item.navDate = dateMatch[1];
+        }
+      }
+    } catch (e) {
+      console.error(`[getMoneyFundData] Fund ${code} page parsing error:`, e.message);
+    }
+
+    // 方法2：如果页面解析失败，尝试备用接口
+    if (item.annualizedRate7d == null) {
+      try {
+        // 尝试天天基金网的另一个API接口
+        const apiUrl = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
+        const apiResp = await fetch(apiUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://fund.eastmoney.com/",
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+        const apiText = await apiResp.text();
+        const match = apiText.match(/jsonpgz\((.*)\);?/);
+        if (match && match[1]) {
+          const data = JSON.parse(match[1]);
+          item.name = data.name || item.name;
+          item.annualizedRate7d = data.gszzl ? Number.parseFloat(data.gszzl) : null;
+          item.perTenThousandIncome = data.gsz ? Number.parseFloat(data.gsz) : null;
+          item.nav = data.dwjz ? Number.parseFloat(data.dwjz) : 1;
+          item.navDate = data.jzrq || null;
+        }
+      } catch (e) {
+        console.error(`[getMoneyFundData] Fund ${code} API fallback error:`, e.message);
+      }
+    }
+  }));
+
+  return results;
+}
+
+export { tencentCodeFor, lookupSecurities, getQuotes, getKline, getFundNav, getFundNavDetail, getFundNavHistory, getUSIndex, getCSIndex, getIndexHistory, getCpiData, getMoneyFundData };
