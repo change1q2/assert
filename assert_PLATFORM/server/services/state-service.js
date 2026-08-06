@@ -86,12 +86,12 @@ async function loadUserState(userId) {
   indoorTransactionRows.forEach(row => addTransaction(row, false));
   outdoorTransactionRows.forEach(row => addTransaction(row, true));
   legacyTransactionRows.forEach(row => addTransaction(row, false));
-  const financeAssets = (await safeSqlAll(pool, "SELECT id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order FROM finance_assets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+  const financeAssets = (await safeSqlAll(pool, "SELECT id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, quantity, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order FROM finance_assets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: numericIfPossible(row.id), kind: row.kind, assetKind: row.asset_kind || '', accountId: row.account_id, category: row.category,
     subcategory: row.subcategory, tertiaryCategory: row.tertiary_category, market: row.market,
     currency: row.currency, name: row.name, code: row.code, positionGroup: row.position_group,
-    positionCategory: row.position_category, costPrice: row.cost_price, shares: row.shares,
-    availableShares: row.available_shares, currentPrice: row.current_price, pnl: row.pnl,
+    positionCategory: row.position_category, positionType: row.position_category, costPrice: row.cost_price, shares: row.shares,
+    quantity: row.quantity ?? row.shares, availableShares: row.available_shares, currentPrice: row.current_price, pnl: row.pnl,
     pnlPercent: row.pnl_percent, avgBuyPrice: row.avg_buy_price, holdingDays: row.holding_days,
     positionWeight: row.position_weight, totalFees: row.total_fees, todayPnl: row.today_pnl,
     todayPnlPercent: row.today_pnl_percent, prevPrice: row.prev_price, priceDate: row.price_date,
@@ -245,11 +245,12 @@ async function saveUserState(conn, userId, state) {
     financeAssets: (state.financeAssets || []).length,
     debts: (state.debts || []).length,
     assetClasses: (state.assetClasses || []).length,
+    independentAssets: state.independentAssets ? Object.values(state.independentAssets).flat().length : 0,
   };
   const totalStateItems = Object.values(stateCounts).reduce((a, b) => a + b, 0);
 
   const hasAnyCoreData = totalStateItems > 0;
-  const hasCriticalData = stateCounts.records > 0 || stateCounts.financeAssets > 0 || stateCounts.debts > 0;
+  const hasCriticalData = stateCounts.records > 0 || stateCounts.financeAssets > 0 || stateCounts.debts > 0 || stateCounts.independentAssets > 0;
 
   // 检查数据库中现有的数据量
   let existingCounts = null;
@@ -264,20 +265,23 @@ async function saveUserState(conn, userId, state) {
     // 如果数据库有大量数据，但提交的状态几乎没有数据，可能是加载出了问题
     if (totalExisting > 0 && totalStateItems === 0) {
       console.warn(`[state-service] 用户 ${userId} 保存的状态完全为空但数据库有 ${totalExisting} 条数据，跳过保存`);
-      return;
+      throw new Error('DATA_LOSS_PREVENTION: state is empty but database has data');
     }
 
     // 如果数据库有记录/资产/债务数据，但提交的状态中这些都为空，且缺少关键模块数据，则拒绝保存
     const hasExistingCritical = countRows.records > 0 || countRows.finance_assets > 0 || countRows.debts > 0;
     if (hasExistingCritical && !hasCriticalData && stateCounts.accounts === 0) {
       console.warn(`[state-service] 用户 ${userId} 保存的状态中关键数据(records/assets/debts)为空但数据库有数据，跳过保存以防止数据丢失`);
-      return;
+      throw new Error('DATA_LOSS_PREVENTION: critical data missing from state but exists in database');
     }
   } catch (e) {
+    if (e.message && e.message.startsWith('DATA_LOSS_PREVENTION')) {
+      throw e;
+    }
     console.warn(`[state-service] 无法检查现有数据量: ${e.message}`);
   }
 
-  const previousSettings = await sqlGet(conn, "SELECT hk_ipo_rules_json FROM user_settings WHERE user_id = ?", [userId]);
+  const previousSettings = await sqlGet(conn, "SELECT hk_ipo_rules_json, independent_assets_json, finance_asset_draft_json, fee_config_json, overview_goals_json, account_categories_json FROM user_settings WHERE user_id = ?", [userId]);
   await sqlRun(conn, `
     UPDATE user_profiles SET name=?, phone=?, email=?, currency=?, theme=?, avatar=?, birthday=?, city=?,
     occupation=?, risk_level=?, privacy_lock=?, data_mask=?, device_name=? WHERE user_id=?
@@ -290,8 +294,40 @@ async function saveUserState(conn, userId, state) {
     "custom_record_categories", "finance_tertiary_categories", "record_tags", "recorders",
     "reminders", "debt_payments", "debts", "debt_categories", "strategies", "user_settings", "books", "tags", "yearly_records",
   ];
+
+  // Map tables to their corresponding state keys
+  const tableStateMap = {
+    "exchange_rates": "rates",
+    "accounts": "accounts",
+    "asset_classes": "assetClasses",
+    "records": "records",
+    "budgets": "budgets",
+    "finance_asset_transactions": "financeAssetTransactions",
+    "finance_asset_indoor_transactions": "financeAssetIndoorTransactions",
+    "finance_asset_outdoor_transactions": "financeAssetOutdoorTransactions",
+    "finance_assets": "financeAssets",
+    "finance_asset_archives": "financeAssetArchives",
+    "custom_record_categories": "customRecordCategories",
+    "finance_tertiary_categories": "financeTertiaryCategories",
+    "record_tags": "recordTags",
+    "recorders": "recorders",
+    "reminders": "reminders",
+    "debt_payments": "debtPayments",
+    "debts": "debts",
+    "debt_categories": "debtCategories",
+    "strategies": "strategies",
+    "user_settings": "__always_delete__", // Always delete user_settings (handled specially)
+    "books": "books",
+    "tags": "tags",
+    "yearly_records": "yearlyRecords",
+  };
+
   for (const table of tables) {
-    await sqlRun(conn, `DELETE FROM ${table} WHERE user_id = ?`, [userId]);
+    const stateKey = tableStateMap[table];
+    // Only delete if the state has explicit data for this table, or it's user_settings
+    if (stateKey === "__always_delete__" || state[stateKey] !== undefined) {
+      await sqlRun(conn, `DELETE FROM ${table} WHERE user_id = ?`, [userId]);
+    }
   }
 
   for (const [currency, rate] of Object.entries(state.rates || {})) {
@@ -333,14 +369,15 @@ async function saveUserState(conn, userId, state) {
 
   for (const [index, row] of (state.financeAssets || []).entries()) {
     await sqlRun(conn, `INSERT INTO finance_assets
-      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, quantity, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, text(row.id), text(row.kind), text(row.assetKind), text(row.accountId), text(row.category),
        text(row.subcategory), text(row.tertiaryCategory), text(row.market), text(row.currency),
-       text(row.name), text(row.code), text(row.positionGroup), text(row.positionCategory),
-       number(row.costPrice), number(row.shares), number(row.availableShares), number(row.currentPrice),
+       text(row.name), text(row.code), text(row.positionGroup), text(row.positionType || row.positionCategory),
+       number(row.costPrice), number(row.shares), number(row.quantity ?? row.shares), number(row.availableShares), number(row.currentPrice),
        number(row.pnl), number(row.pnlPercent), number(row.avgBuyPrice), number(row.holdingDays),
-       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent), number(row.prevPrice), text(row.priceDate), text(row.tags), text(row.status || 'active'), text(row.archiveDate || ''), index]);
+       number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent),
+       number(row.prevPrice), text(row.priceDate), text(row.tags), text(row.status || 'active'), text(row.archiveDate || ''), index]);
 
     const isOutdoor = (row.market === '国内市场') && (row.tertiaryCategory === '场外' || row.categoryL3 === '场外');
 
@@ -450,10 +487,35 @@ async function saveUserState(conn, userId, state) {
       [userId, Number(row.id), text(row.name), row.active ? 1 : 0, text(row.target),
        JSON.stringify(row.allocation || []), number(row.debtLimit), number(row.annualReturn), text(row.risk)]);
   }
+  // Preserve existing settings for fields not provided in state
+  const prevFinAssetDraft = previousSettings ? previousSettings.finance_asset_draft_json : null;
+  const prevFeeConfig = previousSettings ? previousSettings.fee_config_json : null;
+  const prevOverviewGoals = previousSettings ? previousSettings.overview_goals_json : null;
+  const prevAccountCategories = previousSettings ? previousSettings.account_categories_json : null;
+
+  const effectiveFinAssetDraft = state.financeAssetDraft !== undefined
+    ? JSON.stringify(state.financeAssetDraft || {})
+    : (prevFinAssetDraft || '{}');
+  const effectiveFeeConfig = state.feeConfig !== undefined
+    ? JSON.stringify(state.feeConfig || {})
+    : (prevFeeConfig || '{}');
+  const effectiveOverviewGoals = state.overviewGoals !== undefined
+    ? JSON.stringify(state.overviewGoals || {})
+    : (prevOverviewGoals || '{}');
+  const effectiveAccountCategories = state.accountCategories !== undefined
+    ? JSON.stringify(state.accountCategories || {})
+    : (prevAccountCategories || '{}');
+
+  // Preserve existing independentAssets if not provided in state
+  const incomingIndependentAssets = state.independentAssets;
+  const effectiveIndependentAssets = (incomingIndependentAssets && typeof incomingIndependentAssets === 'object')
+    ? incomingIndependentAssets
+    : (previousSettings ? maybeParseJson(previousSettings.independent_assets_json, {}) : {});
+
   await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [userId, JSON.stringify(state.financeAssetDraft || {}), JSON.stringify(state.feeConfig || {}),
-     JSON.stringify(state.overviewGoals || {}), previousSettings?.hk_ipo_rules_json || null,
-     JSON.stringify(state.independentAssets || {}), JSON.stringify(state.accountCategories || {})]);
+    [userId, effectiveFinAssetDraft, effectiveFeeConfig, effectiveOverviewGoals,
+     previousSettings?.hk_ipo_rules_json || null,
+     JSON.stringify(effectiveIndependentAssets), effectiveAccountCategories]);
 
   for (const row of (state.yearlyRecords || [])) {
     await sqlRun(conn, `INSERT INTO yearly_records (user_id, year, opening_asset, closing_asset, target_profit, actual_profit)

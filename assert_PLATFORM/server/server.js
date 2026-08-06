@@ -51,7 +51,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && (pathname === "/api/tools/premium" || pathname === "/api/tools/exchange-rates")) {
+    if (req.method === "GET" && (pathname === "/api/tools/premium" || pathname === "/api/tools/exchange-rates" || pathname === "/api/tools/hk-connect-rate")) {
       await toolsRoute.handler(req, res, body, origin, pathname, url);
       return;
     }
@@ -80,7 +80,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if ((req.method === "GET" || req.method === "POST") && (pathname === "/api/finance/fund-nav" || pathname === "/api/finance/fund-nav-history" || pathname === "/api/finance/quotes" || pathname === "/api/finance/kline" || pathname === "/api/finance/lookup" || pathname === "/api/finance/index" || pathname === "/api/finance/index-history" || pathname === "/api/finance/cpi")) {
+    if ((req.method === "GET" || req.method === "POST") && (pathname === "/api/finance/fund-nav" || pathname === "/api/finance/fund-nav-history" || pathname === "/api/finance/quotes" || pathname === "/api/finance/kline" || pathname === "/api/finance/lookup" || pathname === "/api/finance/index" || pathname === "/api/finance/index-history" || pathname === "/api/finance/cpi" || pathname === "/api/finance/money-fund")) {
       if (req.method !== "GET") {
         body = await readBody(req);
       }

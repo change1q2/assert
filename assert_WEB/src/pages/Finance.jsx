@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchMoneyFundData, fetchRealTimeExchangeRates } from '../api';
+import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchMoneyFundData, fetchRealTimeExchangeRates, fetchHkConnectRate } from '../api';
 import { CURRENCIES, getCurrencySymbol, getCurrencyName, truncateNum } from '../utils/currency';
 import {
   TrendingUp,
@@ -2014,6 +2014,9 @@ export default function Finance({ onAssetPenetration }) {
   // 汇率和币种切换状态
   const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.15, JPY: 0.046, HKD: 0.86, EUR: 7.85 });
   const [selectedCurrency, setSelectedCurrency] = useState('CNY');
+  
+  // 港股通参考汇率
+  const [hkConnectRate, setHkConnectRate] = useState(null);
 
   // 标签管理状态
   const [books, setBooks] = useState([]);
@@ -2457,6 +2460,8 @@ export default function Finance({ onAssetPenetration }) {
   useEffect(() => {
     if (!exchangeRates?.HKD || !stateData?.financeAssets) return;
     const hkdRate = Number(exchangeRates.HKD) || 0.86;
+    // 使用港股通参考汇率中间价（如果可用）
+    const convertRate = hkConnectRate?.mid || hkdRate;
     const hkAssets = stateData.financeAssets.filter(a => a.categoryL2 === '港股通');
     if (hkAssets.length === 0) return;
     setQuotesMap(prev => {
@@ -2466,9 +2471,9 @@ export default function Finance({ onAssetPenetration }) {
         const key = String(asset.code);
         const q = prev[key];
         if (q && q.rawCurrent != null) {
-          const newPrice = Math.trunc(q.rawCurrent * hkdRate * 10000) / 10000;
+          const newPrice = Math.trunc(q.rawCurrent * convertRate * 10000) / 10000;
           const newPrevClose = q.rawPreviousClose != null
-            ? Math.trunc(q.rawPreviousClose * hkdRate * 10000) / 10000
+            ? Math.trunc(q.rawPreviousClose * convertRate * 10000) / 10000
             : null;
           if (Math.abs(newPrice - q.price) > 0.0001) {
             next[key] = {
@@ -2484,12 +2489,17 @@ export default function Finance({ onAssetPenetration }) {
       });
       return changed ? next : prev;
     });
-  }, [exchangeRates?.HKD]);
+  }, [exchangeRates?.HKD, hkConnectRate?.mid]);
 
   const loadExchangeRates = async (force = false) => {
     try {
       const rates = await fetchRealTimeExchangeRates(force);
       setExchangeRates(rates);
+      // 同时加载港股通参考汇率
+      const hkRate = await fetchHkConnectRate(force);
+      if (hkRate) {
+        setHkConnectRate(hkRate);
+      }
       return rates;
     } catch (err) {
       console.error('Failed to load exchange rates:', err);
@@ -2847,8 +2857,16 @@ export default function Finance({ onAssetPenetration }) {
       }
       const quotes = allQuotes;
       const map = {};
-      // 港股通汇率转换：优先使用传入的最新汇率，确保汇率值是最新的
+      // 港股通汇率转换：使用港股通参考汇率
+      // 港股通参考汇率基于离岸市场港币兑人民币（CNH）报价的中间价
+      // 中间价 = (买报价 + 卖报价) / 2
+      // 买入参考汇率（卖出股票）= 中间价 × (1 - 3%)
+      // 卖出参考汇率（买入股票）= 中间价 × (1 + 3%)
       const hkdRate = Number(latestRates?.HKD || exchangeRates?.HKD) || 0.92;
+      // 优先使用港股通参考汇率的中间价
+      const hkConnectMidRate = hkConnectRate?.mid || hkdRate;
+      const hkConnectBuyRate = hkConnectRate?.buyReferenceRate || (hkConnectMidRate * (1 - 0.03));
+      const hkConnectSellRate = hkConnectRate?.sellReferenceRate || (hkConnectMidRate * (1 + 0.03));
       const hkStockConnectCodes = new Set(
         (financeAssetsData || [])
           .filter(a => {
@@ -2886,22 +2904,26 @@ export default function Finance({ onAssetPenetration }) {
           }
           const isHKConnect = hkStockConnectCodes.has(codeKey);
           if (isHKConnect) {
-            // 港股通资产：存储原始 HKD 价格 + 转换后的 CNY 价格
+            // 港股通资产：使用港股通参考汇率的中间价转换
             const converted = { ...q };
             converted.rawCurrent = q.price != null ? Number(q.price) : null;
             converted.rawPreviousClose = q.prevClose != null ? Number(q.prevClose) : null;
             if (q.price != null && Number.isFinite(Number(q.price))) {
-              converted.current = Math.trunc(Number(q.price) * hkdRate * 10000) / 10000;
+              // 使用港股通参考汇率中间价转换为CNY
+              converted.current = Math.trunc(Number(q.price) * hkConnectMidRate * 10000) / 10000;
               converted.price = converted.current;
             }
             if (q.prevClose != null && Number.isFinite(Number(q.prevClose))) {
-              converted.previousClose = Math.trunc(Number(q.prevClose) * hkdRate * 10000) / 10000;
+              converted.previousClose = Math.trunc(Number(q.prevClose) * hkConnectMidRate * 10000) / 10000;
               converted.prevClose = converted.previousClose;
             }
             if (q.changePct != null && Number.isFinite(Number(q.changePct))) {
               converted.changePct = Number(q.changePct);
             }
-            console.log('[DEBUG] 港股转换:', q.code, 'rawPrice=', q.price, 'hkdRate=', hkdRate, 'convertedPrice=', converted.price);
+            // 存储港股通参考汇率信息
+            converted.hkConnectBuyRate = hkConnectBuyRate;   // 买入参考汇率（卖出股票时使用）
+            converted.hkConnectSellRate = hkConnectSellRate; // 卖出参考汇率（买入股票时使用）
+            converted.hkConnectMidRate = hkConnectMidRate;   // 中间价
             map[codeKey] = converted;
           } else {
             map[codeKey] = q;
@@ -2936,10 +2958,9 @@ export default function Finance({ onAssetPenetration }) {
           const q = map[key];
           if (!q) return a;
           let newPrice = Number.isFinite(Number(q.price)) ? Number(q.price) : null;
-          // 备用：如果 price 为 0 但有 rawCurrent，用 rawCurrent * hkdRate 重算
+          // 备用：如果 price 为 0 但有 rawCurrent，用 rawCurrent * 港股通参考汇率中间价重算
           if ((newPrice == null || newPrice === 0) && q.rawCurrent != null) {
-            newPrice = Math.trunc(Number(q.rawCurrent) * hkdRate * 10000) / 10000;
-            console.log('[DEBUG] 使用备用计算:', a.code, 'rawCurrent=', q.rawCurrent, 'newPrice=', newPrice);
+            newPrice = Math.trunc(Number(q.rawCurrent) * hkConnectMidRate * 10000) / 10000;
           }
           const newPrev = Number.isFinite(Number(q.prevClose)) ? Number(q.prevClose) : null;
           const newDate = q.date || a.priceDate || '';
@@ -4532,10 +4553,11 @@ export default function Finance({ onAssetPenetration }) {
         _prevClose = parseFloat(a.prevPrice) || parseFloat(quoteData?.prevClose) || 0;
       } else {
         _price = parseFloat(quoteData?.price);
-        // 如果 price 为 0 但有 rawCurrent（港股通），用原始价格 * 当前汇率重算
+        // 如果 price 为 0 但有 rawCurrent（港股通），用原始价格 * 港股通参考汇率中间价重算
         if ((!_price || _price === 0) && quoteData?.rawCurrent != null) {
           const hkdRate = Number(exchangeRates?.HKD) || 0.86;
-          _price = Math.trunc(Number(quoteData.rawCurrent) * hkdRate * 10000) / 10000;
+          const convertRate = hkConnectRate?.mid || hkdRate;
+          _price = Math.trunc(Number(quoteData.rawCurrent) * convertRate * 10000) / 10000;
         }
         if (!_price || _price === 0) {
           _price = parseFloat(a.currentPrice) || 0;

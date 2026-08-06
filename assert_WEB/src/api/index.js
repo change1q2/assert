@@ -476,6 +476,17 @@ export async function fetchRealTimeExchangeRates(force = false) {
   }
 }
 
+// 获取港股通参考汇率
+export async function fetchHkConnectRate(force = false) {
+  try {
+    const url = force ? '/tools/hk-connect-rate?refresh=1' : '/tools/hk-connect-rate'
+    const response = await request(url)
+    return response || null
+  } catch {
+    return null
+  }
+}
+
 export async function lookupFinance(q) {
   try {
     const response = await request(`/finance/lookup?q=${encodeURIComponent(q)}`)

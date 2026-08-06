@@ -12,9 +12,18 @@ const sqlGet = async (conn, sql, params = []) => {
   const [rows] = await conn.execute(sql, params);
   return rows[0] || null;
 };
-const maybeParseJson = (val) => {
-  if (val === null || val === undefined) return val;
-  if (typeof val === "string") return JSON.parse(val);
+const maybeParseJson = (val, fallback) => {
+  if (val === null || val === undefined) return fallback !== undefined ? fallback : val;
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (!trimmed || trimmed === '[object Object]') return fallback !== undefined ? fallback : {};
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      console.warn('[maybeParseJson] Failed to parse JSON, using fallback');
+      return fallback !== undefined ? fallback : {};
+    }
+  }
   return val;
 };
 const feedbackAttachments = (val) => {

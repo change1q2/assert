@@ -14,7 +14,7 @@ import {
   exportHkIpoToExcel,
 } from "../services/hkipo-service.js";
 import { refreshHkIpoMarketInBackground, getHkIpoCache } from "../services/hkipo-fetcher.js";
-import { getExchangeRates, getCache as getExchangeRateCache } from "../services/exchange-rate-service.js";
+import { getExchangeRates, getCache as getExchangeRateCache, getHkConnectRate, getHkConnectCache } from "../services/exchange-rate-service.js";
 import { allowedOrigins, HK_IPO_DEFAULT_THRESHOLD } from "../config/index.js";
 
 async function handler(req, res, body, origin, pathname, url) {
@@ -53,6 +53,26 @@ async function handler(req, res, body, origin, pathname, url) {
     }
     
     const result = await getExchangeRates();
+    json(res, 200, result, origin);
+    return;
+  }
+
+  // 港股通参考汇率接口
+  if (req.method === "GET" && pathname === "/api/tools/hk-connect-rate") {
+    const force = url.searchParams.get("refresh") === "1";
+    const cache = getHkConnectCache();
+    const now = Date.now();
+    const shouldRefresh = force || !cache || now - (cache.cachedAt || 0) > 10 * 60 * 1000;
+    
+    if (!shouldRefresh && cache) {
+      json(res, 200, {
+        ...cache,
+        cached: true,
+      }, origin);
+      return;
+    }
+    
+    const result = await getHkConnectRate(force);
     json(res, 200, result, origin);
     return;
   }

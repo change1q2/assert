@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, lookupFinance, fetchFinanceQuotes, fetchRealTimeExchangeRates } from '../api';
+import { fetchState, saveState, lookupFinance, fetchFinanceQuotes, fetchRealTimeExchangeRates, fetchHkConnectRate } from '../api';
 import {
   Wallet,
   Plus,
@@ -286,6 +286,7 @@ export default function IndependentAssets() {
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.15, JPY: 0.046, HKD: 0.86, EUR: 7.85 });
+  const [hkConnectRate, setHkConnectRate] = useState(null);
   const [activeTab, setActiveTab] = useState('insurance');
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -459,6 +460,10 @@ export default function IndependentAssets() {
   const convertCurrency = (value, fromCurrency, toCurrency = 'CNY') => {
     if (!value) return 0;
     if (fromCurrency === toCurrency) return parseFloat(value);
+    // 港股通使用参考汇率中间价
+    if (fromCurrency === 'HKD' && toCurrency === 'CNY' && hkConnectRate?.mid) {
+      return parseFloat(value) * hkConnectRate.mid;
+    }
     const fromRate = exchangeRates[fromCurrency] || 1;
     const toRate = exchangeRates[toCurrency] || 1;
     return parseFloat(value) * (fromRate / toRate);
@@ -468,6 +473,9 @@ export default function IndependentAssets() {
     loadData();
     fetchRealTimeExchangeRates(false).then(rates => {
       if (rates) setExchangeRates(rates);
+    }).catch(() => {});
+    fetchHkConnectRate(false).then(rate => {
+      if (rate) setHkConnectRate(rate);
     }).catch(() => {});
   }, []);
 
@@ -491,7 +499,8 @@ export default function IndependentAssets() {
       try {
         const quotes = await fetchFinanceQuotes(codes);
         if (cancelled) return;
-        const hkdRate = exchangeRates?.HKD || 0.92;
+        // 港股通使用参考汇率中间价
+        const hkdRate = hkConnectRate?.mid || exchangeRates?.HKD || 0.92;
         const map = {};
         (quotes || []).forEach(q => {
           if (q && q.code) {
@@ -525,7 +534,7 @@ export default function IndependentAssets() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [stateData?.independentAssets?.equity, exchangeRates]);
+  }, [stateData?.independentAssets?.equity, exchangeRates, hkConnectRate]);
 
   const loadData = async () => {
     setLoading(true);
@@ -556,9 +565,17 @@ export default function IndependentAssets() {
       try {
         const savedAccounts = localStorage.getItem('wealth_os_accounts');
         const savedAssets = localStorage.getItem('wealth_os_independent_assets');
+        const otherState = (() => {
+          try {
+            const raw = localStorage.getItem('wealth_os_full_state');
+            if (raw) return JSON.parse(raw);
+          } catch (e) {}
+          return {};
+        })();
         setStateData({
-          accounts: savedAccounts ? JSON.parse(savedAccounts) : [],
-          independentAssets: savedAssets ? JSON.parse(savedAssets) : {},
+          ...otherState,
+          accounts: savedAccounts ? JSON.parse(savedAccounts) : (otherState.accounts || []),
+          independentAssets: savedAssets ? JSON.parse(savedAssets) : (otherState.independentAssets || {}),
         });
       } catch (e) {
         console.error('Failed to restore data from localStorage:', e);
@@ -574,12 +591,22 @@ export default function IndependentAssets() {
     // 先保存到 localStorage 作为备份，确保数据不会丢失
     try {
       localStorage.setItem('wealth_os_independent_assets', JSON.stringify(newState.independentAssets || {}));
+      localStorage.setItem('wealth_os_full_state', JSON.stringify(newState));
     } catch (e) {
       console.warn('Failed to save to localStorage backup:', e);
     }
     
     // 优先保存到数据库
-    const result = await saveState(newState);
+    let result;
+    try {
+      result = await saveState(newState);
+    } catch (err) {
+      console.error('保存到数据库失败:', err.message);
+      // 数据已保存到 localStorage 作为备份
+      setStateData(newState);
+      alert('保存失败：' + (err.message || '网络异常') + '。数据已保存到本地缓存，请刷新页面后重试。');
+      return;
+    }
     setStateData(newState);
     
     // 如果是缓存模式（离线），标记为待同步
