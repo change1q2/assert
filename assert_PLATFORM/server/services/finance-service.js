@@ -393,8 +393,21 @@ async function getQuotes(codes) {
   const fallbackItems = queryItems.filter(({ index }) => results[index].price == null);
   await Promise.all(fallbackItems.map(async ({ tencentCode, index }) => {
     const prefix = tencentCode.slice(0, 2);
-    if (!["sh", "sz"].includes(prefix)) return;
-    const secid = `${prefix === "sh" ? "1" : "0"}.${tencentCode.slice(2)}`;
+    const suffixCode = tencentCode.slice(2);
+    let secid = null;
+    let scaled = (value) => Number.isFinite(Number(value)) ? Number(value) / 100 : null;
+    if (["sh", "sz"].includes(prefix)) {
+      secid = `${prefix === "sh" ? "1" : "0"}.${suffixCode}`;
+    } else if (prefix === "hk") {
+      // 港股：secid 前缀 116.xxx，缩放因子 /1000
+      secid = `116.${suffixCode}`;
+      scaled = (value) => Number.isFinite(Number(value)) ? Number(value) / 1000 : null;
+    } else if (prefix === "us") {
+      // 美股：secid 前缀 105.xxx，无缩放
+      secid = `105.${suffixCode}`;
+      scaled = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
+    }
+    if (!secid) return;
     try {
       const quoteRes = await fetch(`https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f44,f45,f47,f57,f58,f60,f169,f170`, {
         headers: { "User-Agent": "Mozilla/5.0" },
@@ -402,7 +415,6 @@ async function getQuotes(codes) {
       });
       const data = (await quoteRes.json())?.data;
       if (!data || !Number.isFinite(Number(data.f43))) return;
-      const scaled = (value) => Number.isFinite(Number(value)) ? Number(value) / 100 : null;
       results[index] = {
         ...results[index],
         name: data.f58 || null,
