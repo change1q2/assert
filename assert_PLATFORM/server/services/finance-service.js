@@ -37,15 +37,22 @@ function tencentCodeFor(code, market) {
   code = String(code || "").trim();
   if (!code) return null;
   market = String(market || "").toLowerCase();
-  if (market === "domestic" || market === "国内市场" || market === "国内" || /^sh/i.test(code)) {
-    const raw = code.replace(/^(sh|sz)/i, "");
-    return /^[569]/.test(raw) ? "sh" + raw : "sz" + raw;
-  }
-  if (market === "hk" || market === "港股市场" || market === "港股" || /^hk/i.test(code) || /^0[0-9]{4}$/.test(code)) {
+  // 先检测代码前缀模式，优先级高于市场类型判断
+  if (/^hk/i.test(code) || /^\d{5}$/.test(code)) {
     return "hk" + code.replace(/^hk/i, "").padStart(5, "0");
   }
-  if (market === "us" || market === "美股市场" || market === "美股" || /^us/i.test(code)) {
+  if (/^us/i.test(code)) {
     return "us" + code.replace(/^us/i, "").toUpperCase();
+  }
+  if (market === "hk" || market === "港股市场" || market === "港股") {
+    return "hk" + code.replace(/^hk/i, "").padStart(5, "0");
+  }
+  if (market === "us" || market === "美股市场" || market === "美股") {
+    return "us" + code.replace(/^us/i, "").toUpperCase();
+  }
+  if (market === "domestic" || market === "国内市场" || market === "国内" || /^sh/i.test(code) || /^sz/i.test(code)) {
+    const raw = code.replace(/^(sh|sz)/i, "");
+    return /^[569]/.test(raw) ? "sh" + raw : "sz" + raw;
   }
   if (/^[569]/.test(code)) return "sh" + code;
   if (/^11/.test(code)) return "sh" + code;

@@ -202,12 +202,18 @@ async function loadUserState(userId) {
     accountCategories: settings ? maybeParseJson(settings.account_categories_json) || {} : {},
   };
 
-  // 过滤"??"乱码字段
-  const GARBLED_PATTERN = /^[?？�\s]+$/;
-  const sanitizeStr = (val, fallback = '') => {
+  // 过滤乱码字段 - 增强版：检测 Unicode 特殊字符和编码异常
+  const GARBLED_PATTERN = /[◈◆◇◉●○□■□△▽◇◈◎¤¦¨©®°±²³´µ¶·¸¹º»¼½¾¿À-ÿØ-ÿ]/;
+  // 已知合法的市场值列表
+  const VALID_MARKETS = ['国内市场', '港股市场', '美股市场', '其他市场'];
+  const sanitizeStr = (val, fallback = '', isMarket = false) => {
     if (val == null) return fallback;
     const str = String(val).trim();
-    if (!str || GARBLED_PATTERN.test(str)) return fallback;
+    if (!str) return fallback;
+    // 检测乱码：包含特殊 Unicode 控制/显示字符
+    if (GARBLED_PATTERN.test(str)) return fallback;
+    // 市场字段：精确匹配有效值
+    if (isMarket && VALID_MARKETS.indexOf(str) === -1) return fallback;
     return val;
   };
 
@@ -216,7 +222,7 @@ async function loadUserState(userId) {
     result.financeAssets = result.financeAssets.map(a => ({
       ...a,
       name: sanitizeStr(a.name),
-      market: sanitizeStr(a.market),
+      market: sanitizeStr(a.market, '国内市场', true),
       assetKind: sanitizeStr(a.assetKind),
       category: sanitizeStr(a.category),
       subcategory: sanitizeStr(a.subcategory),

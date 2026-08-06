@@ -1955,9 +1955,36 @@ export default function Finance({ onAssetPenetration }) {
     '债权类': ['债券'],
     '分红类': ['股票', '基金'],
   };
+  const ASSET_TYPE_GARBLED_PATTERN = /[?？�◆◇■□●○★☆△▲※※→←↑↓♀♂㊣^`~!@#$%^&*()_+=\[\]{};':"\\|,.<>\/?]/;
+  const isValidOption = (item) => {
+    if (!item || typeof item !== 'string') return false;
+    const trimmed = item.trim();
+    if (!trimmed) return false;
+    // 过滤纯数字
+    if (/^\d+(\.\d+)?$/.test(trimmed)) return false;
+    // 过滤包含异常字符（除了中文、英文、日文假名、数字、常见符号）
+    if (ASSET_TYPE_GARBLED_PATTERN.test(trimmed)) return false;
+    // 过滤仅含中文问号/乱码
+    if (/^[?？�\s]+$/.test(trimmed)) return false;
+    // 过滤显示为 "??" 的异常选项
+    if (trimmed === '??' || trimmed === '？？') return false;
+    return true;
+  };
   const [assetTypeOptions, setAssetTypeOptions] = useState(() => {
     const saved = localStorage.getItem('finance_asset_type_options');
-    return saved ? JSON.parse(saved) : DEFAULT_ASSET_TYPE_OPTIONS;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const filtered = parsed.filter(isValidOption);
+          if (filtered.length !== parsed.length) {
+            localStorage.setItem('finance_asset_type_options', JSON.stringify(filtered));
+          }
+          return filtered.length > 0 ? filtered : DEFAULT_ASSET_TYPE_OPTIONS;
+        }
+      } catch (e) {}
+    }
+    return DEFAULT_ASSET_TYPE_OPTIONS;
   });
   const [showAssetTypeModal, setShowAssetTypeModal] = useState(false);
   const [assetTypeToEdit, setAssetTypeToEdit] = useState(null);
@@ -1969,16 +1996,13 @@ export default function Finance({ onAssetPenetration }) {
     const saved = localStorage.getItem('finance_asset_kind_options');
     const parsed = saved ? JSON.parse(saved) : DEFAULT_ASSET_KIND_OPTIONS;
     const deduped = [...new Set(parsed)];
-    const garbledPattern = /^[?？�]+$/;
-    const filtered = deduped.filter(item =>
-      item && item.trim() && !garbledPattern.test(item.trim()) && item.trim() !== '??'
-    );
+    const filtered = deduped.filter(isValidOption);
     if (filtered.length !== deduped.length) {
       localStorage.setItem('finance_asset_kind_options', JSON.stringify(filtered));
     } else if (saved && deduped.length !== parsed.length) {
       localStorage.setItem('finance_asset_kind_options', JSON.stringify(deduped));
     }
-    return filtered;
+    return filtered.length > 0 ? filtered : DEFAULT_ASSET_KIND_OPTIONS;
   });
 
   // 一级分类自定义管理（从资产分类模块动态获取）
@@ -2071,6 +2095,7 @@ export default function Finance({ onAssetPenetration }) {
     cost: '',
     quantity: '',
     currentPrice: '',
+    perTenThousandIncome: '',
     prevPrice: '',
     priceDate: '',
     avgBuyPrice: '',
@@ -2181,7 +2206,6 @@ export default function Finance({ onAssetPenetration }) {
         <div className="relative">
           <button
             type="button"
-            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={(e) => { e.stopPropagation(); setShowEngineMenu(!showEngineMenu); }}
             className="flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 px-2 py-1 rounded hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
           >
@@ -2201,6 +2225,7 @@ export default function Finance({ onAssetPenetration }) {
                 <div key={engine.id} className="flex items-center group">
                   <button
                     type="button"
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => openSearchEngine(engine, query)}
                     className="flex-1 text-left px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-600 flex items-center gap-2"
                   >
@@ -2615,10 +2640,24 @@ export default function Finance({ onAssetPenetration }) {
           saveState({ ...data }).catch(err => console.error('Failed to sanitize cash assets:', err));
         }
       }
-      // 修复 "??" 乱码字段
-      const GARBLED_PATTERN_LOCAL = /^[?？�\s]+$/;
-      const sanitizeField = (val, fallback) => {
-        if (!val || GARBLED_PATTERN_LOCAL.test(String(val).trim())) {
+      // 修复乱码字段：检测 Unicode 特殊字符和编码异常
+      // 有效字符范围：中文、英文、数字、常见标点
+      const GARBLED_PATTERN_LOCAL = /[◈◆◇◉●○□■□△▽◇◈◎¤¦¨©®°±²³´µ¶·¸¹º»¼½¾¿À-ÿØ-ÿ]/;
+      // 已知合法的市场值列表，用于精确校验
+      const VALID_MARKETS = ['国内市场', '港股市场', '美股市场', '其他市场'];
+      let sanitizationChanged = false;
+      const sanitizeField = (val, fallback, isMarket = false) => {
+        if (!val) return fallback || '';
+        const str = String(val).trim();
+        if (!str) return fallback || '';
+        // 检测乱码：包含特殊 Unicode 控制/显示字符
+        if (GARBLED_PATTERN_LOCAL.test(str)) {
+          sanitizationChanged = true;
+          return fallback || '';
+        }
+        // 市场字段：精确匹配有效值
+        if (isMarket && VALID_MARKETS.indexOf(str) === -1) {
+          sanitizationChanged = true;
           return fallback || '';
         }
         return val;
@@ -2627,7 +2666,7 @@ export default function Finance({ onAssetPenetration }) {
         data.financeAssets = data.financeAssets.map(asset => ({
           ...asset,
           name: sanitizeField(asset.name, asset.name),
-          market: sanitizeField(asset.market, '国内市场'),
+          market: sanitizeField(asset.market, '国内市场', true),
           assetKind: sanitizeField(asset.assetKind || asset.kind, ''),
           category: sanitizeField(asset.category, ''),
           subcategory: sanitizeField(asset.subcategory, ''),
@@ -2639,6 +2678,10 @@ export default function Finance({ onAssetPenetration }) {
       }
       setStateData(data);
       setLoading(false);
+      // 如果数据被清理（存在乱码），自动保存修复后的数据到数据库
+      if (sanitizationChanged) {
+        saveState(data).catch(err => console.warn('保存修复后的数据失败:', err));
+      }
       const financeAssetsData = data?.financeAssets || [];
       if (financeAssetsData.length > 0) {
         loadQuotes(financeAssetsData, data, latestRates).catch(err =>
@@ -2668,7 +2711,10 @@ export default function Finance({ onAssetPenetration }) {
         if (!isStock && (catL3 === '场外' || (!catL3 && a.market === '场外基金'))) return false;
         return true;
       })
-      .map(a => ({ code: a.code, market: a.market || '国内市场' }));
+      .map(a => ({
+        code: a.code,
+        market: a.categoryL2 === '港股通' ? '港股市场' : (a.market && !GARBLED_PATTERN_LOCAL.test(String(a.market)) ? a.market : '国内市场')
+      }));
     if (codes.length === 0) return;
     setQuotesLoading(true);
     try {
@@ -2812,67 +2858,133 @@ export default function Finance({ onAssetPenetration }) {
   const loadFundNav = async (financeAssetsData, currentState) => {
     if (!financeAssetsData || financeAssetsData.length === 0) return;
     const fundItems = financeAssetsData.filter(a => {
-      if (!a.code || !/^\d{6}$/.test(String(a.code).trim())) return false;
+      if (!a.code) return false;
       const catL3 = a.categoryL3 || a.tertiaryCategory;
-      const isFundOrBond = a.assetType === '基金' || a.assetType === '债券' || a.kind === '基金' || a.kind === '债券';
-      return isFundOrBond && (catL3 === '场外' || (!catL3 && a.market === '场外基金'));
+      return catL3 === '场外' || (!catL3 && a.market === '场外基金');
     });
     if (fundItems.length === 0) return;
     try {
       const codes = fundItems.map(a => ({ code: a.code }));
       const funds = await fetchFundNav(codes);
       console.log('[DEBUG-FRONT] 基金净值API返回:', JSON.stringify(funds, null, 2));
-      if (!funds || funds.length === 0) return;
+
+      // 找出NAV获取失败的场外资产，尝试用行情接口作为回退
+      const failedFundCodes = [];
+      if (funds && funds.length > 0) {
+        funds.forEach((f, idx) => {
+          if (!f || (f.nav == null && f.prevNav == null)) {
+            const item = fundItems[idx];
+            if (item) failedFundCodes.push(item);
+          }
+        });
+      } else {
+        failedFundCodes.push(...fundItems);
+      }
+
+      // 对于NAV获取失败的场外资产，使用行情接口回退
+      let fallbackPrices = {};
+      if (failedFundCodes.length > 0) {
+        try {
+          const fallbackResults = await fetchFinanceQuotes(
+            failedFundCodes.map(a => ({
+              code: a.code,
+              market: a.categoryL2 === '港股通' ? '港股市场' : (a.market && !GARBLED_PATTERN_LOCAL.test(String(a.market)) ? a.market : '国内市场'),
+            }))
+          );
+          fallbackResults.forEach(q => {
+            if (q && q.code && q.price != null && Number(q.price) !== 0) {
+              fallbackPrices[String(q.code)] = {
+                price: Number(q.price),
+                prevClose: q.prevClose != null ? Number(q.prevClose) : null,
+                changePct: q.changePct != null ? Number(q.changePct) : null,
+                name: q.name || null,
+              };
+            }
+          });
+        } catch (e) {
+          console.warn('场外资产行情回退获取失败:', e);
+        }
+      }
+
+      if (!funds || funds.length === 0) {
+        // NAV完全无数据，使用回退行情
+        if (Object.keys(fallbackPrices).length > 0) {
+          let changed = false;
+          const updatedAssets = (currentState?.financeAssets || []).map(a => {
+            const fb = fallbackPrices[String(a.code)];
+            if (!fb) return a;
+            const storedCurrentPrice = parseFloat(a.currentPrice) || 0;
+            if (storedCurrentPrice > 0) return a;
+            changed = true;
+            return {
+              ...a,
+              currentPrice: String(fb.price),
+              prevPrice: fb.prevClose != null ? String(fb.prevClose) : a.prevPrice,
+              dailyChangePct: fb.changePct != null ? fb.changePct : a.dailyChangePct,
+              name: fb.name || a.name,
+            };
+          });
+          if (changed) {
+            const newState = { ...(currentState || {}), financeAssets: updatedAssets };
+            setStateData(newState);
+            try { await saveState(newState); } catch (e) { console.warn('保存场外行情回退数据失败:', e); }
+          }
+        }
+        return;
+      }
+
       let changed = false;
       const updatedAssets = (currentState?.financeAssets || []).map(a => {
         const fund = funds.find(f => f.code === a.code);
-        if (!fund) return a;
-        const newNav = Number.isFinite(Number(fund.nav)) ? Number(fund.nav) : null;
-        const newPrevNav = Number.isFinite(Number(fund.prevNav)) ? Number(fund.prevNav) : null;
-        const newAccNav = Number.isFinite(Number(fund.accumulatedNav)) ? Number(fund.accumulatedNav) : null;
-        const newDate = fund.navDate || a.priceDate || '';
-        const newChangePct = Number.isFinite(Number(fund.dailyChangePct)) ? Number(fund.dailyChangePct) : null;
         const storedCurrentPrice = parseFloat(a.currentPrice) || 0;
-        // 回退链：
-        // 1. API返回有效nav -> 使用nav
-        // 2. nav无效但prevNav有效（上一交易日净值）-> 使用prevNav作为currentPrice
-        // 3. 都无效 -> 保留用户上次输入的currentPrice
-        let finalCurrentPrice = a.currentPrice;
-        let finalPrevPrice = a.prevPrice;
-        let finalPrevNavForPrev = null;
-        if (newNav != null && newNav > 0) {
-          // 正常获取到净值
-          finalCurrentPrice = String(newNav);
-          if (newPrevNav != null && newPrevNav > 0) {
-            finalPrevPrice = String(newPrevNav);
+
+        // 如果NAV获取成功，使用NAV数据
+        if (fund && (Number.isFinite(Number(fund.nav)) || Number.isFinite(Number(fund.prevNav)))) {
+          const newNav = Number.isFinite(Number(fund.nav)) ? Number(fund.nav) : null;
+          const newPrevNav = Number.isFinite(Number(fund.prevNav)) ? Number(fund.prevNav) : null;
+          const newAccNav = Number.isFinite(Number(fund.accumulatedNav)) ? Number(fund.accumulatedNav) : null;
+          const newDate = fund.navDate || a.priceDate || '';
+          const newChangePct = Number.isFinite(Number(fund.dailyChangePct)) ? Number(fund.dailyChangePct) : null;
+
+          let finalCurrentPrice = a.currentPrice;
+          let finalPrevPrice = a.prevPrice;
+          if (newNav != null && newNav > 0) {
+            finalCurrentPrice = String(newNav);
+            if (newPrevNav != null && newPrevNav > 0) finalPrevPrice = String(newPrevNav);
+            changed = true;
+          } else if (newPrevNav != null && newPrevNav > 0 && storedCurrentPrice === 0) {
+            finalCurrentPrice = String(newPrevNav);
+            changed = true;
+          } else if (storedCurrentPrice > 0) {
+            finalCurrentPrice = a.currentPrice;
           }
+          if (!changed && finalPrevPrice === a.prevPrice && finalCurrentPrice === a.currentPrice) return a;
           changed = true;
-        } else if (newPrevNav != null && newPrevNav > 0 && storedCurrentPrice === 0) {
-          // nav为0/无效，但prevNav有效且当前存储价也为0 -> 使用prevNav作为当前价（上一交易日净值）
-          finalCurrentPrice = String(newPrevNav);
+          return {
+            ...a,
+            currentPrice: finalCurrentPrice,
+            prevPrice: finalPrevPrice,
+            accumulatedNav: newAccNav != null ? newAccNav : a.accumulatedNav,
+            priceDate: newDate,
+            dailyChangePct: newChangePct != null ? newChangePct : a.dailyChangePct,
+          };
+        }
+
+        // NAV获取失败，使用回退行情
+        const fb = fallbackPrices[String(a.code)];
+        if (fb && fb.price != null) {
+          if (storedCurrentPrice > 0) return a;
           changed = true;
-        } else if (storedCurrentPrice > 0) {
-          // API没返回数据，但有用户输入的历史价格 -> 保留
-          finalCurrentPrice = a.currentPrice;
+          return {
+            ...a,
+            currentPrice: String(fb.price),
+            prevPrice: fb.prevClose != null ? String(fb.prevClose) : a.prevPrice,
+            dailyChangePct: fb.changePct != null ? fb.changePct : a.dailyChangePct,
+            name: fb.name || a.name,
+          };
         }
-        if (newPrevNav != null && newPrevNav > 0) {
-          finalPrevNavForPrev = newPrevNav;
-          if (newNav == null || newNav === 0) {
-            // 当前nav无效时，用prevNav作为计算基础
-          } else {
-            finalPrevPrice = String(newPrevNav);
-          }
-        }
-        if (!changed && finalPrevPrice === a.prevPrice && finalCurrentPrice === a.currentPrice) return a;
-        changed = true;
-        return {
-          ...a,
-          currentPrice: finalCurrentPrice,
-          prevPrice: finalPrevPrice,
-          accumulatedNav: newAccNav != null ? newAccNav : a.accumulatedNav,
-          priceDate: newDate,
-          dailyChangePct: newChangePct != null ? newChangePct : a.dailyChangePct,
-        };
+
+        return a;
       });
       if (!changed) return;
       const newState = { ...(currentState || {}), financeAssets: updatedAssets };
@@ -2932,15 +3044,28 @@ export default function Finance({ onAssetPenetration }) {
     setSaving(true);
     try {
       const isCashAsset = newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类';
+      const isMoneyFund = newAccount.positionType === '货币基金';
       const _costPrice = parseFloat(newAccount.cost) || 0;
       const _quantity = parseFloat(newAccount.quantity) || 0;
       const _currentPrice = parseFloat(newAccount.currentPrice) || 0;
       const _prevPrice = parseFloat(newAccount.prevPrice) || 0;
-      const _unitPnl = _currentPrice - _costPrice;
-      const _holdingPnl = Math.round(_unitPnl * _quantity * 100) / 100;
-      const _holdingPnlRate = _costPrice > 0 ? Math.round((_unitPnl / _costPrice) * 100 * 100) / 100 : 0;
-      const _dailyPnl = _prevPrice > 0 ? Math.round((_currentPrice - _prevPrice) * _quantity * 100) / 100 : 0;
-      const _dailyPnlRate = _prevPrice > 0 ? Math.round(((_currentPrice - _prevPrice) / _prevPrice) * 100 * 100) / 100 : 0;
+      let _holdingPnl, _holdingPnlRate, _dailyPnl, _dailyPnlRate, _currentValue;
+
+      if (isMoneyFund) {
+        const _perTenThousandIncome = parseFloat(newAccount.perTenThousandIncome) || 0;
+        _holdingPnl = Math.round(_quantity * _perTenThousandIncome * 100) / 100;
+        _holdingPnlRate = (_quantity > 0 && _costPrice > 0) ? Math.round((_holdingPnl / (_quantity * _costPrice)) * 100 * 100) / 100 : 0;
+        _dailyPnl = _holdingPnl;
+        _dailyPnlRate = _holdingPnlRate;
+        _currentValue = _quantity * _costPrice + _holdingPnl;
+      } else {
+        const _unitPnl = _currentPrice - _costPrice;
+        _holdingPnl = Math.round(_unitPnl * _quantity * 100) / 100;
+        _holdingPnlRate = _costPrice > 0 ? Math.round((_unitPnl / _costPrice) * 100 * 100) / 100 : 0;
+        _dailyPnl = _prevPrice > 0 ? Math.round((_currentPrice - _prevPrice) * _quantity * 100) / 100 : 0;
+        _dailyPnlRate = _prevPrice > 0 ? Math.round(((_currentPrice - _prevPrice) / _prevPrice) * 100 * 100) / 100 : 0;
+        _currentValue = _currentPrice * _quantity;
+      }
 
       const payload = {
         id: editMode ? editingId : `fa${Date.now()}`,
@@ -2969,6 +3094,7 @@ export default function Finance({ onAssetPenetration }) {
         cost: _costPrice * _quantity,
         availableShares: _quantity,
         currentPrice: _currentPrice,
+        perTenThousandIncome: parseFloat(newAccount.perTenThousandIncome) || 0,
         prevPrice: _prevPrice,
         priceDate: newAccount.priceDate || '',
         avgBuyPrice: parseFloat(newAccount.avgBuyPrice) || 0,
@@ -2983,7 +3109,7 @@ export default function Finance({ onAssetPenetration }) {
         holdingPnlRate: _holdingPnlRate,
         dailyPnl: _dailyPnl,
         dailyPnlRate: _dailyPnlRate,
-        currentValue: _currentPrice * _quantity,
+        currentValue: _currentValue,
         positionWeight: 0,
         totalFees: 0,
         tags: newAccount.tags ? [newAccount.tags] : [],
@@ -3164,6 +3290,7 @@ export default function Finance({ onAssetPenetration }) {
       cost: holding.costPrice || '',
       quantity: resolvedQuantity,
       currentPrice: holding.currentPrice || '',
+      perTenThousandIncome: holding.perTenThousandIncome || '',
       prevPrice: holding.prevPrice || '',
       priceDate: holding.priceDate || '',
       avgBuyPrice: holding.avgBuyPrice || '',
@@ -3232,6 +3359,7 @@ export default function Finance({ onAssetPenetration }) {
       cost: '',
       quantity: '',
       currentPrice: '',
+      perTenThousandIncome: '',
       avgBuyPrice: '',
       holdingDays: '',
       holdingPnl: '',
@@ -3596,8 +3724,47 @@ export default function Finance({ onAssetPenetration }) {
     setShowLookupDropdown(true);
     lookupTimerRef.current = setTimeout(async () => {
       try {
+        // 先尝试后端API搜索
         const results = await lookupFinance(q.trim());
-        setLookupResults(results);
+        if (results && results.length > 0) {
+          setLookupResults(results);
+          return;
+        }
+        // API无结果时，尝试从雪球API获取（支持CORS）
+        try {
+          const xueqiuResults = await fetchXueqiuSearch(q.trim());
+          if (xueqiuResults && xueqiuResults.length > 0) {
+            setLookupResults(xueqiuResults);
+            return;
+          }
+        } catch (e) {
+          console.warn('雪球搜索失败:', e);
+        }
+        // 纯数字代码：直接查腾讯行情接口
+        const trimmedQ = q.trim();
+        if (/^\d{5,6}$/.test(trimmedQ)) {
+          try {
+            const tencentResults = await fetchTencentSearch(trimmedQ);
+            if (tencentResults && tencentResults.length > 0) {
+              setLookupResults(tencentResults);
+              return;
+            }
+          } catch (e) {
+            console.warn('腾讯搜索失败:', e);
+          }
+        }
+        // 东方财富网页搜索（备用）
+        try {
+          const emResults = await fetchEastMoneySearch(q.trim());
+          if (emResults && emResults.length > 0) {
+            setLookupResults(emResults);
+            return;
+          }
+        } catch (e) {
+          console.warn('东方财富搜索失败:', e);
+        }
+        // 全部无结果
+        setLookupResults([]);
       } catch (e) {
         console.error('Lookup failed:', e);
         setLookupResults([]);
@@ -3605,6 +3772,106 @@ export default function Finance({ onAssetPenetration }) {
         setLookupLoading(false);
       }
     }, 300);
+  };
+
+  // 雪球搜索API（作为后端API的备用搜索源）
+  const fetchXueqiuSearch = async (q) => {
+    try {
+      const url = `https://xueqiu.com/query/v1/search/web.json?q=${encodeURIComponent(q)}&count=10`;
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          'Accept': 'application/json',
+        }
+      });
+      if (!response.ok) return [];
+      const data = await response.json();
+      const items = [];
+      if (data?.data?.list) {
+        data.data.list.forEach(item => {
+          items.push({
+            code: item.code || item.symbol || '',
+            name: item.name || item.title || '',
+            price: item.current || item.last_price || '',
+            market: item.market || '',
+          });
+        });
+      }
+      return items;
+    } catch (e) {
+      console.warn('雪球搜索请求失败:', e);
+      return [];
+    }
+  };
+
+  // 腾讯行情接口（纯数字代码直接查询）
+  const fetchTencentSearch = async (q) => {
+    try {
+      const codes = [];
+      const raw = q.trim();
+      if (/^\d{6}$/.test(raw)) {
+        // 尝试沪市和深市
+        codes.push(`sh${raw}`, `sz${raw}`);
+      } else if (/^\d{5}$/.test(raw)) {
+        codes.push(`hk${raw}`);
+      } else {
+        return [];
+      }
+      const url = `https://qt.gtimg.cn/q=${codes.join(',')}`;
+      const response = await fetch(url);
+      if (!response.ok) return [];
+      const text = await response.text();
+      const items = [];
+      const segments = text.split(/[;\n]/).map(s => s.trim()).filter(Boolean);
+      for (const segment of segments) {
+        const match = segment.match(/v_(\w+)="(.*)"/);
+        if (!match || !match[2]) continue;
+        const fullCode = match[1];
+        const parts = match[2].split('~');
+        if (parts.length > 32) {
+          const code = fullCode.replace(/^(sh|sz|hk)/, '');
+          const name = parts[1] || '';
+          const price = parseFloat(parts[3]) || null;
+          if (name || price) {
+            items.push({
+              code,
+              name,
+              price: price ? String(price.toFixed(4)) : '',
+              market: fullCode.startsWith('sh') ? '上海' : fullCode.startsWith('sz') ? '深圳' : '港股',
+            });
+          }
+        }
+      }
+      return items;
+    } catch (e) {
+      console.warn('腾讯行情搜索失败:', e);
+      return [];
+    }
+  };
+
+  // 东方财富搜索API（网页搜索回退）
+  const fetchEastMoneySearch = async (q) => {
+    try {
+      const url = `https://searchapi.eastmoney.com/api/suggest/get?input=${encodeURIComponent(q)}&type=14&token=D43BF722C8E33BDC906FB84D85E326E8&count=10`;
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      });
+      if (!response.ok) return [];
+      const data = await response.json();
+      const rows = data?.QuotationCodeTable?.Data || [];
+      return rows
+        .filter(r => ["AStock", "OTCFUND", "ETF", "Index", "HK", "UsStock", "UsADR"].includes(r.Classify))
+        .slice(0, 8)
+        .map(r => ({
+          code: r.Code,
+          name: r.Name,
+          classify: r.Classify,
+          market: r.MarketType === '1' ? '上海' : r.MarketType === '2' ? '深圳' : r.Classify === 'HK' ? '港股' : r.Classify === 'UsStock' ? '美股' : '',
+        }));
+    } catch (e) {
+      console.warn('东方财富搜索失败:', e);
+      return [];
+    }
   };
 
   const handleSelectLookup = async (item) => {
@@ -4902,7 +5169,23 @@ export default function Finance({ onAssetPenetration }) {
                     <div className="flex gap-2">
                       <select
                         value={newAccount.positionType}
-                        onChange={e => setNewAccount({ ...newAccount, positionType: e.target.value })}
+                        onChange={e => {
+                          const posType = e.target.value;
+                          setNewAccount(prev => {
+                            const updates = { positionType: posType };
+                            if (posType === '货币基金') {
+                              updates.currentPrice = '1';
+                              updates.perTenThousandIncome = prev.perTenThousandIncome || '';
+                              const qty = parseFloat(prev.quantity) || 0;
+                              const cost = parseFloat(prev.cost) || 0;
+                              const holdingPnl = qty * (parseFloat(prev.perTenThousandIncome) || 0);
+                              const holdingPnlRate = (qty > 0 && cost > 0 && prev.perTenThousandIncome) ? (holdingPnl / (qty * cost)) * 100 : 0;
+                              updates.holdingPnl = (qty || prev.perTenThousandIncome) ? holdingPnl.toFixed(2) : prev.holdingPnl;
+                              updates.holdingPnlRate = (qty && cost && prev.perTenThousandIncome) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate;
+                            }
+                            return { ...prev, ...updates };
+                          });
+                        }}
                         disabled={!newAccount.assetType}
                         className={`${FORM_SELECT} flex-1 ${!newAccount.assetType ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
@@ -4942,7 +5225,7 @@ export default function Finance({ onAssetPenetration }) {
                               handleCodeSearch(e.target.value);
                             }}
                             onFocus={() => newAccount.name && handleCodeSearch(newAccount.name)}
-                            onBlur={() => { setShowLookupDropdown(false); setShowEngineMenu(false); }}
+                            onBlur={() => { setShowLookupDropdown(false); }}
                             placeholder="基金、股票或自定义资产名称"
                             className={FORM_INPUT}
                           />
@@ -4983,7 +5266,7 @@ export default function Finance({ onAssetPenetration }) {
                               handleCodeSearch(e.target.value);
                             }}
                             onFocus={() => newAccount.code && handleCodeSearch(newAccount.code)}
-                            onBlur={() => { setShowLookupDropdown(false); setShowEngineMenu(false); }}
+                            onBlur={() => { setShowLookupDropdown(false); }}
                             placeholder="输入代码如 600519"
                             className={`${FORM_INPUT} font-mono`}
                           />
@@ -5022,6 +5305,18 @@ export default function Finance({ onAssetPenetration }) {
                             setNewAccount(p => {
                               const qty = parseFloat(p.quantity) || 0;
                               const cost = parseFloat(val) || 0;
+                              const isMoneyFund = p.positionType === '货币基金';
+                              if (isMoneyFund) {
+                                const income = parseFloat(p.perTenThousandIncome) || 0;
+                                const holdingPnl = qty * income;
+                                const holdingPnlRate = (qty > 0 && cost > 0) ? (holdingPnl / (qty * cost)) * 100 : 0;
+                                return {
+                                  ...p,
+                                  cost: val,
+                                  holdingPnl: (qty || income) ? holdingPnl.toFixed(2) : p.holdingPnl,
+                                  holdingPnlRate: (qty && cost && income) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                                };
+                              }
                               const price = parseFloat(p.currentPrice) || 0;
                               const currentValue = qty * price;
                               const unitPnl = price - cost;
@@ -5053,6 +5348,18 @@ export default function Finance({ onAssetPenetration }) {
                           setNewAccount(p => {
                             const qty = parseFloat(val) || 0;
                             const cost = parseFloat(p.cost) || 0;
+                            const isMoneyFund = p.positionType === '货币基金';
+                            if (isMoneyFund) {
+                              const income = parseFloat(p.perTenThousandIncome) || 0;
+                              const holdingPnl = qty * income;
+                              const holdingPnlRate = (qty > 0 && cost > 0) ? (holdingPnl / (qty * cost)) * 100 : 0;
+                              return {
+                                ...p,
+                                quantity: val,
+                                holdingPnl: (qty || income) ? holdingPnl.toFixed(2) : p.holdingPnl,
+                                holdingPnlRate: (qty && cost && income) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                              };
+                            }
                             const price = parseFloat(p.currentPrice) || 0;
                             const currentValue = qty * price;
                             const unitPnl = price - cost;
@@ -5076,31 +5383,56 @@ export default function Finance({ onAssetPenetration }) {
                           placeholder="0" className={FORM_INPUT} />
                       </FormField>
 
-                      {/* 现价 — 所有场景都显示，支持自动获取和手动输入 */}
-                      <FormField label="现价">
-                        <input type="number" step="0.0001"
-                          value={newAccount.currentPrice}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setNewAccount(p => {
-                              const qty = parseFloat(p.quantity) || 0;
-                              const cost = parseFloat(p.cost) || 0;
-                              const price = parseFloat(val) || 0;
-                              const currentValue = qty * price;
-                              const unitPnl = price - cost;
-                              const holdingPnl = unitPnl * qty;
-                              const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
-                              return {
-                                ...p,
-                                currentPrice: val,
-                                currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
-                                holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
-                                holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
-                              };
-                            });
-                          }} placeholder="搜索资产自动获取，或手动输入"
+                      {/* 现价 / 万份收益 — 根据持仓类型动态显示 */}
+                      {newAccount.positionType === '货币基金' ? (
+                        <FormField label="万份收益">
+                          <input type="number" step="0.0001"
+                            value={newAccount.perTenThousandIncome}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setNewAccount(p => {
+                                const qty = parseFloat(p.quantity) || 0;
+                                const cost = parseFloat(p.cost) || 0;
+                                const income = parseFloat(val) || 0;
+                                const holdingPnl = qty * income;
+                                const holdingPnlRate = (qty > 0 && cost > 0) ? (holdingPnl / (qty * cost)) * 100 : 0;
+                                return {
+                                  ...p,
+                                  perTenThousandIncome: val,
+                                  currentPrice: income > 0 ? String(income) : '',
+                                  holdingPnl: (qty || income) ? holdingPnl.toFixed(2) : p.holdingPnl,
+                                  holdingPnlRate: (qty && cost && income) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                                };
+                              });
+                            }} placeholder="输入万份收益金额"
+                            className={FORM_INPUT} />
+                        </FormField>
+                      ) : (
+                        <FormField label="现价">
+                          <input type="number" step="0.0001"
+                            value={newAccount.currentPrice}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setNewAccount(p => {
+                                const qty = parseFloat(p.quantity) || 0;
+                                const cost = parseFloat(p.cost) || 0;
+                                const price = parseFloat(val) || 0;
+                                const currentValue = qty * price;
+                                const unitPnl = price - cost;
+                                const holdingPnl = unitPnl * qty;
+                                const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+                                return {
+                                  ...p,
+                                  currentPrice: val,
+                                  currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
+                                  holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
+                                  holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                                };
+                              });
+                            }} placeholder="搜索资产自动获取，或手动输入"
                           className={FORM_INPUT} />
-                      </FormField>
+                        </FormField>
+                      )}
 
                       {/* 以下字段仅在非国内市场简单模式（股票/基金场内/基金场外）时显示 */}
                       {!(newAccount.market === '国内市场' && (newAccount.assetType === '股票' || (newAccount.assetType === '基金' && (newAccount.categoryL3 === '场内' || newAccount.categoryL3 === '场外')))) && (
@@ -5125,18 +5457,26 @@ export default function Finance({ onAssetPenetration }) {
                           </FormField>
 
                           <div className="sm:col-span-2">
-                            <FormField label="当前市值" markRequired fullWidth>
+                            <FormField label={newAccount.positionType === '货币基金' ? '持仓盈亏' : '当前市值'} markRequired fullWidth>
                               <div className="relative">
-                                <input type="number" step="0.001" value={newAccount.currentValue}
+                                <input type="number" step="0.001" value={newAccount.positionType === '货币基金' ? newAccount.holdingPnl : newAccount.currentValue}
                                   readOnly
                                   placeholder="自动计算"
                                   className={`${FORM_INPUT} pl-7 font-semibold bg-gray-50 dark:bg-slate-700 cursor-not-allowed`} />
                                 <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">¥</span>
                               </div>
-                              {(newAccount.quantity && newAccount.currentPrice) && (
-                                <p className="mt-1 text-xs text-gray-400">
-                                  = {newAccount.quantity} × {newAccount.currentPrice} = {(parseFloat(newAccount.quantity) * parseFloat(newAccount.currentPrice)).toFixed(2)}
-                                </p>
+                              {newAccount.positionType === '货币基金' ? (
+                                (newAccount.quantity && newAccount.perTenThousandIncome) && (
+                                  <p className="mt-1 text-xs text-gray-400">
+                                    = {newAccount.quantity} × {newAccount.perTenThousandIncome} = {(parseFloat(newAccount.quantity) * parseFloat(newAccount.perTenThousandIncome)).toFixed(2)}
+                                  </p>
+                                )
+                              ) : (
+                                (newAccount.quantity && newAccount.currentPrice) && (
+                                  <p className="mt-1 text-xs text-gray-400">
+                                    = {newAccount.quantity} × {newAccount.currentPrice} = {(parseFloat(newAccount.quantity) * parseFloat(newAccount.currentPrice)).toFixed(2)}
+                                  </p>
+                                )
                               )}
                             </FormField>
                           </div>
