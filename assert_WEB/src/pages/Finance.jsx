@@ -878,19 +878,27 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
       <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl border border-gray-200 dark:border-slate-700">
-        <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700">
-          <div className="flex items-center gap-3">
-            <div className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full p-2">
+        <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700 gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full p-2 shrink-0">
               <Eye className="w-5 h-5" />
             </div>
-            <div>
-              <h3 className="font-bold text-gray-900 dark:text-white text-lg">{cleanAssetName(latestData.name)}</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400">代码: {latestData.code || '-'}</p>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-bold text-gray-900 dark:text-white text-lg truncate">{cleanAssetName(latestData.name)}</h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-xs text-gray-500 dark:text-gray-400 shrink-0">代码: {latestData.code || '-'}</p>
+                <div className="flex items-baseline gap-1 min-w-0">
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">总额</span>
+                  <span className="text-sm font-bold text-gray-900 dark:text-white truncate">
+                    {formatCurrencyWithRate(currentValue, latestData.currency || 'CNY', selectedCurrency, exchangeRates)}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+            className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors shrink-0"
           >
             <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -3182,41 +3190,84 @@ export default function Finance({ onAssetPenetration }) {
       const funds = await fetchMoneyFundData(codes);
       console.log('[DEBUG] 货币基金数据:', JSON.stringify(funds, null, 2));
 
-      if (!funds || funds.length === 0) return;
-
       let changed = false;
       const updatedAssets = (currentState?.financeAssets || []).map(a => {
         if (a.positionType !== '货币基金' && a.positionCategory !== '货币基金') return a;
-        const fund = funds.find(f => f.code === a.code);
-        if (!fund) return a;
+        const fund = funds && funds.length > 0 ? funds.find(f => f.code === a.code) : null;
 
         const updates = {};
-        if (fund.annualizedRate7d != null) {
-          updates.annualizedRate7d = String(fund.annualizedRate7d);
-          changed = true;
+        if (fund) {
+          if (fund.annualizedRate7d != null) {
+            updates.annualizedRate7d = String(fund.annualizedRate7d);
+            changed = true;
+          }
+          if (fund.perTenThousandIncome != null) {
+            updates.perTenThousandIncome = String(fund.perTenThousandIncome);
+            changed = true;
+          }
+          if (fund.name) {
+            updates.name = fund.name;
+            changed = true;
+          }
+          if (fund.navDate) {
+            updates.priceDate = fund.navDate;
+            changed = true;
+          }
         }
-        if (fund.perTenThousandIncome != null) {
-          updates.perTenThousandIncome = String(fund.perTenThousandIncome);
-          changed = true;
-        }
-        if (fund.name) {
-          updates.name = fund.name;
-          changed = true;
-        }
-        if (fund.navDate) {
-          updates.priceDate = fund.navDate;
-          changed = true;
+
+        // 从交易记录重新计算 shares/quantity/cost（兜底修复：当 shares 为 0 但交易记录不为空时）
+        const txs = a.transactions || [];
+        let currentQty = parseFloat(a.shares || a.quantity) || 0;
+        if (txs.length > 0) {
+          let buyQty = 0, buyAmt = 0, sellQty = 0;
+          txs.forEach(t => {
+            const qty = parseFloat(t.quantity || t.shares) || 0;
+            const amt = parseFloat(t.amount) || 0;
+            if (t.type === '建仓' || t.type === '买入' || t.direction === '建仓' || t.direction === '买入') {
+              buyQty += qty;
+              buyAmt += amt;
+            } else if (t.type === '卖出' || t.type === '清仓' || t.direction === '卖出' || t.direction === '清仓') {
+              sellQty += Math.abs(qty);
+            }
+          });
+          const computedQty = buyQty - sellQty;
+          const computedCostPrice = buyQty > 0 ? buyAmt / buyQty : 0;
+          // 当前数量为0但交易计算的数量不为0，说明持久化有问题，用交易记录修复
+          if (currentQty === 0 && computedQty > 0) {
+            currentQty = computedQty;
+            updates.shares = computedQty;
+            updates.quantity = computedQty;
+            updates.availableShares = computedQty;
+            updates.costPrice = computedCostPrice;
+            updates.cost = computedCostPrice * computedQty;
+            updates.currentValue = Math.round(computedQty * 100) / 100;
+            updates.holdingPnl = Math.round((1 - computedCostPrice) * computedQty * 100) / 100;
+            updates.holdingPnlRate = (computedCostPrice > 0 && computedQty > 0)
+              ? Math.round(((1 - computedCostPrice) / computedCostPrice) * 100 * 100) / 100
+              : 0;
+            changed = true;
+          } else if (currentQty > 0 && parseFloat(a.costPrice) === 0 && computedCostPrice > 0) {
+            // 数量不为0但成本价丢失，也用交易记录修复
+            updates.costPrice = computedCostPrice;
+            updates.cost = computedCostPrice * currentQty;
+            updates.holdingPnl = Math.round((1 - computedCostPrice) * currentQty * 100) / 100;
+            updates.holdingPnlRate = (computedCostPrice > 0 && currentQty > 0)
+              ? Math.round(((1 - computedCostPrice) / computedCostPrice) * 100 * 100) / 100
+              : 0;
+            changed = true;
+          }
         }
 
         // 计算累计收益 = 持有份额 × 万份收益 / 10000
-        const quantity = parseFloat(a.shares || a.quantity) || 0;
-        if (quantity > 0 && fund.perTenThousandIncome != null) {
+        const quantity = currentQty;
+        if (fund && quantity > 0 && fund.perTenThousandIncome != null) {
           const totalIncome = quantity * fund.perTenThousandIncome / 10000;
           updates.totalIncome = String(totalIncome.toFixed(2));
           changed = true;
         }
 
-        if (!changed) return a;
+        const keys = Object.keys(updates);
+        if (keys.length === 0) return a;
         return { ...a, ...updates };
       });
 

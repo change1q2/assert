@@ -385,7 +385,8 @@ async function saveUserState(conn, userId, state) {
        number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent),
        number(row.prevPrice), text(row.priceDate), text(row.tags), text(row.status || 'active'), text(row.archiveDate || ''), index]);
 
-    const isOutdoor = (row.market === '国内市场') && (row.tertiaryCategory === '场外' || row.categoryL3 === '场外');
+    const _positionCategory = row.positionType || row.positionCategory || '';
+    const isOutdoor = (row.market === '国内市场') && (row.tertiaryCategory === '场外' || row.categoryL3 === '场外' || _positionCategory === '货币基金');
 
     for (const [transactionIndex, transaction] of (row.transactions || []).entries()) {
       if (isOutdoor) {
