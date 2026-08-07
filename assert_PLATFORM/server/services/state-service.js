@@ -322,6 +322,12 @@ async function saveUserState(conn, userId, state) {
     "yearly_records": "yearlyRecords",
   };
 
+  // Force delete transaction tables and child tables that are embedded in parent records
+  const forceDeleteTables = ["finance_asset_indoor_transactions", "finance_asset_outdoor_transactions", "finance_asset_archives", "debt_payments"];
+  for (const table of forceDeleteTables) {
+    await sqlRun(conn, `DELETE FROM ${table} WHERE user_id = ?`, [userId]);
+  }
+
   for (const table of tables) {
     const stateKey = tableStateMap[table];
     // Only delete if the state has explicit data for this table, or it's user_settings
