@@ -43,12 +43,12 @@ function migrateAccountOwnership(acc) {
   const result = { ...acc };
   if (!Array.isArray(result.owners) || result.owners.length === 0) {
     result.ownershipType = 'personal';
-    result.owners = [{ name: '默认', share: 100, isDefault: true }];
+    result.owners = [{ name: '自己', share: 100, isDefault: true }];
   } else {
     const normalizedOwners = result.owners.map(o => {
       const shareNum = parseFloat(o.share);
       return {
-        name: (o.name && String(o.name).trim()) || '默认',
+        name: (o.name && String(o.name).trim()) || '自己',
         share: isNaN(shareNum) ? 100 : shareNum,
         isDefault: o.isDefault === true,
       };
@@ -192,7 +192,7 @@ export default function Accounts() {
     currency: 'CNY',
     liability: false,
     ownershipType: 'personal',
-    owners: [{ name: '默认', share: 100, isDefault: true }],
+    owners: [{ name: '自己', share: 100, isDefault: true }],
   });
   const [extraOwnerNames, setExtraOwnerNames] = useState([]);
   const [ownershipDropdownOpen, setOwnershipDropdownOpen] = useState(false);
@@ -203,7 +203,7 @@ export default function Accounts() {
   const [showPersonalAdd, setShowPersonalAdd] = useState(false);
   const [showMultiAdd, setShowMultiAdd] = useState(false);
   const [tempMultiCheckedNames, setTempMultiCheckedNames] = useState(new Set());
-  const [lastPersonalOwner, setLastPersonalOwner] = useState('默认');
+  const [lastPersonalOwner, setLastPersonalOwner] = useState('自己');
   const [filters, setFilters] = useState({
     name: '',
     category: '',
@@ -911,7 +911,7 @@ export default function Accounts() {
     setEditingAccount(null);
     const firstCategory = categoryList[0]?.value || '银行';
     const defaultSub = (accountCatConfig[firstCategory] || [])[0] || '';
-    const defaultOwner = allOwnerNames[0] || '默认';
+    const defaultOwner = allOwnerNames[0] || '自己';
     setFormData({
       name: '',
       category: firstCategory,
@@ -960,7 +960,7 @@ export default function Accounts() {
       owners: migratedAccount.owners,
     });
     if (migratedAccount.ownershipType === 'personal') {
-      const personalName = migratedAccount.owners[0]?.name || '默认';
+      const personalName = migratedAccount.owners[0]?.name || '自己';
       setLastPersonalOwner(personalName);
       setTempMultiCheckedNames(new Set());
     } else {
@@ -1029,7 +1029,7 @@ export default function Accounts() {
 
       const ownersToSave = Array.isArray(formData.owners) && formData.owners.length > 0
         ? formData.owners
-        : [{ name: '默认', share: 100, isDefault: true }];
+        : [{ name: '自己', share: 100, isDefault: true }];
       const ownershipTypeToSave = formData.ownershipType || (ownersToSave.length > 1 ? 'multi' : 'personal');
 
       const allOwnerNamesFromForm = ownersToSave.map(o => o.name).filter(n => n && String(n).trim());
@@ -1514,7 +1514,7 @@ export default function Accounts() {
       const wasDefault = acc.owners.some(o => o.name === ownerName && o.isDefault === true);
       let remaining = acc.owners.filter(o => o.name !== ownerName).map(o => ({ ...o }));
       if (remaining.length === 0) {
-        return { ...acc, ownershipType: 'personal', owners: [{ name: '默认', share: 100, isDefault: true }] };
+        return { ...acc, ownershipType: 'personal', owners: [{ name: '自己', share: 100, isDefault: true }] };
       }
       // rescale shares to sum 100
       const sum = remaining.reduce((s, o) => s + (parseFloat(o.share) || 0), 0);
@@ -1543,7 +1543,7 @@ export default function Accounts() {
         const wasDefaultFd = formData.owners.some(o => o.name === ownerName && o.isDefault === true);
         let remainingFd = formData.owners.filter(o => o.name !== ownerName).map(o => ({ ...o }));
         if (remainingFd.length === 0) {
-          remainingFd = [{ name: '默认', share: 100, isDefault: true }];
+          remainingFd = [{ name: '自己', share: 100, isDefault: true }];
           setFormData({ ...formData, owners: remainingFd, ownershipType: 'personal' });
         } else {
           const sumFd = remainingFd.reduce((s, o) => s + (parseFloat(o.share) || 0), 0);
@@ -2375,10 +2375,10 @@ export default function Accounts() {
                   const hasAssets = stats.marketValue !== 0 || stats.holdingCost !== 0;
                   const plColor = pl > 0 ? 'text-green-600' : pl < 0 ? 'text-red-500' : 'text-gray-400';
                   const ownershipType = account.ownershipType || (Array.isArray(account.owners) && account.owners.length>1 ? 'multi' : 'personal');
-                  const owners = Array.isArray(account.owners) && account.owners.length>0 ? account.owners : [{name:'默认', share:100}];
+                  const owners = Array.isArray(account.owners) && account.owners.length>0 ? account.owners : [{name:'自己', share:100}];
                   const ownerSummaryText = owners.length===1
-                    ? (owners[0].name || '默认')
-                    : ((owners[0].name || '默认') + ' + ' + (owners.length-1) + '人');
+                    ? (owners[0].name || '自己')
+                    : ((owners[0].name || '自己') + ' + ' + (owners.length-1) + '人');
                   return (
                     <tr
                       key={account.id}
@@ -2832,7 +2832,7 @@ export default function Accounts() {
                       <div
                         className={`px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 ${formData.ownershipType !== 'multi' ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
                         onClick={() => {
-                          const ownerName = lastPersonalOwner || allOwnerNames[0] || '默认';
+                          const ownerName = lastPersonalOwner || allOwnerNames[0] || '自己';
                           setFormData({
                             ...formData,
                             ownershipType: 'personal',
@@ -2848,16 +2848,19 @@ export default function Accounts() {
                         className={`px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 ${formData.ownershipType === 'multi' ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
                         onClick={() => {
                           let initialChecked;
-                          if (formData.ownershipType === 'multi' && Array.isArray(formData.owners)) {
+                          if (formData.ownershipType === 'multi' && Array.isArray(formData.owners) && formData.owners.length > 0) {
                             initialChecked = new Set(formData.owners.map(o => o.name));
                           } else {
-                            initialChecked = new Set();
+                            // 从个人所有切换到多人所有时，默认包含"自己"作为所有者并占 100%
+                            const defaultOwnerName = lastPersonalOwner || allOwnerNames[0] || '自己';
+                            initialChecked = new Set([defaultOwnerName]);
                           }
                           let multiOwners;
                           if (formData.ownershipType === 'multi' && Array.isArray(formData.owners) && formData.owners.length > 0) {
                             multiOwners = formData.owners;
                           } else {
-                            multiOwners = [];
+                            const defaultOwnerName = Array.from(initialChecked)[0] || '自己';
+                            multiOwners = [{ name: defaultOwnerName, share: 100, isDefault: true }];
                           }
                           setTempMultiCheckedNames(initialChecked);
                           setFormData({

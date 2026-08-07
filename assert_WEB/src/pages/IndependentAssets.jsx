@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchState, saveState, lookupFinance, fetchFinanceQuotes } from '../api';
+import { convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency';
 import {
   Wallet,
   Plus,
@@ -424,8 +425,23 @@ export default function IndependentAssets() {
   const [fixedInvestmentCashflowEventType, setFixedInvestmentCashflowEventType] = useState('');
   const [fixedInvestmentCashflowSign, setFixedInvestmentCashflowSign] = useState('all');
   const [fixedInvestmentCashflowPage, setFixedInvestmentCashflowPage] = useState(1);
+  // 汇率（用于多币种金额折算到统一显示货币：人民币 CNY）
+  const [exchangeRates, setExchangeRates] = useState(DEFAULT_EXCHANGE_RATES);
+  // 保险资产合计行的统计币种（可切换，默认人民币）
+  const [insuranceTotalCurrency, setInsuranceTotalCurrency] = useState('CNY');
 
   const { accounts = [], independentAssets = {} } = stateData || {};
+
+  // loadData 后，如果后端提供了汇率，则用后端汇率覆盖默认
+  useEffect(() => {
+    if (stateData && stateData.exchangeRates && typeof stateData.exchangeRates === 'object') {
+      setExchangeRates(prev => ({ ...prev, ...stateData.exchangeRates }));
+    }
+  }, [stateData]);
+
+  // 把任意币种的金额折算成人民币（账户本卡片 & 顶部汇总卡片统一显示为人民币）
+  const toCNY = (value, fromCurrency) =>
+    convertAmount(parseFloat(value) || 0, (fromCurrency || 'CNY'), 'CNY', exchangeRates);
 
   // 防止并发重复加载（mount、window focus、saveData 触发可能重叠）
   const loadingRef = useRef(false);
@@ -1565,67 +1581,74 @@ export default function IndependentAssets() {
     Object.keys(independentAssets).forEach(type => {
       const items = independentAssets[type] || [];
       items.forEach(item => {
+        const cur = item.currency || 'CNY';
         if (type === 'insurance') {
+          const records = item.transactionRecords || [];
+          let cost = 0;
+          let value = 0;
           if (item.insuranceType === '年金险') {
-            const records = item.transactionRecords || [];
             const sumAnnualPremium = records.reduce((sum, r) => sum + parseFloat(r.annualPremium || 0), 0);
             const latestRecord = records.length > 0
               ? [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop()
               : null;
             const latestCashValue = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
-            totalValue += sumAnnualPremium > 0 ? sumAnnualPremium : parseFloat(item.paidAmount || 0);
-            totalCost += sumAnnualPremium > 0 ? sumAnnualPremium : parseFloat(item.paidAmount || 0);
-            demoProfit += parseFloat(item.demoProfitAmount || 0);
-            actualProfit += parseFloat(item.actualProfitAmount || 0);
+            cost = sumAnnualPremium > 0 ? sumAnnualPremium : parseFloat(item.paidAmount || 0);
+            value = latestCashValue > 0 ? latestCashValue : cost;
           } else {
-            totalValue += parseFloat(item.paidAmount || 0);
-            totalCost += parseFloat(item.paidAmount || 0);
-            demoProfit += parseFloat(item.demoProfitAmount || 0);
-            actualProfit += parseFloat(item.actualProfitAmount || 0);
+            cost = parseFloat(item.paidAmount || 0);
+            const cash = parseFloat(item.cashValue || 0);
+            value = cash > 0 ? cash : cost;
           }
+          totalValue += toCNY(value, cur);
+          totalCost += toCNY(cost, cur);
+          demoProfit += toCNY(item.demoProfitAmount || 0, cur);
+          actualProfit += toCNY(item.actualProfitAmount || 0, cur);
         } else if (type === 'realestate') {
           if (item.usage === '出租') {
-            totalValue += parseFloat(item.purchasePrice || 0);
+            totalValue += toCNY(item.purchasePrice || 0, cur);
           } else {
             const marketValue = parseFloat(item.marketValue || 0);
             const taxAmount = parseFloat(item.taxAmount || 0);
             const agencyFeeAmount = parseFloat(item.agencyFeeAmount || 0);
             const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFeeAmount) : parseFloat(item.purchasePrice || 0);
-            totalValue += actualValue;
+            totalValue += toCNY(actualValue, cur);
           }
-          totalCost += parseFloat(item.purchasePrice || 0);
+          totalCost += toCNY(item.purchasePrice || 0, cur);
         } else if (type === 'vehicle') {
           const { residualValue } = calculateVehicleResidualValue(item);
-          totalValue += residualValue;
-          totalCost += parseFloat(item.purchasePrice || 0);
+          totalValue += toCNY(residualValue, cur);
+          totalCost += toCNY(item.purchasePrice || 0, cur);
         } else if (type === 'fixedinvestment') {
-          totalValue += parseFloat(item.investmentCost || 0);
-          totalCost += parseFloat(item.investmentCost || 0);
+          totalValue += toCNY(item.investmentCost || 0, cur);
+          totalCost += toCNY(item.investmentCost || 0, cur);
           if (item.dividendRecords && Array.isArray(item.dividendRecords)) {
-            actualProfit += item.dividendRecords.reduce((sum, r) => sum + parseFloat(r.dividendAmount || 0), 0);
+            actualProfit += toCNY(
+              item.dividendRecords.reduce((sum, r) => sum + parseFloat(r.dividendAmount || 0), 0),
+              cur
+            );
           } else {
             const cost = parseFloat(item.investmentCost || 0);
             const rate = parseFloat(item.annualDividendRate || 0);
             if (cost && rate) {
-              actualProfit += cost * rate / 100;
+              actualProfit += toCNY(cost * rate / 100, cur);
             } else {
-              actualProfit += parseFloat(item.dividendAmount || 0);
+              actualProfit += toCNY(item.dividendAmount || 0, cur);
             }
           }
         } else if (type === 'equity') {
-          totalValue += parseFloat(item.marketValue || 0);
-          totalCost += parseFloat(item.investmentCost || 0);
-          actualProfit += parseFloat(item.pnl || 0);
+          totalValue += toCNY(item.marketValue || 0, cur);
+          totalCost += toCNY(item.investmentCost || 0, cur);
+          actualProfit += toCNY(item.pnl || 0, cur);
         } else if (type === 'fixeddeposit') {
-          totalValue += parseFloat(item.amount || 0);
-          totalCost += parseFloat(item.amount || 0);
-          actualProfit += parseFloat(item.actualReturn || 0);
+          totalValue += toCNY(item.amount || 0, cur);
+          totalCost += toCNY(item.amount || 0, cur);
+          actualProfit += toCNY(item.actualReturn || 0, cur);
         }
       });
     });
 
     return { totalValue, totalCost, demoProfit, actualProfit };
-  }, [independentAssets]);
+  }, [independentAssets, exchangeRates]);
 
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -1735,12 +1758,13 @@ export default function IndependentAssets() {
               Object.entries(independentAssets).forEach(([assetType, items]) => {
                 items.forEach(item => {
                   if (item.accountId === account.id) {
+                    const cur = item.currency || 'CNY';
                     if (assetType === 'realestate') {
                       if (item.usage === '出租') {
                         const purchasePrice = parseFloat(item.purchasePrice || 0);
-                        marketValue += purchasePrice;
-                        purchaseCost += purchasePrice;
-                        actualValue += purchasePrice;
+                        marketValue += toCNY(purchasePrice, cur);
+                        purchaseCost += toCNY(purchasePrice, cur);
+                        actualValue += toCNY(purchasePrice, cur);
                       } else {
                         const mv = parseFloat(item.marketValue || 0);
                         const pp = parseFloat(item.purchasePrice || 0);
@@ -1748,42 +1772,58 @@ export default function IndependentAssets() {
                         const agency = parseFloat(item.agencyFeeAmount || 0);
                         const pl = parseFloat(item.profitLossAmount || 0);
                         
-                        marketValue += mv > 0 ? mv : pp;
-                        purchaseCost += pp;
-                        profitLoss += pl;
-                        fees += tax + agency;
-                        actualValue += mv > 0 ? (mv - tax - agency) : pp;
+                        marketValue += toCNY(mv > 0 ? mv : pp, cur);
+                        purchaseCost += toCNY(pp, cur);
+                        profitLoss += toCNY(pl, cur);
+                        fees += toCNY(tax + agency, cur);
+                        actualValue += toCNY(mv > 0 ? (mv - tax - agency) : pp, cur);
                       }
                     } else if (assetType === 'vehicle') {
                       const { residualValue } = calculateVehicleResidualValue(item);
                       const pp = parseFloat(item.purchasePrice || 0);
-                      marketValue += residualValue;
-                      purchaseCost += pp;
-                      profitLoss += residualValue - pp;
-                      actualValue += residualValue;
+                      marketValue += toCNY(residualValue, cur);
+                      purchaseCost += toCNY(pp, cur);
+                      profitLoss += toCNY(residualValue - pp, cur);
+                      actualValue += toCNY(residualValue, cur);
                     } else if (assetType === 'insurance') {
-                      const paid = parseFloat(item.paidAmount || 0);
-                      marketValue += paid;
-                      purchaseCost += paid;
-                      actualValue += paid;
+                      const records = item.transactionRecords || [];
+                      let cost = 0;
+                      let cash = 0;
+                      if (item.insuranceType === '年金险') {
+                        const sumAnnualPremium = records.reduce((s, r) => s + parseFloat(r.annualPremium || 0), 0);
+                        const latestRecord = records.length > 0
+                          ? [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop()
+                          : null;
+                        const latestCash = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
+                        cost = sumAnnualPremium > 0 ? sumAnnualPremium : parseFloat(item.paidAmount || 0);
+                        cash = latestCash > 0 ? latestCash : cost;
+                      } else {
+                        cost = parseFloat(item.paidAmount || 0);
+                        const c = parseFloat(item.cashValue || 0);
+                        cash = c > 0 ? c : cost;
+                      }
+                      purchaseCost += toCNY(cost, cur);
+                      marketValue += toCNY(cash, cur);
+                      actualValue += toCNY(cash, cur);
+                      profitLoss += toCNY(cash - cost, cur);
                     } else if (assetType === 'fixedinvestment') {
                       const cost = parseFloat(item.investmentCost || 0);
-                      marketValue += cost;
-                      purchaseCost += cost;
-                      actualValue += cost;
+                      marketValue += toCNY(cost, cur);
+                      purchaseCost += toCNY(cost, cur);
+                      actualValue += toCNY(cost, cur);
                     } else if (assetType === 'equity') {
                       const mv = parseFloat(item.marketValue || 0);
-                      marketValue += mv;
-                      purchaseCost += parseFloat(item.cost || item.marketValue || 0);
-                      profitLoss += parseFloat(item.pnl || 0);
-                      actualValue += mv;
+                      marketValue += toCNY(mv, cur);
+                      purchaseCost += toCNY(item.cost || item.marketValue || 0, cur);
+                      profitLoss += toCNY(item.pnl || 0, cur);
+                      actualValue += toCNY(mv, cur);
                     } else if (assetType === 'fixeddeposit') {
                       const amount = parseFloat(item.amount || 0);
                       const actualReturn = parseFloat(item.actualReturn || 0);
-                      marketValue += amount + actualReturn;
-                      purchaseCost += amount;
-                      profitLoss += actualReturn;
-                      actualValue += amount + actualReturn;
+                      marketValue += toCNY(amount + actualReturn, cur);
+                      purchaseCost += toCNY(amount, cur);
+                      profitLoss += toCNY(actualReturn, cur);
+                      actualValue += toCNY(amount + actualReturn, cur);
                     }
                   }
                 });
@@ -1860,6 +1900,34 @@ export default function IndependentAssets() {
 
   const renderInsuranceTable = () => {
     const items = getAssets('insurance');
+    // 合计：将所有币种按汇率折算到选定的统计币种（insuranceTotalCurrency）后汇总
+    const insuranceTotals = items.reduce((acc, item) => {
+      const cur = item.currency || 'CNY';
+      const targetCur = insuranceTotalCurrency;
+      const records = item.transactionRecords || [];
+      const isAnnuity = item.insuranceType === '年金险';
+      let listPaid = 0;
+      let listCash = 0;
+      let listDiv = 0;
+      if (isAnnuity) {
+        listPaid = records.reduce((s, r) => s + parseFloat(r.annualPremium || 0), 0);
+        if (records.length > 0) {
+          const latest = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop();
+          listCash = parseFloat(latest?.yearEndCashValue || 0);
+        } else {
+          listCash = parseFloat(item.cashValue || 0);
+        }
+        listDiv = records.reduce((s, r) => s + parseFloat(r.annualActualDividend || 0), 0);
+      } else {
+        listPaid = parseFloat(item.paidAmount || 0);
+        listCash = parseFloat(item.cashValue || 0);
+        listDiv = records.reduce((s, r) => s + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0), 0);
+      }
+      acc.paid += convertAmount(listPaid, cur, targetCur, exchangeRates);
+      acc.cash += convertAmount(listCash, cur, targetCur, exchangeRates);
+      acc.dividend += convertAmount(listDiv, cur, targetCur, exchangeRates);
+      return acc;
+    }, { paid: 0, cash: 0, dividend: 0 });
     return (
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
@@ -1946,6 +2014,28 @@ export default function IndependentAssets() {
               {items.length === 0 && (
                 <tr>
                   <td colSpan={13} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无保险资产数据</td>
+                </tr>
+              )}
+              {items.length > 0 && (
+                <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={8}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>合计</span>
+                      <select
+                        value={insuranceTotalCurrency}
+                        onChange={(e) => setInsuranceTotalCurrency(e.target.value)}
+                        className="text-xs border border-indigo-200 dark:border-indigo-700 rounded px-1.5 py-0.5 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      >
+                        {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                      </select>
+                      <span className="text-xs text-gray-400 font-normal">（按汇率折算）</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(insuranceTotals.paid, insuranceTotalCurrency)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(insuranceTotals.cash, insuranceTotalCurrency)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(insuranceTotals.dividend, insuranceTotalCurrency)}</td>
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">{insuranceTotalCurrency}</td>
+                  <td></td>
                 </tr>
               )}
             </tbody>
