@@ -542,3 +542,25 @@ export async function fetchMoneyFundData(codes) {
     return []
   }
 }
+
+// 货币基金：每万份收益 + 7日年化（走 python-server，经 vite 代理 /api/vi-api -> /api）
+export async function fetchMoneyFund(code) {
+  try {
+    const response = await fetch(`/api/vi-api/fund/money/${encodeURIComponent(code)}`)
+    if (!response.ok) return null
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
+// 通用基金净值（LOF/ETF/场外基金）：最新净值 + 前一日净值（走 python-server）
+export async function fetchFundNavQuote(code) {
+  try {
+    const response = await fetch(`/api/vi-api/fund/nav/${encodeURIComponent(code)}`)
+    if (!response.ok) return null
+    return await response.json()
+  } catch {
+    return null
+  }
+}

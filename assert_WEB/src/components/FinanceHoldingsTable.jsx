@@ -15,6 +15,7 @@ import {
   convertCurrency,
   DEFAULT_COLUMNS,
   ARCHIVED_COLUMNS,
+  MONEY_FUND_COLUMNS,
   DEFAULT_FILTERS,
   ARCHIVED_FILTERS,
 } from './FinanceHoldingsTable.utils';
@@ -47,10 +48,22 @@ export default function FinanceHoldingsTable({
   exchangeRates = {},
   financeAccounts = [],
   assetKindOptions = [],
+  moneyFundMap = {},
 }) {
   const storagePrefix = readOnly ? 'accounts_table_' : 'finance_';
 
-  const [filterText, setFilterText] = useState('');
+  const filtersStorageKey = `${storagePrefix}filters_${categoryName}`;
+  const persistedFilters = (() => {
+    try {
+      const saved = sessionStorage.getItem(filtersStorageKey);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error('Failed to load filters:', e);
+    }
+    return {};
+  })();
+
+  const [filterText, setFilterText] = useState(persistedFilters.filterText || '');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(() => {
     try {
@@ -66,19 +79,19 @@ export default function FinanceHoldingsTable({
     }
     return defaultPageSize;
   });
-  const [filterAccount, setFilterAccount] = useState(defaultAccountFilter);
-  const [filterMarket, setFilterMarket] = useState('');
-  const [filterCurrency, setFilterCurrency] = useState('');
-  const [filterAssetKind, setFilterAssetKind] = useState('');
+  const [filterAccount, setFilterAccount] = useState(persistedFilters.filterAccount ?? defaultAccountFilter);
+  const [filterMarket, setFilterMarket] = useState(persistedFilters.filterMarket || '');
+  const [filterCurrency, setFilterCurrency] = useState(persistedFilters.filterCurrency || '');
+  const [filterAssetKind, setFilterAssetKind] = useState(persistedFilters.filterAssetKind || '');
 
-  const [filterAssetType, setFilterAssetType] = useState('');
-  const [filterCategoryL1, setFilterCategoryL1] = useState('');
-  const [filterCategoryL2, setFilterCategoryL2] = useState('');
-  const [filterCategoryL3, setFilterCategoryL3] = useState('');
-  const [filterCategoryL4, setFilterCategoryL4] = useState('');
-  const [filterPositionGroup, setFilterPositionGroup] = useState('');
-  const [filterPositionType, setFilterPositionType] = useState('');
-  const [filterTag, setFilterTag] = useState('');
+  const [filterAssetType, setFilterAssetType] = useState(persistedFilters.filterAssetType || '');
+  const [filterCategoryL1, setFilterCategoryL1] = useState(persistedFilters.filterCategoryL1 || '');
+  const [filterCategoryL2, setFilterCategoryL2] = useState(persistedFilters.filterCategoryL2 || '');
+  const [filterCategoryL3, setFilterCategoryL3] = useState(persistedFilters.filterCategoryL3 || '');
+  const [filterCategoryL4, setFilterCategoryL4] = useState(persistedFilters.filterCategoryL4 || '');
+  const [filterPositionGroup, setFilterPositionGroup] = useState(persistedFilters.filterPositionGroup || '');
+  const [filterPositionType, setFilterPositionType] = useState(persistedFilters.filterPositionType || '');
+  const [filterTag, setFilterTag] = useState(persistedFilters.filterTag || '');
   const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [showFilterSettings, setShowFilterSettings] = useState(false);
   const [columnSettingsPosition, setColumnSettingsPosition] = useState('bottom');
@@ -209,6 +222,28 @@ export default function FinanceHoldingsTable({
     }
   }, [pageSize, categoryName, storagePrefix]);
 
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(filtersStorageKey, JSON.stringify({
+        filterText,
+        filterAccount,
+        filterMarket,
+        filterCurrency,
+        filterAssetKind,
+        filterAssetType,
+        filterCategoryL1,
+        filterCategoryL2,
+        filterCategoryL3,
+        filterCategoryL4,
+        filterPositionGroup,
+        filterPositionType,
+        filterTag,
+      }));
+    } catch (e) {
+      console.error('Failed to save filters:', e);
+    }
+  }, [filterText, filterAccount, filterMarket, filterCurrency, filterAssetKind, filterAssetType, filterCategoryL1, filterCategoryL2, filterCategoryL3, filterCategoryL4, filterPositionGroup, filterPositionType, filterTag, filtersStorageKey]);
+
   const handlePageSizeChange = (newSize) => {
     setPageSize(newSize);
     setPage(1);
@@ -233,6 +268,17 @@ export default function FinanceHoldingsTable({
 
   const resetColumns = () => {
     setColumns([...DEFAULT_COLUMNS]);
+  };
+
+  // 判断是否为货币基金（货基）
+  const isMoneyFundHold = (h) => {
+    if (!h) return false;
+    if (h.assetType === '货基') return true;
+    const catL2 = h.categoryL2 || '';
+    const catL4 = h.categoryL4 || '';
+    const pType = h.positionType || '';
+    const name = h.name || '';
+    return catL2 === '货币型' || catL4 === '货币基金' || pType === '货币基金' || name.includes('货币');
   };
 
   const renderCell = (h, col) => {
@@ -279,13 +325,49 @@ export default function FinanceHoldingsTable({
       case 'currentValue':
         return formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
       case 'currentPrice':
-        if (h.positionType === '货币基金') {
-          return <span className="text-gray-600 dark:text-gray-400">¥1.000</span>;
+        // 货币基金：现价默认为1（每份净值1元）
+        if (h.categoryL2 === '货币型' || h.categoryL4 === '货币基金' || h.positionType === '货币基金' || (h.name && h.name.includes('货币'))) {
+          const mfPrice = parseFloat(val) || 1;
+          return <span className="text-gray-700 dark:text-gray-200 tabular-nums">{mfPrice.toFixed(4)}</span>;
         }
         let colorClass = '';
         if (h.priceChange === 'up') colorClass = 'text-green-600 dark:text-green-400';
         else if (h.priceChange === 'down') colorClass = 'text-red-500 dark:text-red-400';
         return <span className={colorClass}>{formatPriceValue(val)}</span>;
+      case 'navPer10k': {
+        // 优先使用用户手动填写的 navPer10k；其次使用 moneyFundMap 网络获取的值
+        const userNav = parseFloat(h.navPer10k) || 0;
+        if (userNav > 0) {
+          return <span className="text-gray-700 dark:text-gray-200 tabular-nums" title="手动输入">{userNav.toFixed(4)}</span>;
+        }
+        const mf = h.code && moneyFundMap ? moneyFundMap[h.code] : null;
+        if (!mf || mf.nav_per_10k == null) return <span className="text-gray-300 dark:text-slate-600">—</span>;
+        return <span className="text-gray-700 dark:text-gray-200 tabular-nums" title={mf.date ? `日期: ${mf.date}` : ''}>{Number(mf.nav_per_10k).toFixed(4)}</span>;
+      }
+      case 'annualized7d': {
+        // 优先使用用户手动填写的 annualized7d；其次使用 moneyFundMap 网络获取的值
+        const userAnn = parseFloat(h.annualized7d) || 0;
+        if (userAnn > 0) {
+          return <span className="text-green-600 dark:text-green-400 tabular-nums" title="手动输入">{userAnn.toFixed(4)}%</span>;
+        }
+        const mf = h.code && moneyFundMap ? moneyFundMap[h.code] : null;
+        if (!mf || mf.annualized_7d == null) return <span className="text-gray-300 dark:text-slate-600">—</span>;
+        const av = parseFloat(mf.annualized_7d);
+        const cls = isNaN(av) ? '' : (av >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400');
+        return <span className={`${cls} tabular-nums`} title={mf.date ? `日期: ${mf.date}` : ''}>{isNaN(av) ? '—' : `${av.toFixed(4)}%`}</span>;
+      }
+      case 'cumulativeReturn': {
+        // 累计收益：优先使用存储的 cumulativeReturn/cumulativePnl；缺失则回退为 holdingPnl
+        const stored = parseFloat(h.cumulativeReturn) || parseFloat(h.cumulativePnl);
+        const value = isNaN(stored) ? (parseFloat(h.holdingPnl) || 0) : stored;
+        return (
+          <span className={pnlClass(value)}>
+            {pnlSign(value)}
+            {formatCurrencyWithRate(value, h.currency || 'CNY', h.currency || 'CNY', exchangeRates)
+              .replace(getCurrencySymbol(h.currency || 'CNY'), '')}
+          </span>
+        );
+      }
       case 'holdingDays':
         return computeHoldingDays(h) || '-';
       case 'archiveDate':
@@ -386,13 +468,21 @@ export default function FinanceHoldingsTable({
     setFilterAccount('');
     setFilterMarket('');
     setFilterCurrency('');
+    setFilterAssetKind('');
     setFilterAssetType('');
     setFilterCategoryL1('');
     setFilterCategoryL2('');
+    setFilterCategoryL3('');
+    setFilterCategoryL4('');
     setFilterPositionGroup('');
     setFilterPositionType('');
     setFilterTag('');
     setPage(1);
+    try {
+      sessionStorage.removeItem(filtersStorageKey);
+    } catch (e) {
+      console.error('Failed to clear filters:', e);
+    }
   };
 
   const handleExportToCSV = () => {
@@ -443,6 +533,59 @@ export default function FinanceHoldingsTable({
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const paged = filteredWithRatio.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  // 货基/非货基拆分：货基使用独立专用列和表格
+  const { moneyFundItems, otherItems, mfPaged, otherPaged, mfTotalPages, otherTotalPages, mfSafePage, otherSafePage } = useMemo(() => {
+    const m = [];
+    const o = [];
+    filteredWithRatio.forEach(h => { isMoneyFundHold(h) ? m.push(h) : o.push(h); });
+    const mfTP = Math.max(1, Math.ceil(m.length / pageSize));
+    const otTP = Math.max(1, Math.ceil(o.length / pageSize));
+    const mfSP = Math.min(safePage, mfTP);
+    const otSP = Math.min(safePage, otTP);
+    return {
+      moneyFundItems: m,
+      otherItems: o,
+      mfPaged: m.slice((mfSP - 1) * pageSize, mfSP * pageSize),
+      otherPaged: o.slice((otSP - 1) * pageSize, otSP * pageSize),
+      mfTotalPages: mfTP,
+      otherTotalPages: otTP,
+      mfSafePage: mfSP,
+      otherSafePage: otSP,
+    };
+  }, [filteredWithRatio, safePage, pageSize]);
+
+  const mfVisibleColumns = useMemo(() => MONEY_FUND_COLUMNS.filter(c => c.visible), []);
+
+  const mfSummary = useMemo(() => {
+    const totalValue = moneyFundItems.reduce((s, h) => {
+      const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+      const currency = h.currency || 'CNY';
+      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+    }, 0);
+    const totalCost = moneyFundItems.reduce((s, h) => {
+      const cost = parseFloat(h.cost) || 0;
+      const currency = h.currency || 'CNY';
+      return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
+    }, 0);
+    const totalPnl = moneyFundItems.reduce((s, h) => {
+      const pnl = parseFloat(h.holdingPnl) || 0;
+      const currency = h.currency || 'CNY';
+      return s + convertCurrency(pnl, currency, 'CNY', exchangeRates);
+    }, 0);
+    const totalCumulative = moneyFundItems.reduce((s, h) => {
+      const v = parseFloat(h.cumulativeReturn) || parseFloat(h.cumulativePnl) || parseFloat(h.holdingPnl) || 0;
+      const currency = h.currency || 'CNY';
+      return s + convertCurrency(v, currency, 'CNY', exchangeRates);
+    }, 0);
+    return {
+      value: totalValue,
+      cost: totalCost,
+      pnl: totalPnl,
+      cumulative: totalCumulative,
+      pnlRate: totalCost > 0 ? (totalValue - totalCost) / totalCost * 100 : 0,
+    };
+  }, [moneyFundItems, exchangeRates]);
 
   const summary = useMemo(() => {
     const totalValue = paged.reduce((s, h) => {
@@ -946,6 +1089,198 @@ export default function FinanceHoldingsTable({
         </div>
       </div>
 
+      {/* ════════════════════════════════════════════
+            分区渲染：货基专用表 + 其他资产通用表
+          ════════════════════════════════════════════ */}
+      {/* ─────────────── 货基专用表 ─────────────── */}
+      {categoryName !== 'archived' && moneyFundItems.length > 0 && (
+        <div className="px-4 pb-3 mb-3">
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <span className="inline-block w-1 h-4 bg-emerald-500 rounded"></span>
+            <h3 className="text-sm font-bold text-emerald-700 dark:text-emerald-400">💰 货币基金 (货基专用明细)</h3>
+            <span className="text-xs text-gray-400">共 {moneyFundItems.length} 只</span>
+          </div>
+          <div className="overflow-x-auto border border-emerald-100 dark:border-emerald-900/40 rounded-xl bg-emerald-50/30 dark:bg-emerald-900/10">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-emerald-200/70 dark:border-emerald-900/40 text-emerald-700/80 dark:text-emerald-400/80 bg-emerald-50/60 dark:bg-emerald-900/20">
+                  {showCheckboxCol && (
+                    <th className="py-2 px-1.5 font-medium text-center w-10">
+                      <input
+                        type="checkbox"
+                        checked={mfPaged.length > 0 && mfPaged.every(h => selectedIds.has(h.id))}
+                        onChange={e => {
+                          if (e.target.checked) {
+                            const merged = new Set(selectedIds);
+                            mfPaged.forEach(h => merged.add(h.id));
+                            setSelectedIds(merged);
+                          } else {
+                            const merged = new Set(selectedIds);
+                            mfPaged.forEach(h => merged.delete(h.id));
+                            setSelectedIds(merged);
+                          }
+                        }}
+                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                    </th>
+                  )}
+                  {mfVisibleColumns.map(col => (
+                    <th
+                      key={col.key}
+                      className={`py-2 px-1.5 font-medium whitespace-nowrap ${
+                        col.align === 'right' ? 'text-right' : 'text-left'
+                      } ${col.bold ? 'font-semibold' : ''}`}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                  {showOpsCol && (
+                    <th className="py-2 px-1.5 font-medium whitespace-nowrap text-center">操作</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {mfPaged.map((h, i) => (
+                  <tr
+                    key={`mf-${h.id || i}`}
+                    onClick={() => onDetail && onDetail(h)}
+                    className="border-b border-emerald-50/70 dark:border-emerald-900/20 hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20 cursor-pointer">
+                    {showCheckboxCol && (
+                      <td className="py-2 px-1.5 text-center" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-center gap-1">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(h.id)}
+                            onChange={e => {
+                              const newSet = new Set(selectedIds);
+                              if (e.target.checked) newSet.add(h.id);
+                              else newSet.delete(h.id);
+                              setSelectedIds(newSet);
+                            }}
+                            className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="text-xs text-gray-400">{i + 1}</span>
+                        </div>
+                      </td>
+                    )}
+                    {mfVisibleColumns.map(col => (
+                      <td
+                        key={col.key}
+                        className={`py-2 px-1.5 ${
+                          col.align === 'right' ? 'text-right tabular-nums' : ''
+                        } ${col.bold ? 'font-semibold' : ''} ${
+                          col.pnl ? pnlClass(
+                            col.key === 'cumulativeReturn'
+                              ? (parseFloat(h.cumulativeReturn) || parseFloat(h.cumulativePnl) || parseFloat(h.holdingPnl) || 0)
+                              : h[col.key]
+                          ) : ''
+                        } ${col.key === 'currentValue' ? 'text-gray-900 dark:text-white' : ''}`}
+                      >
+                        {col.key === 'currentValue'
+                          ? formatNum(h.currentValue || h.balance)
+                          : renderCell(h, col)}
+                      </td>
+                    ))}
+                    {showOpsCol && (
+                      <td className="py-2 px-1.5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-center gap-1">
+                          {onEdit && (
+                            <button
+                              onClick={() => onEdit && onEdit(h)}
+                              className="p-1 rounded text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                              title="编辑"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => onDetail && onDetail(h)}
+                            className="px-1.5 py-0.5 text-xs rounded text-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+                            title="详情"
+                          >
+                            明细
+                          </button>
+                          <button
+                            onClick={() => onDelete && onDelete(h.id)}
+                            className="p-1 rounded text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-emerald-200/70 dark:border-emerald-900/40 bg-emerald-50/70 dark:bg-emerald-900/20 font-semibold">
+                  {showCheckboxCol && <td className="py-2 px-1.5"></td>}
+                  {mfVisibleColumns.map((col, idx) => {
+                    if (idx === 0) {
+                      return (
+                        <td key={col.key} className="py-2 px-1.5 text-xs text-emerald-700/70 dark:text-emerald-400/70">
+                          合计 ({moneyFundItems.length}只)
+                        </td>
+                      );
+                    }
+                    if (col.key === 'quantity') {
+                      const sum = moneyFundItems.reduce((s, h) => s + (parseFloat(h.quantity) || 0), 0);
+                      return <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">{formatNum(sum)}</td>;
+                    }
+                    if (col.key === 'currentValue') {
+                      return (
+                        <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
+                          {formatCurrencyWithRate(mfSummary.value, 'CNY', selectedCurrency, exchangeRates)}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'cumulativeReturn') {
+                      return (
+                        <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(mfSummary.cumulative)}`}>
+                          {pnlSign(mfSummary.cumulative)}
+                          {formatCurrencyWithRate(mfSummary.cumulative, 'CNY', selectedCurrency, exchangeRates)
+                            .replace(getCurrencySymbol(selectedCurrency), '')}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'holdingPnl') {
+                      return (
+                        <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(mfSummary.pnl)}`}>
+                          {pnlSign(mfSummary.pnl)}
+                          {formatCurrencyWithRate(mfSummary.pnl, 'CNY', selectedCurrency, exchangeRates)
+                            .replace(getCurrencySymbol(selectedCurrency), '')}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'holdingPnlRate') {
+                      return (
+                        <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(mfSummary.pnlRate)}`}>
+                          {mfSummary.cost > 0 ? formatPercentage(mfSummary.pnlRate) : '—'}
+                        </td>
+                      );
+                    }
+                    if (col.key === 'avgCost') {
+                      const qty = moneyFundItems.reduce((s, h) => s + (parseFloat(h.quantity) || 0), 0);
+                      const costBase = moneyFundItems.reduce((s, h) => {
+                        const cp = parseFloat(h.costPrice);
+                        const q = parseFloat(h.quantity) || 0;
+                        return s + (isNaN(cp) ? (parseFloat(h.cost) || 0) : cp * q);
+                      }, 0);
+                      const avg = qty > 0 ? costBase / qty : 1;
+                      return <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">{formatCurrencyWithRate(avg, 'CNY', selectedCurrency, exchangeRates)}</td>;
+                    }
+                    return <td key={col.key} className="py-2 px-1.5"></td>;
+                  })}
+                  {showOpsCol && <td className="py-2 px-1.5"></td>}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────── 其他资产通用表 ─────────────── */}
       <div className="overflow-x-auto px-4">
         <table className="w-full text-xs">
           <thead>
@@ -954,12 +1289,16 @@ export default function FinanceHoldingsTable({
                 <th className="py-2 px-1.5 font-medium text-center w-10">
                   <input
                     type="checkbox"
-                    checked={paged.length > 0 && paged.every(h => selectedIds.has(h.id))}
+                    checked={otherPaged.length > 0 && otherPaged.every(h => selectedIds.has(h.id))}
                     onChange={e => {
                       if (e.target.checked) {
-                        setSelectedIds(new Set(paged.map(h => h.id)));
+                        const merged = new Set(selectedIds);
+                        otherPaged.forEach(h => merged.add(h.id));
+                        setSelectedIds(merged);
                       } else {
-                        setSelectedIds(new Set());
+                        const merged = new Set(selectedIds);
+                        otherPaged.forEach(h => merged.delete(h.id));
+                        setSelectedIds(merged);
                       }
                     }}
                     className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
@@ -984,9 +1323,9 @@ export default function FinanceHoldingsTable({
             </tr>
           </thead>
           <tbody>
-            {paged.map((h, i) => (
+            {otherPaged.map((h, i) => (
               <tr
-                key={h.id || i}
+                key={`oth-${h.id || i}`}
                 onClick={() => onDetail && onDetail(h)}
                 className="border-b border-gray-50 dark:border-slate-700/30 hover:bg-gray-50/80 dark:hover:bg-slate-700/20 cursor-pointer">
                 {showCheckboxCol && (
@@ -1003,7 +1342,7 @@ export default function FinanceHoldingsTable({
                         }}
                         className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                       />
-                      <span className="text-xs text-gray-400">{(safePage - 1) * pageSize + i + 1}</span>
+                      <span className="text-xs text-gray-400">{i + 1}</span>
                     </div>
                   </td>
                 )}
@@ -1054,15 +1393,15 @@ export default function FinanceHoldingsTable({
                 )}
               </tr>
             ))}
-            {paged.length === 0 && (
+            {otherPaged.length === 0 && (
               <tr>
                 <td colSpan={visibleColumns.length + (showCheckboxCol ? 1 : 0) + (showOpsCol ? 1 : 0)} className="py-8 text-center text-gray-400 text-xs">
-                  {filterText ? '无匹配结果' : '暂无数据'}
+                  {(moneyFundItems.length > 0) ? '非货基资产无匹配结果' : (filterText ? '无匹配结果' : '暂无数据')}
                 </td>
               </tr>
             )}
           </tbody>
-          {filtered.length > 0 && (
+          {otherItems.length > 0 && (
             <tfoot>
               <tr className="border-t-2 border-gray-200 dark:border-slate-600 bg-gray-50/80 dark:bg-slate-700/30 font-semibold">
                 {showCheckboxCol && <td className="py-2 px-1.5"></td>}
@@ -1073,49 +1412,106 @@ export default function FinanceHoldingsTable({
                         key={col.key}
                         className="py-2 px-1.5 text-xs text-gray-500"
                       >
-                        合计 ({paged.length}项)
+                        合计 ({otherItems.length}项)
                       </td>
                     );
                   }
                   if (col.key === 'cost') {
+                    const otherCost = otherItems.reduce((s, h) => {
+                      const cost = parseFloat(h.cost) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
+                    }, 0);
                     return (
                       <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">
-                        {formatCurrencyWithRate(summary.cost, 'CNY', selectedCurrency, exchangeRates)}
+                        {formatCurrencyWithRate(otherCost, 'CNY', selectedCurrency, exchangeRates)}
                       </td>
                     );
                   }
                   if (col.key === 'currentValue') {
+                    const otherValue = otherItems.reduce((s, h) => {
+                      const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+                    }, 0);
                     return (
                       <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
-                        {formatCurrencyWithRate(summary.value, 'CNY', selectedCurrency, exchangeRates)}
+                        {formatCurrencyWithRate(otherValue, 'CNY', selectedCurrency, exchangeRates)}
                       </td>
                     );
                   }
                   if (col.key === 'holdingPnl') {
+                    const otherPnl = otherItems.reduce((s, h) => {
+                      const pnl = parseFloat(h.holdingPnl) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(pnl, currency, 'CNY', exchangeRates);
+                    }, 0);
+                    const otherCost = otherItems.reduce((s, h) => {
+                      const cost = parseFloat(h.cost) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
+                    }, 0);
+                    const otherValue = otherItems.reduce((s, h) => {
+                      const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+                    }, 0);
                     return (
-                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(summary.pnl)}`}>
-                        {pnlSign(summary.pnl)}{formatCurrencyWithRate(summary.pnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(otherPnl)}`}>
+                        {pnlSign(otherPnl)}{formatCurrencyWithRate(otherPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
                       </td>
                     );
                   }
                   if (col.key === 'holdingPnlRate') {
+                    const otherCost = otherItems.reduce((s, h) => {
+                      const cost = parseFloat(h.cost) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
+                    }, 0);
+                    const otherValue = otherItems.reduce((s, h) => {
+                      const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+                    }, 0);
+                    const rate = otherCost > 0 ? (otherValue - otherCost) / otherCost * 100 : 0;
                     return (
-                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(summary.pnlRate)}`}>
-                        {summary.value > 0 ? formatPercentage(summary.pnlRate) : '—'}
+                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(rate)}`}>
+                        {otherValue > 0 ? formatPercentage(rate) : '—'}
                       </td>
                     );
                   }
                   if (col.key === 'dailyPnl') {
+                    const otherDaily = otherItems.reduce((s, h) => {
+                      const dailyPnl = parseFloat(h.dailyPnl) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
+                    }, 0);
+                    const otherValue = otherItems.reduce((s, h) => {
+                      const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+                    }, 0);
                     return (
-                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums font-semibold ${pnlClass(summary.dailyPnl)}`}>
-                        {pnlSign(summary.dailyPnl)}{formatCurrencyWithRate(summary.dailyPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums font-semibold ${pnlClass(otherDaily)}`}>
+                        {pnlSign(otherDaily)}{formatCurrencyWithRate(otherDaily, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
                       </td>
                     );
                   }
                   if (col.key === 'dailyPnlRate') {
+                    const otherDaily = otherItems.reduce((s, h) => {
+                      const dailyPnl = parseFloat(h.dailyPnl) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
+                    }, 0);
+                    const otherValue = otherItems.reduce((s, h) => {
+                      const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+                    }, 0);
+                    const rate = otherValue > 0 ? (otherDaily / otherValue) * 100 : 0;
                     return (
-                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(summary.dailyPnlRate)}`}>
-                        {summary.value > 0 ? formatPercentage(summary.dailyPnlRate) : '—'}
+                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(rate)}`}>
+                        {otherValue > 0 ? formatPercentage(rate) : '—'}
                       </td>
                     );
                   }

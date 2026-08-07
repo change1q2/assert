@@ -43,12 +43,12 @@ function migrateAccountOwnership(acc) {
   const result = { ...acc };
   if (!Array.isArray(result.owners) || result.owners.length === 0) {
     result.ownershipType = 'personal';
-    result.owners = [{ name: '默认', share: 100, isDefault: true }];
+    result.owners = [{ name: '自己', share: 100, isDefault: true }];
   } else {
     const normalizedOwners = result.owners.map(o => {
       const shareNum = parseFloat(o.share);
       return {
-        name: (o.name && String(o.name).trim()) || '默认',
+        name: (o.name && String(o.name).trim()) || '自己',
         share: isNaN(shareNum) ? 100 : shareNum,
         isDefault: o.isDefault === true,
       };
@@ -189,9 +189,10 @@ export default function Accounts() {
     name: '',
     category: '银行',
     subCategory: '招商银行',
+    currency: 'CNY',
     liability: false,
     ownershipType: 'personal',
-    owners: [{ name: '默认', share: 100, isDefault: true }],
+    owners: [{ name: '自己', share: 100, isDefault: true }],
   });
   const [extraOwnerNames, setExtraOwnerNames] = useState([]);
   const [ownershipDropdownOpen, setOwnershipDropdownOpen] = useState(false);
@@ -202,7 +203,7 @@ export default function Accounts() {
   const [showPersonalAdd, setShowPersonalAdd] = useState(false);
   const [showMultiAdd, setShowMultiAdd] = useState(false);
   const [tempMultiCheckedNames, setTempMultiCheckedNames] = useState(new Set());
-  const [lastPersonalOwner, setLastPersonalOwner] = useState('默认');
+  const [lastPersonalOwner, setLastPersonalOwner] = useState('自己');
   const [filters, setFilters] = useState({
     name: '',
     category: '',
@@ -910,7 +911,7 @@ export default function Accounts() {
     setEditingAccount(null);
     const firstCategory = categoryList[0]?.value || '银行';
     const defaultSub = (accountCatConfig[firstCategory] || [])[0] || '';
-    const defaultOwner = allOwnerNames[0] || '默认';
+    const defaultOwner = allOwnerNames[0] || '自己';
     setFormData({
       name: '',
       category: firstCategory,
@@ -959,7 +960,7 @@ export default function Accounts() {
       owners: migratedAccount.owners,
     });
     if (migratedAccount.ownershipType === 'personal') {
-      const personalName = migratedAccount.owners[0]?.name || '默认';
+      const personalName = migratedAccount.owners[0]?.name || '自己';
       setLastPersonalOwner(personalName);
       setTempMultiCheckedNames(new Set());
     } else {
@@ -976,6 +977,30 @@ export default function Accounts() {
   };
 
   const handleDelete = async (accountId) => {
+    const account = (stateData.accounts || []).find(a => a.id === accountId);
+    if (!account) return;
+
+    // 关联数据检查：理财/独立资产/收支/债务，按 id 与 name 双维度匹配（历史数据可能用 name 引用）
+    const hasFinanceAsset = (financeAssets || []).some(a =>
+      a.accountId === account.id || a.account === account.name || a.accountId === account.name
+    );
+    let hasIndependentAsset = false;
+    if (independentAssets && typeof independentAssets === 'object') {
+      Object.entries(independentAssets).forEach(([, items]) => {
+        if (!Array.isArray(items)) return;
+        if (items.some(item => item.accountId === account.id || item.accountId === account.name)) {
+          hasIndependentAsset = true;
+        }
+      });
+    }
+    const hasRecord = (records || []).some(r => r.account === account.id || r.account === account.name);
+    const hasDebt = (debts || []).some(d => d.account === account.id || d.account === account.name);
+
+    if (hasFinanceAsset || hasIndependentAsset || hasRecord || hasDebt) {
+      alert('该账户下仍有关联资产（理财/独立资产/收支/债务），请先删除或转移关联资产后再删除账户');
+      return;
+    }
+
     if (!confirm('确定要删除这个账户吗？')) return;
 
     try {
@@ -1004,7 +1029,7 @@ export default function Accounts() {
 
       const ownersToSave = Array.isArray(formData.owners) && formData.owners.length > 0
         ? formData.owners
-        : [{ name: '默认', share: 100, isDefault: true }];
+        : [{ name: '自己', share: 100, isDefault: true }];
       const ownershipTypeToSave = formData.ownershipType || (ownersToSave.length > 1 ? 'multi' : 'personal');
 
       const allOwnerNamesFromForm = ownersToSave.map(o => o.name).filter(n => n && String(n).trim());
@@ -1014,24 +1039,11 @@ export default function Accounts() {
       }
 
       if (editingAccount) {
-        let saveType = formData.type;
-        const originalType = editingAccount.type;
-        if (originalType === '资产' && formData.type === '独立资产') {
-          saveType = '资产';
-        }
-        if (originalType === undefined && !editingAccount.liability && formData.type === '独立资产') {
-          saveType = undefined;
-        }
         const saveData = { ...formData };
         saveData.ownershipType = ownershipTypeToSave;
         saveData.owners = ownersToSave;
-        if (saveType === undefined) {
-          delete saveData.type;
-        } else {
-          saveData.type = saveType;
-        }
-        if (saveData.type === '理财资产' && saveData.financeMarket) {
-        } else {
+        saveData.type = formData.type;
+        if (!(saveData.type === '理财资产' && saveData.financeMarket)) {
           delete saveData.financeMarket;
         }
         newAccounts = newAccounts.map(a =>
@@ -1502,7 +1514,7 @@ export default function Accounts() {
       const wasDefault = acc.owners.some(o => o.name === ownerName && o.isDefault === true);
       let remaining = acc.owners.filter(o => o.name !== ownerName).map(o => ({ ...o }));
       if (remaining.length === 0) {
-        return { ...acc, ownershipType: 'personal', owners: [{ name: '默认', share: 100, isDefault: true }] };
+        return { ...acc, ownershipType: 'personal', owners: [{ name: '自己', share: 100, isDefault: true }] };
       }
       // rescale shares to sum 100
       const sum = remaining.reduce((s, o) => s + (parseFloat(o.share) || 0), 0);
@@ -1531,7 +1543,7 @@ export default function Accounts() {
         const wasDefaultFd = formData.owners.some(o => o.name === ownerName && o.isDefault === true);
         let remainingFd = formData.owners.filter(o => o.name !== ownerName).map(o => ({ ...o }));
         if (remainingFd.length === 0) {
-          remainingFd = [{ name: '默认', share: 100, isDefault: true }];
+          remainingFd = [{ name: '自己', share: 100, isDefault: true }];
           setFormData({ ...formData, owners: remainingFd, ownershipType: 'personal' });
         } else {
           const sumFd = remainingFd.reduce((s, o) => s + (parseFloat(o.share) || 0), 0);
@@ -1716,6 +1728,24 @@ export default function Accounts() {
     return { totalMv, totalCost, balance, balanceByType, balanceCount };
   }, [accountHoldings, exchangeRates]);
 
+  // 账户详情页：归属当前账户的独立资产，按类型分组（复用 independentAssets 结构：{ insurance: [], realestate: [], ... }）
+  const accountIndependentAssets = useMemo(() => {
+    if (!selectedAccountId) return {};
+    const account = accounts.find(a => a.id === selectedAccountId);
+    if (!account) return {};
+    const result = {};
+    if (independentAssets && typeof independentAssets === 'object') {
+      Object.entries(independentAssets).forEach(([type, items]) => {
+        if (!Array.isArray(items)) return;
+        const matched = items.filter(item =>
+          item.accountId === account.id || item.accountId === account.name
+        );
+        if (matched.length > 0) result[type] = matched;
+      });
+    }
+    return result;
+  }, [selectedAccountId, accounts, independentAssets]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -1742,6 +1772,147 @@ export default function Accounts() {
       </div>
     );
   }
+
+  // 详情页：渲染归属当前账户的独立资产列表（按类型分小表格，金额按当前所有者 share 缩放）
+  const renderIndependentAssetSection = (s) => {
+    const types = Object.keys(accountIndependentAssets);
+    if (types.length === 0) return null;
+
+    const fmt = (val, currency) => formatCurrencyWithRate(
+      scaleAmountByOwner(parseFloat(val || 0), s),
+      currency || 'CNY',
+      selectedCurrency,
+      exchangeRates
+    );
+    const td = (content, numeric) => (
+      <td className={`px-4 py-3 text-sm text-gray-900 dark:text-white ${numeric ? 'tabular-nums' : ''}`}>{content == null || content === '' ? '—' : content}</td>
+    );
+    const th = (label) => (
+      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">{label}</th>
+    );
+
+    const renderHeader = (type) => {
+      if (type === 'insurance') return <tr>{th('保单号')}{th('保险名称')}{th('已付金额')}{th('现金价值')}{th('累计分红')}</tr>;
+      if (type === 'realestate') return <tr>{th('类型')}{th('用途')}{th('面积')}{th('购买价')}{th('市场估值')}</tr>;
+      if (type === 'vehicle') return <tr>{th('厂商')}{th('型号')}{th('购买价格')}{th('现车残值')}</tr>;
+      if (type === 'equity') return <tr>{th('名称')}{th('代码')}{th('数量')}{th('市值')}</tr>;
+      if (type === 'fixedinvestment') return <tr>{th('名称')}{th('投入本金')}{th('累计分红')}</tr>;
+      if (type === 'fixeddeposit') return <tr>{th('名称')}{th('金额')}</tr>;
+      return <tr>{th('名称')}</tr>;
+    };
+
+    const renderRows = (type, items) => {
+      if (type === 'insurance') {
+        return items.map(item => {
+          const records = item.transactionRecords || [];
+          const isAnnuity = item.insuranceType === '年金险';
+          let dividend = 0;
+          if (isAnnuity) {
+            dividend = records.reduce((sum, r) => sum + parseFloat(r.annualActualDividend || 0), 0);
+          } else {
+            dividend = records.reduce((sum, r) => sum + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0), 0);
+          }
+          return (
+            <tr key={item.id}>
+              {td(item.policyNumber)}
+              {td(item.policyName)}
+              {td(fmt(item.paidAmount, item.currency), true)}
+              {td(fmt(item.cashValue, item.currency), true)}
+              {td(fmt(dividend, item.currency), true)}
+            </tr>
+          );
+        });
+      }
+      if (type === 'realestate') {
+        return items.map(item => (
+          <tr key={item.id}>
+            {td(item.type)}
+            {td(item.usage)}
+            {td(item.selfUseMarketArea || item.area)}
+            {td(fmt(item.purchasePrice, item.currency), true)}
+            {td(fmt(item.marketValue, item.currency), true)}
+          </tr>
+        ));
+      }
+      if (type === 'vehicle') {
+        return items.map(item => (
+          <tr key={item.id}>
+            {td(item.manufacturer)}
+            {td(item.model)}
+            {td(fmt(item.purchasePrice, item.currency), true)}
+            {td(fmt(item.residualValue, item.currency), true)}
+          </tr>
+        ));
+      }
+      if (type === 'equity') {
+        return items.map(item => {
+          const qty = parseFloat(item.quantity || 0);
+          const mv = qty * (parseFloat(item.currentPrice || 0));
+          return (
+            <tr key={item.id}>
+              {td(item.name)}
+              {td(item.code)}
+              {td(qty, true)}
+              {td(fmt(mv, item.currency), true)}
+            </tr>
+          );
+        });
+      }
+      if (type === 'fixedinvestment') {
+        return items.map(item => {
+          const records = item.dividendRecords || [];
+          const dividend = records.reduce((sum, r) => {
+            const amt = parseFloat(r.dividendAmount || 0);
+            return sum + (amt > 0 ? amt : 0);
+          }, 0);
+          return (
+            <tr key={item.id}>
+              {td(item.name)}
+              {td(fmt(item.investmentCost, item.currency), true)}
+              {td(fmt(dividend, item.currency), true)}
+            </tr>
+          );
+        });
+      }
+      if (type === 'fixeddeposit') {
+        return items.map(item => (
+          <tr key={item.id}>
+            {td(item.name)}
+            {td(fmt(item.amount, item.currency), true)}
+          </tr>
+        ));
+      }
+      return items.map(item => (
+        <tr key={item.id}>{td(item.name || item.id)}</tr>
+      ));
+    };
+
+    return (
+      <div className="space-y-4">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white px-1">独立资产</h3>
+        {types.map(type => {
+          const items = accountIndependentAssets[type];
+          return (
+            <div key={type} className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 overflow-hidden">
+              <div className="p-4 border-b border-gray-200 dark:border-slate-700">
+                <h4 className="font-semibold text-gray-900 dark:text-white">{independentAssetTypeLabels[type] || type}</h4>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 dark:bg-slate-700">
+                    {renderHeader(type)}
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+                    {renderRows(type, items)}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   const renderDetailPage = () => {
     const account = accounts.find(a => a.id === selectedAccountId);
@@ -1988,6 +2159,7 @@ export default function Accounts() {
           exchangeRates={exchangeRates}
           assetKindOptions={assetKindOptions}
         />
+        {renderIndependentAssetSection(s)}
       </>
     );
   };
@@ -2203,10 +2375,10 @@ export default function Accounts() {
                   const hasAssets = stats.marketValue !== 0 || stats.holdingCost !== 0;
                   const plColor = pl > 0 ? 'text-green-600' : pl < 0 ? 'text-red-500' : 'text-gray-400';
                   const ownershipType = account.ownershipType || (Array.isArray(account.owners) && account.owners.length>1 ? 'multi' : 'personal');
-                  const owners = Array.isArray(account.owners) && account.owners.length>0 ? account.owners : [{name:'默认', share:100}];
+                  const owners = Array.isArray(account.owners) && account.owners.length>0 ? account.owners : [{name:'自己', share:100}];
                   const ownerSummaryText = owners.length===1
-                    ? (owners[0].name || '默认')
-                    : ((owners[0].name || '默认') + ' + ' + (owners.length-1) + '人');
+                    ? (owners[0].name || '自己')
+                    : ((owners[0].name || '自己') + ' + ' + (owners.length-1) + '人');
                   return (
                     <tr
                       key={account.id}
@@ -2635,20 +2807,6 @@ export default function Accounts() {
                     )}
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    货币
-                  </label>
-                  <select
-                    value={formData.currency || 'CNY'}
-                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  >
-                    {currencies.map(curr => (
-                      <option key={curr.value} value={curr.value}>{curr.label}</option>
-                    ))}
-                  </select>
-                </div>
                 <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     所属
@@ -2674,7 +2832,7 @@ export default function Accounts() {
                       <div
                         className={`px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 ${formData.ownershipType !== 'multi' ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
                         onClick={() => {
-                          const ownerName = lastPersonalOwner || allOwnerNames[0] || '默认';
+                          const ownerName = lastPersonalOwner || allOwnerNames[0] || '自己';
                           setFormData({
                             ...formData,
                             ownershipType: 'personal',
@@ -2690,16 +2848,19 @@ export default function Accounts() {
                         className={`px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 ${formData.ownershipType === 'multi' ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
                         onClick={() => {
                           let initialChecked;
-                          if (formData.ownershipType === 'multi' && Array.isArray(formData.owners)) {
+                          if (formData.ownershipType === 'multi' && Array.isArray(formData.owners) && formData.owners.length > 0) {
                             initialChecked = new Set(formData.owners.map(o => o.name));
                           } else {
-                            initialChecked = new Set();
+                            // 从个人所有切换到多人所有时，默认包含"自己"作为所有者并占 100%
+                            const defaultOwnerName = lastPersonalOwner || allOwnerNames[0] || '自己';
+                            initialChecked = new Set([defaultOwnerName]);
                           }
                           let multiOwners;
                           if (formData.ownershipType === 'multi' && Array.isArray(formData.owners) && formData.owners.length > 0) {
                             multiOwners = formData.owners;
                           } else {
-                            multiOwners = [];
+                            const defaultOwnerName = Array.from(initialChecked)[0] || '自己';
+                            multiOwners = [{ name: defaultOwnerName, share: 100, isDefault: true }];
                           }
                           setTempMultiCheckedNames(initialChecked);
                           setFormData({

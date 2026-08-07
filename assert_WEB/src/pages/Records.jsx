@@ -42,6 +42,29 @@ function formatDate(dateStr) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+// 文本清洗：过滤 GBK↔UTF-8 转换错误导致的乱码字符
+function sanitizeText(str, fallback) {
+  if (typeof str !== 'string') return fallback;
+  const trimmed = str.trim();
+  if (!trimmed) return fallback;
+  // 移除 UTF-8 替换符 \uFFFD
+  let cleaned = trimmed.replace(/\uFFFD/g, '');
+  // 移除常见 GBK 误读乱码块：锟斤拷、烫烫烫、虉、锘、鍦 等
+  cleaned = cleaned.replace(/锟斤拷/g, '').replace(/烫+/g, '').replace(/[虉锘鍦]/g, '');
+  if (!cleaned.trim()) return fallback;
+  // 检测：若含大量非可打印/非常见字符，判定为乱码
+  const commonCharRegex = /[\u4e00-\u9fff\u3000-\u303fa-zA-Z0-9\s.,;:!?'""''()（）【】《》\-/&%.]/;
+  let commonCount = 0;
+  for (const ch of cleaned) {
+    if (commonCharRegex.test(ch)) commonCount++;
+  }
+  if (cleaned.length > 0 && commonCount / cleaned.length < 0.5) {
+    return fallback;
+  }
+  const result = cleaned.trim();
+  return result || fallback;
+}
+
 const defaultCategories = {
   income: {
     '工资': ['工资', '奖金', '补贴'],
@@ -1367,11 +1390,11 @@ export default function Records({ onNavigate }) {
       const amount = convertAmount(rawAmount, fromCurrency, selectedCurrencyFilter, DEFAULT_EXCHANGE_RATES);
       if (record.type === 'income') {
         totalIncome += amount;
-        const category = record.category || '其他收入';
+        const category = sanitizeText(record.category, '其他收入');
         incomeMap[category] = (incomeMap[category] || 0) + amount;
       } else if (record.type === 'expense') {
         totalExpense += amount;
-        const category = record.category || '其他支出';
+        const category = sanitizeText(record.category, '其他支出');
         expenseMap[category] = (expenseMap[category] || 0) + amount;
       }
     });
@@ -1432,10 +1455,10 @@ export default function Records({ onNavigate }) {
 
       if (record.type === 'income') {
         totalIncome += amount;
-        const category = record.category || '其他收入';
+        const category = sanitizeText(record.category, '其他收入');
         incomeCategoryMap[category] = (incomeCategoryMap[category] || 0) + amount;
 
-        const subCategory = record.sub || record.subCategory || '';
+        const subCategory = sanitizeText(record.sub || record.subCategory || '', '');
         let detailName;
         let parentCategory;
         if (subCategory) {
@@ -1451,10 +1474,10 @@ export default function Records({ onNavigate }) {
         incomeDetailMap[detailName].value += amount;
       } else if (record.type === 'expense') {
         totalExpense += amount;
-        const category = record.category || '其他支出';
+        const category = sanitizeText(record.category, '其他支出');
         expenseCategoryMap[category] = (expenseCategoryMap[category] || 0) + amount;
 
-        const subCategory = record.sub || record.subCategory || '';
+        const subCategory = sanitizeText(record.sub || record.subCategory || '', '');
         let detailName;
         let parentCategory;
         if (subCategory) {
@@ -2311,17 +2334,17 @@ export default function Records({ onNavigate }) {
                     )}
                     {visibleColumns.category && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                        {record.category || '其他'}
+                        {sanitizeText(record.category, '其他')}
                       </td>
                     )}
                     {visibleColumns.subCategory && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                        {record.sub || '-'}
+                        {sanitizeText(record.sub, '-')}
                       </td>
                     )}
                     {visibleColumns.book && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                        {books.find(b => b.id === record.bookId)?.name || (record.book || '-')}
+                        {sanitizeText(books.find(b => b.id === record.bookId)?.name || record.book, '-')}
                       </td>
                     )}
                     {visibleColumns.currency && (
@@ -2331,12 +2354,12 @@ export default function Records({ onNavigate }) {
                     )}
                     {visibleColumns.note && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                        {record.note || '-'}
+                        {sanitizeText(record.note, '-')}
                       </td>
                     )}
                     {visibleColumns.tag && (
                       <td className="py-2.5 px-3 text-gray-900 dark:text-white">
-                        {Array.isArray(record.tag) ? record.tag.join(', ') : (record.tag || '-')}
+                        {Array.isArray(record.tag) ? sanitizeText(record.tag.join(', '), '-') : sanitizeText(record.tag, '-')}
                       </td>
                     )}
                     <td className="py-2.5 px-3">

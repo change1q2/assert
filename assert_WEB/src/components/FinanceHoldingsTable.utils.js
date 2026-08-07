@@ -99,7 +99,8 @@ export const DEFAULT_COLUMNS = [
   { key: 'avgCost', label: '平均买入成本', visible: true, align: 'right' },
   { key: 'quantity', label: '数量', visible: true, align: 'right' },
   { key: 'currentPrice', label: '现价', visible: true, align: 'right' },
-
+  { key: 'navPer10k', label: '每万份收益', visible: false, align: 'right' },
+  { key: 'annualized7d', label: '7日年化', visible: false, align: 'right' },
   { key: 'holdingDays', label: '天数', visible: true, align: 'right' },
   { key: 'currentValue', label: '当前市值', visible: true, align: 'right', bold: true },
   { key: 'holdingPnl', label: '持仓盈亏', visible: true, align: 'right', bold: true, pnl: true },
@@ -109,6 +110,23 @@ export const DEFAULT_COLUMNS = [
   { key: 'positionRatio', label: '仓位占比', visible: true, align: 'right' },
   { key: 'account', label: '所属账户', visible: true, align: 'left' },
   { key: 'tags', label: '标签', visible: true, align: 'left' },
+];
+
+// 货基专用列（独立表格展示，列顺序/可见性为货基定制）
+export const MONEY_FUND_COLUMNS = [
+  { key: 'market', label: '市场', visible: true, align: 'left' },
+  { key: 'currency', label: '货币', visible: true, align: 'left' },
+  { key: 'name', label: '资产名称', visible: true, align: 'left' },
+  { key: 'code', label: '代码', visible: true, align: 'left' },
+  { key: 'navPer10k', label: '万份收益', visible: true, align: 'right' },
+  { key: 'annualized7d', label: '七日年化(%)', visible: true, align: 'right' },
+  { key: 'cumulativeReturn', label: '累计收益', visible: true, align: 'right', bold: true, pnl: true },
+  { key: 'holdingPnl', label: '持有收益', visible: true, align: 'right', bold: true, pnl: true },
+  { key: 'holdingPnlRate', label: '持有收益率(%)', visible: true, align: 'right', pnl: true },
+  { key: 'quantity', label: '持有份额', visible: true, align: 'right' },
+  { key: 'avgCost', label: '成本单价', visible: true, align: 'right' },
+  { key: 'currentValue', label: '当前市值', visible: true, align: 'right', bold: true },
+  { key: 'account', label: '所属账户', visible: true, align: 'left' },
 ];
 
 export const ARCHIVED_COLUMNS = [
