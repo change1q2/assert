@@ -958,25 +958,22 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
               </div>
               <div className="bg-white dark:bg-slate-800 rounded-lg p-4">
                 <div className="grid grid-cols-[minmax(90px,auto)_1fr_minmax(80px,auto)_1fr] gap-x-3 gap-y-3 items-center">
-                  {/* 第1行：单位净值 + 净值时间 | 值 | 日涨幅 | 值 */}
-                  <div className="flex flex-col">
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-base text-gray-600 dark:text-gray-300">单位净值</span>
-                    </div>
-                    <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                      净值时间: {priceDate ? (() => {
-                        const m = priceDate.match(/(\d{4})-(\d{2})-(\d{2})/);
-                        if (m) return `${m[2]}月${m[3]}日`;
-                        const m2 = priceDate.match(/(\d{2})-(\d{2})/);
-                        return m2 ? `${m2[1]}月${m2[2]}日` : priceDate;
-                      })() : '—'}
-                    </span>
-                  </div>
-                  <span className="text-xl font-semibold text-gray-900 dark:text-white">{currentPrice > 0 ? currentPrice.toFixed(4) : '—'}</span>
-                  <span className="text-base text-gray-600 dark:text-gray-300">日涨幅</span>
-                  <span className={`text-lg font-semibold ${computedDailyPnlRate >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                    {computedDailyPnlRate >= 0 ? '+' : ''}{computedDailyPnlRate.toFixed(2)}%
-                  </span>
+                  {/* 第1行：七日年化 | 值 */}
+                  <span className="text-base text-gray-600 dark:text-gray-300">七日年化</span>
+                  {(() => {
+                    const _userAnn = parseFloat(latestData.annualized7d) || 0;
+                    const _mfAnn = latestData.code && moneyFundMap ? moneyFundMap[latestData.code] : null;
+                    const _netAnn = _mfAnn && _mfAnn.annualized_7d != null ? parseFloat(_mfAnn.annualized_7d) : 0;
+                    const _displayAnn = _userAnn > 0 ? _userAnn : _netAnn;
+                    const _annCls = _displayAnn >= 0 ? 'text-red-500' : 'text-green-600';
+                    return (
+                      <span className={`text-lg font-semibold ${_annCls}`} title={_userAnn > 0 ? '手动输入' : (_netAnn !== 0 && _mfAnn?.date ? `网络获取 (${_mfAnn.date})` : '')}>
+                        {_displayAnn > 0 ? `${_displayAnn.toFixed(4)}%` : '—'}
+                      </span>
+                    );
+                  })()}
+                  <span></span>
+                  <span></span>
 
                   {/* 第2行：持仓成本单价 | 值 | 累计净值/每万份收益 | 值 */}
                   <span className="text-base text-gray-600 dark:text-gray-300">持仓成本单价</span>
@@ -1980,7 +1977,7 @@ export default function Finance({ onAssetPenetration }) {
   const CATEGORY_L1_ASSET_TYPES = {
     '权益类': ['股票', '基金', '期货', '期权', '外汇'],
     '固收类': ['债券', '银行理财'],
-    '现金类': ['现金', '银行理财'],
+    '现金类': ['现金余额', '货基', '银行理财', '短期债券'],
     '另类投资': ['房产', '实体投资', '数字货币', '其他'],
     '商品': ['黄金', '白银', '原油'],
     '债权类': ['债券'],
@@ -2548,7 +2545,7 @@ export default function Finance({ onAssetPenetration }) {
     }
     setSaving(true);
     try {
-      const isCashAsset = newAccount.assetType === '现金';
+      const isCashAsset = (newAccount.assetType === '现金' || newAccount.assetType === '现金余额');
       // 货币基金：现价默认1，平均买入成本默认1
       const _isMoneyFundForm = isNewMoneyFund;
       const _costPrice = isCashAsset ? 1 : (parseFloat(newAccount.cost) || (_isMoneyFundForm ? 1 : 0));
@@ -4455,7 +4452,7 @@ export default function Finance({ onAssetPenetration }) {
                     <div className="flex gap-2">
                       <select value={newAccount.assetType} onChange={e => {
                         const assetType = e.target.value;
-                        const isCash = assetType === '现金';
+                        const isCash = (assetType === '现金' || assetType === '现金余额');
                         // 切换资产类型时清空持仓分组和持仓分类；现金类强制成本和现价为1
                         setNewAccount({
                           ...newAccount,
@@ -4472,7 +4469,8 @@ export default function Finance({ onAssetPenetration }) {
                         {(() => {
                           const mapped = CATEGORY_L1_ASSET_TYPES[newAccount.categoryL1];
                           if (mapped) {
-                            return [...new Set([...mapped, ...assetTypeOptions])].map(o => <option key={o} value={o}>{o}</option>);
+                            // 有映射：仅显示映射中的选项（精确显示，不与全局自定义项合并）
+                            return mapped.map(o => <option key={o} value={o}>{o}</option>);
                           }
                           return assetTypeOptions.map(o => <option key={o} value={o}>{o}</option>);
                         })()}
@@ -4704,9 +4702,7 @@ export default function Finance({ onAssetPenetration }) {
                       {/* 平均买入成本 */}
                       <FormField label="平均买入成本" required>
                         <input type="number" step="0.001"
-                          value={(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? '1'
-                            : (isNewMoneyFund && !newAccount.cost ? '1' : newAccount.cost)}
-                          disabled={newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类'}
+                          value={(isNewMoneyFund && !newAccount.cost ? '1' : newAccount.cost)}
                           onChange={e => {
                             const val = e.target.value;
                             setNewAccount(p => {
@@ -4727,7 +4723,7 @@ export default function Finance({ onAssetPenetration }) {
                             });
                           }}
                           placeholder="0.00"
-                          className={`${FORM_INPUT} ${(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? 'bg-gray-100 dark:bg-slate-600 cursor-not-allowed opacity-70' : ''}`} />
+                          className={FORM_INPUT} />
                       </FormField>
 
                       {/* 份额/数量 - 根据资产类型动态显示标签 */}
@@ -4769,9 +4765,7 @@ export default function Finance({ onAssetPenetration }) {
                       {/* 现价 — 所有场景都显示，支持自动获取和手动输入 */}
                       <FormField label="现价">
                         <input type="number" step="0.0001"
-                          value={(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? '1'
-                            : (isNewMoneyFund && !newAccount.currentPrice ? '1' : newAccount.currentPrice)}
-                          disabled={newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类'}
+                          value={(isNewMoneyFund && !newAccount.currentPrice ? '1' : newAccount.currentPrice)}
                           onChange={e => {
                             const val = e.target.value;
                             setNewAccount(p => {
@@ -4791,7 +4785,7 @@ export default function Finance({ onAssetPenetration }) {
                               };
                             });
                           }} placeholder="搜索资产自动获取，或手动输入"
-                          className={`${FORM_INPUT} ${(newAccount.assetType === '现金' || newAccount.categoryL1 === '现金类') ? 'bg-gray-100 dark:bg-slate-600 cursor-not-allowed opacity-70' : ''}`} />
+                          className={FORM_INPUT} />
                       </FormField>
 
                       {/* 每万份收益 — 仅货币基金显示，可手动输入或自动获取 */}
