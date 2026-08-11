@@ -4292,15 +4292,22 @@ export default function Finance({ onAssetPenetration }) {
 
       // 持仓盈亏 = (现价 * 份额) - (平均买入成本 * 份额)
       // 货币基金用净值(1)计算浮动盈亏，当前市值显示成本价
-      const _holdingPnl = isCash ? 0 : Math.round((_isMF ? (_mfNavValue - _costTotal) : (_currentValue - _costTotal)) * 100) / 100;
-      const _holdingPnlRate = isCash ? 0 : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0);
+      const _storedHoldingPnl = parseFloat(a.holdingPnl);
+      const _storedHoldingPnlRate = parseFloat(a.holdingPnlRate);
+      const _storedCumulativeReturn = parseFloat(a.cumulativeReturn);
+      const _storedCumulativeReturnRate = parseFloat(a.cumulativeReturnRate);
+      // 货币基金：优先使用loadData种子注入的存储值（确保列表与明细一致）
+      const _hasStoredMFValues = _isMF && !isNaN(_storedHoldingPnl);
+
+      const _holdingPnl = isCash ? 0 : (_hasStoredMFValues ? _storedHoldingPnl : Math.round((_isMF ? (_mfNavValue - _costTotal) : (_currentValue - _costTotal)) * 100) / 100);
+      const _holdingPnlRate = isCash ? 0 : (_hasStoredMFValues && !isNaN(_storedHoldingPnlRate) ? _storedHoldingPnlRate : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0));
 
       // 累计收益 = 已实现卖出收益 + 持有收益(浮动) + 分红
       // 已实现收益 = 卖出总金额 - 卖出份额 * 平均买入成本
       const _avgBuyCost = _effectiveBuyQty > 0 ? (_effectiveBuyAmount - buyFees) / _effectiveBuyQty : 0;
       const _realizedPnl = sellTotalAmount - _avgBuyCost * sellTotalQty;
-      const _cumulativeReturn = isCash ? 0 : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100;
-      const _cumulativeReturnRate = isCash ? 0 : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0);
+      const _cumulativeReturn = isCash ? 0 : (_hasStoredMFValues && !isNaN(_storedCumulativeReturn) ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100);
+      const _cumulativeReturnRate = isCash ? 0 : (_hasStoredMFValues && !isNaN(_storedCumulativeReturnRate) ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0));
 
       return {
         id: a.id,
