@@ -1019,7 +1019,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
               <Eye className="w-5 h-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <h3 className="font-bold text-gray-900 dark:text-white text-lg truncate">{cleanAssetName(latestData.name)}</h3>
+              <h3 className="font-bold text-gray-900 dark:text-white text-lg truncate">{latestData.name ? String(latestData.name).trim() : '未命名资产'}</h3>
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="text-xs text-gray-500 dark:text-gray-400 shrink-0">代码: {latestData.code || '-'}</p>
                 <div className="flex items-baseline gap-1 min-w-0">
