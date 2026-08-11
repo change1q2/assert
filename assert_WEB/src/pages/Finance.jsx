@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchRealTimeExchangeRates, fetchMoneyFund, fetchFundNavQuote } from '../api';
+import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchRealTimeExchangeRates, fetchMoneyFund, fetchMoneyFundData, fetchFundNavQuote } from '../api';
 import { CURRENCIES, getCurrencySymbol, getCurrencyName } from '../utils/currency';
 import {
   TrendingUp,
@@ -2872,19 +2872,49 @@ export default function Finance({ onAssetPenetration }) {
     });
     if (fundItems.length === 0) return;
     const next = {};
-    await Promise.all(fundItems.map(async (a) => {
+    const codesToFetch = [];
+    fundItems.forEach(a => {
       const code = String(a.code).trim();
-      // 简单缓存：同一会话内不重复请求
       if (moneyFundCacheRef.current[code]) {
         next[code] = moneyFundCacheRef.current[code];
-        return;
+      } else {
+        codesToFetch.push(code);
       }
-      const data = await fetchMoneyFund(code);
-      if (data && (data.nav_per_10k != null || data.annualized_7d != null)) {
-        moneyFundCacheRef.current[code] = data;
-        next[code] = data;
+    });
+    // 批量请求 Node.js 后端接口（/api/finance/money-fund）
+    if (codesToFetch.length > 0) {
+      try {
+        const funds = await fetchMoneyFundData(codesToFetch);
+        if (Array.isArray(funds)) {
+          funds.forEach(f => {
+            const code = String(f.code || '').trim();
+            if (!code) return;
+            // 映射后端字段 → 前端 DetailModal 期望的字段名
+            const mapped = {
+              nav_per_10k: f.perTenThousandIncome != null ? f.perTenThousandIncome : null,
+              annualized_7d: f.annualizedRate7d != null ? f.annualizedRate7d : null,
+              date: f.navDate || '',
+              name: f.name || '',
+            };
+            if (mapped.nav_per_10k != null || mapped.annualized_7d != null) {
+              moneyFundCacheRef.current[code] = mapped;
+              next[code] = mapped;
+            }
+          });
+        }
+      } catch (e) {
+        console.error('[loadMoneyFunds] batch fetch failed:', e.message);
       }
-    }));
+      // 对批量接口未返回的 code，逐个回退到 python-server 接口
+      const missing = codesToFetch.filter(c => !next[c]);
+      await Promise.all(missing.map(async (code) => {
+        const data = await fetchMoneyFund(code);
+        if (data && (data.nav_per_10k != null || data.annualized_7d != null)) {
+          moneyFundCacheRef.current[code] = data;
+          next[code] = data;
+        }
+      }));
+    }
     if (Object.keys(next).length > 0) {
       setMoneyFundMap(prev => ({ ...prev, ...next }));
     }
