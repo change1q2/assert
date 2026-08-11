@@ -3998,6 +3998,19 @@ export default function Finance({ onAssetPenetration }) {
     return [...new Set([...hardcoded, ...custom])].filter(o => !allDeleted.includes(o)).sort();
   }, [positionTypeOptionsMap, deletedPositionTypeMap, ASSET_TYPE_POSITION_TYPE_MAP]);
 
+  // 当前资产类型的持仓分组选项（合并硬编码 + 自定义）
+  const currentPositionGroupOptions = useMemo(() => {
+    if (!newAccount.assetType) return [];
+    const hardcoded = ASSET_TYPE_POSITION_GROUP_MAP[newAccount.assetType] || [];
+    return [...new Set([...hardcoded, ...positionGroupOptions])].sort();
+  }, [newAccount.assetType, positionGroupOptions]);
+
+  // 所有持仓分组选项（用于批量编辑等，合并所有硬编码 + 自定义）
+  const allPositionGroupOptions = useMemo(() => {
+    const hardcoded = Object.values(ASSET_TYPE_POSITION_GROUP_MAP).flat();
+    return [...new Set([...hardcoded, ...positionGroupOptions])].sort();
+  }, [positionGroupOptions]);
+
   // 当前表单是否为货币基金（用于触发货币基金特殊处理：现价默认1、万份收益字段等）
   const isNewMoneyFund = useMemo(() => {
     const catL2 = newAccount.categoryL2 || '';
@@ -5072,7 +5085,7 @@ export default function Finance({ onAssetPenetration }) {
                         className={`${FORM_SELECT} flex-1 ${!newAccount.assetType ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <option value="">{newAccount.assetType ? '请选择' : '请先选择资产类型'}</option>
-                        {(ASSET_TYPE_POSITION_GROUP_MAP[newAccount.assetType] || []).map(o => <option key={o} value={o}>{o}</option>)}
+                        {currentPositionGroupOptions.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                       <button onClick={() => setShowPositionGroupModal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理持仓分组">
                         <Settings className="w-4 h-4" />
@@ -5515,7 +5528,7 @@ export default function Finance({ onAssetPenetration }) {
                 <FormField label="持仓分组">
                   <select value={batchEditData.positionGroup} onChange={e => setBatchEditData({ ...batchEditData, positionGroup: e.target.value })} className={FORM_SELECT}>
                     <option value="">不修改</option>
-                    {positionGroupOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                    {allPositionGroupOptions.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </FormField>
 
