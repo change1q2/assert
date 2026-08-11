@@ -274,7 +274,7 @@ export default function Overview() {
   });
   const [editingYearIndex, setEditingYearIndex] = useState(-1);
 
-  const { debts = [], records = [], accounts = [], overviewGoals = {}, financeAssets = [], independentAssets = {} } = stateData || {};
+  const { debts = [], records = [], accounts = [], overviewGoals = {}, financeAssets = [], independentAssets = {}, budgets = [] } = stateData || {};
 
   useEffect(() => {
     loadData();
@@ -739,6 +739,28 @@ export default function Overview() {
   const totalInflow = incomeExpense.totalIncome + financePositivePnl + independentPositivePnl;
   const totalOutflow = incomeExpense.totalExpense + financeNegativePnl + independentNegativePnl - liabilities.total;
   const netCashflow = totalInflow - totalOutflow;
+
+  // 自由现金流计算：理财模块中持仓分组为"自由现金流"的资产市值
+  const totalBudget = budgets.reduce((sum, b) => sum + (parseFloat(b.amount) || 0), 0);
+  const freeCashFlowCurrent = (financeAssets || [])
+    .filter(a => a.positionGroup === '自由现金流')
+    .reduce((sum, a) => {
+      const _price = parseFloat(a.currentPrice);
+      const _costPrice = parseFloat(a.costPrice);
+      const _cost = parseFloat(a.cost);
+      const safePrice = !isNaN(_price) ? _price : (!isNaN(_costPrice) ? _costPrice : (!isNaN(_cost) ? _cost : 0));
+      const _qty = parseFloat(a.shares);
+      const _qty2 = parseFloat(a.quantity);
+      const safeQty = !isNaN(_qty) ? _qty : (!isNaN(_qty2) ? _qty2 : 0);
+      const value = safePrice * safeQty;
+      if (isNaN(value)) return sum;
+      const currency = a.currency || 'CNY';
+      const fromRate = exchangeRates[currency] ?? 1;
+      const toRate = exchangeRates['CNY'] ?? 1;
+      const rmbValue = currency === 'CNY' ? value : (value * fromRate) / toRate;
+      return sum + (isNaN(rmbValue) ? 0 : rmbValue);
+    }, 0);
+  const freeCashFlowExpected = totalBudget;
 
   // 独立资产配置计算
   const independentTypeLabels = {
@@ -1280,7 +1302,7 @@ export default function Overview() {
         return (
           <CardWrapper>
             <h2 className="text-base font-semibold font-mono text-gray-900 dark:text-white">收益与盈亏</h2>
-            <div className="grid grid-cols-3 gap-3 mt-3">
+            <div className="grid grid-cols-4 gap-3 mt-3">
               <div className="text-center">
                 <div className="text-xs text-green-600 dark:text-green-400">总流入</div>
                 <div className="text-lg font-bold font-mono text-green-600 truncate">{formatCurrency(totalInflow)}</div>
@@ -1334,6 +1356,22 @@ export default function Overview() {
                   <div className="flex justify-center gap-x-3">
                     <span className="whitespace-nowrap text-red-500 dark:text-red-400">总流出:</span>
                     <span className="font-mono tabular-nums text-red-500 dark:text-red-400 truncate">{formatCurrency(totalOutflow)}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="text-center">
+                <div className="text-xs text-indigo-600 dark:text-indigo-400">自由现金流</div>
+                <div className={`text-lg font-bold font-mono truncate ${freeCashFlowCurrent >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                  {formatCurrency(freeCashFlowCurrent)}
+                </div>
+                <div className="mt-2 space-y-0.5 text-xs">
+                  <div className="flex justify-center gap-x-3 pt-1 border-t border-gray-100 dark:border-gray-700">
+                    <span className="whitespace-nowrap text-indigo-600 dark:text-indigo-400">预计自有现金流:</span>
+                    <span className="font-mono tabular-nums text-indigo-600 dark:text-indigo-400 truncate">{formatCurrency(freeCashFlowExpected)}</span>
+                  </div>
+                  <div className="flex justify-center gap-x-3 pt-1 border-t border-gray-100 dark:border-gray-700">
+                    <span className="whitespace-nowrap text-indigo-600 dark:text-indigo-400">自由月份:</span>
+                    <span className="font-mono tabular-nums text-indigo-600 dark:text-indigo-400 truncate">{Math.floor(freeCashFlowCurrent / 36000)} 个月</span>
                   </div>
                 </div>
               </div>

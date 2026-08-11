@@ -1909,6 +1909,9 @@ export default function IndependentAssets() {
       let listPaid = 0;
       let listCash = 0;
       let listDiv = 0;
+      let listCurYearDiv = 0;
+      const currentYear = new Date().getFullYear();
+      const policyYear = item.policyDate ? new Date(item.policyDate).getFullYear() : null;
       if (isAnnuity) {
         listPaid = records.reduce((s, r) => s + parseFloat(r.annualPremium || 0), 0);
         if (records.length > 0) {
@@ -1918,16 +1921,35 @@ export default function IndependentAssets() {
           listCash = parseFloat(item.cashValue || 0);
         }
         listDiv = records.reduce((s, r) => s + parseFloat(r.annualActualDividend || 0), 0);
+        // 当年分红额：（保单日期年份 + 保单年度 - 1）=== 当前自然年 的记录汇总（年金险：annualActualDividend）
+        if (policyYear) {
+          listCurYearDiv = records
+            .filter(r => {
+              const py = parseInt(r.year || 0, 10);
+              return py > 0 && (policyYear + py - 1 === currentYear);
+            })
+            .reduce((s, r) => s + parseFloat(r.annualActualDividend || 0), 0);
+        }
       } else {
         listPaid = parseFloat(item.paidAmount || 0);
         listCash = parseFloat(item.cashValue || 0);
         listDiv = records.reduce((s, r) => s + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0), 0);
+        // 当年分红额：（保单日期年份 + 保单年度 - 1）=== 当前自然年 的记录汇总（非年金险：actualProfitAmount = 明细弹窗"实际分红额"列）
+        if (policyYear) {
+          listCurYearDiv = records
+            .filter(r => {
+              const py = parseInt(r.year || 0, 10);
+              return py > 0 && (policyYear + py - 1 === currentYear);
+            })
+            .reduce((s, r) => s + parseFloat(r.actualProfitAmount || 0), 0);
+        }
       }
       acc.paid += convertAmount(listPaid, cur, targetCur, exchangeRates);
       acc.cash += convertAmount(listCash, cur, targetCur, exchangeRates);
       acc.dividend += convertAmount(listDiv, cur, targetCur, exchangeRates);
+      acc.curYearDividend += convertAmount(listCurYearDiv, cur, targetCur, exchangeRates);
       return acc;
-    }, { paid: 0, cash: 0, dividend: 0 });
+    }, { paid: 0, cash: 0, dividend: 0, curYearDividend: 0 });
     return (
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
@@ -1955,6 +1977,7 @@ export default function IndependentAssets() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">已付金额</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">现金价值</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">累计分红额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">当年分红额</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">货币单位</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
@@ -1981,6 +2004,25 @@ export default function IndependentAssets() {
                   }, 0);
                 }
 
+                // 当年分红额 = 明细弹窗中（保单日期年份 + 保单年度 - 1）为当前自然年的实际分红额汇总
+                // 年金险：当年实际红利 = annualActualDividend；非年金险：实际分红额 = actualProfitAmount
+                let currentYearDividend = 0;
+                const currentYear = new Date().getFullYear();
+                const policyYear = item.policyDate ? new Date(item.policyDate).getFullYear() : null;
+                if (records.length > 0 && policyYear) {
+                  const yearMatchedRecords = records.filter(r => {
+                    const py = parseInt(r.year || 0, 10);
+                    return py > 0 && (policyYear + py - 1 === currentYear);
+                  });
+                  if (isAnnuity) {
+                    currentYearDividend = yearMatchedRecords
+                      .reduce((s, r) => s + parseFloat(r.annualActualDividend || 0), 0);
+                  } else {
+                    currentYearDividend = yearMatchedRecords
+                      .reduce((s, r) => s + parseFloat(r.actualProfitAmount || 0), 0);
+                  }
+                }
+
                 return (
                   <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyNumber || '—'}</td>
@@ -1994,6 +2036,7 @@ export default function IndependentAssets() {
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listPaidAmount, item.currency)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listCashValue, item.currency)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listDividend, item.currency)}</td>
+                    <td className="px-4 py-3 text-sm text-orange-600 dark:text-orange-400">{formatCurrency(currentYearDividend, item.currency)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.currency || '—'}</td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
@@ -2013,7 +2056,7 @@ export default function IndependentAssets() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无保险资产数据</td>
+                  <td colSpan={14} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无保险资产数据</td>
                 </tr>
               )}
               {items.length > 0 && (
@@ -2034,6 +2077,7 @@ export default function IndependentAssets() {
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(insuranceTotals.paid, insuranceTotalCurrency)}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(insuranceTotals.cash, insuranceTotalCurrency)}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(insuranceTotals.dividend, insuranceTotalCurrency)}</td>
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">{formatCurrency(insuranceTotals.curYearDividend, insuranceTotalCurrency)}</td>
                   <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">{insuranceTotalCurrency}</td>
                   <td></td>
                 </tr>
@@ -2318,6 +2362,14 @@ export default function IndependentAssets() {
     };
 
     const totalDividend = sorted.reduce((s, r) => s + (getCashflow(r) > 0 ? getCashflow(r) : 0), 0);
+    // 当年分红 = 当前自然年所有现金流的总和（含负数）
+    const currentYear = new Date().getFullYear();
+    const currentYearDividend = sorted.reduce((s, r) => {
+      const dateStr = r.dividendDate || '';
+      const year = parseInt(dateStr.slice(0, 4), 10);
+      if (isNaN(year) || year !== currentYear) return s;
+      return s + getCashflow(r);
+    }, 0);
     const totalBuyCost = sorted.reduce((s, r) => s + getCostBasis(r), 0);
     const investmentCost = parseFloat(item.investmentCost || 0);
     const annualContribution = parseFloat(item.annualContribution || 0);
@@ -2371,7 +2423,7 @@ export default function IndependentAssets() {
     }
     const irrDisplay = irr !== null ? `${(irr * 100).toFixed(2)}%` : '—';
 
-    return { totalInvested, totalDividend, dividendRate, irrDisplay };
+    return { totalInvested, totalDividend, currentYearDividend, dividendRate, irrDisplay };
   };
 
   const calculateRentalStats = (item) => {
@@ -2467,6 +2519,7 @@ export default function IndependentAssets() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">累计投入本金</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">分红频率</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">累计分红</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">当年分红</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">累计分红率</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">IRR 分红率</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
@@ -2485,6 +2538,7 @@ export default function IndependentAssets() {
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(listStats.totalInvested, item.currency)}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.dividendFrequency || '每年'}</td>
                   <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400">{formatCurrency(listStats.totalDividend, item.currency)}</td>
+                  <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400">{formatCurrency(listStats.currentYearDividend, item.currency)}</td>
                   <td className="px-4 py-3 text-sm text-purple-600 dark:text-purple-400">{listStats.dividendRate}</td>
                   <td className="px-4 py-3 text-sm text-blue-600 dark:text-blue-400">{listStats.irrDisplay}</td>
                   <td className="px-4 py-3 text-sm">
@@ -2505,7 +2559,7 @@ export default function IndependentAssets() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无固定投资数据</td>
+                  <td colSpan={12} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无固定投资数据</td>
                 </tr>
               )}
             </tbody>
@@ -5656,13 +5710,13 @@ export default function IndependentAssets() {
 
     const buildRecordFromForm = (formValues) => {
       const eventType = formValues.eventType || '分红';
-      const absAmount = Math.abs(parseFloat(formValues.cashflow) || 0);
-      const signedAmount = FIXED_INVESTMENT_OUTFLOW_EVENTS.includes(eventType) ? -absAmount : absAmount;
+      const cashflow = parseFloat(formValues.cashflow) || 0;
+      const absAmount = Math.abs(cashflow);
       return {
         dividendDate: formValues.dividendDate,
         month: formValues.dividendDate.slice(0, 7),
         eventType,
-        cashflow: signedAmount,
+        cashflow,
         dividendAmount: eventType === '分红' ? absAmount : 0,
         investmentCost: eventType === '投入本金' ? absAmount : 0,
         annualContribution: eventType === '追加' ? absAmount : 0,
@@ -5698,7 +5752,7 @@ export default function IndependentAssets() {
       setEditDividendRecord({
         dividendDate: record.dividendDate || '',
         eventType: getRecordEventType(record),
-        cashflow: Math.abs(getRecordCashflow(record)).toString(),
+        cashflow: getRecordCashflow(record).toString(),
       });
     };
 
@@ -5884,12 +5938,12 @@ export default function IndependentAssets() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">现金流金额（正数）</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">现金流金额</label>
                       <input
                         type="number"
                         value={newDividendRecord.cashflow}
                         onChange={(e) => setNewDividendRecord({ ...newDividendRecord, cashflow: e.target.value })}
-                        placeholder="输入正数"
+                        placeholder="输入金额（负数表示流出）"
                         className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
                       />
                     </div>
@@ -6023,12 +6077,12 @@ export default function IndependentAssets() {
                                     </select>
                                   </div>
                                   <div>
-                                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">现金流金额（正数）</label>
+                                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">现金流金额</label>
                                     <input
                                       type="number"
                                       value={editDividendRecord.cashflow}
                                       onChange={(e) => setEditDividendRecord({ ...editDividendRecord, cashflow: e.target.value })}
-                                      placeholder="输入正数"
+                                      placeholder="输入金额（负数表示流出）"
                                       className="w-full px-2 py-1.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
                                     />
                                   </div>
