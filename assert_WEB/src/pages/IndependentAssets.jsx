@@ -1465,6 +1465,24 @@ export default function IndependentAssets() {
     const items = getAssets(activeTab);
     let itemData = { ...formData };
     
+    // 股权类型：自动计算市值、盈亏、盈亏比例
+    if (activeTab === 'equity') {
+      const cost = parseFloat(formData.cost) || 0;
+      const quantity = parseFloat(formData.quantity) || 0;
+      const currentPrice = parseFloat(formData.currentPrice) || 0;
+      
+      // 计算市值 = 数量 × 现价
+      const marketValue = quantity * currentPrice;
+      // 计算盈亏 = 市值 - 成本×数量
+      const pnl = marketValue - cost * quantity;
+      // 计算盈亏比例
+      const pnlRate = cost > 0 ? ((currentPrice - cost) / cost) * 100 : 0;
+      
+      itemData.marketValue = marketValue > 0 ? marketValue.toFixed(2) : '';
+      itemData.pnl = pnl.toFixed(2);
+      itemData.pnlRate = pnlRate.toFixed(2);
+    }
+    
     if (activeTab === 'fixeddeposit') {
       const amount = parseFloat(formData.amount || 0);
       const rate = parseFloat(formData.interestRate || 0);

@@ -50,6 +50,7 @@ export default function FinanceHoldingsTable({
   financeAccounts = [],
   assetKindOptions = [],
   moneyFundMap = {},
+  accountOptions = null,
 }) {
   const storagePrefix = readOnly ? 'accounts_table_' : 'finance_';
 
@@ -433,10 +434,12 @@ export default function FinanceHoldingsTable({
     }
   };
 
-  const uniqueAccounts = useMemo(() =>
-    [...new Set(holdings.map(h => h.account).filter(Boolean))].sort(),
-    [holdings]
-  );
+  const uniqueAccounts = useMemo(() => {
+    if (accountOptions && accountOptions.length > 0) {
+      return [...new Set(accountOptions)].sort();
+    }
+    return [...new Set(holdings.map(h => h.account).filter(Boolean))].sort();
+  }, [holdings, accountOptions]);
   const uniqueMarkets = useMemo(() =>
     [...new Set(holdings.map(h => h.market).filter(Boolean))].sort(),
     [holdings]

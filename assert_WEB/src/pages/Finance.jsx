@@ -987,22 +987,14 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     const cashAccountName = `${accountName} 现金账户`;
     const accounts = JSON.parse(JSON.stringify(stateData.accounts || []));
 
-    let cashAccount = accounts.find(acc =>
+    // 不再自动创建现金账户，仅查找已存在的现金账户
+    const cashAccount = accounts.find(acc =>
       acc.name === cashAccountName && (acc.type === 'cash' || acc.type === 'wallet' || acc.type === 'bank')
     );
 
     if (!cashAccount) {
-      const newCashAccount = {
-        id: `cash-${Date.now()}`,
-        name: cashAccountName,
-        type: 'cash',
-        currency: record.currency || asset.currency || 'CNY',
-        balance: 0,
-        liability: false,
-        enabled: true,
-      };
-      cashAccount = newCashAccount;
-      accounts.push(newCashAccount);
+      // 找不到现金账户时直接返回，不自动创建
+      return accounts;
     }
 
     const amount = Math.abs(parseFloat(record.amount) || 0);
@@ -2406,10 +2398,22 @@ export default function Finance({ onAssetPenetration }) {
         const parsed = JSON.parse(saved);
         if (parsed && parsed['债权类']) {
           const l2 = parsed['债权类'];
-          const hasBond = l2.includes('中债') || l2.includes('美债');
-          if (!hasBond) {
-            const migrated = ['中债', '美债', ...l2.filter(x => x !== 'A股' && x !== '港股通')];
+          // 过滤掉不相关的选项，确保只保留中债和美债（以及用户自定义项，排除系统默认的其他）
+          const bondOptions = ['中债', '美债'];
+          const filtered = l2.filter(x => !['A股', '港股通', '港股', '美股', '其他'].includes(x));
+          const remaining = filtered.filter(x => !bondOptions.includes(x));
+          const migrated = [...bondOptions, ...remaining];
+          if (migrated.length !== l2.length || !bondOptions.every(o => l2.includes(o))) {
             parsed['债权类'] = migrated;
+            localStorage.setItem('finance_category_l2_options', JSON.stringify(parsed));
+          }
+        }
+        if (parsed && parsed['固收类']) {
+          const l2 = parsed['固收类'];
+          // 固收类不应该有A股等选项，清理掉
+          const cleaned = l2.filter(x => !['A股', '港股通'].includes(x));
+          if (cleaned.length !== l2.length) {
+            parsed['固收类'] = cleaned.length > 0 ? cleaned : ['其他'];
             localStorage.setItem('finance_category_l2_options', JSON.stringify(parsed));
           }
         }
@@ -2434,11 +2438,11 @@ export default function Finance({ onAssetPenetration }) {
     }
     return {
       '权益类': ['A股', '港股', '美股', '其他'],
-      '债权类': ['中债', '美债', '其他'],
+      '债权类': ['中债', '美债'],
       '现金类': ['活期存款', '定期存款', '其他'],
       '商品类': ['黄金', '白银', '原油', '其他'],
       '分红类': ['A股', '固定投资', '其他'],
-      '固收类': ['A股', '其他'],
+      '固收类': ['其他'],
       '另类投资': ['数字货币', '其他'],
     };
   });
@@ -4208,45 +4212,65 @@ export default function Finance({ onAssetPenetration }) {
   }, [assetClasses]);
 
   const categoryL2Options = useMemo(() => {
+    const at = newAccount.assetType || '';
+    const l1 = newAccount.categoryL1 || '';
+    
+    // 债券相关判断 - 优先级最高，覆盖市场判断
+    if (at === '债券' || l1 === '债权类') {
+      return ['中债', '美债'];
+    }
+    // 固收类 + 债券 组合
+    if (at === '债券' && l1 === '固收类') {
+      return ['中债', '美债'];
+    }
+    
     if (newAccount.market === '港股市场') {
       return ['港股'];
     }
     if (newAccount.market === '美股市场') {
       return ['美股'];
     }
-    if (newAccount.assetType === '债券' || newAccount.categoryL1 === '债权类') {
-      return ['中债', '美债'];
-    }
-    if (newAccount.assetType === '现金' || newAccount.assetType === '现金余额' || newAccount.assetType === '货基' || newAccount.assetType === '银行理财') {
+    
+    if (at === '现金' || at === '现金余额' || at === '货基' || at === '银行理财') {
       return ['活期存款', '定期存款', '其他'];
     }
-    if (newAccount.assetType === '外汇') {
+    if (at === '外汇') {
       return ['欧元', '美元', '日元', '人民币'];
     }
-    if (newAccount.market === '国内市场') {
+    
+    // 国内市场默认选项 - 仅在无特定资产类型/一级分类匹配时生效
+    if (newAccount.market === '国内市场' && !at && !l1) {
       return ['A股', '港股通'];
     }
-    if (newAccount.assetType === '股票') {
+    
+    if (at === '股票') {
       return ['A股', '港股', '美股', '其他'];
     }
-    if (newAccount.assetType === '基金') {
+    if (at === '基金') {
       return ['混合型', '指数型', '货币型', '债券型', '行业主题型'];
     }
-    if (newAccount.assetType === '商品') {
+    if (at === '商品') {
       return ['黄金', '白银', '原油', '其他'];
     }
+    
     // 合并资产分类模块数据和 localStorage 自定义数据
-    const l1Key = newAccount.categoryL1;
+    const l1Key = l1;
     const moduleL2 = assetClasses && assetClasses.length > 0 && l1Key
       ? (() => {
-          const l1 = assetClasses.find(c => c.name === l1Key);
-          return l1?.children?.map(c => c.name) || [];
+          const l1Obj = assetClasses.find(c => c.name === l1Key);
+          return l1Obj?.children?.map(c => c.name) || [];
         })()
       : [];
     const customL2 = (categoryL2OptionsMap[l1Key] || []);
-    const cascadeL2 = newAccount.assetType && CASCADE_OPTIONS[newAccount.assetType]?.l2Options?.[l1Key]
-      ? CASCADE_OPTIONS[newAccount.assetType].l2Options[l1Key]
+    const cascadeL2 = at && CASCADE_OPTIONS[at]?.l2Options?.[l1Key]
+      ? CASCADE_OPTIONS[at].l2Options[l1Key]
       : [];
+      
+    // 债券兜底：如果是债券类型，优先使用债券选项
+    if (at === '债券' || l1 === '债权类') {
+      return ['中债', '美债', ...customL2.filter(x => x !== '中债' && x !== '美债')];
+    }
+    
     return [...new Set([...moduleL2, ...customL2, ...cascadeL2, ...DEFAULT_CATEGORY_L2])];
   }, [assetClasses, newAccount.categoryL1, newAccount.assetType, newAccount.market, categoryL2OptionsMap]);
 
@@ -5063,6 +5087,7 @@ export default function Finance({ onAssetPenetration }) {
                 financeAccounts={computed.financeAccounts}
                 assetKindOptions={assetKindOptions}
                 moneyFundMap={moneyFundMap}
+                accountOptions={accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc => acc.name || acc.id)}
               />
             ) : (
               <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-12 text-center shadow-soft border border-gray-100/80 dark:border-slate-700/50">
@@ -5100,6 +5125,7 @@ export default function Finance({ onAssetPenetration }) {
                 exchangeRates={exchangeRates}
                 financeAccounts={computed.financeAccounts}
                 assetKindOptions={assetKindOptions}
+                accountOptions={accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc => acc.name || acc.id)}
               />
             ) : (
               <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-12 text-center shadow-soft border border-gray-100/80 dark:border-slate-700/50">
@@ -5223,7 +5249,7 @@ export default function Finance({ onAssetPenetration }) {
                       <select value={newAccount.assetType} onChange={e => {
                         const assetType = e.target.value;
                         const isCash = (assetType === '现金' || assetType === '现金余额' || assetType === '货基');
-                        // 切换资产类型时清空持仓分组和持仓分类；现金类强制成本和现价为1
+                        // 切换资产类型时清空持仓分组、持仓分类和二级/三级/四级分类；现金类强制成本和现价为1
                         // 货基持仓分组默认设为现金仓位
                         const defaultPositionGroup = (assetType === '货基' || assetType === '现金' || assetType === '现金余额') ? '现金仓位' : '';
                         setNewAccount({
@@ -5231,6 +5257,9 @@ export default function Finance({ onAssetPenetration }) {
                           assetType: assetType,
                           positionGroup: defaultPositionGroup,
                           positionType: '',
+                          categoryL2: '',
+                          categoryL3: '',
+                          categoryL4: '',
                           cost: isCash ? '1' : newAccount.cost,
                           currentPrice: isCash ? '1' : newAccount.currentPrice,
                         });
