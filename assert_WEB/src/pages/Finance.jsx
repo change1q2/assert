@@ -3401,7 +3401,7 @@ export default function Finance({ onAssetPenetration }) {
   const handleEdit = (holding) => {
     setNewAccount({
       market: holding.market || '国内市场',
-      currency: holding.currency || '',
+      currency: holding.originalCurrency || holding.currency || '',
       assetKind: holding.assetKind || '',
       assetType: holding.assetType || '股票',
       account: holding.account || '',
@@ -4347,11 +4347,37 @@ export default function Finance({ onAssetPenetration }) {
     // 将 financeAssets 映射到前端 holding 结构（倒序排列，最新数据在最上面）
     const financeAccounts = (financeAssets || []).slice().reverse().map(a => {
       const _isMF = _isMoneyFund(a);
+      const _market = a.market || '国内市场';
+      const _currency = a.currency || 'CNY';
+      // 国内市场·港股通：自动获取的行情价格为港币，需按参考汇率折算为人民币（成本用sellRef，市值用buyRef）
+      // 港股市场·港股：不做任何转换，直接使用原始货币
+      const isHKConnect = _market === '国内市场' && (
+        a.categoryL2 === '港股通' || (a.subcategory || a.categoryL3) === '港股通'
+      );
+      const isHKMarket = _market === '港股市场' && (_currency === 'HKD' || _currency === 'HK$');
+      let _hkConnectCostFactor = 1;
+      let _hkConnectValueFactor = 1;
+      if (isHKConnect) {
+        if (hkConnectRate) {
+          _hkConnectCostFactor = hkConnectRate.sellReferenceRate || (hkConnectRate.mid * 1.03);
+          _hkConnectValueFactor = hkConnectRate.buyReferenceRate || (hkConnectRate.mid * 0.97);
+        } else {
+          const hkdDefault = exchangeRates.HKD || 0.86;
+          _hkConnectCostFactor = hkdDefault * 1.03;
+          _hkConnectValueFactor = hkdDefault * 0.97;
+        }
+      }
+      // 从 quotesMap 取到的实时行情：港股通时转换成 CNY，其他情况直接使用
+      const _quoteRawPrice = parseFloat(quotesMap[a.code]?.price);
+      const _quoteRawPrevClose = parseFloat(quotesMap[a.code]?.prevClose);
+      const _quotePrice = (isHKConnect && _quoteRawPrice) ? (_quoteRawPrice * _hkConnectValueFactor) : _quoteRawPrice;
+      const _quotePrevClose = (isHKConnect && _quoteRawPrevClose) ? (_quoteRawPrevClose * _hkConnectValueFactor) : _quoteRawPrevClose;
+
       // 货币基金：现价默认为1（货币基金每份净值1元）
       const _price = _isMF
         ? 1  // 货币基金净值恒为1，避免被万份收益覆盖
-        : (parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0);
-      const _prevClose = parseFloat(quotesMap[a.code]?.prevClose) || parseFloat(a.prevPrice) || (_isMF ? 1 : 0);
+        : (_quotePrice || parseFloat(a.currentPrice) || 0);
+      const _prevClose = _quotePrevClose || parseFloat(a.prevPrice) || (_isMF ? 1 : 0);
       const _priceChange = _price > _prevClose ? 'up' : _price < _prevClose ? 'down' : 'unchanged';
 
       // 从交易明细动态计算持仓数据
@@ -4442,48 +4468,30 @@ export default function Finance({ onAssetPenetration }) {
       const _cumulativeReturn = isCash ? 0 : (_useStoredMF && _storedCumulativeReturn && !isNaN(_storedCumulativeReturn) ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100);
       const _cumulativeReturnRate = isCash ? 0 : (_useStoredMF && _storedCumulativeReturnRate && !isNaN(_storedCumulativeReturnRate) ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0));
 
-      // —— 港股通折算：按参考汇率把港币市值/成本折算为人民币显示
-      // 成本：港币成本 × 卖出参考汇率（sellReferenceRate = 中间价上浮3%，用于买入股票时的预冻结）
-      // 市值：港币市值 × 买入参考汇率（buyReferenceRate = 中间价下浮3%，用于卖出时预到账估算）
-      let _hkCostFactor = 1;
-      let _hkValueFactor = 1;
-      const _market = a.market || '国内市场';
-      const _currency = a.currency || 'CNY';
-      const isHKConnect = _market === '国内市场' && (
-        a.categoryL2 === '港股通' || (a.subcategory || a.categoryL3) === '港股通'
-      );
-      const isHKMarket = (_market === '港股市场' || a.categoryL2 === '港股通') && (_currency === 'HKD' || _currency === 'HK$');
-      if (isHKConnect || isHKMarket) {
-        if (hkConnectRate) {
-          _hkCostFactor = hkConnectRate.sellReferenceRate || (hkConnectRate.mid * 1.03);
-          _hkValueFactor = hkConnectRate.buyReferenceRate || (hkConnectRate.mid * 0.97);
-        } else {
-          // API未加载时使用默认值：HKD 0.86 参考汇率中间价，上下浮动3%
-          const hkdDefault = exchangeRates.HKD || 0.86;
-          _hkCostFactor = hkdDefault * 1.03;
-          _hkValueFactor = hkdDefault * 0.97;
-        }
-      }
-
-      const _finalCostTotal = _costTotal * _hkCostFactor;
+      // —— 港股处理逻辑
+      // 国内市场·港股通：用户输入价格已是CNY，无需转换；仅实时获取的行情价格（上方quotePrice处）按参考汇率折算
+      // 港股市场·港股：不做任何货币转换，保留原始货币HKD
+      const _finalCostTotal = _costTotal;
       const _finalCurrentValue = isCash
         ? _cashValue
-        : (_isMF ? (parseFloat(a.cost) || _costTotal) : _currentValue) * _hkValueFactor;
+        : (_isMF ? (parseFloat(a.cost) || _costTotal) : _currentValue);
 
-      // 港股通：所有金额类字段按参考汇率折算成人民币（成本用sellRef，市值/盈亏用buyRef，dailyPnl用buyRef）
-      const _isHKAdjusted = (isHKConnect || isHKMarket) && !isCash;
-      const _finalHoldingPnl = isCash ? 0 : (_holdingPnl * _hkValueFactor);
-      const _finalHoldingPnlRate = _finalCostTotal > 0 ? Math.round((_finalHoldingPnl / _finalCostTotal) * 100 * 100) / 100 : 0;
-      const _finalCumulativeReturn = isCash ? 0 : (_cumulativeReturn * _hkValueFactor);
-      const _finalCumulativeReturnRate = _finalCostTotal > 0 ? Math.round((_finalCumulativeReturn / _finalCostTotal) * 100 * 100) / 100 : 0;
+      // 港股通：显示货币为CNY（用户已输入CNY）；其他：使用原始货币（港股市场保持HKD）
+      const _isHKConnectDisplay = isHKConnect && !isCash;
+      const _finalHoldingPnl = _holdingPnl;
+      const _finalHoldingPnlRate = _holdingPnlRate;
+      const _finalCumulativeReturn = _cumulativeReturn;
+      const _finalCumulativeReturnRate = _cumulativeReturnRate;
       const _rawDailyPnl = isCash ? 0 : getDailyPnl(a);
-      const _finalDailyPnl = _rawDailyPnl * _hkValueFactor;
+      // 港股通：每日盈亏中基于行情的部分已在上方转换为CNY；若存储值为港币也按市值汇率折算
+      const _finalDailyPnl = (isHKConnect && !isCash) ? (_rawDailyPnl * _hkConnectValueFactor) : _rawDailyPnl;
       const _finalDailyPnlRate = _finalCurrentValue > 0 ? Math.round((_finalDailyPnl / _finalCurrentValue) * 100 * 100) / 100 : 0;
 
       return {
         id: a.id,
         market: a.market || '国内市场',
-        currency: _isHKAdjusted ? 'CNY' : (a.currency || 'CNY'),
+        currency: _isHKConnectDisplay ? 'CNY' : (a.currency || 'CNY'),
+        originalCurrency: a.currency || 'CNY',
         name: a.name,
         code: a.code || '',
         assetType: a.kind || a.assetType || '',
@@ -5059,7 +5067,7 @@ export default function Finance({ onAssetPenetration }) {
         )}
 
         {/* ══════════════════════════════════════
-            新增弹窗（保持不变，仅改货币单位为可编辑）
+            新增/编辑资产弹窗
            ══════════════════════════════════════ */}
         {showAddModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -5079,7 +5087,7 @@ export default function Finance({ onAssetPenetration }) {
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-300">分类选择</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
-                  {/* Row 1: 市场 | 货币单位（可自由编辑） */}
+                  {/* Row 1: 市场 | 货币单位 */}
                   <FormField label="市场" required>
                     <select value={newAccount.market} onChange={e => {
                       const market = e.target.value;
@@ -5102,19 +5110,12 @@ export default function Finance({ onAssetPenetration }) {
                   </FormField>
 
                   <FormField label="货币单位">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        list="currency-suggestions"
-                        value={newAccount.currency}
-                        onChange={e => setNewAccount({ ...newAccount, currency: e.target.value.toUpperCase() })}
-                        placeholder="CNY / CNH / USD / 自定义..."
-                        className={`${FORM_INPUT} pr-8 font-mono`}
-                      />
-                      <datalist id="currency-suggestions">
-                        {CURRENCY_SUGGESTIONS.map(c => <option key={c} value={c} />)}
-                      </datalist>
-                    </div>
+                    <select
+                      value={newAccount.currency}
+                      onChange={e => setNewAccount({ ...newAccount, currency: e.target.value })}
+                      className={FORM_SELECT}>
+                      {CURRENCY_SUGGESTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
                   </FormField>
 
                   {/* Row 2: 资产种类 | 资产分类一级 */}
@@ -5599,7 +5600,7 @@ export default function Finance({ onAssetPenetration }) {
                                 onChange={e => setNewAccount({ ...newAccount, holdingPnl: e.target.value })}
                                 placeholder="自动计算 或 手动输入"
                                 className={`${FORM_INPUT} pl-7 ${pnlClass(newAccount.holdingPnl)}`} />
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">¥</span>
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">{getCurrencySymbol(newAccount.currency)}</span>
                             </div>
                           </FormField>
 
@@ -5619,7 +5620,7 @@ export default function Finance({ onAssetPenetration }) {
                                   readOnly
                                   placeholder="自动计算"
                                   className={`${FORM_INPUT} pl-7 font-semibold bg-gray-50 dark:bg-slate-700 cursor-not-allowed`} />
-                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">¥</span>
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">{getCurrencySymbol(newAccount.currency)}</span>
                               </div>
                               {(newAccount.quantity && newAccount.currentPrice) && (
                                 <p className="mt-1 text-xs text-gray-400">
@@ -5751,12 +5752,10 @@ export default function Finance({ onAssetPenetration }) {
                 </FormField>
 
                 <FormField label="货币单位">
-                  <div className="relative">
-                    <input type="text" list="batch-currency-suggestions" value={batchEditData.currency} onChange={e => setBatchEditData({ ...batchEditData, currency: e.target.value.toUpperCase() })} placeholder="不修改 / CNY / USD..." className={`${FORM_INPUT} pr-8 font-mono`} />
-                    <datalist id="batch-currency-suggestions">
-                      {CURRENCY_SUGGESTIONS.map(c => <option key={c} value={c} />)}
-                    </datalist>
-                  </div>
+                  <select value={batchEditData.currency} onChange={e => setBatchEditData({ ...batchEditData, currency: e.target.value })} className={FORM_SELECT}>
+                    <option value="">不修改</option>
+                    {CURRENCY_SUGGESTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
                 </FormField>
 
                 <FormField label="资产类型">
