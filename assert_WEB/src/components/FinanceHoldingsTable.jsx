@@ -359,7 +359,15 @@ export default function FinanceHoldingsTable({
       }
       case 'cumulativeReturn': {
         // 累计收益：优先使用存储的 cumulativeReturn/cumulativePnl；缺失则回退为 holdingPnl
-        const stored = parseFloat(h.cumulativeReturn) || parseFloat(h.cumulativePnl);
+        let stored = parseFloat(h.cumulativeReturn) || parseFloat(h.cumulativePnl);
+        // 货币基金兜底：存储值为 0 时，用 (currentValue - cost) 计算持有收益作为累计收益
+        if ((!stored || isNaN(stored)) && isMoneyFundHold(h)) {
+          const _cv = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+          const _c = parseFloat(h.cost) || 0;
+          const _qty = parseFloat(h.quantity) || parseFloat(h.shares) || 0;
+          const _cp = parseFloat(h.costPrice) || (_qty > 0 ? _c / _qty : 1);
+          stored = Math.round((_cv - _cp * _qty) * 100) / 100;
+        }
         const value = isNaN(stored) ? (parseFloat(h.holdingPnl) || 0) : stored;
         return (
           <span className={pnlClass(value)}>
@@ -369,18 +377,42 @@ export default function FinanceHoldingsTable({
           </span>
         );
       }
-      case 'holdingDays':
-        return computeHoldingDays(h) || '-';
+      case 'holdingDays': {
+        const days = h.isArchived ? h.holdingDays : computeHoldingDays(h);
+        return (days != null && days !== '') ? days : '-';
+      }
       case 'archiveDate':
         return val || '-';
       case 'finalPnl':
       case 'holdingPnl':
-      case 'dailyPnl':
-        return <span className={pnlClass(val)}>{pnlSign(parseFloat(val))}{formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates).replace(getCurrencySymbol(h.currency || 'CNY'), '')}</span>;
+      case 'dailyPnl': {
+        // 货币基金兜底：存储值为 0 时，用 (currentValue - cost) 计算持有收益
+        // 原因：货币基金 currentPrice=1, costPrice≈1，computed 中 (mfNavValue - costTotal) 可能为 0
+        let _v = parseFloat(val);
+        if ((!_v || isNaN(_v)) && isMoneyFundHold(h) && col.key === 'holdingPnl') {
+          const _cv = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+          const _c = parseFloat(h.cost) || 0;
+          const _qty = parseFloat(h.quantity) || parseFloat(h.shares) || 0;
+          const _cp = parseFloat(h.costPrice) || (_qty > 0 ? _c / _qty : 1);
+          _v = Math.round((_cv - _cp * _qty) * 100) / 100;
+        }
+        return <span className={pnlClass(_v)}>{pnlSign(_v)}{formatCurrencyWithRate(_v, h.currency || 'CNY', h.currency || 'CNY', exchangeRates).replace(getCurrencySymbol(h.currency || 'CNY'), '')}</span>;
+      }
       case 'finalPnlPercent':
       case 'holdingPnlRate':
-      case 'dailyPnlRate':
-        return <span className={pnlClass(val)}>{formatPercentage(val)}</span>;
+      case 'dailyPnlRate': {
+        // 货币基金兜底：存储值为 0 时，用 (currentValue - cost) / cost * 100 计算持有收益率
+        let _r = parseFloat(val);
+        if ((!_r || isNaN(_r)) && isMoneyFundHold(h) && col.key === 'holdingPnlRate') {
+          const _cv = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+          const _c = parseFloat(h.cost) || 0;
+          const _qty = parseFloat(h.quantity) || parseFloat(h.shares) || 0;
+          const _cp = parseFloat(h.costPrice) || (_qty > 0 ? _c / _qty : 1);
+          const _costTotal = _cp * _qty;
+          _r = _costTotal > 0 ? Math.round(((_cv - _costTotal) / _costTotal) * 100 * 100) / 100 : 0;
+        }
+        return <span className={pnlClass(_r)}>{formatPercentage(_r)}</span>;
+      }
       case 'positionRatio':
         const ratio = parseFloat(val);
         return <span className="text-gray-600 dark:text-gray-400">{isNaN(ratio) ? '—' : `${ratio.toFixed(2)}%`}</span>;
@@ -559,25 +591,26 @@ export default function FinanceHoldingsTable({
   const mfVisibleColumns = useMemo(() => MONEY_FUND_COLUMNS.filter(c => c.visible), []);
 
   const mfSummary = useMemo(() => {
+    const target = selectedCurrency || 'CNY';
     const totalValue = moneyFundItems.reduce((s, h) => {
       const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
       const currency = h.currency || 'CNY';
-      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+      return s + convertCurrency(value, currency, target, exchangeRates);
     }, 0);
     const totalCost = moneyFundItems.reduce((s, h) => {
       const cost = parseFloat(h.cost) || 0;
       const currency = h.currency || 'CNY';
-      return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
+      return s + convertCurrency(cost, currency, target, exchangeRates);
     }, 0);
     const totalPnl = moneyFundItems.reduce((s, h) => {
       const pnl = parseFloat(h.holdingPnl) || 0;
       const currency = h.currency || 'CNY';
-      return s + convertCurrency(pnl, currency, 'CNY', exchangeRates);
+      return s + convertCurrency(pnl, currency, target, exchangeRates);
     }, 0);
     const totalCumulative = moneyFundItems.reduce((s, h) => {
       const v = parseFloat(h.cumulativeReturn) || parseFloat(h.cumulativePnl) || parseFloat(h.holdingPnl) || 0;
       const currency = h.currency || 'CNY';
-      return s + convertCurrency(v, currency, 'CNY', exchangeRates);
+      return s + convertCurrency(v, currency, target, exchangeRates);
     }, 0);
     return {
       value: totalValue,
@@ -586,28 +619,29 @@ export default function FinanceHoldingsTable({
       cumulative: totalCumulative,
       pnlRate: totalCost > 0 ? (totalValue - totalCost) / totalCost * 100 : 0,
     };
-  }, [moneyFundItems, exchangeRates]);
+  }, [moneyFundItems, exchangeRates, selectedCurrency]);
 
   const summary = useMemo(() => {
+    const target = selectedCurrency || 'CNY';
     const totalValue = paged.reduce((s, h) => {
       const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
       const currency = h.currency || 'CNY';
-      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+      return s + convertCurrency(value, currency, target, exchangeRates);
     }, 0);
     const totalCost = paged.reduce((s, h) => {
       const cost = parseFloat(h.cost) || 0;
       const currency = h.currency || 'CNY';
-      return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
+      return s + convertCurrency(cost, currency, target, exchangeRates);
     }, 0);
     const totalPnl = paged.reduce((s, h) => {
       const pnl = parseFloat(h.holdingPnl) || 0;
       const currency = h.currency || 'CNY';
-      return s + convertCurrency(pnl, currency, 'CNY', exchangeRates);
+      return s + convertCurrency(pnl, currency, target, exchangeRates);
     }, 0);
     const totalDailyPnl = paged.reduce((s, h) => {
       const dailyPnl = parseFloat(h.dailyPnl) || 0;
       const currency = h.currency || 'CNY';
-      return s + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
+      return s + convertCurrency(dailyPnl, currency, target, exchangeRates);
     }, 0);
     return {
       value: totalValue,
@@ -617,20 +651,21 @@ export default function FinanceHoldingsTable({
       dailyPnl: totalDailyPnl,
       dailyPnlRate: totalValue > 0 ? (totalDailyPnl / totalValue) * 100 : 0,
     };
-  }, [paged, exchangeRates]);
+  }, [paged, exchangeRates, selectedCurrency]);
 
   const filteredSummary = useMemo(() => {
+    const target = selectedCurrency || 'CNY';
     if (categoryName === 'archived') {
       const totalFinalPnl = paged.reduce((sum, a) => {
         const pnl = parseFloat(a.finalPnl) || 0;
         const currency = a.currency || 'CNY';
-        return sum + convertCurrency(pnl, currency, 'CNY', exchangeRates);
+        return sum + convertCurrency(pnl, currency, target, exchangeRates);
       }, 0);
       const totalCostAll = financeAccounts.reduce((sum, a) => {
         if (a.isArchived) return sum;
         const cost = parseFloat(a.cost) || 0;
         const currency = a.currency || 'CNY';
-        return sum + convertCurrency(cost, currency, 'CNY', exchangeRates);
+        return sum + convertCurrency(cost, currency, target, exchangeRates);
       }, 0);
       return {
         totalCost: totalCostAll,
@@ -641,22 +676,22 @@ export default function FinanceHoldingsTable({
       const totalCost = paged.reduce((sum, a) => {
         const cost = parseFloat(a.cost) || 0;
         const currency = a.currency || 'CNY';
-        return sum + convertCurrency(cost, currency, 'CNY', exchangeRates);
+        return sum + convertCurrency(cost, currency, target, exchangeRates);
       }, 0);
       const totalMarketValue = paged.reduce((sum, a) => {
         const value = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
         const currency = a.currency || 'CNY';
-        return sum + convertCurrency(value, currency, 'CNY', exchangeRates);
+        return sum + convertCurrency(value, currency, target, exchangeRates);
       }, 0);
       const totalPnl = paged.reduce((sum, a) => {
         const pnl = parseFloat(a.holdingPnl) || 0;
         const currency = a.currency || 'CNY';
-        return sum + convertCurrency(pnl, currency, 'CNY', exchangeRates);
+        return sum + convertCurrency(pnl, currency, target, exchangeRates);
       }, 0);
       const totalDailyPnl = paged.reduce((sum, a) => {
         const dailyPnl = parseFloat(a.dailyPnl) || 0;
         const currency = a.currency || 'CNY';
-        return sum + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
+        return sum + convertCurrency(dailyPnl, currency, target, exchangeRates);
       }, 0);
       return {
         totalCost,
@@ -667,7 +702,7 @@ export default function FinanceHoldingsTable({
         totalDailyPnlRate: totalMarketValue > 0 ? (totalDailyPnl / totalMarketValue) * 100 : 0,
       };
     }
-  }, [paged, exchangeRates, categoryName, financeAccounts]);
+  }, [paged, exchangeRates, categoryName, financeAccounts, selectedCurrency]);
 
   const showCheckboxCol = !readOnly && showBatchEdit;
   const showOpsCol = !readOnly;
@@ -1201,13 +1236,15 @@ export default function FinanceHoldingsTable({
                           >
                             明细
                           </button>
-                          <button
-                            onClick={() => onDelete && onDelete(h.id)}
-                            className="p-1 rounded text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                            title="删除"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {onDelete && (
+                            <button
+                              onClick={() => onDelete && onDelete(h.id)}
+                              className="p-1 rounded text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                              title="删除"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     )}
@@ -1232,7 +1269,7 @@ export default function FinanceHoldingsTable({
                     if (col.key === 'currentValue') {
                       return (
                         <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
-                          {formatCurrencyWithRate(mfSummary.value, 'CNY', selectedCurrency, exchangeRates)}
+                          {formatCurrencyWithRate(mfSummary.value, selectedCurrency || 'CNY', selectedCurrency, exchangeRates)}
                         </td>
                       );
                     }
@@ -1240,7 +1277,7 @@ export default function FinanceHoldingsTable({
                       return (
                         <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(mfSummary.cumulative)}`}>
                           {pnlSign(mfSummary.cumulative)}
-                          {formatCurrencyWithRate(mfSummary.cumulative, 'CNY', selectedCurrency, exchangeRates)
+                          {formatCurrencyWithRate(mfSummary.cumulative, selectedCurrency || 'CNY', selectedCurrency, exchangeRates)
                             .replace(getCurrencySymbol(selectedCurrency), '')}
                         </td>
                       );
@@ -1249,7 +1286,7 @@ export default function FinanceHoldingsTable({
                       return (
                         <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(mfSummary.pnl)}`}>
                           {pnlSign(mfSummary.pnl)}
-                          {formatCurrencyWithRate(mfSummary.pnl, 'CNY', selectedCurrency, exchangeRates)
+                          {formatCurrencyWithRate(mfSummary.pnl, selectedCurrency || 'CNY', selectedCurrency, exchangeRates)
                             .replace(getCurrencySymbol(selectedCurrency), '')}
                         </td>
                       );
@@ -1269,7 +1306,7 @@ export default function FinanceHoldingsTable({
                         return s + (isNaN(cp) ? (parseFloat(h.cost) || 0) : cp * q);
                       }, 0);
                       const avg = qty > 0 ? costBase / qty : 1;
-                      return <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">{formatCurrencyWithRate(avg, 'CNY', selectedCurrency, exchangeRates)}</td>;
+                      return <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">{formatCurrencyWithRate(avg, selectedCurrency || 'CNY', selectedCurrency, exchangeRates)}</td>;
                     }
                     return <td key={col.key} className="py-2 px-1.5"></td>;
                   })}
@@ -1417,15 +1454,16 @@ export default function FinanceHoldingsTable({
                       </td>
                     );
                   }
+                  const target = selectedCurrency || 'CNY';
                   if (col.key === 'cost') {
                     const otherCost = otherItems.reduce((s, h) => {
                       const cost = parseFloat(h.cost) || 0;
                       const currency = h.currency || 'CNY';
-                      return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
+                      return s + convertCurrency(cost, currency, target, exchangeRates);
                     }, 0);
                     return (
                       <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">
-                        {formatCurrencyWithRate(otherCost, 'CNY', selectedCurrency, exchangeRates)}
+                        {formatCurrencyWithRate(otherCost, target, selectedCurrency, exchangeRates)}
                       </td>
                     );
                   }
@@ -1433,11 +1471,11 @@ export default function FinanceHoldingsTable({
                     const otherValue = otherItems.reduce((s, h) => {
                       const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
                       const currency = h.currency || 'CNY';
-                      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+                      return s + convertCurrency(value, currency, target, exchangeRates);
                     }, 0);
                     return (
                       <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
-                        {formatCurrencyWithRate(otherValue, 'CNY', selectedCurrency, exchangeRates)}
+                        {formatCurrencyWithRate(otherValue, target, selectedCurrency, exchangeRates)}
                       </td>
                     );
                   }
@@ -1445,21 +1483,11 @@ export default function FinanceHoldingsTable({
                     const otherPnl = otherItems.reduce((s, h) => {
                       const pnl = parseFloat(h.holdingPnl) || 0;
                       const currency = h.currency || 'CNY';
-                      return s + convertCurrency(pnl, currency, 'CNY', exchangeRates);
-                    }, 0);
-                    const otherCost = otherItems.reduce((s, h) => {
-                      const cost = parseFloat(h.cost) || 0;
-                      const currency = h.currency || 'CNY';
-                      return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
-                    }, 0);
-                    const otherValue = otherItems.reduce((s, h) => {
-                      const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
-                      const currency = h.currency || 'CNY';
-                      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+                      return s + convertCurrency(pnl, currency, target, exchangeRates);
                     }, 0);
                     return (
                       <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(otherPnl)}`}>
-                        {pnlSign(otherPnl)}{formatCurrencyWithRate(otherPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+                        {pnlSign(otherPnl)}{formatCurrencyWithRate(otherPnl, target, selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
                       </td>
                     );
                   }
@@ -1467,12 +1495,12 @@ export default function FinanceHoldingsTable({
                     const otherCost = otherItems.reduce((s, h) => {
                       const cost = parseFloat(h.cost) || 0;
                       const currency = h.currency || 'CNY';
-                      return s + convertCurrency(cost, currency, 'CNY', exchangeRates);
+                      return s + convertCurrency(cost, currency, target, exchangeRates);
                     }, 0);
                     const otherValue = otherItems.reduce((s, h) => {
                       const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
                       const currency = h.currency || 'CNY';
-                      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+                      return s + convertCurrency(value, currency, target, exchangeRates);
                     }, 0);
                     const rate = otherCost > 0 ? (otherValue - otherCost) / otherCost * 100 : 0;
                     return (
@@ -1485,16 +1513,11 @@ export default function FinanceHoldingsTable({
                     const otherDaily = otherItems.reduce((s, h) => {
                       const dailyPnl = parseFloat(h.dailyPnl) || 0;
                       const currency = h.currency || 'CNY';
-                      return s + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
-                    }, 0);
-                    const otherValue = otherItems.reduce((s, h) => {
-                      const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
-                      const currency = h.currency || 'CNY';
-                      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+                      return s + convertCurrency(dailyPnl, currency, target, exchangeRates);
                     }, 0);
                     return (
                       <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums font-semibold ${pnlClass(otherDaily)}`}>
-                        {pnlSign(otherDaily)}{formatCurrencyWithRate(otherDaily, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+                        {pnlSign(otherDaily)}{formatCurrencyWithRate(otherDaily, target, selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
                       </td>
                     );
                   }
@@ -1502,12 +1525,12 @@ export default function FinanceHoldingsTable({
                     const otherDaily = otherItems.reduce((s, h) => {
                       const dailyPnl = parseFloat(h.dailyPnl) || 0;
                       const currency = h.currency || 'CNY';
-                      return s + convertCurrency(dailyPnl, currency, 'CNY', exchangeRates);
+                      return s + convertCurrency(dailyPnl, currency, target, exchangeRates);
                     }, 0);
                     const otherValue = otherItems.reduce((s, h) => {
                       const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
                       const currency = h.currency || 'CNY';
-                      return s + convertCurrency(value, currency, 'CNY', exchangeRates);
+                      return s + convertCurrency(value, currency, target, exchangeRates);
                     }, 0);
                     const rate = otherValue > 0 ? (otherDaily / otherValue) * 100 : 0;
                     return (

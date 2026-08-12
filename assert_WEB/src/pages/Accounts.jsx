@@ -693,8 +693,7 @@ export default function Accounts() {
 
     const marketMap = {
       '国内资产': { market: '国内市场', currency: 'CNY', subcategory: 'A股' },
-      '港股资产': { market: '港股市场', currency: 'HKD', subcategory: '港股' },
-      '美股资产': { market: '美股市场', currency: 'USD', subcategory: '美股' },
+      '海外资产': { market: '港股市场', currency: 'HKD', subcategory: '港股' },
     };
 
     const defaultMarket = { market: '国内市场', currency: 'CNY', subcategory: 'A股' };
@@ -909,6 +908,18 @@ export default function Accounts() {
   const paginatedAccounts = filteredAccounts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleAdd = () => {
+    // 现金账户判断：type === 'cash' （现金） OR category === '现金' （现金类别）
+    const allAccounts = accounts || [];
+    const hasCashAccount = allAccounts.some(a =>
+      (a.type || '').toLowerCase() === 'cash' ||
+      (a.category || '') === '现金'
+    );
+    if (!hasCashAccount) {
+      const confirmed = window.confirm(
+        '提示：建议先创建一个现金账户（type=cash 或 category=现金），用于理财模块的资产增添，您确定要继续吗？'
+      );
+      if (!confirmed) return;
+    }
     setEditingAccount(null);
     const firstCategory = categoryList[0]?.value || '银行';
     const defaultSub = (accountCatConfig[firstCategory] || [])[0] || '';
@@ -1062,7 +1073,7 @@ export default function Accounts() {
           currency: formData.currency || 'CNY',
           liability: formData.liability,
           type: formData.type || '独立资产',
-          balance: isFinanceAsset ? 0.1 : 0,
+          balance: 0,
           ownershipType: ownershipTypeToSave,
           owners: ownersToSave,
         };
@@ -2442,9 +2453,9 @@ export default function Accounts() {
                         {hasAssets && plRate !== null ? `${(plRate * 100).toFixed(2)}%` : '—'}
                       </td>
                       <td className={`py-3 px-3 text-right font-medium tabular-nums ${
-                        balance < 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'
+                        balance < 0 ? 'text-red-500' : balance === 0 ? 'text-gray-400' : 'text-gray-900 dark:text-white'
                       }`}>
-                        {formatCurrencyWithRate(balance, account.currency || 'CNY', selectedCurrency, exchangeRates)}
+                        {balance === 0 ? '—' : formatCurrencyWithRate(balance, account.currency || 'CNY', selectedCurrency, exchangeRates)}
                       </td>
                       <td className="py-3 px-3">
                         <div className="flex items-center justify-center gap-1">
@@ -3394,16 +3405,14 @@ export default function Accounts() {
                         const market = e.target.value;
                         let currency = formData.currency;
                         if (market === '国内资产') currency = 'CNY';
-                        else if (market === '港股资产') currency = 'HKD';
-                        else if (market === '美股资产') currency = 'USD';
+                        else if (market === '海外资产') currency = 'HKD';
                         setFormData({ ...formData, financeMarket: market, currency });
                       }}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                     >
                       <option value="">请选择市场</option>
                       <option value="国内资产">国内资产</option>
-                      <option value="港股资产">港股资产</option>
-                      <option value="美股资产">美股资产</option>
+                      <option value="海外资产">海外资产</option>
                     </select>
                   </div>
                 )}
