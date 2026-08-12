@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchRealTimeExchangeRates, fetchMoneyFund, fetchMoneyFundData, fetchFundNavQuote } from '../api';
 import { CURRENCIES, getCurrencySymbol, getCurrencyName } from '../utils/currency';
+import sanitizeText from '../utils/sanitizeText';
 import {
   TrendingUp,
   TrendingDown,
@@ -4976,7 +4977,7 @@ export default function Finance({ onAssetPenetration }) {
                       }}
                         className={`${FORM_SELECT} flex-1`}>
                         <option value="">请选择资产种类</option>
-                        {assetKindOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                        {assetKindOptions.map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>)}
                       </select>
                       <button onClick={() => {
                         const newKind = prompt('请输入新的资产种类名称');
@@ -5006,7 +5007,7 @@ export default function Finance({ onAssetPenetration }) {
                       }}
                         className={`${FORM_SELECT} flex-1`}>
                         <option value="">请选择</option>
-                        {categoryL1Options.map(o => <option key={o} value={o}>{o}</option>)}
+                        {categoryL1Options.map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>)}
                       </select>
                       <button onClick={() => setShowCategoryL1Modal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理一级分类">
                         <Settings className="w-4 h-4" />
@@ -5039,9 +5040,9 @@ export default function Finance({ onAssetPenetration }) {
                           const mapped = CATEGORY_L1_ASSET_TYPES[newAccount.categoryL1];
                           if (mapped) {
                             // 有映射：仅显示映射中的选项（精确显示，不与全局自定义项合并）
-                            return mapped.map(o => <option key={o} value={o}>{o}</option>);
+                            return mapped.map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>);
                           }
-                          return assetTypeOptions.map(o => <option key={o} value={o}>{o}</option>);
+                          return assetTypeOptions.map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>);
                         })()}
                       </select>
                       <button onClick={() => setShowAssetTypeModal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理资产类型">
@@ -5055,7 +5056,7 @@ export default function Finance({ onAssetPenetration }) {
                       className={FORM_SELECT}>
                       <option value="">请选择账户</option>
                       {accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc =>
-                        <option key={acc.id || acc.name} value={acc.name}>{acc.name}</option>
+                        <option key={acc.id || acc.name} value={acc.name}>{sanitizeText(acc.name, acc.name)}</option>
                       )}
                     </select>
                   </FormField>
@@ -5076,7 +5077,7 @@ export default function Finance({ onAssetPenetration }) {
                       }}
                         className={`${FORM_SELECT} flex-1`}>
                         <option value="">请选择</option>
-                        {categoryL2Options.map(o => <option key={o} value={o}>{o}</option>)}
+                        {categoryL2Options.map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>)}
                       </select>
                       <button onClick={() => { if (newAccount.categoryL1) setShowCategoryL2Modal(true); }} disabled={!newAccount.categoryL1} className={`p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors ${!newAccount.categoryL1 ? 'opacity-50 cursor-not-allowed' : ''}`} title="管理二级分类">
                         <Settings className="w-4 h-4" />
@@ -5102,9 +5103,9 @@ export default function Finance({ onAssetPenetration }) {
                           const marketL3 = (newAccount.market === '国内市场') ? ['场内', '场外'] : ['场内', '场外'];
                           const allOptions = [...new Set([...cascadeL3, ...marketL3, ...customOptions])];
                           if (newAccount.market === '国内市场' && cascadeL3.length > 0) {
-                            return cascadeL3.map(o => <option key={o} value={o}>{o}</option>);
+                            return cascadeL3.map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>);
                           }
-                          return allOptions.map(o => <option key={o} value={o}>{o}</option>);
+                          return allOptions.map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>);
                         })()}
                       </select>
                       <button onClick={() => { if (newAccount.categoryL2) setShowCategoryL3Modal(true); }} disabled={!newAccount.categoryL2} className={`p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors ${!newAccount.categoryL2 ? 'opacity-50 cursor-not-allowed' : ''}`} title="管理三级分类">
@@ -5123,9 +5124,9 @@ export default function Finance({ onAssetPenetration }) {
                         {(() => {
                           const cascade = CASCADE_OPTIONS[newAccount.assetType];
                           if (newAccount.market === '国内市场' && cascade && cascade.l4Options[newAccount.categoryL1] && cascade.l4Options[newAccount.categoryL1][newAccount.categoryL2] && cascade.l4Options[newAccount.categoryL1][newAccount.categoryL2][newAccount.categoryL3]) {
-                            return cascade.l4Options[newAccount.categoryL1][newAccount.categoryL2][newAccount.categoryL3].map(o => <option key={o} value={o}>{o}</option>);
+                            return cascade.l4Options[newAccount.categoryL1][newAccount.categoryL2][newAccount.categoryL3].map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>);
                           }
-                          return (categoryL4Options[newAccount.categoryL1] || []).map(o => <option key={o} value={o}>{o}</option>);
+                          return (categoryL4Options[newAccount.categoryL1] || []).map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>);
                         })()}
                       </select>
                       <button onClick={() => { if (newAccount.categoryL3) setShowCategoryL4Modal(true); }} disabled={!newAccount.categoryL3} className={`p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors ${!newAccount.categoryL3 ? 'opacity-50 cursor-not-allowed' : ''}`} title="管理四级分类">
@@ -5145,7 +5146,7 @@ export default function Finance({ onAssetPenetration }) {
                         className={`${FORM_SELECT} flex-1 ${!newAccount.assetType ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <option value="">{newAccount.assetType ? '请选择' : '请先选择资产类型'}</option>
-                        {currentPositionGroupOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                        {currentPositionGroupOptions.map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>)}
                       </select>
                       <button onClick={() => setShowPositionGroupModal(true)} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="管理持仓分组">
                         <Settings className="w-4 h-4" />
@@ -5170,7 +5171,7 @@ export default function Finance({ onAssetPenetration }) {
                         className={`${FORM_SELECT} flex-1 ${!newAccount.assetType ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <option value="">{newAccount.assetType ? '请选择' : '请先选择资产类型'}</option>
-                        {currentPositionTypeOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                        {currentPositionTypeOptions.map(o => <option key={o} value={o}>{sanitizeText(o, o)}</option>)}
                       </select>
                       <button onClick={() => { if (newAccount.assetType) setShowPositionTypeModal(true); }} disabled={!newAccount.assetType} className={`p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 transition-colors ${!newAccount.assetType ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 dark:hover:bg-slate-600'}`} title={newAccount.assetType ? '管理持仓分类' : '请先选择资产类型'}>
                         <Settings className="w-4 h-4" />
@@ -5427,7 +5428,7 @@ export default function Finance({ onAssetPenetration }) {
                               className={`${FORM_SELECT} flex-1`}>
                               <option value="">请选择标签</option>
                               {tags.map(tag => (
-                                <option key={tag} value={tag}>{tag}</option>
+                                <option key={tag} value={tag}>{sanitizeText(tag, tag)}</option>
                               ))}
                             </select>
                             <button onClick={() => setShowTagModal(true)} className="px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
@@ -5555,7 +5556,7 @@ export default function Finance({ onAssetPenetration }) {
                 <FormField label="所属账户">
                   <select value={batchEditData.account} onChange={e => setBatchEditData({ ...batchEditData, account: e.target.value })} className={FORM_SELECT}>
                     <option value="">不修改</option>
-                    {accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc => <option key={acc.id || acc.name} value={acc.name}>{acc.name}</option>)}
+                    {accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc => <option key={acc.id || acc.name} value={acc.name}>{sanitizeText(acc.name, acc.name)}</option>)}
                   </select>
                 </FormField>
 
@@ -5602,7 +5603,7 @@ export default function Finance({ onAssetPenetration }) {
                 <FormField label="标签">
                   <select value={batchEditData.tag} onChange={e => setBatchEditData({ ...batchEditData, tag: e.target.value })} className={FORM_SELECT}>
                     <option value="">不修改</option>
-                    {tags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+                    {tags.map(tag => <option key={tag} value={tag}>{sanitizeText(tag, tag)}</option>)}
                   </select>
                 </FormField>
               </div>

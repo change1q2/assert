@@ -20,6 +20,7 @@ import {
   ARCHIVED_FILTERS,
 } from './FinanceHoldingsTable.utils';
 import { HoldingsSummaryCard, Pagination } from './FinanceHoldingsTable.subcomponents';
+import sanitizeText from '../utils/sanitizeText';
 
 export default function FinanceHoldingsTable({
   readOnly = false,
@@ -296,9 +297,9 @@ export default function FinanceHoldingsTable({
       case 'categoryL4':
       case 'positionGroup':
       case 'positionType':
-        return val || '-';
+        return sanitizeText(val, val) || '-';
       case 'name':
-        return <span className="font-medium text-gray-900 dark:text-white">{val || '-'}</span>;
+        return <span className="font-medium text-gray-900 dark:text-white">{sanitizeText(val, val) || '-'}</span>;
       case 'code':
         return <span className="font-mono">{val || '-'}</span>;
       case 'quantity':
@@ -384,7 +385,7 @@ export default function FinanceHoldingsTable({
         const ratio = parseFloat(val);
         return <span className="text-gray-600 dark:text-gray-400">{isNaN(ratio) ? '—' : `${ratio.toFixed(2)}%`}</span>;
       case 'account':
-        return <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">{val || '-'}</span>;
+        return <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">{sanitizeText(val, val) || '-'}</span>;
       case 'tags':
         return val && Array.isArray(val) ? val.join(', ') : '-';
       default:
@@ -689,7 +690,7 @@ export default function FinanceHoldingsTable({
               className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
             >
               <option value="">全部账户</option>
-              {uniqueAccounts.map(a => <option key={a} value={a}>{a}</option>)}
+              {uniqueAccounts.map(a => <option key={a} value={a}>{sanitizeText(a, a)}</option>)}
             </select>
           )}
 
@@ -783,7 +784,7 @@ export default function FinanceHoldingsTable({
               className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
             >
               <option value="">全部账户</option>
-              {uniqueAccounts.map(a => <option key={a} value={a}>{a}</option>)}
+              {uniqueAccounts.map(a => <option key={a} value={a}>{sanitizeText(a, a)}</option>)}
             </select>
           )}
 
