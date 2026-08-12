@@ -3296,13 +3296,12 @@ export default function Finance({ onAssetPenetration }) {
         payload.transactions = [buildRecord];
         updatedFinanceAssets = [...currentFinanceAssets, payload];
 
-        // 自动创建现金类持仓资产（若关联账户下不存在）
+        // 不再自动创建现金类持仓资产，仅更新已存在的现金资产余额
         const accountName = payload.accountId || '';
         const existingCashAssets = currentFinanceAssets.filter(a =>
           (a.accountId === accountName || a.account === accountName) &&
           (a.category === '现金类' || a.categoryL1 === '现金类')
         );
-        const hasCashAsset = existingCashAssets.length > 0;
 
         // 获取所属账户的 balance
         const linkedAccount = (stateData.accounts || []).find(a =>
@@ -3310,66 +3309,8 @@ export default function Finance({ onAssetPenetration }) {
         );
         const _accBalance = linkedAccount ? (parseFloat(linkedAccount.balance) || 0) : 0;
 
-        if (!hasCashAsset && accountName) {
-          // 生成资产代码：{账户名}01，若已存在则顺延
-          const existingCodes = currentFinanceAssets
-            .filter(a => a.category === '现金类' && a.code && a.code.startsWith(accountName))
-            .map(a => a.code);
-          let codeSuffix = 1;
-          let cashCode = `${accountName}01`;
-          while (existingCodes.includes(cashCode)) {
-            codeSuffix++;
-            cashCode = `${accountName}${String(codeSuffix).padStart(2, '0')}`;
-          }
-          // 市场映射二级分类
-          const marketSubcategoryMap = {
-            '国内市场': 'A股',
-            '港股市场': '港股',
-            '美股市场': '美股',
-          };
-          const cashAsset = {
-            id: `cash-asset-${Date.now()}`,
-            market: payload.market || '国内市场',
-            currency: payload.currency || 'CNY',
-            assetKind: '现金',
-            kind: '现金',
-            accountId: accountName,
-            category: '现金类',
-            subcategory: marketSubcategoryMap[payload.market] || 'A股',
-            tertiaryCategory: '场内',
-            positionGroup: '现金仓位',
-            positionCategory: '现金管理',
-            name: `${accountName}现金管理`,
-            code: cashCode,
-            costPrice: 1,
-            shares: 0,
-            cost: 0,
-            availableShares: 0,
-            currentPrice: 1,
-            prevPrice: 1,
-            priceDate: '',
-            avgBuyPrice: 0,
-            holdingDays: 0,
-            holdingDaysBase: 0,
-            holdingDaysDate: new Date().toISOString().split('T')[0],
-            pnl: 0,
-            pnlPercent: 0,
-            todayPnl: 0,
-            todayPnlPercent: 0,
-            holdingPnl: 0,
-            holdingPnlRate: 0,
-            dailyPnl: 0,
-            dailyPnlRate: 0,
-            currentValue: _accBalance,
-            positionWeight: 0,
-            totalFees: 0,
-            tags: '',
-            transactions: [],
-          };
-
-          updatedFinanceAssets = [...updatedFinanceAssets, cashAsset];
-        } else if (hasCashAsset) {
-          // 已有现金类资产：余额自动关联到该资产（多条时优先 positionCategory === '现金管理'）
+        if (existingCashAssets.length > 0) {
+          // 已有现金类资产：余额自动关联到该资产
           const preferredCashAsset =
             existingCashAssets.find(a => a.positionCategory === '现金管理') ||
             existingCashAssets[0];
@@ -3380,38 +3321,25 @@ export default function Finance({ onAssetPenetration }) {
           );
         }
 
-        // 现金账户联动：建仓扣减现金（仅对已存在的账户生效，新账户保持初始余额0）
+        // 现金账户联动：仅对已存在的账户扣减，不再自动创建
         const cashAccountName = `${accountName} 现金账户`;
         const accountsForUpdate = JSON.parse(JSON.stringify(stateData.accounts || []));
-        let cashAcct = accountsForUpdate.find(acc =>
+        const cashAcct = accountsForUpdate.find(acc =>
           acc.name === cashAccountName && (acc.type === 'cash' || acc.type === 'wallet' || acc.type === 'bank')
         );
-        const isNewCashAccount = !cashAcct;
-        if (isNewCashAccount) {
-          cashAcct = {
-            id: `cash-${Date.now()}`,
-            name: cashAccountName,
-            type: 'cash',
-            currency: payload.currency || 'CNY',
-            balance: 0,
-            liability: false,
-            enabled: true,
-          };
-          accountsForUpdate.push(cashAcct);
-        }
-        const _amount = Math.abs(parseFloat(buildRecord.amount) || 0);
-        const _fee = parseFloat(buildRecord.fee) || 0;
-        // 仅对已存在的账户扣减，新创建的账户保持初始余额不变
-        if (!isNewCashAccount) {
-          cashAcct.balance = (parseFloat(cashAcct.balance) || 0) - _amount - _fee;
-        }
-        buildRecord.cashAccountId = cashAcct.id;
-        buildRecord.cashAccountName = cashAcct.name;
 
-        // 交易本金与所属账户余额联动（适配新返回结构）
-        const syncResult = updateAccountBalance(payload, buildRecord, accountsForUpdate, undefined, updatedFinanceAssets);
-        updatedAccounts = syncResult.accounts;
-        updatedFinanceAssets = syncResult.financeAssets;
+        if (cashAcct) {
+          const _amount = Math.abs(parseFloat(buildRecord.amount) || 0);
+          const _fee = parseFloat(buildRecord.fee) || 0;
+          cashAcct.balance = (parseFloat(cashAcct.balance) || 0) - _amount - _fee;
+          buildRecord.cashAccountId = cashAcct.id;
+          buildRecord.cashAccountName = cashAcct.name;
+
+          // 交易本金与所属账户余额联动
+          const syncResult = updateAccountBalance(payload, buildRecord, accountsForUpdate, undefined, updatedFinanceAssets);
+          updatedAccounts = syncResult.accounts;
+          updatedFinanceAssets = syncResult.financeAssets;
+        }
       }
 
       // 统一保存
