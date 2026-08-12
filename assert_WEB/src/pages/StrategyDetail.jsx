@@ -184,6 +184,8 @@ export default function StrategyDetail({ strategyId, onBack, onNavigate }) {
         holdingPnl: _holdingPnl,
         holdingPnlRate: _holdingPnlRate,
         transactions: a.transactions || [],
+        isArchived: a.isArchived || a.status === 'archived',
+        archiveDate: a.archiveDate || '',
       };
     });
   }, [poolHoldings]);
@@ -221,7 +223,7 @@ export default function StrategyDetail({ strategyId, onBack, onNavigate }) {
 
   const availableAssets = useMemo(() => {
     const poolIdSet = new Set(poolIds.map((id) => String(id)));
-    return financeAssets.filter((a) => !poolIdSet.has(String(a.id)));
+    return financeAssets.filter((a) => !poolIdSet.has(String(a.id)) && !(a.isArchived || a.status === 'archived'));
   }, [financeAssets, poolIds]);
 
   const handleSaveState = async (newState) => {
@@ -526,8 +528,17 @@ export default function StrategyDetail({ strategyId, onBack, onNavigate }) {
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
                   {computedHoldings.map((h) => (
-                    <tr key={h.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">{h.name}</td>
+                    <tr key={h.id} className={`hover:bg-gray-50 dark:hover:bg-slate-700/50 ${h.isArchived ? 'opacity-70' : ''}`}>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">
+                        <span className="flex items-center gap-1.5">
+                          {h.name}
+                          {h.isArchived && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600">
+                              归档{h.archiveDate ? ` · ${h.archiveDate}` : ''}
+                            </span>
+                          )}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">{h.code || '—'}</td>
                       <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">{h.assetType || '—'}</td>
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-white text-right">{formatCurrency(h.cost, h.currency)}</td>

@@ -283,6 +283,8 @@ export default function IndependentAssets() {
   const [customFixedDepositTypes, setCustomFixedDepositTypes] = useState([]);
   const [showInsuranceDetailModal, setShowInsuranceDetailModal] = useState(false);
   const [selectedInsurance, setSelectedInsurance] = useState(null);
+  const [insurancePaginationPage, setInsurancePaginationPage] = useState(1);
+  const INSURANCE_PAGE_SIZE = 20;
   const [showCalculationModal, setShowCalculationModal] = useState(false);
   const [calculationData, setCalculationData] = useState(null);
   const [showInsuranceTransactionModal, setShowInsuranceTransactionModal] = useState(false);
@@ -646,6 +648,9 @@ export default function IndependentAssets() {
         policyDate: '',
         policyStatus: '待生效',
         paymentMethod: '年付',
+        monthlyPaymentAmount: '',
+        annualPaymentAmount: '',
+        paidPeriods: '',
         paidAmount: '',
         cashValue: '',
         currency: 'CNY',
@@ -798,6 +803,7 @@ export default function IndependentAssets() {
 
   const handleShowInsuranceDetail = (item) => {
     setSelectedInsurance(item);
+    setInsurancePaginationPage(1);
     setShowInsuranceDetailModal(true);
   };
 
@@ -1916,34 +1922,45 @@ export default function IndependentAssets() {
       if (isAnnuity) {
         listPaid = records.reduce((s, r) => s + parseFloat(r.annualPremium || 0), 0);
         if (records.length > 0) {
-          const latest = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop();
+          const latest = [...records].sort((a, b) => {
+            const va = a.year || '';
+            const vb = b.year || '';
+            if ((/^\d{4}-\d{2}$/.test(va) || /^\d{4}$/.test(va)) && (/^\d{4}-\d{2}$/.test(vb) || /^\d{4}$/.test(vb))) {
+              return va.localeCompare(vb);
+            }
+            return (parseInt(va) || 0) - (parseInt(vb) || 0);
+          }).pop();
           listCash = parseFloat(latest?.yearEndCashValue || 0);
         } else {
           listCash = parseFloat(item.cashValue || 0);
         }
         listDiv = records.reduce((s, r) => s + parseFloat(r.annualActualDividend || 0), 0);
-        // 当年分红额：（保单日期年份 + 保单年度 - 1）=== 当前自然年 的记录汇总（年金险：annualActualDividend）
-        if (policyYear) {
-          listCurYearDiv = records
-            .filter(r => {
-              const py = parseInt(r.year || 0, 10);
-              return py > 0 && (policyYear + py - 1 === currentYear);
-            })
-            .reduce((s, r) => s + parseFloat(r.annualActualDividend || 0), 0);
-        }
+        // 当年分红额：支持 YYYY-MM 格式和纯保单年度格式
+        listCurYearDiv = records
+          .filter(r => {
+            const yearVal = r.year || '';
+            if (/^\d{4}-\d{2}$/.test(yearVal)) {
+              return parseInt(yearVal.slice(0, 4), 10) === currentYear;
+            }
+            const py = parseInt(yearVal || 0, 10);
+            return policyYear && py > 0 && (policyYear + py - 1 === currentYear);
+          })
+          .reduce((s, r) => s + parseFloat(r.annualActualDividend || 0), 0);
       } else {
         listPaid = parseFloat(item.paidAmount || 0);
         listCash = parseFloat(item.cashValue || 0);
         listDiv = records.reduce((s, r) => s + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0), 0);
-        // 当年分红额：（保单日期年份 + 保单年度 - 1）=== 当前自然年 的记录汇总（非年金险：actualProfitAmount = 明细弹窗"实际分红额"列）
-        if (policyYear) {
-          listCurYearDiv = records
-            .filter(r => {
-              const py = parseInt(r.year || 0, 10);
-              return py > 0 && (policyYear + py - 1 === currentYear);
-            })
-            .reduce((s, r) => s + parseFloat(r.actualProfitAmount || 0), 0);
-        }
+        // 当年分红额：支持 YYYY-MM 格式和纯保单年度格式
+        listCurYearDiv = records
+          .filter(r => {
+            const yearVal = r.year || '';
+            if (/^\d{4}-\d{2}$/.test(yearVal)) {
+              return parseInt(yearVal.slice(0, 4), 10) === currentYear;
+            }
+            const py = parseInt(yearVal || 0, 10);
+            return policyYear && py > 0 && (policyYear + py - 1 === currentYear);
+          })
+          .reduce((s, r) => s + parseFloat(r.actualProfitAmount || 0), 0);
       }
       acc.paid += convertAmount(listPaid, cur, targetCur, exchangeRates);
       acc.cash += convertAmount(listCash, cur, targetCur, exchangeRates);
@@ -1995,7 +2012,15 @@ export default function IndependentAssets() {
                 if (isAnnuity) {
                   listPaidAmount = records.reduce((sum, r) => sum + parseFloat(r.annualPremium || 0), 0);
                   if (records.length > 0) {
-                    const latestRecord = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop();
+                    const sortedByYear = [...records].sort((a, b) => {
+                      const va = a.year || '';
+                      const vb = b.year || '';
+                      if ((/^\d{4}-\d{2}$/.test(va) || /^\d{4}$/.test(va)) && (/^\d{4}-\d{2}$/.test(vb) || /^\d{4}$/.test(vb))) {
+                        return va.localeCompare(vb);
+                      }
+                      return (parseInt(va) || 0) - (parseInt(vb) || 0);
+                    });
+                    const latestRecord = sortedByYear[sortedByYear.length - 1];
                     listCashValue = parseFloat(latestRecord.yearEndCashValue || 0);
                   }
                   listDividend = records.reduce((sum, r) => sum + parseFloat(r.annualActualDividend || 0), 0);
@@ -2005,15 +2030,24 @@ export default function IndependentAssets() {
                   }, 0);
                 }
 
-                // 当年分红额 = 明细弹窗中（保单日期年份 + 保单年度 - 1）为当前自然年的实际分红额汇总
+                // 当年分红额 = 明细弹窗中当年的实际分红额汇总
+                // 支持两种 year 格式：纯数字（保单年度 1/2/3...）和 YYYY-MM（年月）
+                //   纯数字年度：按（保单日期年份 + 保单年度 - 1）== 当前自然年匹配
+                //   YYYY-MM：按 year.slice(0,4) == 当前自然年匹配
                 // 年金险：当年实际红利 = annualActualDividend；非年金险：实际分红额 = actualProfitAmount
                 let currentYearDividend = 0;
                 const currentYear = new Date().getFullYear();
                 const policyYear = item.policyDate ? new Date(item.policyDate).getFullYear() : null;
-                if (records.length > 0 && policyYear) {
+                if (records.length > 0) {
                   const yearMatchedRecords = records.filter(r => {
-                    const py = parseInt(r.year || 0, 10);
-                    return py > 0 && (policyYear + py - 1 === currentYear);
+                    const yearVal = r.year || '';
+                    // YYYY-MM 格式：直接比较年份部分
+                    if (/^\d{4}-\d{2}$/.test(yearVal)) {
+                      return parseInt(yearVal.slice(0, 4), 10) === currentYear;
+                    }
+                    // 纯数字年度格式（保单年度序号）
+                    const py = parseInt(yearVal || 0, 10);
+                    return policyYear && py > 0 && (policyYear + py - 1 === currentYear);
                   });
                   if (isAnnuity) {
                     currentYearDividend = yearMatchedRecords
@@ -2810,12 +2844,89 @@ export default function IndependentAssets() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">缴纳方式</label>
-            <select value={formData.paymentMethod || '年付'} onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select value={formData.paymentMethod || '年付'} onChange={(e) => {
+              const nextMethod = e.target.value;
+              const next = { ...formData, paymentMethod: nextMethod };
+              // 切换时自动计算已付金额
+              const periods = parseFloat(next.paidPeriods || 0) || 0;
+              if (nextMethod === '月付') {
+                const monthly = parseFloat(next.monthlyPaymentAmount || 0) || 0;
+                if (monthly > 0 && periods > 0) {
+                  next.paidAmount = (monthly * periods).toString();
+                }
+              } else if (nextMethod === '年付') {
+                const annual = parseFloat(next.annualPaymentAmount || 0) || 0;
+                if (annual > 0 && periods > 0) {
+                  next.paidAmount = (annual * periods).toString();
+                }
+              }
+              setFormData(next);
+            }} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="整付">整付</option>
               <option value="年付">年付</option>
               <option value="月付">月付</option>
             </select>
           </div>
+          {formData.paymentMethod === '月付' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">每月付款金额</label>
+                <input type="number" value={formData.monthlyPaymentAmount || ''} onChange={(e) => {
+                  const monthly = e.target.value;
+                  const periods = parseFloat(formData.paidPeriods || 0) || 0;
+                  const paid = parseFloat(monthly || 0) * periods;
+                  setFormData({
+                    ...formData,
+                    monthlyPaymentAmount: monthly,
+                    paidAmount: (parseFloat(monthly || 0) > 0 && periods > 0) ? paid.toString() : formData.paidAmount,
+                  });
+                }} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">已付款期数（月）</label>
+                <input type="number" value={formData.paidPeriods || ''} onChange={(e) => {
+                  const periods = e.target.value;
+                  const monthly = parseFloat(formData.monthlyPaymentAmount || 0) || 0;
+                  const paid = monthly * (parseFloat(periods || 0) || 0);
+                  setFormData({
+                    ...formData,
+                    paidPeriods: periods,
+                    paidAmount: (monthly > 0 && parseFloat(periods || 0) > 0) ? paid.toString() : formData.paidAmount,
+                  });
+                }} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </>
+          )}
+          {formData.paymentMethod === '年付' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">每年付款金额</label>
+                <input type="number" value={formData.annualPaymentAmount || ''} onChange={(e) => {
+                  const annual = e.target.value;
+                  const periods = parseFloat(formData.paidPeriods || 0) || 0;
+                  const paid = parseFloat(annual || 0) * periods;
+                  setFormData({
+                    ...formData,
+                    annualPaymentAmount: annual,
+                    paidAmount: (parseFloat(annual || 0) > 0 && periods > 0) ? paid.toString() : formData.paidAmount,
+                  });
+                }} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">已付款期数（年）</label>
+                <input type="number" value={formData.paidPeriods || ''} onChange={(e) => {
+                  const periods = e.target.value;
+                  const annual = parseFloat(formData.annualPaymentAmount || 0) || 0;
+                  const paid = annual * (parseFloat(periods || 0) || 0);
+                  setFormData({
+                    ...formData,
+                    paidPeriods: periods,
+                    paidAmount: (annual > 0 && parseFloat(periods || 0) > 0) ? paid.toString() : formData.paidAmount,
+                  });
+                }} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{formData.insuranceType === '年金险' ? '当年保费' : '已付金额'}</label>
             <input type="number" value={formData.paidAmount || ''} onChange={(e) => setFormData({ ...formData, paidAmount: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -4126,7 +4237,14 @@ export default function IndependentAssets() {
       }, 0);
 
       if (records.length > 0) {
-        const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
+        const sortedByYear = [...records].sort((a, b) => {
+          const va = a.year || '';
+          const vb = b.year || '';
+          if ((/^\d{4}-\d{2}$/.test(va) || /^\d{4}$/.test(va)) && (/^\d{4}-\d{2}$/.test(vb) || /^\d{4}$/.test(vb))) {
+            return va.localeCompare(vb);
+          }
+          return (parseInt(va) || 0) - (parseInt(vb) || 0);
+        });
         const latestRecord = sortedByYear[sortedByYear.length - 1];
         displayCashValue = parseFloat(latestRecord.yearEndCashValue || 0);
       }
@@ -4193,6 +4311,30 @@ export default function IndependentAssets() {
                 <span className="text-gray-500 dark:text-gray-400">缴纳方式</span>
                 <span className="text-gray-900 dark:text-white font-medium">{item.paymentMethod || '—'}</span>
               </div>
+              {item.paymentMethod === '月付' && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500 dark:text-gray-400">每月付款金额</span>
+                    <span className="text-gray-900 dark:text-white font-medium">{item.monthlyPaymentAmount ? formatCurrency(parseFloat(item.monthlyPaymentAmount), item.currency) : '—'}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500 dark:text-gray-400">已付款期数（月）</span>
+                    <span className="text-gray-900 dark:text-white font-medium">{item.paidPeriods || '—'}</span>
+                  </div>
+                </>
+              )}
+              {item.paymentMethod === '年付' && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500 dark:text-gray-400">每年付款金额</span>
+                    <span className="text-gray-900 dark:text-white font-medium">{item.annualPaymentAmount ? formatCurrency(parseFloat(item.annualPaymentAmount), item.currency) : '—'}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500 dark:text-gray-400">已付款期数（年）</span>
+                    <span className="text-gray-900 dark:text-white font-medium">{item.paidPeriods || '—'}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500 dark:text-gray-400">货币单位</span>
                 <span className="text-gray-900 dark:text-white font-medium">{item.currency || '—'}</span>
@@ -4266,162 +4408,223 @@ export default function IndependentAssets() {
 
               {records.length > 0 ? (
                 <div className="overflow-x-auto">
-                  {item.insuranceType === '年金险' ? (
-                  <table className="w-full">
-                    <thead className="bg-gray-50 dark:bg-slate-700">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保单年度</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年保费</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">累计保费</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年保证年金</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">累计保证领取</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">年末现金价值</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年红利(演示)</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">累积红利(演示)</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">含红利生存总利益</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年实际红利</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">实际累计红利</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-                      {records
-                        .slice()
-                        .sort((a, b) => {
-                          const yearA = parseInt(a.year) || 0;
-                          const yearB = parseInt(b.year) || 0;
-                          if (yearA === 0 && yearB !== 0) return 1;
-                          if (yearA !== 0 && yearB === 0) return -1;
-                          if (yearA === 0 && yearB === 0) return 0;
-                          return yearA - yearB;
-                        })
-                        .map((record, index) => {
-                        const annualPremium = parseFloat(record.annualPremium || 0);
-                        const cumulativePremium = parseFloat(record.cumulativePremium || 0);
-                        const annualGuaranteedAnnuity = parseFloat(record.annualGuaranteedAnnuity || 0);
-                        const cumulativeGuaranteedReceived = parseFloat(record.cumulativeGuaranteedReceived || 0);
-                        const yearEndCashValue = parseFloat(record.yearEndCashValue || 0);
-                        const annualDividendDemo = parseFloat(record.annualDividendDemo || 0);
-                        const cumulativeDividendDemo = parseFloat(record.cumulativeDividendDemo || 0);
-                        const totalBenefit = yearEndCashValue + cumulativeDividendDemo;
-                        const annualActualDividend = parseFloat(record.annualActualDividend || 0);
-                        const cumulativeActualDividend = parseFloat(record.cumulativeActualDividend || 0);
+                  {(() => {
+                    // Sort records - 年金险支持 YYYY-MM（年月）或纯数字年份
+                    const sortedRecords = records.slice().sort((a, b) => {
+                      const va = a.year || '';
+                      const vb = b.year || '';
+                      // 优先作为年月字符串比较
+                      if ((/^\d{4}-\d{2}$/.test(va) || /^\d{4}$/.test(va)) && (/^\d{4}-\d{2}$/.test(vb) || /^\d{4}$/.test(vb))) {
+                        return va.localeCompare(vb);
+                      }
+                      const na = parseInt(va) || 0;
+                      const nb = parseInt(vb) || 0;
+                      if (na === 0 && nb !== 0) return 1;
+                      if (na !== 0 && nb === 0) return -1;
+                      if (na === 0 && nb === 0) return 0;
+                      return na - nb;
+                    });
+                    const totalPages = Math.max(1, Math.ceil(sortedRecords.length / INSURANCE_PAGE_SIZE));
+                    const currentPage = Math.min(insurancePaginationPage, totalPages);
+                    const pageStart = (currentPage - 1) * INSURANCE_PAGE_SIZE;
+                    const pagedRecords = sortedRecords.slice(pageStart, pageStart + INSURANCE_PAGE_SIZE);
 
-                        const toggleStatus = () => {
-                          const newRecords = selectedInsurance.transactionRecords.map(r => {
-                            if (r.id === record.id) {
-                              return { ...r, status: record.status === '达成' ? '未达成' : '达成' };
-                            }
-                            return r;
-                          });
-                          handleUpdateTransactionField(newRecords);
-                        };
+                    const renderPagination = () => {
+                      if (totalPages <= 1) return null;
+                      return (
+                        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-slate-700">
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            共 {sortedRecords.length} 条，每页 {INSURANCE_PAGE_SIZE} 条，第 {currentPage}/{totalPages} 页
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              disabled={currentPage <= 1}
+                              onClick={() => setInsurancePaginationPage(1)}
+                              className="px-2 py-1 text-xs rounded border border-gray-200 dark:border-slate-600 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+                            >
+                              首页
+                            </button>
+                            <button
+                              disabled={currentPage <= 1}
+                              onClick={() => setInsurancePaginationPage(currentPage - 1)}
+                              className="p-1 rounded border border-gray-200 dark:border-slate-600 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <span className="px-2 text-xs text-gray-600 dark:text-gray-300">{currentPage} / {totalPages}</span>
+                            <button
+                              disabled={currentPage >= totalPages}
+                              onClick={() => setInsurancePaginationPage(currentPage + 1)}
+                              className="p-1 rounded border border-gray-200 dark:border-slate-600 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                            <button
+                              disabled={currentPage >= totalPages}
+                              onClick={() => setInsurancePaginationPage(totalPages)}
+                              className="px-2 py-1 text-xs rounded border border-gray-200 dark:border-slate-600 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+                            >
+                              末页
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    };
 
-                        return (
-                          <tr key={record.id || index} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{record.year || '—'}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                              <input type="number" value={record.annualPremium || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
-                                  if (r.id === record.id) return { ...r, annualPremium: e.target.value };
-                                  return r;
-                                });
-                                handleUpdateTransactionField(newRecords);
-                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                              <input type="number" value={record.cumulativePremium || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
-                                  if (r.id === record.id) return { ...r, cumulativePremium: e.target.value };
-                                  return r;
-                                });
-                                handleUpdateTransactionField(newRecords);
-                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                              <input type="number" value={record.annualGuaranteedAnnuity || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
-                                  if (r.id === record.id) return { ...r, annualGuaranteedAnnuity: e.target.value };
-                                  return r;
-                                });
-                                handleUpdateTransactionField(newRecords);
-                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                              <input type="number" value={record.cumulativeGuaranteedReceived || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
-                                  if (r.id === record.id) return { ...r, cumulativeGuaranteedReceived: e.target.value };
-                                  return r;
-                                });
-                                handleUpdateTransactionField(newRecords);
-                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                              <input type="number" value={record.yearEndCashValue || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
-                                  if (r.id === record.id) return { ...r, yearEndCashValue: e.target.value };
-                                  return r;
-                                });
-                                handleUpdateTransactionField(newRecords);
-                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                              <input type="number" value={record.annualDividendDemo || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
-                                  if (r.id === record.id) return { ...r, annualDividendDemo: e.target.value };
-                                  return r;
-                                });
-                                handleUpdateTransactionField(newRecords);
-                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                              <input type="number" value={record.cumulativeDividendDemo || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
-                                  if (r.id === record.id) return { ...r, cumulativeDividendDemo: e.target.value };
-                                  return r;
-                                });
-                                handleUpdateTransactionField(newRecords);
-                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">{formatCurrency(totalBenefit, item.currency)}</td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                              <input type="number" value={record.annualActualDividend || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
-                                  if (r.id === record.id) return { ...r, annualActualDividend: e.target.value };
-                                  return r;
-                                });
-                                handleUpdateTransactionField(newRecords);
-                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                              <input type="number" value={record.cumulativeActualDividend || ''} onChange={(e) => {
-                                const newRecords = selectedInsurance.transactionRecords.map(r => {
-                                  if (r.id === record.id) return { ...r, cumulativeActualDividend: e.target.value };
-                                  return r;
-                                });
-                                handleUpdateTransactionField(newRecords);
-                              }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                            </td>
-                            <td className="px-4 py-3 text-sm">
-                              <div className="flex items-center gap-2">
-                                <button onClick={() => handleEditInsuranceTransaction(record)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => handleDeleteInsuranceTransaction(record)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  ) : (
-                  <table className="w-full">
-                    <thead className="bg-gray-50 dark:bg-slate-700">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保单年度终结</th>
+                    if (item.insuranceType === '年金险') {
+                      return (
+                        <>
+                          <table className="w-full">
+                            <thead className="bg-gray-50 dark:bg-slate-700">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">年月</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年保费</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">累计保费</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年保证年金</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">累计保证领取</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">年末现金价值</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年红利(演示)</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">累积红利(演示)</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">含红利生存总利益</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">当年实际红利</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">实际累计红利</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">操作</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+                              {pagedRecords.map((record, index) => {
+                                const annualPremium = parseFloat(record.annualPremium || 0);
+                                const cumulativePremium = parseFloat(record.cumulativePremium || 0);
+                                const annualGuaranteedAnnuity = parseFloat(record.annualGuaranteedAnnuity || 0);
+                                const cumulativeGuaranteedReceived = parseFloat(record.cumulativeGuaranteedReceived || 0);
+                                const yearEndCashValue = parseFloat(record.yearEndCashValue || 0);
+                                const annualDividendDemo = parseFloat(record.annualDividendDemo || 0);
+                                const cumulativeDividendDemo = parseFloat(record.cumulativeDividendDemo || 0);
+                                const totalBenefit = yearEndCashValue + cumulativeDividendDemo;
+                                const annualActualDividend = parseFloat(record.annualActualDividend || 0);
+                                const cumulativeActualDividend = parseFloat(record.cumulativeActualDividend || 0);
+
+                                const toggleStatus = () => {
+                                  const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                    if (r.id === record.id) {
+                                      return { ...r, status: record.status === '达成' ? '未达成' : '达成' };
+                                    }
+                                    return r;
+                                  });
+                                  handleUpdateTransactionField(newRecords);
+                                };
+
+                                return (
+                                  <tr key={record.id || index} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{record.year || '—'}</td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                      <input type="number" value={record.annualPremium || ''} onChange={(e) => {
+                                        const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                          if (r.id === record.id) return { ...r, annualPremium: e.target.value };
+                                          return r;
+                                        });
+                                        handleUpdateTransactionField(newRecords);
+                                      }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                      <input type="number" value={record.cumulativePremium || ''} onChange={(e) => {
+                                        const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                          if (r.id === record.id) return { ...r, cumulativePremium: e.target.value };
+                                          return r;
+                                        });
+                                        handleUpdateTransactionField(newRecords);
+                                      }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                      <input type="number" value={record.annualGuaranteedAnnuity || ''} onChange={(e) => {
+                                        const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                          if (r.id === record.id) return { ...r, annualGuaranteedAnnuity: e.target.value };
+                                          return r;
+                                        });
+                                        handleUpdateTransactionField(newRecords);
+                                      }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                      <input type="number" value={record.cumulativeGuaranteedReceived || ''} onChange={(e) => {
+                                        const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                          if (r.id === record.id) return { ...r, cumulativeGuaranteedReceived: e.target.value };
+                                          return r;
+                                        });
+                                        handleUpdateTransactionField(newRecords);
+                                      }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                      <input type="number" value={record.yearEndCashValue || ''} onChange={(e) => {
+                                        const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                          if (r.id === record.id) return { ...r, yearEndCashValue: e.target.value };
+                                          return r;
+                                        });
+                                        handleUpdateTransactionField(newRecords);
+                                      }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                      <input type="number" value={record.annualDividendDemo || ''} onChange={(e) => {
+                                        const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                          if (r.id === record.id) return { ...r, annualDividendDemo: e.target.value };
+                                          return r;
+                                        });
+                                        handleUpdateTransactionField(newRecords);
+                                      }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                      <input type="number" value={record.cumulativeDividendDemo || ''} onChange={(e) => {
+                                        const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                          if (r.id === record.id) return { ...r, cumulativeDividendDemo: e.target.value };
+                                          return r;
+                                        });
+                                        handleUpdateTransactionField(newRecords);
+                                      }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white font-medium">{formatCurrency(totalBenefit, item.currency)}</td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                      <input type="number" value={record.annualActualDividend || ''} onChange={(e) => {
+                                        const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                          if (r.id === record.id) return { ...r, annualActualDividend: e.target.value };
+                                          return r;
+                                        });
+                                        handleUpdateTransactionField(newRecords);
+                                      }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                      <input type="number" value={record.cumulativeActualDividend || ''} onChange={(e) => {
+                                        const newRecords = selectedInsurance.transactionRecords.map(r => {
+                                          if (r.id === record.id) return { ...r, cumulativeActualDividend: e.target.value };
+                                          return r;
+                                        });
+                                        handleUpdateTransactionField(newRecords);
+                                      }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                    </td>
+                                    <td className="px-4 py-3 text-sm">
+                                      <div className="flex items-center gap-2">
+                                        <button onClick={() => handleEditInsuranceTransaction(record)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
+                                          <Edit2 className="w-4 h-4" />
+                                        </button>
+                                        <button onClick={() => handleDeleteInsuranceTransaction(record)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                          {renderPagination()}
+                        </>
+                      );
+                    }
+                    // 非年金险表格（同样支持分页）
+                    return (
+                      <>
+                        <table className="w-full">
+                          <thead className="bg-gray-50 dark:bg-slate-700">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">保单年度终结</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">缴付保费总额</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">复归红利</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">终期红利</th>
@@ -4443,17 +4646,7 @@ export default function IndependentAssets() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-                      {records
-                        .slice()
-                        .sort((a, b) => {
-                          const yearA = parseInt(a.year) || 0;
-                          const yearB = parseInt(b.year) || 0;
-                          if (yearA === 0 && yearB !== 0) return 1;
-                          if (yearA !== 0 && yearB === 0) return -1;
-                          if (yearA === 0 && yearB === 0) return 0;
-                          return yearB - yearA;
-                        })
-                        .map((record, index) => {
+                      {pagedRecords.map((record, index) => {
                         const guaranteedCashValue = parseFloat(record.guaranteedCashValue || 0);
                         const bonusDividend = parseFloat(record.bonusDividend || 0);
                         const midTermDividend = parseFloat(record.midTermDividend || 0);
@@ -4661,9 +4854,12 @@ export default function IndependentAssets() {
                       })}
                     </tbody>
                   </table>
-                  )}
-                </div>
-              ) : (
+                  {renderPagination()}
+                  </>
+                );
+              })()}
+            </div>
+          ) : (
                 <div className="text-center py-8">
                   <div className="text-sm text-gray-500 dark:text-gray-400">暂无交易记录</div>
                 </div>
@@ -4965,8 +5161,8 @@ export default function IndependentAssets() {
               {selectedInsurance?.insuranceType === '年金险' ? (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">保单年度</label>
-                    <input type="text" value={transactionFormData.year || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, year: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">年月（YYYY-MM）</label>
+                    <input type="month" value={transactionFormData.year || ''} onChange={(e) => setTransactionFormData({ ...transactionFormData, year: e.target.value })} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日期</label>
