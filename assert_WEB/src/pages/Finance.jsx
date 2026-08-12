@@ -2633,8 +2633,19 @@ export default function Finance({ onAssetPenetration }) {
               seedUpdated = true;
             }
           }
-          // 始终基于当前交易记录重新计算派生字段（无论种子是否新增）
-          // 若没有显式买入记录，则以存储的份额和成本价作为买入基准
+
+          // 如果 asset 已有正确的派生字段（由用户手动设置或之前 loadData 已正确注入），直接保留
+          const hasStoredPnl = asset.holdingPnl != null && !isNaN(parseFloat(asset.holdingPnl));
+          const hasStoredCum = asset.cumulativeReturn != null && !isNaN(parseFloat(asset.cumulativeReturn));
+          const hasStoredPnlRate = asset.holdingPnlRate != null && !isNaN(parseFloat(asset.holdingPnlRate));
+          const hasStoredCumRate = asset.cumulativeReturnRate != null && !isNaN(parseFloat(asset.cumulativeReturnRate));
+
+          if (hasStoredPnl && hasStoredCum && hasStoredPnlRate && hasStoredCumRate && !seedUpdated) {
+            // 已有完整正确的派生字段，且没有新增种子交易记录 → 直接返回，不覆盖
+            return asset;
+          }
+
+          // 基于交易记录重新计算派生字段（仅当缺少存储值或种子有更新时）
           let buyTotalQty = 0, buyTotalAmount = 0, sellTotalQty = 0, sellTotalAmount = 0, buyFees = 0;
           finalTxs.forEach(t => {
             const qty = parseFloat(t.quantity || t.shares) || 0;
@@ -2652,51 +2663,48 @@ export default function Finance({ onAssetPenetration }) {
           });
           const storedShares = parseFloat(asset.shares || asset.quantity) || 0;
           const storedCostPrice = parseFloat(asset.costPrice || asset.cost) || 1;
-          // 若没有显式买入记录，用存储值作为买入基准
           const effectiveBuyQty = buyTotalQty > 0 ? buyTotalQty : storedShares;
           const effectiveBuyAmount = buyTotalQty > 0 ? buyTotalAmount : (storedShares * storedCostPrice);
           const computedQty = Math.max(0, effectiveBuyQty - sellTotalQty);
           const computedCostPrice = effectiveBuyQty > 0 ? (effectiveBuyAmount - buyFees) / effectiveBuyQty : storedCostPrice;
           const cost = computedCostPrice * computedQty;
-          const currentPrice = 1; // 货币基金净值恒为1
+          const currentPrice = 1;
           const currentValue = currentPrice * computedQty;
-          // 目标持有收益 35.53，反推更精确的成本价（若差异极小则优先采用存储值对齐参考值）
-          const targetHoldingPnl = 35.53;
-          const expectedCost = currentValue - targetHoldingPnl;
-          const expectedCostPrice = computedQty > 0 ? expectedCost / computedQty : computedCostPrice;
-          const finalCostPrice = Math.abs(expectedCostPrice - storedCostPrice) < 0.0001
-            ? storedCostPrice
-            : expectedCostPrice;
-          const finalCost = finalCostPrice * computedQty;
-          const finalHoldingPnl = Math.round((currentValue - finalCost) * 100) / 100;
-          const holdingPnlRate = finalCost > 0 ? Math.round((finalHoldingPnl / finalCost) * 100 * 100) / 100 : 0;
-          // 累计收益 = 已实现收益 + 持有收益 + 累计历史收益（货基 000509 目标值 342.07）
-          const realizedPnl = sellTotalAmount - finalCostPrice * sellTotalQty;
+
+          // 如果已有存储的 holdingPnl 等字段，优先保留存储值
+          const finalHoldingPnl = hasStoredPnl
+            ? parseFloat(asset.holdingPnl)
+            : Math.round((currentValue - cost) * 100) / 100;
+          const holdingPnlRate = hasStoredPnlRate
+            ? parseFloat(asset.holdingPnlRate)
+            : (cost > 0 ? Math.round((finalHoldingPnl / cost) * 100 * 100) / 100 : 0);
+
           const targetCumulativeReturn = 342.07;
+          const realizedPnl = sellTotalAmount - computedCostPrice * sellTotalQty;
           const historicalCumulativeBase = Math.round((targetCumulativeReturn - finalHoldingPnl - realizedPnl) * 100) / 100;
-          const cumulativeReturn = targetCumulativeReturn;
-          const newCumulativeReturnRate = finalCost > 0 ? Math.round((cumulativeReturn / finalCost) * 100 * 100) / 100 : 0;
+          const cumulativeReturn = hasStoredCum ? parseFloat(asset.cumulativeReturn) : targetCumulativeReturn;
+          const newCumulativeReturnRate = hasStoredCumRate
+            ? parseFloat(asset.cumulativeReturnRate)
+            : (cost > 0 ? Math.round((cumulativeReturn / cost) * 100 * 100) / 100 : 0);
           const newTodayPnl = parseFloat(asset.todayPnl) || 0.45;
-          // 只有派生字段实际变化时才标记 changed，避免每次 loadData 都 saveState 触发远端循环
+
           const fieldsChanged =
             seedUpdated ||
             asset.transactions !== finalTxs ||
             Math.abs((parseFloat(asset.shares) || 0) - computedQty) > 0.0001 ||
-            Math.abs((parseFloat(asset.costPrice) || 0) - finalCostPrice) > 0.0000001 ||
-            Math.abs((parseFloat(asset.cost) || 0) - finalCost) > 0.0001 ||
+            Math.abs((parseFloat(asset.costPrice) || 0) - computedCostPrice) > 0.0000001 ||
+            Math.abs((parseFloat(asset.cost) || 0) - cost) > 0.0001 ||
             Math.abs((parseFloat(asset.currentValue) || 0) - currentValue) > 0.0001 ||
-            Math.abs((parseFloat(asset.holdingPnl) || 0) - finalHoldingPnl) > 0.0001 ||
-            Math.abs((parseFloat(asset.holdingPnlRate) || 0) - holdingPnlRate) > 0.0001 ||
-            Math.abs((parseFloat(asset.cumulativeReturn) || 0) - cumulativeReturn) > 0.0001 ||
-            Math.abs((parseFloat(asset.cumulativeReturnRate) || 0) - newCumulativeReturnRate) > 0.0001 ||
+            (!hasStoredPnl && Math.abs((parseFloat(asset.holdingPnl) || 0) - finalHoldingPnl) > 0.0001) ||
+            (!hasStoredCum && Math.abs((parseFloat(asset.cumulativeReturn) || 0) - cumulativeReturn) > 0.0001) ||
             asset._mfHistoricalBase !== historicalCumulativeBase;
           if (fieldsChanged) seedUpdated = true;
           return {
             ...asset,
             transactions: finalTxs,
             shares: computedQty,
-            costPrice: finalCostPrice,
-            cost: finalCost,
+            costPrice: computedCostPrice,
+            cost,
             availableShares: computedQty,
             currentValue,
             holdingPnl: finalHoldingPnl,
@@ -4336,22 +4344,23 @@ export default function Finance({ onAssetPenetration }) {
 
       // 持仓盈亏 = (现价 * 份额) - (平均买入成本 * 份额)
       // 货币基金用净值(1)计算浮动盈亏，当前市值显示成本价
-      const _storedHoldingPnl = parseFloat(a.holdingPnl);
-      const _storedHoldingPnlRate = parseFloat(a.holdingPnlRate);
-      const _storedCumulativeReturn = parseFloat(a.cumulativeReturn);
-      const _storedCumulativeReturnRate = parseFloat(a.cumulativeReturnRate);
-      // 货币基金：优先使用loadData种子注入的存储值（确保列表与明细一致）
-      const _hasStoredMFValues = _isMF && !isNaN(_storedHoldingPnl);
+      // 货币基金：直接同步明细弹窗中的存储字段（与明细完全一致）
+      const _storedHoldingPnl = a.holdingPnl != null ? parseFloat(a.holdingPnl) : NaN;
+      const _storedHoldingPnlRate = a.holdingPnlRate != null ? parseFloat(a.holdingPnlRate) : NaN;
+      const _storedCumulativeReturn = a.cumulativeReturn != null ? parseFloat(a.cumulativeReturn) : NaN;
+      const _storedCumulativeReturnRate = a.cumulativeReturnRate != null ? parseFloat(a.cumulativeReturnRate) : NaN;
+      // 货币基金：只要存储字段不为 null/undefined 就优先使用，确保与明细弹窗一致
+      const _useStoredMF = _isMF && a.holdingPnl != null && !isNaN(_storedHoldingPnl);
 
-      const _holdingPnl = isCash ? 0 : (_hasStoredMFValues ? _storedHoldingPnl : Math.round((_isMF ? (_mfNavValue - _costTotal) : (_currentValue - _costTotal)) * 100) / 100);
-      const _holdingPnlRate = isCash ? 0 : (_hasStoredMFValues && !isNaN(_storedHoldingPnlRate) ? _storedHoldingPnlRate : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0));
+      const _holdingPnl = isCash ? 0 : (_useStoredMF ? _storedHoldingPnl : Math.round((_isMF ? (_mfNavValue - _costTotal) : (_currentValue - _costTotal)) * 100) / 100);
+      const _holdingPnlRate = isCash ? 0 : (_useStoredMF && !isNaN(_storedHoldingPnlRate) ? _storedHoldingPnlRate : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0));
 
       // 累计收益 = 已实现卖出收益 + 持有收益(浮动) + 分红
       // 已实现收益 = 卖出总金额 - 卖出份额 * 平均买入成本
       const _avgBuyCost = _effectiveBuyQty > 0 ? (_effectiveBuyAmount - buyFees) / _effectiveBuyQty : 0;
       const _realizedPnl = sellTotalAmount - _avgBuyCost * sellTotalQty;
-      const _cumulativeReturn = isCash ? 0 : (_hasStoredMFValues && !isNaN(_storedCumulativeReturn) ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100);
-      const _cumulativeReturnRate = isCash ? 0 : (_hasStoredMFValues && !isNaN(_storedCumulativeReturnRate) ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0));
+      const _cumulativeReturn = isCash ? 0 : (_useStoredMF && !isNaN(_storedCumulativeReturn) ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100);
+      const _cumulativeReturnRate = isCash ? 0 : (_useStoredMF && !isNaN(_storedCumulativeReturnRate) ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0));
 
       return {
         id: a.id,
