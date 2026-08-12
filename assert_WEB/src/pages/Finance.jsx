@@ -345,100 +345,99 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       /广发钱袋子/.test(latestData?.name || data?.name || '');
     if (!isMoneyFund000509) return;
     if (userSeedOverride) return;
-    // 检查用户是否已显式修改过种子记录
     const userModified = localStorage.getItem('mf_000509_seed_user_modified') === 'true';
     if (userModified) return;
-    setTradeRecords(prev => {
-      const currentRecords = prev || [];
-      const seedDefs = [
-        { date: '2026-08-06', time: '14:59', quantity: 159.47, shares: 159.47, price: 1, amount: 159.47 },
-        { date: '2026-07-06', time: '14:59', quantity: 156.69, shares: 156.69, price: 1, amount: 156.69 },
-        { date: '2026-06-04', time: '14:59', quantity: 164.72, shares: 164.72, price: 1, amount: 164.72 },
-      ];
-      const existingKeys = new Set(currentRecords.map(r => `${r.date}_${r.time}_${r.type || r.direction}`));
-      const newSeeds = seedDefs
-        .filter(def => !existingKeys.has(`${def.date}_${def.time}_快速过户`))
-        .map(def => ({
-          id: `seed-transfer-${def.date}`,
-          type: '快速过户',
-          direction: '快速过户',
-          date: def.date,
-          time: def.time,
-          transaction_date: `${def.date} ${def.time}`,
-          quantity: def.quantity,
-          shares: def.shares,
-          price: def.price,
-          amount: def.amount,
-          fee: 0,
-          commission: 0,
-          accountId: latestData?.accountId || latestData?.account,
-          currency: latestData?.currency,
-          status: '成功',
-          isSeed: true,
-        }));
-      if (newSeeds.length === 0) return currentRecords;
-      const merged = [...newSeeds, ...currentRecords];
-      // 同步到全局 stateData.financeAssets，计算派生字段使列表数据与明细一致
-      if (stateData && setStateData) {
-        let buyTotalQty = 0, buyTotalAmount = 0, sellTotalQty = 0, sellTotalAmount = 0, buyFees = 0;
-        merged.forEach(t => {
-          const qty = parseFloat(t.quantity || t.shares) || 0;
-          const amount = parseFloat(t.amount) || 0;
-          const fee = parseFloat(t.commission || t.fee) || 0;
-          const txType = t.type || t.direction || '';
-          if (txType === '建仓' || txType === '买入') {
-            buyTotalQty += qty;
-            buyTotalAmount += amount;
-            if (!isNaN(fee)) buyFees += fee;
-          } else if (txType === '卖出' || txType === '清仓' || txType === '快速过户') {
-            sellTotalQty += Math.abs(qty);
-            sellTotalAmount += Math.abs(amount);
-          }
-        });
-        const computedQty = buyTotalQty > 0 ? (buyTotalQty - sellTotalQty) : (parseFloat(latestData?.shares || latestData?.quantity) || 0);
-        const computedCostPriceRaw = buyTotalQty > 0 ? (buyTotalAmount - buyFees) / buyTotalQty : (parseFloat(latestData?.costPrice || latestData?.cost) || 1);
-        const currentPrice = 1;
-        const currentValue = currentPrice * computedQty;
-        // 货基 000509：目标持有收益 35.53，反推精确成本价
-        const targetHoldingPnl = 35.53;
-        const expectedCost = currentValue - targetHoldingPnl;
-        const expectedCostPrice = computedQty > 0 ? expectedCost / computedQty : computedCostPriceRaw;
-        const finalCostPrice = Math.abs(expectedCostPrice - (parseFloat(latestData?.costPrice || latestData?.cost) || 1)) < 0.0001
-          ? (parseFloat(latestData?.costPrice || latestData?.cost) || 1)
-          : expectedCostPrice;
-        const finalCost = finalCostPrice * computedQty;
-        const finalHoldingPnl = Math.round((currentValue - finalCost) * 100) / 100;
-        const holdingPnlRate = finalCost > 0 ? Math.round((finalHoldingPnl / finalCost) * 100 * 100) / 100 : 0;
-        const updatedAssets = (stateData.financeAssets || []).map(asset => {
-          if (String(asset.id) === String(data?.id)) {
-            return {
-              ...asset,
-              transactions: merged,
-              shares: computedQty,
-              costPrice: finalCostPrice,
-              cost: finalCost,
-              availableShares: computedQty,
-              currentValue,
-              holdingPnl: finalHoldingPnl,
-              holdingPnlRate,
-              cumulativeReturn: 342.07,
-              cumulativeReturnRate: finalCost > 0 ? Math.round((342.07 / finalCost) * 100 * 100) / 100 : 0,
-              todayPnl: parseFloat(asset.todayPnl) || 0.45,
-              dailyPnl: parseFloat(asset.todayPnl) || 0.45,
-            };
-          }
-          return asset;
-        });
-        const newState = { ...stateData, financeAssets: updatedAssets };
-        setStateData(newState);
-        if (saveState) {
-          setTimeout(() => saveState(newState).catch(() => {}), 0);
+
+    const seedDefs = [
+      { date: '2026-08-06', time: '14:59', quantity: 159.47, shares: 159.47, price: 1, amount: 159.47 },
+      { date: '2026-07-06', time: '14:59', quantity: 156.69, shares: 156.69, price: 1, amount: 156.69 },
+      { date: '2026-06-04', time: '14:59', quantity: 164.72, shares: 164.72, price: 1, amount: 164.72 },
+    ];
+    const existingKeys = new Set((tradeRecords || []).map(r => `${r.date}_${r.time}_${r.type || r.direction}`));
+    const newSeeds = seedDefs
+      .filter(def => !existingKeys.has(`${def.date}_${def.time}_快速过户`))
+      .map(def => ({
+        id: `seed-transfer-${def.date}`,
+        type: '快速过户',
+        direction: '快速过户',
+        date: def.date,
+        time: def.time,
+        transaction_date: `${def.date} ${def.time}`,
+        quantity: def.quantity,
+        shares: def.shares,
+        price: def.price,
+        amount: def.amount,
+        fee: 0,
+        commission: 0,
+        accountId: latestData?.accountId || latestData?.account,
+        currency: latestData?.currency,
+        status: '成功',
+        isSeed: true,
+      }));
+    if (newSeeds.length === 0) return;
+    const merged = [...newSeeds, ...(tradeRecords || [])];
+
+    // 先更新本地 tradeRecords（不在 updater 内嵌套其他 setState，避免 React 185 无限循环）
+    setTradeRecords(merged);
+
+    // 同步到全局 stateData.financeAssets，计算派生字段使列表数据与明细一致
+    if (stateData && setStateData) {
+      let buyTotalQty = 0, buyTotalAmount = 0, sellTotalQty = 0, sellTotalAmount = 0, buyFees = 0;
+      merged.forEach(t => {
+        const qty = parseFloat(t.quantity || t.shares) || 0;
+        const amount = parseFloat(t.amount) || 0;
+        const fee = parseFloat(t.commission || t.fee) || 0;
+        const txType = t.type || t.direction || '';
+        if (txType === '建仓' || txType === '买入') {
+          buyTotalQty += qty;
+          buyTotalAmount += amount;
+          if (!isNaN(fee)) buyFees += fee;
+        } else if (txType === '卖出' || txType === '清仓' || txType === '快速过户') {
+          sellTotalQty += Math.abs(qty);
+          sellTotalAmount += Math.abs(amount);
         }
+      });
+      const computedQty = buyTotalQty > 0 ? (buyTotalQty - sellTotalQty) : (parseFloat(latestData?.shares || latestData?.quantity) || 0);
+      const computedCostPriceRaw = buyTotalQty > 0 ? (buyTotalAmount - buyFees) / buyTotalQty : (parseFloat(latestData?.costPrice || latestData?.cost) || 1);
+      const currentPrice = 1;
+      const currentValue = currentPrice * computedQty;
+      const targetHoldingPnl = 35.53;
+      const expectedCost = currentValue - targetHoldingPnl;
+      const expectedCostPrice = computedQty > 0 ? expectedCost / computedQty : computedCostPriceRaw;
+      const finalCostPrice = Math.abs(expectedCostPrice - (parseFloat(latestData?.costPrice || latestData?.cost) || 1)) < 0.0001
+        ? (parseFloat(latestData?.costPrice || latestData?.cost) || 1)
+        : expectedCostPrice;
+      const finalCost = finalCostPrice * computedQty;
+      const finalHoldingPnl = Math.round((currentValue - finalCost) * 100) / 100;
+      const holdingPnlRate = finalCost > 0 ? Math.round((finalHoldingPnl / finalCost) * 100 * 100) / 100 : 0;
+      const updatedAssets = (stateData.financeAssets || []).map(asset => {
+        if (String(asset.id) === String(data?.id)) {
+          return {
+            ...asset,
+            transactions: merged,
+            shares: computedQty,
+            costPrice: finalCostPrice,
+            cost: finalCost,
+            availableShares: computedQty,
+            currentValue,
+            holdingPnl: finalHoldingPnl,
+            holdingPnlRate,
+            cumulativeReturn: 342.07,
+            cumulativeReturnRate: finalCost > 0 ? Math.round((342.07 / finalCost) * 100 * 100) / 100 : 0,
+            todayPnl: parseFloat(asset.todayPnl) || 0.45,
+            dailyPnl: parseFloat(asset.todayPnl) || 0.45,
+          };
+        }
+        return asset;
+      });
+      const newState = { ...stateData, financeAssets: updatedAssets };
+      setStateData(newState);
+      if (saveState) {
+        setTimeout(() => saveState(newState).catch(() => {}), 0);
       }
-      return merged;
-    });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestData?.code, latestData?.name, userSeedOverride]);
+  }, [latestData?.code, latestData?.name, userSeedOverride, tradeRecords]);
 
   const saveTradeRecords = async (records, updatedAccounts, updatedFinanceAssetsFromSync) => {
     if (!saveState || !stateData) return;
@@ -2676,7 +2675,22 @@ export default function Finance({ onAssetPenetration }) {
           const targetCumulativeReturn = 342.07;
           const historicalCumulativeBase = Math.round((targetCumulativeReturn - finalHoldingPnl - realizedPnl) * 100) / 100;
           const cumulativeReturn = targetCumulativeReturn;
-          seedUpdated = true;
+          const newCumulativeReturnRate = finalCost > 0 ? Math.round((cumulativeReturn / finalCost) * 100 * 100) / 100 : 0;
+          const newTodayPnl = parseFloat(asset.todayPnl) || 0.45;
+          // 只有派生字段实际变化时才标记 changed，避免每次 loadData 都 saveState 触发远端循环
+          const fieldsChanged =
+            seedUpdated ||
+            asset.transactions !== finalTxs ||
+            Math.abs((parseFloat(asset.shares) || 0) - computedQty) > 0.0001 ||
+            Math.abs((parseFloat(asset.costPrice) || 0) - finalCostPrice) > 0.0000001 ||
+            Math.abs((parseFloat(asset.cost) || 0) - finalCost) > 0.0001 ||
+            Math.abs((parseFloat(asset.currentValue) || 0) - currentValue) > 0.0001 ||
+            Math.abs((parseFloat(asset.holdingPnl) || 0) - finalHoldingPnl) > 0.0001 ||
+            Math.abs((parseFloat(asset.holdingPnlRate) || 0) - holdingPnlRate) > 0.0001 ||
+            Math.abs((parseFloat(asset.cumulativeReturn) || 0) - cumulativeReturn) > 0.0001 ||
+            Math.abs((parseFloat(asset.cumulativeReturnRate) || 0) - newCumulativeReturnRate) > 0.0001 ||
+            asset._mfHistoricalBase !== historicalCumulativeBase;
+          if (fieldsChanged) seedUpdated = true;
           return {
             ...asset,
             transactions: finalTxs,
@@ -2688,9 +2702,9 @@ export default function Finance({ onAssetPenetration }) {
             holdingPnl: finalHoldingPnl,
             holdingPnlRate,
             cumulativeReturn,
-            cumulativeReturnRate: finalCost > 0 ? Math.round((cumulativeReturn / finalCost) * 100 * 100) / 100 : 0,
-            todayPnl: parseFloat(asset.todayPnl) || 0.45,
-            dailyPnl: parseFloat(asset.todayPnl) || 0.45,
+            cumulativeReturnRate: newCumulativeReturnRate,
+            todayPnl: newTodayPnl,
+            dailyPnl: newTodayPnl,
             _mfHistoricalBase: historicalCumulativeBase,
           };
         });
