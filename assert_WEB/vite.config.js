@@ -13,7 +13,7 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api\/vi-api/, '/api'),
       },
       '/api': {
-        target: 'http://127.0.0.1:3000',
+        target: 'http://119.28.189.98',
         changeOrigin: true,
       },
     },
