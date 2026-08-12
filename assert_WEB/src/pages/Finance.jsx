@@ -4520,13 +4520,13 @@ export default function Finance({ onAssetPenetration }) {
       const tc = items.reduce((s, a) => s + (parseFloat(a.cost) || 0), 0);
       const tp = items.reduce((s, a) => s + (parseFloat(a.holdingPnl) || 0), 0);
       const tdp = items.reduce((s, a) => s + (parseFloat(a.dailyPnl) || getDailyPnl(a)), 0);
-      // 账户余额：从 accounts 中按 name 匹配找 balance；若无则用该账户下现金类资产 currentValue 之和
-      const matchedAcc = accounts.find(a => (a.name || '') === name);
+      // 账户余额：从 accounts 中按 name/id 匹配找 balance；若无则用该账户下现金类资产 currentValue 之和
+      const matchedAcc = accounts.find(a => (a.name || '') === name || (a.id || '') === name);
       const cashAssetBalance = items
         .filter(a => (a.categoryL1 || a.category) === '现金类')
         .reduce((s, a) => s + (parseFloat(a.currentValue) || parseFloat(a.balance) || 0), 0);
-      const accBalance = matchedAcc && (parseFloat(matchedAcc.balance) || 0) > 0
-        ? parseFloat(matchedAcc.balance)
+      const accBalance = matchedAcc
+        ? (parseFloat(matchedAcc.balance) || 0)
         : cashAssetBalance;
       return {
         name,
@@ -4587,7 +4587,7 @@ export default function Finance({ onAssetPenetration }) {
       financeAccounts,
       holdingsSummary,
     };
-  }, [financeAssets, quotesMap, moneyFundMap, hkConnectRate, exchangeRates]);
+  }, [financeAssets, quotesMap, moneyFundMap, hkConnectRate, exchangeRates, accounts]);
 
   const activeHoldings = useMemo(() => {
     return computed.financeAccounts.filter(a => !a.isArchived);

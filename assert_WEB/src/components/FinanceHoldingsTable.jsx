@@ -376,8 +376,10 @@ export default function FinanceHoldingsTable({
           </span>
         );
       }
-      case 'holdingDays':
-        return computeHoldingDays(h) || '-';
+      case 'holdingDays': {
+        const days = h.isArchived ? h.holdingDays : computeHoldingDays(h);
+        return (days != null && days !== '') ? days : '-';
+      }
       case 'archiveDate':
         return val || '-';
       case 'finalPnl':
