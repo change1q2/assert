@@ -63,6 +63,80 @@ function formatPercentage(value) {
   return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
+// 港股货币基金数据源配置（模块级常量，供 DetailModal 和主组件共用）
+const HK_MONEY_FUND_SOURCES = [
+  {
+    key: 'efunds_hk',
+    name: '易方达(香港)',
+    url: 'https://www.efunds.com.hk',
+    type: 'fund_company',
+    note: '港元/美元货币基金单位资产净值每个交易日公布',
+  },
+  {
+    key: 'boci_pru',
+    name: '中银香港(中银国际英国保诚)',
+    url: 'https://www.boci-pru.com.hk',
+    type: 'fund_company',
+    note: '港元货币市场基金每单位资产净值于每个交易日计算',
+  },
+  {
+    key: 'pingan_hk',
+    name: '中国平安资管(香港)',
+    url: 'https://asset.pingan.com.hk/zh-hk/PACSIF-PAHKMMF',
+    type: 'fund_company',
+    note: '平安港元货币基金官网逐日公布每单位资产净值',
+  },
+  {
+    key: 'chinaamc_hk',
+    name: '华夏基金(香港)',
+    url: 'http://www.chinaamc.com.hk',
+    type: 'fund_company',
+    note: '华夏数字货币基金(HKD/USD/RMB)年度报告可查',
+  },
+  {
+    key: 'dac',
+    name: '大成国际',
+    url: 'https://www.dac.com.hk',
+    type: 'fund_company',
+    note: '港元、美元、澳门元等多份额类别逐日净值查询',
+  },
+  {
+    key: 'morningstar',
+    name: '晨星 Morningstar',
+    url: 'https://www.morningstar.hk',
+    type: 'aggregator',
+    note: '本港认可货币基金按组别排名(1月/6月/年初至今/1年/3年)',
+  },
+  {
+    key: 'endowus',
+    name: 'Endowus 智安投',
+    url: 'https://endowus.com',
+    type: 'aggregator',
+    note: '港元/美元货币基金总收益率、净收益率、加权平均期限',
+  },
+  {
+    key: 'chief',
+    name: 'Chief Group 直达',
+    url: 'https://www.chiefgroup.com.hk',
+    type: 'aggregator',
+    note: '基金净值、升跌幅、资产总值及最新更新日期',
+  },
+  {
+    key: 'moneyhero',
+    name: 'MoneyHero',
+    url: 'https://moneyhero.com.hk',
+    type: 'aggregator',
+    note: '富途现金宝、老虎钱罂等热门产品7日年化收益率排行',
+  },
+  {
+    key: 'hkexnews',
+    name: '香港交易所披露易',
+    url: 'https://www1.hkexnews.hk',
+    type: 'exchange',
+    note: '上市货币基金ETF(如03053)年报、财务报告、重大事项公告',
+  },
+];
+
 // 计算经过 N 天的实际持仓天数
 function computeHoldingDays(account) {
   if (!account) return 0;
@@ -240,24 +314,27 @@ const updateAccountBalance = (asset, record, accounts, fallbackAccounts, finance
   }
   // 分红交易：不调整所属账户余额
 
-  // 同步现金类 financeAssets
-  financeAssetsCopy = financeAssetsCopy.map(a => {
+  // 同步现金类 financeAssets（多条时优先 positionCategory === '现金管理'）
+  const matchingCashAssets = financeAssetsCopy.filter(a => {
     const isAccountMatch = a.accountId === accountId || a.account === accountId || a.accountId === targetAccount.id || a.account === targetAccount.name || a.accountId === targetAccount.name || a.account === targetAccount.id;
     const isCashCategory = a.category === '现金类' || a.categoryL1 === '现金类';
-    if (!isAccountMatch || !isCashCategory) return a;
-
+    if (!isAccountMatch || !isCashCategory) return false;
     // 跳过货币不一致的条目
-    if (a.currency && targetAccount.currency && a.currency !== targetAccount.currency) {
-      return a;
-    }
-
-    const balance = parseFloat(targetAccount.balance) || 0;
-    return {
-      ...a,
-      currentValue: balance,
-      currentPrice: 1,
-    };
+    if (a.currency && targetAccount.currency && a.currency !== targetAccount.currency) return false;
+    return true;
   });
+
+  if (matchingCashAssets.length > 0) {
+    const preferredCashAsset =
+      matchingCashAssets.find(a => a.positionCategory === '现金管理') ||
+      matchingCashAssets[0];
+    const balance = parseFloat(targetAccount.balance) || 0;
+    financeAssetsCopy = financeAssetsCopy.map(a =>
+      String(a.id) === String(preferredCashAsset.id)
+        ? { ...a, currentValue: balance, currentPrice: 1 }
+        : a
+    );
+  }
 
   return { accounts: accountsCopy, financeAssets: financeAssetsCopy };
 };
@@ -629,7 +706,12 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     const positionType = latestData.positionCategory || latestData.positionType || '';
     const name = latestData.name || '';
     const kind = latestData.kind || latestData.assetType || '';
-    return catL2 === '货币型' || catL4 === '货币基金' || positionType === '货币基金' || name.includes('货币') || kind === '货基' || latestData.code === '000509';
+    const assetType = latestData.assetType || '';
+    // 货币基金判断：
+    // 1. 国内市场：catL2==='货币型' || catL4==='货币基金'
+    // 2. 所有市场：positionType/positionCategory==='货币基金' || assetType==='货基' || kind==='货基' || name包含'货币'
+    // 3. 特殊代码：000509
+    return catL2 === '货币型' || catL4 === '货币基金' || positionType === '货币基金' || assetType === '货基' || kind === '货基' || kind === '货币基金' || name.includes('货币') || latestData.code === '000509';
   })();
   const _quote = quotesMap && latestData.code ? quotesMap[latestData.code] : null;
   const _quotePrice = _quote && _quote.price != null ? parseFloat(_quote.price) : null;
@@ -948,7 +1030,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       shares: newRecord.type === '分红' ? 0 : parseFloat(newRecord.quantity) || 0,
       quantity: newRecord.type === '分红' ? 0 : parseFloat(newRecord.quantity) || 0,
       price: newRecord.type === '分红' ? '-' : parseFloat(newRecord.price) || 0,
-      net_value: isDomesticOutdoor ? (newRecord.type === '分红' ? '-' : parseFloat(newRecord.price) || 0) : undefined,
+      net_value: (isDomesticOutdoor || _isDetailMoneyFund) ? (newRecord.type === '分红' ? '-' : parseFloat(newRecord.price) || 0) : undefined,
       amount: parseFloat(newRecord.amount) || 0,
       commission: newRecord.type === '分红' ? '-' : parseFloat(newRecord.fee) || 0,
       fee: newRecord.type === '分红' ? '-' : parseFloat(newRecord.fee) || 0,
@@ -956,7 +1038,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       currency: latestData.currency,
     };
 
-    // 买入/建仓时校验关联账户余额是否充足；现金类资产自身不校验
+    // 买入/建仓时校验关联账户余额是否充足；现金类资产自身不校验；余额为0时允许增减
     const isCashAsset = latestData.category === '现金类' || latestData.categoryL1 === '现金类';
     if (!isCashAsset && (record.type === '买入' || record.type === '建仓')) {
       const accountId = latestData.accountId || latestData.account;
@@ -964,9 +1046,9 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       if (linkedAccount) {
         const accountBalance = parseFloat(linkedAccount.balance) || 0;
         const requiredAmount = (parseFloat(record.amount) || 0) + (parseFloat(record.fee) || 0);
-        // 货币单位一致时才进行余额校验
+        // 货币单位一致时才进行余额校验；余额为0时跳过校验（允许增减）
         const tradeCurrency = record.currency || latestData.currency || 'CNY';
-        if ((!linkedAccount.currency || linkedAccount.currency === tradeCurrency) && accountBalance < requiredAmount) {
+        if (accountBalance > 0 && (!linkedAccount.currency || linkedAccount.currency === tradeCurrency) && accountBalance < requiredAmount) {
           alert(`余额不足。当前余额：${accountBalance.toFixed(2)}，所需金额：${requiredAmount.toFixed(2)}`);
           return;
         }
@@ -1090,7 +1172,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
         )}
 
         <div className="p-4 overflow-y-auto max-h-[calc(90vh-80px)]">
-          {isDomesticOutdoor ? (
+          {isDomesticOutdoor || _isDetailMoneyFund ? (
             <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4 mb-4">
               {_isDetailMoneyFund ? (
                 <>
@@ -1101,6 +1183,22 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                     {latestData.positionGroup && (
                       <span className="inline-block mt-2 px-3 py-1 text-sm bg-gray-200 dark:bg-slate-600 text-gray-600 dark:text-gray-300 rounded-full">关联组合: {latestData.positionGroup}</span>
                     )}
+                    {latestData.dataSource && (() => {
+                      const src = HK_MONEY_FUND_SOURCES.find(s => s.key === latestData.dataSource);
+                      if (!src) return null;
+                      return (
+                        <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-left">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-blue-700 dark:text-blue-300">数据源:</span>
+                            <a href={src.url} target="_blank" rel="noopener noreferrer"
+                              className="text-xs text-blue-600 dark:text-blue-400 hover:underline truncate">
+                              {src.name}
+                            </a>
+                          </div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{src.note}</p>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     <div className="text-center bg-white dark:bg-slate-800 rounded-lg p-3">
@@ -1693,7 +1791,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                       <span>关联账户: {record.cashAccountName}</span>
                     </div>
                   )}
-                  {isDomesticOutdoor ? (
+                  {isDomesticOutdoor || _isDetailMoneyFund ? (
                     <div className="grid grid-cols-4 gap-2 text-xs">
                       <div>
                         <span className="text-gray-500 dark:text-gray-400">净值</span>
@@ -2278,7 +2376,7 @@ export default function Finance({ onAssetPenetration }) {
   const [assetTypeToEdit, setAssetTypeToEdit] = useState(null);
   const [newAssetTypeName, setNewAssetTypeName] = useState('');
 
-  // 资产种类：固定为 流动资产 / 非流动资产，不允许自定义
+  // 资产种类：流动资产 / 非流动资产，不允许自定义
   const DEFAULT_ASSET_KIND_OPTIONS = ['流动资产', '非流动资产'];
   const assetKindOptions = DEFAULT_ASSET_KIND_OPTIONS;
 
@@ -2381,6 +2479,8 @@ export default function Finance({ onAssetPenetration }) {
     navPer10k: '',
     annualized7d: '',
     tags: '',
+    dataSource: '',
+    dataSources: [],
   });
 
   // 自动计算当前市值
@@ -3079,7 +3179,8 @@ export default function Finance({ onAssetPenetration }) {
       const isCashAsset = (newAccount.assetType === '现金' || newAccount.assetType === '现金余额');
       // 货币基金：现价默认1，平均买入成本默认1
       const _isMoneyFundForm = isNewMoneyFund;
-      const _costPrice = isCashAsset ? 1 : (parseFloat(newAccount.cost) || (_isMoneyFundForm ? 1 : 0));
+      const _avgBuyPrice = parseFloat(newAccount.avgBuyPrice) || 0;
+      const _costPrice = isCashAsset ? 1 : (_avgBuyPrice > 0 ? _avgBuyPrice : (parseFloat(newAccount.cost) || (_isMoneyFundForm ? 1 : 0)));
       const _quantity = parseFloat(newAccount.quantity) || 0;
       const _currentPrice = isCashAsset ? 1 : (parseFloat(newAccount.currentPrice) || (_isMoneyFundForm ? 1 : 0));
       const _prevPrice = parseFloat(newAccount.prevPrice) || 0;
@@ -3134,6 +3235,8 @@ export default function Finance({ onAssetPenetration }) {
         tags: newAccount.tags || '',
         navPer10k: _navPer10k,
         annualized7d: _annualized7d,
+        dataSource: newAccount.dataSource || '',
+        dataSources: newAccount.dataSources || [],
       };
 
       // 获取当前的 financeAssets 数组
@@ -3155,7 +3258,7 @@ export default function Finance({ onAssetPenetration }) {
             updatedTx.shares = _quantity;
             updatedTx.quantity = _quantity;
             updatedTx.price = _costPrice;
-            if (isDomesticOutdoor) updatedTx.net_value = _costPrice;
+            if (isDomesticOutdoor || _isMoneyFundForm) updatedTx.net_value = _costPrice;
             updatedTx.amount = _costPrice * _quantity;
             existingTransactions = existingTransactions.map((t, i) => i === buildIndex ? updatedTx : t);
           }
@@ -3181,7 +3284,7 @@ export default function Finance({ onAssetPenetration }) {
           shares: _quantity,
           quantity: _quantity,
           price: _costPrice,
-          net_value: isDomesticOutdoor ? _costPrice : undefined,
+          net_value: (isDomesticOutdoor || _isMoneyFundForm) ? _costPrice : undefined,
           amount: _costPrice * _quantity,
           commission: 0,
           fee: 0,
@@ -3194,10 +3297,18 @@ export default function Finance({ onAssetPenetration }) {
 
         // 自动创建现金类持仓资产（若关联账户下不存在）
         const accountName = payload.accountId || '';
-        const hasCashAsset = currentFinanceAssets.some(a =>
+        const existingCashAssets = currentFinanceAssets.filter(a =>
           (a.accountId === accountName || a.account === accountName) &&
-          a.category === '现金类'
+          (a.category === '现金类' || a.categoryL1 === '现金类')
         );
+        const hasCashAsset = existingCashAssets.length > 0;
+
+        // 获取所属账户的 balance
+        const linkedAccount = (stateData.accounts || []).find(a =>
+          a.name === accountName || a.id === accountName
+        );
+        const _accBalance = linkedAccount ? (parseFloat(linkedAccount.balance) || 0) : 0;
+
         if (!hasCashAsset && accountName) {
           // 生成资产代码：{账户名}01，若已存在则顺延
           const existingCodes = currentFinanceAssets
@@ -3248,33 +3359,34 @@ export default function Finance({ onAssetPenetration }) {
             holdingPnlRate: 0,
             dailyPnl: 0,
             dailyPnlRate: 0,
-            currentValue: 0,
+            currentValue: _accBalance,
             positionWeight: 0,
             totalFees: 0,
             tags: '',
             transactions: [],
           };
 
-          // 任务 C：用所属账户当前 balance 初始化现金类资产
-          const linkedAccount = (stateData.accounts || []).find(a =>
-            a.name === accountName || a.id === accountName
-          );
-          if (linkedAccount && linkedAccount.balance !== undefined && linkedAccount.balance !== null) {
-            const _bal = parseFloat(linkedAccount.balance) || 0;
-            cashAsset.currentValue = _bal;
-            cashAsset.currentPrice = 1;
-          }
-
           updatedFinanceAssets = [...updatedFinanceAssets, cashAsset];
+        } else if (hasCashAsset) {
+          // 已有现金类资产：余额自动关联到该资产（多条时优先 positionCategory === '现金管理'）
+          const preferredCashAsset =
+            existingCashAssets.find(a => a.positionCategory === '现金管理') ||
+            existingCashAssets[0];
+          updatedFinanceAssets = updatedFinanceAssets.map(a =>
+            String(a.id) === String(preferredCashAsset.id)
+              ? { ...a, currentValue: _accBalance, currentPrice: 1 }
+              : a
+          );
         }
 
-        // 现金账户联动：建仓扣减现金
+        // 现金账户联动：建仓扣减现金（仅对已存在的账户生效，新账户保持初始余额0）
         const cashAccountName = `${accountName} 现金账户`;
         const accountsForUpdate = JSON.parse(JSON.stringify(stateData.accounts || []));
         let cashAcct = accountsForUpdate.find(acc =>
           acc.name === cashAccountName && (acc.type === 'cash' || acc.type === 'wallet' || acc.type === 'bank')
         );
-        if (!cashAcct) {
+        const isNewCashAccount = !cashAcct;
+        if (isNewCashAccount) {
           cashAcct = {
             id: `cash-${Date.now()}`,
             name: cashAccountName,
@@ -3288,7 +3400,10 @@ export default function Finance({ onAssetPenetration }) {
         }
         const _amount = Math.abs(parseFloat(buildRecord.amount) || 0);
         const _fee = parseFloat(buildRecord.fee) || 0;
-        cashAcct.balance = (parseFloat(cashAcct.balance) || 0) - _amount - _fee;
+        // 仅对已存在的账户扣减，新创建的账户保持初始余额不变
+        if (!isNewCashAccount) {
+          cashAcct.balance = (parseFloat(cashAcct.balance) || 0) - _amount - _fee;
+        }
         buildRecord.cashAccountId = cashAcct.id;
         buildRecord.cashAccountName = cashAcct.name;
 
@@ -3384,6 +3499,8 @@ export default function Finance({ onAssetPenetration }) {
       navPer10k: holding.navPer10k || '',
       annualized7d: holding.annualized7d || '',
       tags: holding.tags || '',
+      dataSource: holding.dataSource || '',
+      dataSources: holding.dataSources || [],
     });
     setEditMode(true);
     setEditingId(holding.id);
@@ -3401,7 +3518,7 @@ export default function Finance({ onAssetPenetration }) {
       const currentFinanceAssets = stateData?.financeAssets || [];
       const updatedFinanceAssets = currentFinanceAssets.filter(item => String(item.id) !== String(id));
       const newState = {
-        ...stateData,
+        ...(stateData || {}),
         financeAssets: updatedFinanceAssets,
       };
       setStateData(newState);
@@ -3418,7 +3535,7 @@ export default function Finance({ onAssetPenetration }) {
       const updatedArchives = (stateData?.financeAssetArchives || []).filter(
         item => String(item.originalAssetId || item.id) !== String(id)
       );
-      const newState = { ...stateData, financeAssetArchives: updatedArchives };
+      const newState = { ...(stateData || {}), financeAssetArchives: updatedArchives };
       await saveState(newState);
       setStateData(newState);
     } catch (err) {
@@ -4354,16 +4471,17 @@ export default function Finance({ onAssetPenetration }) {
         ? _computedCostPrice
         : _computedCostPrice;
 
-      // 现金类资产：直接使用存储的 currentValue（已与 account.balance 同步）
+      // 现金类资产：始终从关联账户的 balance 获取余额（余额自动关联）
       // 注意：货币基金虽归入"现金类"分类，但具有收益（持有收益/累计收益），不应视为纯现金
       const isCash = (a.category === '现金类' || a.categoryL1 === '现金类') && !_isMF;
-      let _cashValue = isCash ? (parseFloat(a.currentValue) || 0) : 0;
-      // 若 currentValue 仍为 0，实时从 accounts 中查找关联账户的 balance 作为回退
-      if (isCash && _cashValue === 0) {
+      let _cashValue = 0;
+      if (isCash) {
         const accId = a.accountId || a.account || '';
         const linkedAccount = (stateData?.accounts || []).find(acc => acc.id === accId || acc.name === accId);
         if (linkedAccount) {
           _cashValue = parseFloat(linkedAccount.balance) || 0;
+        } else {
+          _cashValue = parseFloat(a.currentValue) || 0;
         }
       }
       const _effectiveQty = isCash ? (parseFloat(a.shares || a.quantity) || _cashValue) : _qty;
@@ -5144,22 +5262,21 @@ export default function Finance({ onAssetPenetration }) {
                     <select value={newAccount.account} onChange={e => {
                       const accName = e.target.value;
                       if (accName) {
-                        // 判断所选账户是否存在"现金类"资产：
-                        // 理财资产中 category/categoryL1 === '现金类' 并且账户匹配的
-                        const hasCashAsset = stateData.financeAssets.some(a => {
-                          const isCashCat = a.category === '现金类' || a.categoryL1 === '现金类';
-                          if (!isCashCat) return false;
-                          const accMatch = (a.accountId === accName || a.account === accName);
-                          // 也匹配 accountId 对应的账户对象 name
-                          const linked = (stateData.accounts || []).find(acc => acc.id === a.accountId || acc.name === a.accountId);
-                          const linkMatch = linked && (linked.name === accName || linked.id === accName);
-                          return accMatch || linkMatch;
-                        });
-                        if (!hasCashAsset) {
-                          window.alert('所选账户尚未创建现金类资产，请先在该账户下创建一个"现金类"资产后再进行增添资产。');
-                          return; // 不清空选择，仅提示；若需要强制清空用下面两行
-                          // setNewAccount({ ...newAccount, account: '' });
-                          // return;
+                        // 仅在非现金类资产时检查是否存在现金类资产（现金类资产本身不需要此检查）
+                        const isCashCategory = newAccount.categoryL1 === '现金类' || newAccount.category === '现金类';
+                        if (!isCashCategory) {
+                          const hasCashAsset = stateData.financeAssets.some(a => {
+                            const isCashCat = a.category === '现金类' || a.categoryL1 === '现金类';
+                            if (!isCashCat) return false;
+                            const accMatch = (a.accountId === accName || a.account === accName);
+                            const linked = (stateData.accounts || []).find(acc => acc.id === a.accountId || acc.name === a.accountId);
+                            const linkMatch = linked && (linked.name === accName || linked.id === accName);
+                            return accMatch || linkMatch;
+                          });
+                          if (!hasCashAsset) {
+                            window.alert('所选账户尚未创建现金类资产，请先在该账户下创建一个"现金类"资产后再进行增添资产。');
+                            return;
+                          }
                         }
                       }
                       setNewAccount({ ...newAccount, account: accName });
@@ -5486,6 +5603,62 @@ export default function Finance({ onAssetPenetration }) {
                             placeholder="自动获取，或手动输入"
                             className={FORM_INPUT} />
                         </FormField>
+                      )}
+
+                      {/* 港股货基数据源选择 — 仅港股市场+货基时显示 */}
+                      {isNewMoneyFund && newAccount.market === '港股市场' && (
+                        <>
+                          <FormField label="数据源" markRequired>
+                            <select
+                              value={newAccount.dataSource || ''}
+                              onChange={e => {
+                                const selectedKey = e.target.value;
+                                const selectedSource = HK_MONEY_FUND_SOURCES.find(s => s.key === selectedKey);
+                                setNewAccount({
+                                  ...newAccount,
+                                  dataSource: selectedKey,
+                                  dataSources: selectedSource ? [selectedKey] : [],
+                                });
+                              }}
+                              className={FORM_SELECT}>
+                              <option value="">请选择数据源</option>
+                              <optgroup label="基金公司官网">
+                                {HK_MONEY_FUND_SOURCES.filter(s => s.type === 'fund_company').map(s => (
+                                  <option key={s.key} value={s.key}>{s.name}</option>
+                                ))}
+                              </optgroup>
+                              <optgroup label="第三方平台">
+                                {HK_MONEY_FUND_SOURCES.filter(s => s.type === 'aggregator').map(s => (
+                                  <option key={s.key} value={s.key}>{s.name}</option>
+                                ))}
+                              </optgroup>
+                              <optgroup label="交易所">
+                                {HK_MONEY_FUND_SOURCES.filter(s => s.type === 'exchange').map(s => (
+                                  <option key={s.key} value={s.key}>{s.name}</option>
+                                ))}
+                              </optgroup>
+                            </select>
+                          </FormField>
+                          {newAccount.dataSource && (() => {
+                            const src = HK_MONEY_FUND_SOURCES.find(s => s.key === newAccount.dataSource);
+                            if (!src) return null;
+                            return (
+                              <FormField label="来源信息">
+                                <div className="p-2 bg-gray-50 dark:bg-slate-700/50 rounded-lg border border-gray-200 dark:border-slate-600">
+                                  <p className="text-xs text-gray-600 dark:text-gray-300 mb-1">{src.note}</p>
+                                  <a
+                                    href={src.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline break-all"
+                                  >
+                                    {src.url}
+                                  </a>
+                                </div>
+                              </FormField>
+                            );
+                          })()}
+                        </>
                       )}
 
                       {/* 以下字段仅在非国内市场简单模式（股票/基金场内/基金场外）时显示 */}

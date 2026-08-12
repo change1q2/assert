@@ -8,6 +8,7 @@ import {
 } from './FinanceHoldingsTable.utils';
 
 export function HoldingsSummaryCard({ summary, selectedCurrency = 'CNY', exchangeRates = {}, categoryName = 'active' }) {
+  const src = selectedCurrency || 'CNY';
   if (categoryName === 'archived') {
     const isFinalPos = summary.totalFinalPnl >= 0;
     return (
@@ -22,7 +23,7 @@ export function HoldingsSummaryCard({ summary, selectedCurrency = 'CNY', exchang
           <div>
             <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">最终总盈亏</p>
             <p className={`text-sm font-bold tabular-nums ${isFinalPos ? 'text-green-600' : 'text-red-500'}`}>
-              {pnlSign(summary.totalFinalPnl)}{formatCurrencyWithRate(summary.totalFinalPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+              {pnlSign(summary.totalFinalPnl)}{formatCurrencyWithRate(summary.totalFinalPnl, src, selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
             </p>
           </div>
           <div>
@@ -50,16 +51,16 @@ export function HoldingsSummaryCard({ summary, selectedCurrency = 'CNY', exchang
       <div className="grid grid-cols-3 gap-2 text-center mb-2">
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当前总市值</p>
-          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(summary.totalMarketValue, 'CNY', selectedCurrency, exchangeRates)}</p>
+          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(summary.totalMarketValue, src, selectedCurrency, exchangeRates)}</p>
         </div>
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">持仓总成本</p>
-          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(summary.totalCost, 'CNY', selectedCurrency, exchangeRates)}</p>
+          <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(summary.totalCost, src, selectedCurrency, exchangeRates)}</p>
         </div>
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">持仓总盈亏</p>
           <p className={`text-sm font-bold tabular-nums ${isPos ? 'text-green-600' : 'text-red-500'}`}>
-            {pnlSign(summary.totalPnl)}{formatCurrencyWithRate(summary.totalPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+            {pnlSign(summary.totalPnl)}{formatCurrencyWithRate(summary.totalPnl, src, selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
           </p>
         </div>
       </div>
@@ -73,7 +74,7 @@ export function HoldingsSummaryCard({ summary, selectedCurrency = 'CNY', exchang
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当日总盈亏</p>
           <p className={`text-sm font-bold tabular-nums ${isDayPos ? 'text-green-600' : 'text-red-500'}`}>
-            {pnlSign(summary.totalDailyPnl)}{formatCurrencyWithRate(summary.totalDailyPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+            {pnlSign(summary.totalDailyPnl)}{formatCurrencyWithRate(summary.totalDailyPnl, src, selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
           </p>
         </div>
         <div>
