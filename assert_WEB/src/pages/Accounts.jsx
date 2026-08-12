@@ -908,6 +908,18 @@ export default function Accounts() {
   const paginatedAccounts = filteredAccounts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleAdd = () => {
+    // 现金账户判断：type === 'cash' （现金） OR category === '现金' （现金类别）
+    const allAccounts = accounts || [];
+    const hasCashAccount = allAccounts.some(a =>
+      (a.type || '').toLowerCase() === 'cash' ||
+      (a.category || '') === '现金'
+    );
+    if (!hasCashAccount) {
+      const confirmed = window.confirm(
+        '提示：建议先创建一个现金账户（type=cash 或 category=现金），用于理财模块的资产增添，您确定要继续吗？'
+      );
+      if (!confirmed) return;
+    }
     setEditingAccount(null);
     const firstCategory = categoryList[0]?.value || '银行';
     const defaultSub = (accountCatConfig[firstCategory] || [])[0] || '';

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchRealTimeExchangeRates, fetchMoneyFund, fetchMoneyFundData, fetchFundNavQuote } from '../api';
+import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchRealTimeExchangeRates, fetchMoneyFund, fetchMoneyFundData, fetchFundNavQuote, fetchHkConnectRate } from '../api';
 import { CURRENCIES, getCurrencySymbol, getCurrencyName } from '../utils/currency';
 import {
   TrendingUp,
@@ -134,20 +134,23 @@ const FORM_INPUT = 'w-full px-3 py-2 border border-gray-300 dark:border-slate-60
 const FORM_SELECT = 'w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white text-sm bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors appearance-none cursor-pointer';
 
 // ── 账户卡片子组件 ──
-function AccountCard({ name, totalValue, totalCost, totalPnl, totalPnlRate, totalDailyPnl, totalDailyPnlRate, count, selectedCurrency, exchangeRates, currency = 'CNY' }) {
+function AccountCard({ name, totalValue, totalCost, totalPnl, totalPnlRate, totalDailyPnl, totalDailyPnlRate, count, balance, selectedCurrency, exchangeRates, currency = 'CNY' }) {
   const isPos = totalPnl >= 0;
   const isDayPos = totalDailyPnl >= 0;
   return (
     <div className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 hover:shadow-md transition-shadow">
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full p-1.5">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full p-1.5 shrink-0">
             <Wallet className="w-4 h-4" />
           </div>
-          <span className="font-semibold text-gray-900 dark:text-white text-sm">{name}</span>
-          <span className="text-xs text-gray-400">({count}项)</span>
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</span>
+            <span className="text-xs text-gray-400 shrink-0">({count}项)</span>
+            <span className="text-xs text-indigo-600 dark:text-indigo-400 shrink-0 ml-1">余额 {formatCurrencyWithRate(balance || 0, currency, selectedCurrency, exchangeRates)}</span>
+          </div>
         </div>
-        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isPos ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+        <span className={`text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${isPos ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
           {formatPercentage(totalPnlRate)}
         </span>
       </div>
@@ -2234,6 +2237,8 @@ export default function Finance({ onAssetPenetration }) {
   // 汇率和币种切换状态
   const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.2, JPY: 0.048, HKD: 0.92, EUR: 7.8 });
   const [selectedCurrency, setSelectedCurrency] = useState('CNY');
+  // 港股通参考汇率：买报价/卖报价/中间价/±3%参考汇率（成本用sellRef，市值用buyRef）
+  const [hkConnectRate, setHkConnectRate] = useState(null);
 
   // 标签管理状态
   const [books, setBooks] = useState([]);
@@ -2273,12 +2278,9 @@ export default function Finance({ onAssetPenetration }) {
   const [assetTypeToEdit, setAssetTypeToEdit] = useState(null);
   const [newAssetTypeName, setNewAssetTypeName] = useState('');
 
-  // 资产种类自定义管理
+  // 资产种类：固定为 流动资产 / 非流动资产，不允许自定义
   const DEFAULT_ASSET_KIND_OPTIONS = ['流动资产', '非流动资产'];
-  const [assetKindOptions, setAssetKindOptions] = useState(() => {
-    const saved = localStorage.getItem('finance_asset_kind_options');
-    return saved ? JSON.parse(saved) : DEFAULT_ASSET_KIND_OPTIONS;
-  });
+  const assetKindOptions = DEFAULT_ASSET_KIND_OPTIONS;
 
   // 一级分类自定义管理（从资产分类模块动态获取）
   const DEFAULT_CATEGORY_L1_OPTIONS = ['权益类', '债权类', '现金类', '商品类', '分红类', '固收类', '另类投资'];
@@ -2414,6 +2416,7 @@ export default function Finance({ onAssetPenetration }) {
     loadData();
     loadBooksAndTags();
     loadExchangeRates();
+    loadHkConnectRate();
     const saved = localStorage.getItem('finance_categoryL3_options');
     if (saved) {
       try {
@@ -2427,6 +2430,7 @@ export default function Finance({ onAssetPenetration }) {
   useEffect(() => {
     const timer = setInterval(() => {
       loadExchangeRates();
+      loadHkConnectRate();
     }, 30 * 60 * 1000);
     return () => clearInterval(timer);
   }, []);
@@ -2437,6 +2441,15 @@ export default function Finance({ onAssetPenetration }) {
       setExchangeRates(rates);
     } catch (err) {
       console.error('Failed to load exchange rates:', err);
+    }
+  };
+
+  const loadHkConnectRate = async () => {
+    try {
+      const rate = await fetchHkConnectRate();
+      if (rate) setHkConnectRate(rate);
+    } catch (err) {
+      console.error('Failed to load HK Connect rate:', err);
     }
   };
 
@@ -4382,10 +4395,48 @@ export default function Finance({ onAssetPenetration }) {
       const _cumulativeReturn = isCash ? 0 : (_useStoredMF && _storedCumulativeReturn && !isNaN(_storedCumulativeReturn) ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100);
       const _cumulativeReturnRate = isCash ? 0 : (_useStoredMF && _storedCumulativeReturnRate && !isNaN(_storedCumulativeReturnRate) ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0));
 
+      // —— 港股通折算：按参考汇率把港币市值/成本折算为人民币显示
+      // 成本：港币成本 × 卖出参考汇率（sellReferenceRate = 中间价上浮3%，用于买入股票时的预冻结）
+      // 市值：港币市值 × 买入参考汇率（buyReferenceRate = 中间价下浮3%，用于卖出时预到账估算）
+      let _hkCostFactor = 1;
+      let _hkValueFactor = 1;
+      const _market = a.market || '国内市场';
+      const _currency = a.currency || 'CNY';
+      const isHKConnect = _market === '国内市场' && (
+        a.categoryL2 === '港股通' || (a.subcategory || a.categoryL3) === '港股通'
+      );
+      const isHKMarket = (_market === '港股市场' || a.categoryL2 === '港股通') && (_currency === 'HKD' || _currency === 'HK$');
+      if (isHKConnect || isHKMarket) {
+        if (hkConnectRate) {
+          _hkCostFactor = hkConnectRate.sellReferenceRate || (hkConnectRate.mid * 1.03);
+          _hkValueFactor = hkConnectRate.buyReferenceRate || (hkConnectRate.mid * 0.97);
+        } else {
+          // API未加载时使用默认值：HKD 0.86 参考汇率中间价，上下浮动3%
+          const hkdDefault = exchangeRates.HKD || 0.86;
+          _hkCostFactor = hkdDefault * 1.03;
+          _hkValueFactor = hkdDefault * 0.97;
+        }
+      }
+
+      const _finalCostTotal = _costTotal * _hkCostFactor;
+      const _finalCurrentValue = isCash
+        ? _cashValue
+        : (_isMF ? (parseFloat(a.cost) || _costTotal) : _currentValue) * _hkValueFactor;
+
+      // 港股通：所有金额类字段按参考汇率折算成人民币（成本用sellRef，市值/盈亏用buyRef，dailyPnl用buyRef）
+      const _isHKAdjusted = (isHKConnect || isHKMarket) && !isCash;
+      const _finalHoldingPnl = isCash ? 0 : (_holdingPnl * _hkValueFactor);
+      const _finalHoldingPnlRate = _finalCostTotal > 0 ? Math.round((_finalHoldingPnl / _finalCostTotal) * 100 * 100) / 100 : 0;
+      const _finalCumulativeReturn = isCash ? 0 : (_cumulativeReturn * _hkValueFactor);
+      const _finalCumulativeReturnRate = _finalCostTotal > 0 ? Math.round((_finalCumulativeReturn / _finalCostTotal) * 100 * 100) / 100 : 0;
+      const _rawDailyPnl = isCash ? 0 : getDailyPnl(a);
+      const _finalDailyPnl = _rawDailyPnl * _hkValueFactor;
+      const _finalDailyPnlRate = _finalCurrentValue > 0 ? Math.round((_finalDailyPnl / _finalCurrentValue) * 100 * 100) / 100 : 0;
+
       return {
         id: a.id,
         market: a.market || '国内市场',
-        currency: a.currency || 'CNY',
+        currency: _isHKAdjusted ? 'CNY' : (a.currency || 'CNY'),
         name: a.name,
         code: a.code || '',
         assetType: a.kind || a.assetType || '',
@@ -4399,7 +4450,7 @@ export default function Finance({ onAssetPenetration }) {
         positionType: a.positionCategory || a.positionType || '',
         costPrice: isCash ? 1 : _cost,
         quantity: _effectiveQty,
-        cost: _costTotal,
+        cost: _finalCostTotal,
         currentPrice: _effectivePrice,
         prevPrice: parseFloat(a.prevPrice) || _prevClose || 0,
         priceDate: a.priceDate || '',
@@ -4407,14 +4458,14 @@ export default function Finance({ onAssetPenetration }) {
         priceChange: _priceChange,
         avgBuyPrice: a.avgBuyPrice || 0,
         holdingDays: computeHoldingDays(a),
-        balance: _currentValue,
-        currentValue: _currentValue,
-        holdingPnl: _holdingPnl,
-        holdingPnlRate: _holdingPnlRate,
-        cumulativeReturn: _cumulativeReturn,
-        cumulativeReturnRate: _cumulativeReturnRate,
-        dailyPnl: isCash ? 0 : getDailyPnl(a),
-        dailyPnlRate: isCash ? 0 : getDailyPnlRate(a),
+        balance: _finalCurrentValue,
+        currentValue: _finalCurrentValue,
+        holdingPnl: _finalHoldingPnl,
+        holdingPnlRate: _finalHoldingPnlRate,
+        cumulativeReturn: _finalCumulativeReturn,
+        cumulativeReturnRate: _finalCumulativeReturnRate,
+        dailyPnl: _finalDailyPnl,
+        dailyPnlRate: _finalDailyPnlRate,
         transactions: a.transactions || [],
         status: a.status || 'active',
         archiveDate: a.archiveDate || '',
@@ -4469,6 +4520,14 @@ export default function Finance({ onAssetPenetration }) {
       const tc = items.reduce((s, a) => s + (parseFloat(a.cost) || 0), 0);
       const tp = items.reduce((s, a) => s + (parseFloat(a.holdingPnl) || 0), 0);
       const tdp = items.reduce((s, a) => s + (parseFloat(a.dailyPnl) || getDailyPnl(a)), 0);
+      // 账户余额：从 accounts 中按 name 匹配找 balance；若无则用该账户下现金类资产 currentValue 之和
+      const matchedAcc = accounts.find(a => (a.name || '') === name);
+      const cashAssetBalance = items
+        .filter(a => (a.categoryL1 || a.category) === '现金类')
+        .reduce((s, a) => s + (parseFloat(a.currentValue) || parseFloat(a.balance) || 0), 0);
+      const accBalance = matchedAcc && (parseFloat(matchedAcc.balance) || 0) > 0
+        ? parseFloat(matchedAcc.balance)
+        : cashAssetBalance;
       return {
         name,
         totalValue: tv,
@@ -4478,6 +4537,7 @@ export default function Finance({ onAssetPenetration }) {
         totalDailyPnl: tdp,
         totalDailyPnlRate: tv > 0 ? (tdp / tv) * 100 : 0,
         count: items.length,
+        balance: accBalance,
       };
     }).sort((a, b) => b.totalValue - a.totalValue);
 
@@ -4527,7 +4587,7 @@ export default function Finance({ onAssetPenetration }) {
       financeAccounts,
       holdingsSummary,
     };
-  }, [financeAssets, quotesMap, moneyFundMap]);
+  }, [financeAssets, quotesMap, moneyFundMap, hkConnectRate, exchangeRates]);
 
   const activeHoldings = useMemo(() => {
     return computed.financeAccounts.filter(a => !a.isArchived);
@@ -4541,14 +4601,20 @@ export default function Finance({ onAssetPenetration }) {
       let buyTotalAmount = 0;
       let sellTotalAmount = 0;
       let totalFees = 0;
+      // 归档天数 = 清仓日期（最后卖出/清仓） - 建仓日期（最早买入/建仓）
+      let firstBuyDate = a.buildDate || a.purchaseDate || '';
+      let lastSellDate = a.archiveDate || a.sellDate || '';
       txs.forEach(t => {
         const amount = parseFloat(t.amount) || 0;
         const fee = parseFloat(t.commission || t.fee) || 0;
+        const txDate = t.date || t.createdAt || '';
         if (!isNaN(fee)) totalFees += fee;
         if (t.type === '建仓' || t.type === '买入') {
           buyTotalAmount += amount;
+          if (txDate && (!firstBuyDate || txDate < firstBuyDate)) firstBuyDate = txDate;
         } else if (t.type === '卖出' || t.type === '清仓' || t.type === '快速过户') {
           sellTotalAmount += Math.abs(amount);
+          if (txDate && (!lastSellDate || txDate > lastSellDate)) lastSellDate = txDate;
         }
       });
       const computedFinalPnl = sellTotalAmount - buyTotalAmount - totalFees;
@@ -4556,6 +4622,18 @@ export default function Finance({ onAssetPenetration }) {
       // 优先使用交易明细实时计算结果；只有明细为空时才回退到数据库存档值
       const finalPnl = (txs.length > 0) ? computedFinalPnl : (parseFloat(a.finalPnl) || 0);
       const finalPnlPercent = (txs.length > 0) ? computedFinalPnlPercent : (parseFloat(a.finalPnlPercent) || 0);
+      // 计算归档天数：清仓日期 - 建仓日期
+      let holdingDays = 0;
+      if (firstBuyDate && lastSellDate) {
+        const bd = new Date(firstBuyDate);
+        const sd = new Date(lastSellDate);
+        if (!isNaN(bd.getTime()) && !isNaN(sd.getTime())) {
+          holdingDays = Math.max(0, Math.round((sd.getTime() - bd.getTime()) / (24 * 60 * 60 * 1000)));
+        }
+      }
+      if (!holdingDays) {
+        holdingDays = Math.max(0, parseInt(a.holdingDays || 0, 10));
+      }
       // 现金类归档资产成本和现价固定为1
       const isCashArchive = (a.category === '现金类' || a.kind === '现金');
       const _archiveCostPrice = isCashArchive ? 1 : (parseFloat(a.costPrice) || 0);
@@ -4583,7 +4661,7 @@ export default function Finance({ onAssetPenetration }) {
         prevClose: 0,
         priceChange: 'unchanged',
         avgBuyPrice: isCashArchive ? 1 : 0,
-        holdingDays: 0,
+        holdingDays,
         balance: 0,
         currentValue: isCashArchive ? _archiveShares : 0,
         finalPnl,
@@ -4775,21 +4853,25 @@ export default function Finance({ onAssetPenetration }) {
           )}
 
           {/* 账户本汇总条 */}
-          {computed.accountBook.length > 1 && (
-            <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-700 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-center text-xs">
-              {[
-                ['账户数', `${computed.accountBook.length}个`, ''],
-                ['合计市值', formatCurrencyWithRate(totalValue, 'CNY', selectedCurrency, exchangeRates), ''],
-                ['合计成本', formatCurrencyWithRate(totalCost, 'CNY', selectedCurrency, exchangeRates), ''],
-                ['合计盈亏', `${isTotalPos?'+':''}${formatCurrencyWithRate(totalPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}`, isTotalPos?POS_CLASS:NEG_CLASS],
-                ['合计收益率', formatPercentage(totalPnlRate), isTotalPos?POS_CLASS:NEG_CLASS],
-                ['当日收益', `${isDayPos?'+':''}${formatCurrencyWithRate(totalDailyPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}`, isDayPos?POS_CLASS:NEG_CLASS],
-              ].map(([label, val, cls], i) => (
-                <div key={i}>
-                  <p className="text-gray-400 mb-0.5">{label}</p>
-                  <p className={`font-semibold tabular-nums ${cls || 'text-gray-900 dark:text-white'}`}>{val}</p>
-                </div>
-              ))}
+          {computed.accountBook.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-gray-100 dark:border-slate-700 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 xl:grid-cols-8 gap-3 text-center text-xs">
+              {(() => {
+                const totalBalance = computed.accountBook.reduce((s, a) => s + (parseFloat(a.balance) || 0), 0);
+                return [
+                  ['账户数', `${computed.accountBook.length}个`, ''],
+                  ['合计市值', formatCurrencyWithRate(totalValue, 'CNY', selectedCurrency, exchangeRates), ''],
+                  ['合计成本', formatCurrencyWithRate(totalCost, 'CNY', selectedCurrency, exchangeRates), ''],
+                  ['合计盈亏', `${isTotalPos?'+':''}${formatCurrencyWithRate(totalPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}`, isTotalPos?POS_CLASS:NEG_CLASS],
+                  ['合计收益率', formatPercentage(totalPnlRate), isTotalPos?POS_CLASS:NEG_CLASS],
+                  ['当日收益', `${isDayPos?'+':''}${formatCurrencyWithRate(totalDailyPnl, 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}`, isDayPos?POS_CLASS:NEG_CLASS],
+                  ['余额合计', formatCurrencyWithRate(totalBalance, 'CNY', selectedCurrency, exchangeRates), 'text-indigo-600 dark:text-indigo-400'],
+                ].map(([label, val, cls], i) => (
+                  <div key={i}>
+                    <p className="text-gray-400 mb-0.5">{label}</p>
+                    <p className={`font-semibold tabular-nums ${cls || 'text-gray-900 dark:text-white'}`}>{val}</p>
+                  </div>
+                ));
+              })()}
             </div>
           )}
         </section>
@@ -4990,25 +5072,13 @@ export default function Finance({ onAssetPenetration }) {
 
                   {/* Row 2: 资产种类 | 资产分类一级 */}
                   <FormField label="资产种类" required>
-                    <div className="flex gap-2">
-                      <select value={newAccount.assetKind} onChange={e => {
-                        setNewAccount({ ...newAccount, assetKind: e.target.value });
-                      }}
-                        className={`${FORM_SELECT} flex-1`}>
-                        <option value="">请选择资产种类</option>
-                        {assetKindOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                      <button onClick={() => {
-                        const newKind = prompt('请输入新的资产种类名称');
-                        if (newKind && newKind.trim() && !assetKindOptions.includes(newKind.trim())) {
-                          const updated = [...assetKindOptions, newKind.trim()];
-                          setAssetKindOptions(updated);
-                          localStorage.setItem('finance_asset_kind_options', JSON.stringify(updated));
-                        }
-                      }} className="p-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 hover:bg-gray-50 dark:hover:bg-slate-600 transition-colors" title="添加资产种类">
-                        <Plus className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <select value={newAccount.assetKind} onChange={e => {
+                      setNewAccount({ ...newAccount, assetKind: e.target.value });
+                    }}
+                      className={FORM_SELECT}>
+                      <option value="">请选择资产种类</option>
+                      {assetKindOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
                   </FormField>
 
                   <FormField label="资产分类一级" required>
@@ -5071,7 +5141,29 @@ export default function Finance({ onAssetPenetration }) {
                   </FormField>
 
                   <FormField label="所属账户" required>
-                    <select value={newAccount.account} onChange={e => setNewAccount({ ...newAccount, account: e.target.value })}
+                    <select value={newAccount.account} onChange={e => {
+                      const accName = e.target.value;
+                      if (accName) {
+                        // 判断所选账户是否存在"现金类"资产：
+                        // 理财资产中 category/categoryL1 === '现金类' 并且账户匹配的
+                        const hasCashAsset = stateData.financeAssets.some(a => {
+                          const isCashCat = a.category === '现金类' || a.categoryL1 === '现金类';
+                          if (!isCashCat) return false;
+                          const accMatch = (a.accountId === accName || a.account === accName);
+                          // 也匹配 accountId 对应的账户对象 name
+                          const linked = (stateData.accounts || []).find(acc => acc.id === a.accountId || acc.name === a.accountId);
+                          const linkMatch = linked && (linked.name === accName || linked.id === accName);
+                          return accMatch || linkMatch;
+                        });
+                        if (!hasCashAsset) {
+                          window.alert('所选账户尚未创建现金类资产，请先在该账户下创建一个"现金类"资产后再进行增添资产。');
+                          return; // 不清空选择，仅提示；若需要强制清空用下面两行
+                          // setNewAccount({ ...newAccount, account: '' });
+                          // return;
+                        }
+                      }
+                      setNewAccount({ ...newAccount, account: accName });
+                    }}
                       className={FORM_SELECT}>
                       <option value="">请选择账户</option>
                       {accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc =>
