@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchState, saveState, fetchRealTimeExchangeRates, fetchFinanceQuotes } from '../api';
 import { getCurrencySymbol, truncateNum } from '../utils/currency';
+import sanitizeText from '../utils/sanitizeText';
 import FinanceHoldingsTable from '../components/FinanceHoldingsTable';
 import {
   Wallet,
@@ -1989,7 +1990,7 @@ export default function Accounts() {
                 返回
               </button>
               <div>
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">{account.name}</h2>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">{sanitizeText(account.name, account.name)}</h2>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   {account.category || '其他'} · {account.subCategory || '-'} · {getDisplayType(account)}{account.type === '理财资产' && account.financeMarket ? ` · ${account.financeMarket}` : ''}
                 </p>
@@ -2405,7 +2406,7 @@ export default function Accounts() {
                           }`}>
                             <Icon className="w-4 h-4" />
                           </div>
-                          <span className="font-medium text-gray-900 dark:text-white">{account.name}</span>
+                          <span className="font-medium text-gray-900 dark:text-white">{sanitizeText(account.name, account.name)}</span>
                           <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${ownershipType==='multi' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
                             {ownershipType==='multi' ? '多人' : '个人'}
                           </span>

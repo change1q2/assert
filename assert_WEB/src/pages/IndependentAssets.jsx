@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchState, saveState, lookupFinance, fetchFinanceQuotes } from '../api';
 import { convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency';
+import sanitizeText from '../utils/sanitizeText';
 import {
   Wallet,
   Plus,
@@ -2027,7 +2028,7 @@ export default function IndependentAssets() {
                   <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyNumber || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.insuranceType || '—'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyName || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{sanitizeText(item.policyName, item.policyName) || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.insured || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.beneficiary || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.policyDate || '—'}</td>
@@ -2601,7 +2602,7 @@ export default function IndependentAssets() {
                 const pnlClass = pnlValue >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
                 return (
                   <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.name}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{sanitizeText(item.name, item.name) || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">{item.code}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.cost, item.currency)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatNumber(item.quantity)}</td>
@@ -2743,7 +2744,7 @@ export default function IndependentAssets() {
               <option value="">请选择账户本</option>
               {accounts.filter(acc => !acc.liability && acc.type !== '负债').map(account => (
                 <option key={account.id || account.name} value={account.id || account.name}>
-                  {account.name}
+                  {sanitizeText(account.name, account.name)}
                 </option>
               ))}
             </select>
