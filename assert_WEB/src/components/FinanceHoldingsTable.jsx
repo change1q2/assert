@@ -323,8 +323,14 @@ export default function FinanceHoldingsTable({
         }
         return '—';
       }
-      case 'currentValue':
+      case 'currentValue': {
+        if (h.assetType === '现金' || h.assetType === '现金余额') {
+          const cp = parseFloat(h.currentPrice) || 0;
+          const qty = parseFloat(h.quantity) || 0;
+          return formatCurrencyWithRate(cp * qty, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
+        }
         return formatCurrencyWithRate(val, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
+      }
       case 'currentPrice':
         // 货币基金：现价默认为1（每份净值1元）
         if (h.categoryL2 === '货币型' || h.categoryL4 === '货币基金' || h.positionType === '货币基金' || (h.name && h.name.includes('货币'))) {
@@ -346,7 +352,9 @@ export default function FinanceHoldingsTable({
         return <span className="text-gray-700 dark:text-gray-200 tabular-nums" title={mf.date ? `日期: ${mf.date}` : ''}>{Number(mf.nav_per_10k).toFixed(4)}</span>;
       }
       case 'annualized7d': {
-        // 优先使用用户手动填写的 annualized7d；其次使用 moneyFundMap 网络获取的值
+        if (h.assetType === '现金' || h.assetType === '现金余额') {
+          return <span className="text-gray-300 dark:text-slate-600">—</span>;
+        }
         const userAnn = parseFloat(h.annualized7d) || 0;
         if (userAnn > 0) {
           return <span className="text-green-600 dark:text-green-400 tabular-nums" title="手动输入">{userAnn.toFixed(4)}%</span>;

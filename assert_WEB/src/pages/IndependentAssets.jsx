@@ -3868,13 +3868,21 @@ export default function IndependentAssets() {
                     type="number"
                     step="0.001"
                     value={formData.cost || ''}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      cost: e.target.value,
-                      marketValue: marketValue ? marketValue.toFixed(2) : formData.marketValue,
-                      pnl: pnl ? pnl.toFixed(2) : formData.pnl,
-                      pnlRate: pnlRate ? pnlRate.toFixed(2) : formData.pnlRate,
-                    })}
+                    onChange={(e) => {
+                      const newCost = parseFloat(e.target.value) || 0;
+                      const qty = parseFloat(formData.quantity) || 0;
+                      const price = parseFloat(formData.currentPrice) || 0;
+                      const newMv = qty * price;
+                      const newPnl = newMv - newCost * qty;
+                      const newPnlRate = newCost > 0 ? ((price - newCost) / newCost) * 100 : 0;
+                      setFormData({
+                        ...formData,
+                        cost: e.target.value,
+                        marketValue: newMv ? newMv.toFixed(2) : '',
+                        pnl: newPnl ? newPnl.toFixed(2) : '',
+                        pnlRate: newPnlRate ? newPnlRate.toFixed(2) : '',
+                      });
+                    }}
                     placeholder="0.00"
                     className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -3887,13 +3895,21 @@ export default function IndependentAssets() {
                     type="number"
                     step="0.0001"
                     value={formData.quantity || ''}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      quantity: e.target.value,
-                      marketValue: marketValue ? marketValue.toFixed(2) : formData.marketValue,
-                      pnl: pnl ? pnl.toFixed(2) : formData.pnl,
-                      pnlRate: pnlRate ? pnlRate.toFixed(2) : formData.pnlRate,
-                    })}
+                    onChange={(e) => {
+                      const newQty = parseFloat(e.target.value) || 0;
+                      const cost = parseFloat(formData.cost) || 0;
+                      const price = parseFloat(formData.currentPrice) || 0;
+                      const newMv = newQty * price;
+                      const newPnl = newMv - cost * newQty;
+                      const newPnlRate = cost > 0 ? ((price - cost) / cost) * 100 : 0;
+                      setFormData({
+                        ...formData,
+                        quantity: e.target.value,
+                        marketValue: newMv ? newMv.toFixed(2) : '',
+                        pnl: newPnl ? newPnl.toFixed(2) : '',
+                        pnlRate: newPnlRate ? newPnlRate.toFixed(2) : '',
+                      });
+                    }}
                     placeholder="0"
                     className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -3904,14 +3920,22 @@ export default function IndependentAssets() {
                     type="number"
                     step="0.0001"
                     value={formData.currentPrice || ''}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      currentPrice: e.target.value,
-                      marketValue: marketValue ? marketValue.toFixed(2) : formData.marketValue,
-                      pnl: pnl ? pnl.toFixed(2) : formData.pnl,
-                      pnlRate: pnlRate ? pnlRate.toFixed(2) : formData.pnlRate,
-                    })}
-                    placeholder="0.0000"
+                    onChange={(e) => {
+                      const newPrice = parseFloat(e.target.value) || 0;
+                      const qty = parseFloat(formData.quantity) || 0;
+                      const cost = parseFloat(formData.cost) || 0;
+                      const newMv = qty * newPrice;
+                      const newPnl = newMv - cost * qty;
+                      const newPnlRate = cost > 0 ? ((newPrice - cost) / cost) * 100 : 0;
+                      setFormData({
+                        ...formData,
+                        currentPrice: e.target.value,
+                        marketValue: newMv ? newMv.toFixed(2) : '',
+                        pnl: newPnl ? newPnl.toFixed(2) : '',
+                        pnlRate: newPnlRate ? newPnlRate.toFixed(2) : '',
+                      });
+                    }}
+                    placeholder="搜索资产自动获取，或手动输入"
                     className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

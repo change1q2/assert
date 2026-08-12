@@ -310,7 +310,7 @@ const updateAccountBalance = (asset, record, accounts, fallbackAccounts, finance
 
   if (record.type === '建仓' || record.type === '买入') {
     targetAccount.balance = (parseFloat(targetAccount.balance) || 0) - amount - fee;
-  } else if (record.type === '卖出' || record.type === '清仓' || record.type === '快速过户') {
+  } else if (record.type === '卖出' || record.type === '清仓') {
     targetAccount.balance = (parseFloat(targetAccount.balance) || 0) + amount - fee;
   }
   // 分红交易：不调整所属账户余额
@@ -383,7 +383,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       const txType = t.type || t.direction || '';
       if (txType === '建仓' || txType === '买入') {
         buyTotalAmount += amount;
-      } else if (txType === '卖出' || txType === '清仓' || txType === '快速过户') {
+      } else if (txType === '卖出' || txType === '清仓') {
         sellTotalAmount += Math.abs(amount);
       }
     });
@@ -473,7 +473,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           buyTotalQty += qty;
           buyTotalAmount += amount;
           if (!isNaN(fee)) buyFees += fee;
-        } else if (txType === '卖出' || txType === '清仓' || txType === '快速过户') {
+        } else if (txType === '卖出' || txType === '清仓') {
           sellTotalQty += Math.abs(qty);
           sellTotalAmount += Math.abs(amount);
         }
@@ -613,7 +613,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           const txType = t.type || t.direction || '';
           if (txType === '建仓' || txType === '买入') {
             buyTotalAmount += amount;
-          } else if (txType === '卖出' || txType === '清仓' || txType === '快速过户') {
+          } else if (txType === '卖出' || txType === '清仓') {
             sellTotalAmount += Math.abs(amount);
           }
         });
@@ -848,7 +848,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
         buyTotalAmount += amount;
         buyTotalQty += qty;
         if (!isNaN(fee)) buyFee += fee;
-      } else if (rType === '卖出' || rType === '清仓' || rType === '快速过户') {
+      } else if (rType === '卖出' || rType === '清仓') {
         sellTotalAmount += Math.abs(amount);
         sellTotalQty += Math.abs(qty);
       } else if (rType === '分红') {
@@ -935,7 +935,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       if (!isNaN(fee)) totalFees += fee;
       if (t.type === '建仓' || t.type === '买入') {
         buyTotalAmount += amount;
-      } else if (t.type === '卖出' || t.type === '清仓' || t.type === '快速过户') {
+      } else if (t.type === '卖出' || t.type === '清仓') {
         sellTotalAmount += Math.abs(amount);
       }
     });
@@ -1010,7 +1010,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
 
     if (record.type === '建仓' || record.type === '买入') {
       cashAccount.balance = (parseFloat(cashAccount.balance) || 0) - amount - fee;
-    } else if (record.type === '卖出' || record.type === '清仓' || record.type === '快速过户') {
+    } else if (record.type === '卖出' || record.type === '清仓') {
       cashAccount.balance = (parseFloat(cashAccount.balance) || 0) + amount - fee;
     }
 
@@ -1241,13 +1241,13 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">累计收益(元)</p>
                         {(() => {
-                          // 累计收益 = 已实现卖出收益 + 持有收益(浮动) + 分红 + 历史累计基数（货基 000509）
                           const realizedPnl = tradeStats.sellTotalAmount - tradeStats.avgBuyCost * tradeStats.sellTotalQty;
                           const mfHistoricalBase = parseFloat(latestData._mfHistoricalBase) || 0;
                           const cumulativeProfit = realizedPnl + floatPnl + tradeStats.dividendTotal + mfHistoricalBase;
-                          // 对于货基 000509，若 latestData 有显式累计收益值则直接用，确保列表与明细一致
                           const storedCum = parseFloat(latestData.cumulativeReturn);
-                          const finalProfit = (storedCum > 0 && (latestData.code === '000509' || /广发钱袋子/.test(latestData.name || '')))
+                          const isLegacy = storedCum === 342.07;
+                          const isTargetFund = latestData.code === '000509' || /广发钱袋子/.test(latestData.name || '');
+                          const finalProfit = isTargetFund && !isLegacy && storedCum > 0
                             ? storedCum
                             : cumulativeProfit;
                           return (
@@ -2401,15 +2401,45 @@ export default function Finance({ onAssetPenetration }) {
   // 二级分类自定义管理（按一级分类分组）
   const [categoryL2OptionsMap, setCategoryL2OptionsMap] = useState(() => {
     const saved = localStorage.getItem('finance_category_l2_options');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed['债权类']) {
+          const l2 = parsed['债权类'];
+          const hasBond = l2.includes('中债') || l2.includes('美债');
+          if (!hasBond) {
+            const migrated = ['中债', '美债', ...l2.filter(x => x !== 'A股' && x !== '港股通')];
+            parsed['债权类'] = migrated;
+            localStorage.setItem('finance_category_l2_options', JSON.stringify(parsed));
+          }
+        }
+        if (parsed && parsed['现金类']) {
+          const l2 = parsed['现金类'];
+          const cleaned = l2.filter(x => x !== 'A股');
+          if (cleaned.length !== l2.length) {
+            parsed['现金类'] = cleaned;
+            localStorage.setItem('finance_category_l2_options', JSON.stringify(parsed));
+          }
+        }
+        if (parsed && parsed['商品类']) {
+          const l2 = parsed['商品类'];
+          const cleaned = l2.filter(x => x !== 'A股');
+          if (cleaned.length !== l2.length) {
+            parsed['商品类'] = cleaned.length > 0 ? cleaned : ['黄金', '白银', '原油', '其他'];
+            localStorage.setItem('finance_category_l2_options', JSON.stringify(parsed));
+          }
+        }
+        return parsed;
+      } catch {}
+    }
     return {
       '权益类': ['A股', '港股', '美股', '其他'],
-      '债权类': ['A股', '中债', '美债', '其他'],
-      '现金类': ['活期存款', '定期存款', 'A股', '其他'],
-      '商品类': ['A股', '其他'],
+      '债权类': ['中债', '美债', '其他'],
+      '现金类': ['活期存款', '定期存款', '其他'],
+      '商品类': ['黄金', '白银', '原油', '其他'],
       '分红类': ['A股', '固定投资', '其他'],
       '固收类': ['A股', '其他'],
-      '另类投资': ['A股', '其他'],
+      '另类投资': ['数字货币', '其他'],
     };
   });
   const [showCategoryL2Modal, setShowCategoryL2Modal] = useState(false);
@@ -2761,9 +2791,11 @@ export default function Finance({ onAssetPenetration }) {
             }
           }
 
-          // 检查存储的派生字段是否有效（非0值才算有效，0视为未初始化）
-          const hasStoredPnl = parseFloat(asset.holdingPnl) > 0;
-          const hasStoredCum = parseFloat(asset.cumulativeReturn) > 0;
+          // 如果 asset 已有正确的派生字段（由用户手动设置或之前 loadData 已正确注入），直接保留
+          const hasStoredPnl = asset.holdingPnl != null && !isNaN(parseFloat(asset.holdingPnl));
+          const rawCum = parseFloat(asset.cumulativeReturn);
+          const isLegacyHardcodedCum = rawCum === 342.07;
+          const hasStoredCum = asset.cumulativeReturn != null && !isNaN(rawCum) && !isLegacyHardcodedCum;
           const hasStoredPnlRate = asset.holdingPnlRate != null && !isNaN(parseFloat(asset.holdingPnlRate));
           const hasStoredCumRate = asset.cumulativeReturnRate != null && !isNaN(parseFloat(asset.cumulativeReturnRate));
 
@@ -2795,7 +2827,7 @@ export default function Finance({ onAssetPenetration }) {
           const computedQty = Math.max(0, effectiveBuyQty - sellTotalQty);
           const computedCostPrice = effectiveBuyQty > 0 ? (effectiveBuyAmount - buyFees) / effectiveBuyQty : storedCostPrice;
           const cost = computedCostPrice * computedQty;
-          const currentPrice = 1;
+          const currentPrice = parseFloat(asset.currentPrice) || 1;
           const currentValue = currentPrice * computedQty;
 
           // 优先使用已有存储值（非0），否则用目标值
@@ -2810,9 +2842,9 @@ export default function Finance({ onAssetPenetration }) {
             ? parseFloat(asset.holdingPnlRate)
             : (cost > 0 ? Math.round((finalHoldingPnl / cost) * 100 * 100) / 100 : 0);
 
-          const targetCumulativeReturn = 342.07;
           const realizedPnl = sellTotalAmount - computedCostPrice * sellTotalQty;
-          const historicalCumulativeBase = Math.round((targetCumulativeReturn - finalHoldingPnl - realizedPnl) * 100) / 100;
+          const targetCumulativeReturn = Math.round((finalHoldingPnl + realizedPnl) * 100) / 100;
+          const historicalCumulativeBase = targetCumulativeReturn;
           const cumulativeReturn = hasStoredCum ? parseFloat(asset.cumulativeReturn) : targetCumulativeReturn;
           const newCumulativeReturnRate = hasStoredCumRate
             ? parseFloat(asset.cumulativeReturnRate)
@@ -2884,12 +2916,12 @@ export default function Finance({ onAssetPenetration }) {
       setStateData(data);
       const financeAssetsData = data?.financeAssets || [];
       if (financeAssetsData.length > 0) {
-        loadQuotes(financeAssetsData);
-        await Promise.all([
+        Promise.allSettled([
+          loadQuotes(financeAssetsData),
           loadFundNav(financeAssetsData, data),
           repairMoneyFundSharesFromTxs(financeAssetsData, data),
+          loadMoneyFunds(financeAssetsData),
         ]);
-        loadMoneyFunds(financeAssetsData);
       }
     } catch (err) {
       console.error('Failed to load finance data:', err);
@@ -3092,7 +3124,7 @@ export default function Finance({ onAssetPenetration }) {
             buyQty += qty;
             buyAmt += amt;
             if (!isNaN(fee)) buyFee += fee;
-          } else if (t.type === '卖出' || t.type === '清仓' || t.type === '快速过户' || t.direction === '卖出' || t.direction === '清仓' || t.direction === '快速过户') {
+          } else if (t.type === '卖出' || t.type === '清仓' || t.direction === '卖出' || t.direction === '清仓') {
             sellQty += Math.abs(qty);
           }
         });
@@ -3140,13 +3172,26 @@ export default function Finance({ onAssetPenetration }) {
     try {
       const booksData = await fetchBooks();
       setBooks(booksData || []);
-      // 从账本中提取所有唯一的标签
       const allTags = new Set();
       booksData?.forEach(book => {
         if (book.tags && Array.isArray(book.tags)) {
           book.tags.forEach(tag => allTags.add(tag));
         }
       });
+      const savedTags = localStorage.getItem('finance_tags');
+      if (savedTags) {
+        try {
+          const parsed = JSON.parse(savedTags);
+          if (Array.isArray(parsed)) parsed.forEach(t => allTags.add(t));
+        } catch {}
+      }
+      if (stateData?.financeAssets) {
+        stateData.financeAssets.forEach(a => {
+          const t = a.tags || a.tag;
+          if (Array.isArray(t)) t.forEach(tag => allTags.add(tag));
+          else if (typeof t === 'string' && t.trim()) allTags.add(t.trim());
+        });
+      }
       setTags(Array.from(allTags).sort());
     } catch (err) {
       console.error('Failed to load books and tags:', err);
@@ -3195,13 +3240,18 @@ export default function Finance({ onAssetPenetration }) {
       const _dailyPnl = _prevPrice > 0 ? Math.round((_currentPrice - _prevPrice) * _quantity * 100) / 100 : 0;
       const _dailyPnlRate = _prevPrice > 0 ? Math.round(((_currentPrice - _prevPrice) / _prevPrice) * 100 * 100) / 100 : 0;
 
+      const selectedAccount = accounts.find(acc => acc.id === newAccount.account || acc.name === newAccount.account);
+      const resolvedAccountId = selectedAccount?.id || newAccount.account || '';
+      const resolvedAccountName = selectedAccount?.name || newAccount.account || '';
+
       const payload = {
         id: editMode ? editingId : `fa${Date.now()}`,
         market: newAccount.market || '国内市场',
         currency: newAccount.currency || 'CNY',
         assetKind: newAccount.assetKind || '',
         kind: newAccount.assetType || '股票',
-        accountId: newAccount.account || '',
+        accountId: resolvedAccountId,
+        account: resolvedAccountName,
         category: newAccount.categoryL1 || '',
         subcategory: newAccount.categoryL2 || '',
         tertiaryCategory: newAccount.categoryL3 || '',
@@ -3522,8 +3572,8 @@ export default function Finance({ onAssetPenetration }) {
     if (tags.includes(newTagName.trim())) return;
     const newTags = [...tags, newTagName.trim()].sort();
     setTags(newTags);
+    localStorage.setItem('finance_tags', JSON.stringify(newTags));
     setNewTagName('');
-    // 更新所有账本的标签列表
     setBooks(books.map(book => ({
       ...book,
       tags: Array.from(new Set([...(book.tags || []), newTagName.trim()])),
@@ -3541,8 +3591,8 @@ export default function Finance({ onAssetPenetration }) {
     
     const newTags = tags.map(t => t === tagToEdit ? newTagName.trim() : t).sort();
     setTags(newTags);
+    localStorage.setItem('finance_tags', JSON.stringify(newTags));
     
-    // 更新所有账本中的标签引用
     setBooks(books.map(book => ({
       ...book,
       tags: (book.tags || []).map(t => t === tagToEdit ? newTagName.trim() : t),
@@ -3556,8 +3606,8 @@ export default function Finance({ onAssetPenetration }) {
   const handleDeleteTag = async (tagName) => {
     const newTags = tags.filter(t => t !== tagName);
     setTags(newTags);
+    localStorage.setItem('finance_tags', JSON.stringify(newTags));
     
-    // 从所有账本中移除该标签
     setBooks(books.map(book => ({
       ...book,
       tags: (book.tags || []).filter(t => t !== tagName),
@@ -3962,11 +4012,11 @@ export default function Finance({ onAssetPenetration }) {
     '债券': {
       l1Options: ['债权类'],
       l1Default: '债权类',
-      l2Options: { '债权类': ['A股'] },
-      l2Default: { '债权类': 'A股' },
-      l3Options: { '债权类': { 'A股': ['场内', '场外'] } },
-      l3Default: { '债权类': { 'A股': '场内' } },
-      l4Options: { '债权类': { 'A股': { '场内': ['国债', '可转债'], '场外': ['纯债', '混合债', '地方债', '企业债', '固收+'] } } }
+      l2Options: { '债权类': ['中债', '美债'] },
+      l2Default: { '债权类': '中债' },
+      l3Options: { '债权类': { '中债': ['场内', '场外'], '美债': ['场内', '场外'] } },
+      l3Default: { '债权类': { '中债': '场内', '美债': '场内' } },
+      l4Options: { '债权类': { '中债': { '场内': ['国债', '可转债'], '场外': ['纯债', '混合债', '地方债', '企业债', '固收+'] }, '美债': { '场内': ['美债ETF'], '场外': ['美债', '美元债'] } } }
     },
     '现金': {
       l1Options: ['现金类'],
@@ -4164,6 +4214,15 @@ export default function Finance({ onAssetPenetration }) {
     if (newAccount.market === '美股市场') {
       return ['美股'];
     }
+    if (newAccount.assetType === '债券' || newAccount.categoryL1 === '债权类') {
+      return ['中债', '美债'];
+    }
+    if (newAccount.assetType === '现金' || newAccount.assetType === '现金余额' || newAccount.assetType === '货基' || newAccount.assetType === '银行理财') {
+      return ['活期存款', '定期存款', '其他'];
+    }
+    if (newAccount.assetType === '外汇') {
+      return ['欧元', '美元', '日元', '人民币'];
+    }
     if (newAccount.market === '国内市场') {
       return ['A股', '港股通'];
     }
@@ -4175,9 +4234,6 @@ export default function Finance({ onAssetPenetration }) {
     }
     if (newAccount.assetType === '商品') {
       return ['黄金', '白银', '原油', '其他'];
-    }
-    if (newAccount.categoryL1 === '债权类') {
-      return ['中债', '美债'];
     }
     // 合并资产分类模块数据和 localStorage 自定义数据
     const l1Key = newAccount.categoryL1;
@@ -4223,6 +4279,14 @@ export default function Finance({ onAssetPenetration }) {
     let defaults = [];
     if (newAccount.assetType === '基金') {
       defaults = ['场外', '场内'];
+    } else if (newAccount.assetType === '债券' || newAccount.categoryL1 === '债权类') {
+      defaults = ['场内', '场外'];
+    } else if (newAccount.assetType === '现金' || newAccount.assetType === '现金余额' || newAccount.assetType === '货基' || newAccount.assetType === '银行理财') {
+      if (newAccount.categoryL2 === '活期存款') defaults = ['场内', '场外'];
+      else if (newAccount.categoryL2 === '定期存款') defaults = ['场内', '场外'];
+      else defaults = ['场内', '场外'];
+    } else if (newAccount.assetType === '外汇') {
+      defaults = ['场内'];
     } else if (assetClasses && assetClasses.length > 0 && newAccount.categoryL1 && newAccount.categoryL2) {
       const l1 = assetClasses.find(c => c.name === newAccount.categoryL1);
       if (l1 && l1.children) {
@@ -4454,6 +4518,7 @@ export default function Finance({ onAssetPenetration }) {
       const _storedHoldingPnl = a.holdingPnl != null ? parseFloat(a.holdingPnl) : NaN;
       const _storedHoldingPnlRate = a.holdingPnlRate != null ? parseFloat(a.holdingPnlRate) : NaN;
       const _storedCumulativeReturn = a.cumulativeReturn != null ? parseFloat(a.cumulativeReturn) : NaN;
+      const _isLegacyCum = _storedCumulativeReturn === 342.07;
       const _storedCumulativeReturnRate = a.cumulativeReturnRate != null ? parseFloat(a.cumulativeReturnRate) : NaN;
       // 货币基金：存储值非0才使用（0 视为未初始化），与明细弹窗 storedHP && is000509 一致
       const _useStoredMF = _isMF && _storedHoldingPnl && !isNaN(_storedHoldingPnl);
@@ -4465,8 +4530,8 @@ export default function Finance({ onAssetPenetration }) {
       // 已实现收益 = 卖出总金额 - 卖出份额 * 平均买入成本
       const _avgBuyCost = _effectiveBuyQty > 0 ? (_effectiveBuyAmount - buyFees) / _effectiveBuyQty : 0;
       const _realizedPnl = sellTotalAmount - _avgBuyCost * sellTotalQty;
-      const _cumulativeReturn = isCash ? 0 : (_useStoredMF && _storedCumulativeReturn && !isNaN(_storedCumulativeReturn) ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100);
-      const _cumulativeReturnRate = isCash ? 0 : (_useStoredMF && _storedCumulativeReturnRate && !isNaN(_storedCumulativeReturnRate) ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0));
+      const _cumulativeReturn = isCash ? 0 : (_useStoredMF && !isNaN(_storedCumulativeReturn) && !_isLegacyCum ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100);
+      const _cumulativeReturnRate = isCash ? 0 : (_useStoredMF && !isNaN(_storedCumulativeReturnRate) && !_isLegacyCum ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0));
 
       // —— 港股处理逻辑
       // 国内市场·港股通：用户输入价格已是CNY，无需转换；仅实时获取的行情价格（上方quotePrice处）按参考汇率折算
@@ -4667,7 +4732,7 @@ export default function Finance({ onAssetPenetration }) {
         if (t.type === '建仓' || t.type === '买入') {
           buyTotalAmount += amount;
           if (txDate && (!firstBuyDate || txDate < firstBuyDate)) firstBuyDate = txDate;
-        } else if (t.type === '卖出' || t.type === '清仓' || t.type === '快速过户') {
+        } else if (t.type === '卖出' || t.type === '清仓') {
           sellTotalAmount += Math.abs(amount);
           if (txDate && (!lastSellDate || txDate > lastSellDate)) lastSellDate = txDate;
         }
@@ -5214,7 +5279,7 @@ export default function Finance({ onAssetPenetration }) {
                       className={FORM_SELECT}>
                       <option value="">请选择账户</option>
                       {accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc =>
-                        <option key={acc.id || acc.name} value={acc.name}>{sanitizeText(acc.name, acc.name)}</option>
+                        <option key={acc.id || acc.name} value={acc.id || acc.name}>{sanitizeText(acc.name, acc.name)}</option>
                       )}
                     </select>
                   </FormField>

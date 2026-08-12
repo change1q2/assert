@@ -1058,11 +1058,30 @@ export default function Accounts() {
         if (!(saveData.type === '理财资产' && saveData.financeMarket)) {
           delete saveData.financeMarket;
         }
+        const oldName = editingAccount.name;
+        const newName = saveData.name;
         newAccounts = newAccounts.map(a =>
           a.id === editingAccount.id
             ? { ...a, ...saveData }
             : a
         );
+
+        if (oldName !== newName && stateData?.financeAssets && stateData.financeAssets.length > 0) {
+          stateData.financeAssets = stateData.financeAssets.map(asset => {
+            if (asset.accountId === editingAccount.id || asset.account === oldName) {
+              return { ...asset, account: newName, accountId: editingAccount.id };
+            }
+            return asset;
+          });
+          if (stateData.financeAssetArchives) {
+            stateData.financeAssetArchives = stateData.financeAssetArchives.map(asset => {
+              if (asset.accountId === editingAccount.id || asset.account === oldName) {
+                return { ...asset, account: newName, accountId: editingAccount.id };
+              }
+              return asset;
+            });
+          }
+        }
       } else {
         const isFinanceAsset = formData.type === '理财资产';
         const newAccount = {
