@@ -569,7 +569,9 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           const _effectiveBuyQty = buyTotalQty > 0 ? buyTotalQty : _storedShares;
           const _effectiveBuyAmount = buyTotalQty > 0 ? buyTotalAmount : (_storedShares * _storedCostPrice);
           const _computedQty = Math.max(0, _effectiveBuyQty - sellTotalQty);
-          const _computedCostPrice = _effectiveBuyQty > 0 ? (_effectiveBuyAmount - buyFees) / _effectiveBuyQty : _storedCostPrice;
+          // 摊薄成本法（券商口径）：平均成本 = (累计买入总金额 + 买入手续费 - 累计卖出总金额) / 当前数量
+          const _netAmount = _effectiveBuyAmount + buyFees - sellTotalAmount;
+          const _computedCostPrice = _computedQty > 0 ? Math.max(0, _netAmount) / _computedQty : _storedCostPrice;
           const currentPrice = _isMF ? 1 : (parseFloat(item.currentPrice) || 0);
           const shares = _computedQty;
           const costPrice = _computedCostPrice;
@@ -836,6 +838,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     let sellTotalQty = 0;
     let totalFee = 0;
     let buyFee = 0;
+    let sellFee = 0;
     let dividendTotal = 0;
 
     tradeRecords.forEach(record => {
@@ -851,6 +854,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       } else if (rType === '卖出' || rType === '清仓') {
         sellTotalAmount += Math.abs(amount);
         sellTotalQty += Math.abs(qty);
+        if (!isNaN(fee)) sellFee += fee;
       } else if (rType === '分红') {
         dividendTotal += amount;
       }
@@ -859,11 +863,16 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       }
     });
 
-    // 成本单价 = (总买入金额 - 总买入手续费) / 总买入份额
-    const avgBuyCost = buyTotalQty > 0 ? (buyTotalAmount - buyFee) / buyTotalQty : 0;
+    // 摊薄成本法（券商口径）：平均成本 = (累计买入总金额 + 买入手续费 - 累计卖出总金额) / 当前数量
+    // 当前数量 = 累计买入份额 - 累计卖出份额
+    const currentQty = buyTotalQty - sellTotalQty;
+    const netAmount = buyTotalAmount + buyFee - sellTotalAmount;
+    const avgBuyCost = currentQty > 0 ? Math.max(0, netAmount) / currentQty : 0;
+    // 原始买入成本（不含手续费），用于计算已实现盈亏
+    const originalBuyCost = buyTotalQty > 0 ? buyTotalAmount / buyTotalQty : 0;
     const avgSellCost = sellTotalQty > 0 ? sellTotalAmount / sellTotalQty : 0;
 
-    return { buyTotalAmount, sellTotalAmount, buyTotalQty, sellTotalQty, avgBuyCost, avgSellCost, totalFee, buyFee, dividendTotal };
+    return { buyTotalAmount, sellTotalAmount, buyTotalQty, sellTotalQty, avgBuyCost, originalBuyCost, avgSellCost, totalFee, buyFee, sellFee, dividendTotal };
   }, [tradeRecords]);
 
   const isFloatPos = floatPnl >= 0;
@@ -1031,22 +1040,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       currency: latestData.currency,
     };
 
-    // 买入/建仓时校验关联账户余额是否充足；现金类资产自身不校验；余额为0时允许增减
-    const isCashAsset = latestData.category === '现金类' || latestData.categoryL1 === '现金类';
-    if (!isCashAsset && (record.type === '买入' || record.type === '建仓')) {
-      const accountId = latestData.accountId || latestData.account;
-      const linkedAccount = (stateData?.accounts || []).find(acc => acc.id === accountId || acc.name === accountId);
-      if (linkedAccount) {
-        const accountBalance = parseFloat(linkedAccount.balance) || 0;
-        const requiredAmount = (parseFloat(record.amount) || 0) + (parseFloat(record.fee) || 0);
-        // 货币单位一致时才进行余额校验；余额为0时跳过校验（允许增减）
-        const tradeCurrency = record.currency || latestData.currency || 'CNY';
-        if (accountBalance > 0 && (!linkedAccount.currency || linkedAccount.currency === tradeCurrency) && accountBalance < requiredAmount) {
-          alert(`余额不足。当前余额：${accountBalance.toFixed(2)}，所需金额：${requiredAmount.toFixed(2)}`);
-          return;
-        }
-      }
-    }
+    // 余额不足时也允许交易记录的增删改 —— 不再校验账户余额
+    // 买入/建仓时不再校验关联账户余额是否充足
 
     let newRecords;
     if (editingRecord) {
@@ -1058,11 +1053,16 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     setTradeRecords(newRecords);
 
     // 计算可用份额（从交易历史推算）
-    const totalShares = parseFloat(latestData.shares || latestData.quantity || 0);
+    // 从交易记录计算总买入份额，避免使用已扣减过卖出的存储值
+    const totalBought = tradeRecords
+      .filter(r => r.type === '建仓' || r.type === '买入')
+      .reduce((sum, r) => sum + (Math.abs(parseFloat(r.quantity) || 0)), 0);
+    // 编辑时排除旧记录，避免重复计算
     const soldShares = tradeRecords
       .filter(r => r.type === '卖出' || r.type === '清仓' || r.type === '快速过户')
+      .filter(r => !editingRecord || r.id !== editingRecord.id)
       .reduce((sum, r) => sum + (Math.abs(parseFloat(r.quantity) || 0)), 0);
-    const availableAfterTrade = totalShares - soldShares - Math.abs(parseFloat(record.quantity) || 0);
+    const availableAfterTrade = totalBought - soldShares - Math.abs(parseFloat(record.quantity) || 0);
 
     // 清仓判断：显式选清仓 或 卖出/快速过户后份额归零
     const isLiquidation = record.type === '清仓' ||
@@ -1102,7 +1102,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl border border-gray-200 dark:border-slate-700">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl border border-gray-200 dark:border-slate-700 flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700 gap-3">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full p-2 shrink-0">
@@ -1164,7 +1164,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           </div>
         )}
 
-        <div className="p-4 overflow-y-auto max-h-[calc(90vh-80px)]">
+        <div className="p-4 overflow-y-auto flex-1 min-h-0">
           {isDomesticOutdoor || _isDetailMoneyFund ? (
             <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4 mb-4">
               {_isDetailMoneyFund ? (
@@ -1233,7 +1233,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">累计收益(元)</p>
                         {(() => {
-                          const realizedPnl = tradeStats.sellTotalAmount - tradeStats.avgBuyCost * tradeStats.sellTotalQty;
+                          const _buyRatio = tradeStats.buyTotalQty > 0 ? tradeStats.sellTotalQty / tradeStats.buyTotalQty : 0;
+                          const realizedPnl = tradeStats.sellTotalAmount - tradeStats.originalBuyCost * tradeStats.sellTotalQty - (tradeStats.buyFee || 0) * _buyRatio - (tradeStats.sellFee || 0);
                           const mfHistoricalBase = parseFloat(latestData._mfHistoricalBase) || 0;
                           const cumulativeProfit = realizedPnl + floatPnl + tradeStats.dividendTotal + mfHistoricalBase;
                           const storedCum = parseFloat(latestData.cumulativeReturn);
@@ -1458,8 +1459,10 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                 // 货币基金：列表持仓成本 = 当前市值（净值×份额），与列表保持一致
                 const listCost = _isDetailMoneyFund ? currentValue : costTotal;
                 const fee = tradeStats.totalFee || 0;
-                const diff = Math.round((computedCost - listCost + fee) * 100) / 100;
-                const isMatch = Math.abs(diff) < 0.01;
+                // 差异 = 明细持仓成本 - 列表持仓成本（原始差异，不含手续费调整）
+                const rawDiff = Math.round((computedCost - listCost) * 100) / 100;
+                // 校验通过条件：差异为0，或差异的绝对值等于交易税费
+                const isMatch = Math.abs(rawDiff) < 0.01 || Math.abs(Math.abs(rawDiff) - fee) < 0.01;
                 return (
                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isMatch ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-500 dark:bg-red-900/30 dark:text-red-400'}`}>
                     {isMatch ? '校验通过' : '校验异常'}
@@ -1473,7 +1476,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                 // 货币基金：列表持仓成本 = 当前市值，与列表保持一致
                 const listCost = _isDetailMoneyFund ? currentValue : costTotal;
                 const fee = tradeStats.totalFee || 0;
-                const diff = Math.round((computedCost - listCost + fee) * 100) / 100;
+                const rawDiff = Math.round((computedCost - listCost) * 100) / 100;
+                const isMatch = Math.abs(rawDiff) < 0.01 || Math.abs(Math.abs(rawDiff) - fee) < 0.01;
                 return (
                   <>
                     <div className="text-center">
@@ -1490,8 +1494,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                     </div>
                     <div className="text-center">
                       <p className="text-gray-500 dark:text-gray-400 mb-0.5">差异</p>
-                      <p className={`text-sm font-semibold ${Math.abs(diff) < 0.01 ? 'text-green-600' : 'text-red-500'}`}>
-                        {diff > 0 ? '+' : ''}{formatNum(diff)}
+                      <p className={`text-sm font-semibold ${isMatch ? 'text-green-600' : 'text-red-500'}`}>
+                        {rawDiff > 0 ? '+' : ''}{formatNum(rawDiff)}
                       </p>
                     </div>
                   </>
@@ -1499,6 +1503,35 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
               })()}
             </div>
           </div>
+
+          {/* 盈亏汇总区域 */}
+          {(() => {
+            // 已实现盈亏 = 卖出金额 − 买入对应成本 − 买入费用(按比例分摊) − 卖出费用
+            // 买入对应成本 = 原始买入成本(不含手续费) × 卖出份额
+            const buyRatio = tradeStats.buyTotalQty > 0 ? tradeStats.sellTotalQty / tradeStats.buyTotalQty : 0;
+            const realizedPnl = tradeStats.sellTotalAmount
+              - (tradeStats.originalBuyCost * tradeStats.sellTotalQty)
+              - ((tradeStats.buyFee || 0) * buyRatio)
+              - (tradeStats.sellFee || 0);
+            // 累计收益 = 已实现盈亏 + 浮动盈亏
+            const cumulativePnl = realizedPnl + floatPnl;
+            return (
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-2 text-center">
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">已实现盈亏</p>
+                  <p className={`text-sm font-semibold ${realizedPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                    {realizedPnl >= 0 ? '+' : ''}{formatNum(realizedPnl)}
+                  </p>
+                </div>
+                <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-2 text-center">
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">累计收益</p>
+                  <p className={`text-sm font-semibold ${cumulativePnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                    {cumulativePnl >= 0 ? '+' : ''}{formatNum(cumulativePnl)}
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
 
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -1839,11 +1872,9 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                                 if (record.isSeed || record.id?.startsWith('seed-transfer-') || _txType === '快速过户') {
                                   localStorage.setItem('mf_000509_seed_user_modified', 'true');
                                 }
-                                setTradeRecords(prev => {
-                                  const newRecords = prev.filter(r => r.id !== record.id);
-                                  saveTradeRecords(newRecords);
-                                  return newRecords;
-                                });
+                                const newRecords = tradeRecords.filter(r => r.id !== record.id);
+                                setTradeRecords(newRecords);
+                                saveTradeRecords(newRecords);
                               }}
                               className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
                               title="删除"
@@ -1909,11 +1940,9 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                                 if (record.isSeed || record.id?.startsWith('seed-transfer-') || _txType === '快速过户') {
                                   localStorage.setItem('mf_000509_seed_user_modified', 'true');
                                 }
-                                setTradeRecords(prev => {
-                                  const newRecords = prev.filter(r => r.id !== record.id);
-                                  saveTradeRecords(newRecords);
-                                  return newRecords;
-                                });
+                                const newRecords = tradeRecords.filter(r => r.id !== record.id);
+                                setTradeRecords(newRecords);
+                                saveTradeRecords(newRecords);
                               }}
                               className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
                               title="删除"
@@ -2486,6 +2515,24 @@ export default function Finance({ onAssetPenetration }) {
       else migrated[k] = [...new Set([...defaults[k], ...migrated[k]])];
     });
     return migrated;
+  });
+
+  // 已删除的系统内置 L2 项记录（key: market__l1__assetType, value: 字符串数组）
+  const [deletedL2Map, setDeletedL2Map] = useState(() => {
+    try {
+      const saved = localStorage.getItem('finance_category_l2_deleted');
+      if (saved) return JSON.parse(saved) || {};
+    } catch {}
+    return {};
+  });
+
+  // 已删除的系统内置 L3 项记录（key: market__l1__assetType__l2, value: 字符串数组）
+  const [deletedL3Map, setDeletedL3Map] = useState(() => {
+    try {
+      const saved = localStorage.getItem('finance_category_l3_deleted');
+      if (saved) return JSON.parse(saved) || {};
+    } catch {}
+    return {};
   });
 
   const DEFAULT_POSITION_GROUP_OPTIONS = ['核心仓位', '卫星仓位', '观察仓位', '套利仓位', '现金仓位'];
@@ -3720,13 +3767,37 @@ export default function Finance({ onAssetPenetration }) {
     if (!categoryL2ToEdit || !newCategoryL2Name.trim() || !newAccount.categoryL1) return;
     const market = newAccount.market || '国内市场';
     const at = newAccount.assetType || '';
-    const key = `${market}__${newAccount.categoryL1}__${at}`;
-    const currentOptions = categoryL2OptionsMap[key] || [];
-    if (currentOptions.includes(newCategoryL2Name.trim()) && newCategoryL2Name.trim() !== categoryL2ToEdit) return;
-    const newOptions = currentOptions.map(o => o === categoryL2ToEdit ? newCategoryL2Name.trim() : o).sort();
-    const newMap = { ...categoryL2OptionsMap, [key]: newOptions };
-    setCategoryL2OptionsMap(newMap);
-    localStorage.setItem('finance_category_l2_options_v2', JSON.stringify(newMap));
+    const l1 = newAccount.categoryL1;
+    const key = `${market}__${l1}__${at}`;
+    const cascade = getCascadeFor(market, l1, at);
+    const systemDefaults = _cleanOpts(cascade?.l2Options || []);
+    const isSystemItem = systemDefaults.includes(categoryL2ToEdit);
+
+    if (isSystemItem) {
+      // 编辑系统项：把旧名加入删除集合，新名加入自定义
+      const newDeleted = { ...deletedL2Map };
+      const deletedArr = new Set(newDeleted[key] || []);
+      deletedArr.add(categoryL2ToEdit);
+      newDeleted[key] = [...deletedArr];
+      setDeletedL2Map(newDeleted);
+      localStorage.setItem('finance_category_l2_deleted', JSON.stringify(newDeleted));
+
+      const currentOptions = categoryL2OptionsMap[key] || [];
+      if (!currentOptions.includes(newCategoryL2Name.trim())) {
+        const newOptions = [...currentOptions, newCategoryL2Name.trim()].sort();
+        const newMap = { ...categoryL2OptionsMap, [key]: newOptions };
+        setCategoryL2OptionsMap(newMap);
+        localStorage.setItem('finance_category_l2_options_v2', JSON.stringify(newMap));
+      }
+    } else {
+      // 编辑自定义项：直接替换
+      const currentOptions = categoryL2OptionsMap[key] || [];
+      if (currentOptions.includes(newCategoryL2Name.trim()) && newCategoryL2Name.trim() !== categoryL2ToEdit) return;
+      const newOptions = currentOptions.map(o => o === categoryL2ToEdit ? newCategoryL2Name.trim() : o).sort();
+      const newMap = { ...categoryL2OptionsMap, [key]: newOptions };
+      setCategoryL2OptionsMap(newMap);
+      localStorage.setItem('finance_category_l2_options_v2', JSON.stringify(newMap));
+    }
     setCategoryL2ToEdit(null);
     setNewCategoryL2Name('');
   };
@@ -3734,12 +3805,28 @@ export default function Finance({ onAssetPenetration }) {
     if (!newAccount.categoryL1) return;
     const market = newAccount.market || '国内市场';
     const at = newAccount.assetType || '';
-    const key = `${market}__${newAccount.categoryL1}__${at}`;
-    const currentOptions = categoryL2OptionsMap[key] || [];
-    const newOptions = currentOptions.filter(o => o !== name);
-    const newMap = { ...categoryL2OptionsMap, [key]: newOptions };
-    setCategoryL2OptionsMap(newMap);
-    localStorage.setItem('finance_category_l2_options_v2', JSON.stringify(newMap));
+    const l1 = newAccount.categoryL1;
+    const key = `${market}__${l1}__${at}`;
+    const cascade = getCascadeFor(market, l1, at);
+    const systemDefaults = _cleanOpts(cascade?.l2Options || []);
+    const isSystemItem = systemDefaults.includes(name);
+
+    if (isSystemItem) {
+      // 删除系统项：加入删除集合
+      const newDeleted = { ...deletedL2Map };
+      const deletedArr = new Set(newDeleted[key] || []);
+      deletedArr.add(name);
+      newDeleted[key] = [...deletedArr];
+      setDeletedL2Map(newDeleted);
+      localStorage.setItem('finance_category_l2_deleted', JSON.stringify(newDeleted));
+    } else {
+      // 删除自定义项：从存储中移除
+      const currentOptions = categoryL2OptionsMap[key] || [];
+      const newOptions = currentOptions.filter(o => o !== name);
+      const newMap = { ...categoryL2OptionsMap, [key]: newOptions };
+      setCategoryL2OptionsMap(newMap);
+      localStorage.setItem('finance_category_l2_options_v2', JSON.stringify(newMap));
+    }
     setDeleteConfirm(null);
   };
 
@@ -3761,13 +3848,38 @@ export default function Finance({ onAssetPenetration }) {
     if (!categoryL3ToEdit || !newCategoryL3Name.trim() || !newAccount.categoryL1 || !newAccount.categoryL2) return;
     const market = newAccount.market || '国内市场';
     const at = newAccount.assetType || '';
-    const key = `${market}__${newAccount.categoryL1}__${at}__${newAccount.categoryL2}`;
-    const currentOptions = categoryL3OptionsMap[key] || [];
-    if (currentOptions.includes(newCategoryL3Name.trim()) && newCategoryL3Name.trim() !== categoryL3ToEdit) return;
-    const newOptions = currentOptions.map(o => o === categoryL3ToEdit ? newCategoryL3Name.trim() : o).sort();
-    const newMap = { ...categoryL3OptionsMap, [key]: newOptions };
-    setCategoryL3OptionsMap(newMap);
-    localStorage.setItem('finance_category_l3_options_v2', JSON.stringify(newMap));
+    const l1 = newAccount.categoryL1;
+    const l2 = newAccount.categoryL2;
+    const key = `${market}__${l1}__${at}__${l2}`;
+    const cascade = getCascadeFor(market, l1, at);
+    const systemDefaults = _cleanOpts((cascade?.l3Options && cascade.l3Options[l2]) || []);
+    const isSystemItem = systemDefaults.includes(categoryL3ToEdit);
+
+    if (isSystemItem) {
+      // 编辑系统项：把旧名加入删除集合，新名加入自定义
+      const newDeleted = { ...deletedL3Map };
+      const deletedArr = new Set(newDeleted[key] || []);
+      deletedArr.add(categoryL3ToEdit);
+      newDeleted[key] = [...deletedArr];
+      setDeletedL3Map(newDeleted);
+      localStorage.setItem('finance_category_l3_deleted', JSON.stringify(newDeleted));
+
+      const currentOptions = categoryL3OptionsMap[key] || [];
+      if (!currentOptions.includes(newCategoryL3Name.trim())) {
+        const newOptions = [...currentOptions, newCategoryL3Name.trim()].sort();
+        const newMap = { ...categoryL3OptionsMap, [key]: newOptions };
+        setCategoryL3OptionsMap(newMap);
+        localStorage.setItem('finance_category_l3_options_v2', JSON.stringify(newMap));
+      }
+    } else {
+      // 编辑自定义项：直接替换
+      const currentOptions = categoryL3OptionsMap[key] || [];
+      if (currentOptions.includes(newCategoryL3Name.trim()) && newCategoryL3Name.trim() !== categoryL3ToEdit) return;
+      const newOptions = currentOptions.map(o => o === categoryL3ToEdit ? newCategoryL3Name.trim() : o).sort();
+      const newMap = { ...categoryL3OptionsMap, [key]: newOptions };
+      setCategoryL3OptionsMap(newMap);
+      localStorage.setItem('finance_category_l3_options_v2', JSON.stringify(newMap));
+    }
     setCategoryL3ToEdit(null);
     setNewCategoryL3Name('');
   };
@@ -3775,12 +3887,29 @@ export default function Finance({ onAssetPenetration }) {
     if (!newAccount.categoryL1 || !newAccount.categoryL2) return;
     const market = newAccount.market || '国内市场';
     const at = newAccount.assetType || '';
-    const key = `${market}__${newAccount.categoryL1}__${at}__${newAccount.categoryL2}`;
-    const currentOptions = categoryL3OptionsMap[key] || [];
-    const newOptions = currentOptions.filter(o => o !== name);
-    const newMap = { ...categoryL3OptionsMap, [key]: newOptions };
-    setCategoryL3OptionsMap(newMap);
-    localStorage.setItem('finance_category_l3_options_v2', JSON.stringify(newMap));
+    const l1 = newAccount.categoryL1;
+    const l2 = newAccount.categoryL2;
+    const key = `${market}__${l1}__${at}__${l2}`;
+    const cascade = getCascadeFor(market, l1, at);
+    const systemDefaults = _cleanOpts((cascade?.l3Options && cascade.l3Options[l2]) || []);
+    const isSystemItem = systemDefaults.includes(name);
+
+    if (isSystemItem) {
+      // 删除系统项：加入删除集合
+      const newDeleted = { ...deletedL3Map };
+      const deletedArr = new Set(newDeleted[key] || []);
+      deletedArr.add(name);
+      newDeleted[key] = [...deletedArr];
+      setDeletedL3Map(newDeleted);
+      localStorage.setItem('finance_category_l3_deleted', JSON.stringify(newDeleted));
+    } else {
+      // 删除自定义项：从存储中移除
+      const currentOptions = categoryL3OptionsMap[key] || [];
+      const newOptions = currentOptions.filter(o => o !== name);
+      const newMap = { ...categoryL3OptionsMap, [key]: newOptions };
+      setCategoryL3OptionsMap(newMap);
+      localStorage.setItem('finance_category_l3_options_v2', JSON.stringify(newMap));
+    }
     setDeleteConfirm(null);
   };
 
@@ -4356,7 +4485,9 @@ export default function Finance({ onAssetPenetration }) {
 
     // 按 (市场, L1, 资产类型) 匹配规则 → 返回系统默认 L2
     const cascade = getCascadeFor(market, l1, at);
-    const cascadeL2 = _cleanOpts(cascade?.l2Options || []);
+    const newKey = `${market}__${l1}__${at}`;
+    const deletedL2 = new Set(deletedL2Map[newKey] || []);
+    const cascadeL2 = _cleanOpts(cascade?.l2Options || []).filter(o => !deletedL2.has(o));
 
     // 特殊资产类型兜底（兼容通用快速场景）
     let typedFallback = [];
@@ -4371,7 +4502,6 @@ export default function Finance({ onAssetPenetration }) {
       : [];
 
     // 齿轮自定义（v2 新 key: market__l1__assetType）
-    const newKey = `${market}__${l1}__${at}`;
     const customL2 = _cleanOpts(categoryL2OptionsMap[newKey] || []);
     // 兼容旧单级 L1 key（仅当没有新 key 时才使用）
     const legacyL2 = !customL2.length ? _cleanOpts(categoryL2OptionsMap[l1] || []) : [];
@@ -4389,7 +4519,7 @@ export default function Finance({ onAssetPenetration }) {
     if (market === '国内市场' && !l1 && !at) return ['A股', '港股通'];
 
     return _cleanOpts([...new Set([...moduleL2, ...customL2, ...legacyL2, ...DEFAULT_CATEGORY_L2])]);
-  }, [assetClasses, newAccount.market, newAccount.categoryL1, newAccount.assetType, categoryL2OptionsMap]);
+  }, [assetClasses, newAccount.market, newAccount.categoryL1, newAccount.assetType, categoryL2OptionsMap, deletedL2Map]);
 
   const allCategoryL2Options = useMemo(() => {
     const l2s = new Set();
@@ -4419,10 +4549,12 @@ export default function Finance({ onAssetPenetration }) {
 
     // 优先用 getCascadeFor 取 L3 配置
     const cascade = getCascadeFor(market, l1, at);
-    const cascadeL3 = (cascade?.l3Options && cascade.l3Options[l2]) ? _cleanOpts(cascade.l3Options[l2]) : [];
+    const newKey = `${market}__${l1}__${at}__${l2}`;
+    const deletedL3 = new Set(deletedL3Map[newKey] || []);
+    const cascadeL3Raw = (cascade?.l3Options && cascade.l3Options[l2]) ? _cleanOpts(cascade.l3Options[l2]) : [];
+    const cascadeL3 = cascadeL3Raw.filter(o => !deletedL3.has(o));
 
     // 齿轮自定义新 key: market__l1__assetType__l2
-    const newKey = `${market}__${l1}__${at}__${l2}`;
     const customL3 = _cleanOpts(categoryL3OptionsMap[newKey] || []);
     // 兼容旧 l1__l2 key
     const legacyKey = `${l1}__${l2}`;
@@ -4450,7 +4582,7 @@ export default function Finance({ onAssetPenetration }) {
     else if (moduleL3.length > 0) defaults = moduleL3;
 
     return _cleanOpts([...new Set([...defaults, ...customL3, ...legacyL3, ...flatCustom, ...moduleL3])]);
-  }, [assetClasses, newAccount.market, newAccount.categoryL1, newAccount.categoryL2, newAccount.assetType, categoryL3OptionsMap, categoryL3CustomOptions]);
+  }, [assetClasses, newAccount.market, newAccount.categoryL1, newAccount.categoryL2, newAccount.assetType, categoryL3OptionsMap, categoryL3CustomOptions, deletedL3Map]);
 
   // ══════════════════════════════════════
   //  数据计算（核心）
@@ -4636,8 +4768,9 @@ export default function Finance({ onAssetPenetration }) {
       const _effectiveBuyAmount = buyTotalQty > 0 ? buyTotalAmount : (_storedShares * _storedCostPrice);
       const _computedQty = Math.max(0, _effectiveBuyQty - sellTotalQty);
       const _qty = _computedQty;
-      // 动态计算成本价 = (总买入金额 - 总买入手续费) / 总买入份额
-      const _computedCostPrice = _effectiveBuyQty > 0 ? (_effectiveBuyAmount - buyFees) / _effectiveBuyQty : _storedCostPrice;
+      // 摊薄成本法（券商口径）：平均成本 = (累计买入总金额 + 买入手续费 - 累计卖出总金额) / 当前数量
+      const _netAmount = _effectiveBuyAmount + buyFees - sellTotalAmount;
+      const _computedCostPrice = _computedQty > 0 ? Math.max(0, _netAmount) / _computedQty : _storedCostPrice;
       const _cost = _isMF
         ? _computedCostPrice
         : _computedCostPrice;
@@ -4679,9 +4812,14 @@ export default function Finance({ onAssetPenetration }) {
       const _holdingPnlRate = isCash ? 0 : (_useStoredMF && !isNaN(_storedHoldingPnlRate) ? _storedHoldingPnlRate : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0));
 
       // 累计收益 = 已实现卖出收益 + 持有收益(浮动) + 分红
-      // 已实现收益 = 卖出总金额 - 卖出份额 * 平均买入成本
-      const _avgBuyCost = _effectiveBuyQty > 0 ? (_effectiveBuyAmount - buyFees) / _effectiveBuyQty : 0;
-      const _realizedPnl = sellTotalAmount - _avgBuyCost * sellTotalQty;
+      // 已实现盈亏 = 卖出金额 − 原始买入成本×卖出份额 − 买入费用(按比例分摊) − 卖出费用
+      // 摊薄平均成本(券商口径) = (累计买入总金额 + 买入手续费 - 累计卖出总金额) / 当前数量
+      const _currentQtyForAvg = _effectiveBuyQty - sellTotalQty;
+      const _netAmountForAvg = _effectiveBuyAmount + buyFees - sellTotalAmount;
+      const _avgBuyCost = _currentQtyForAvg > 0 ? Math.max(0, _netAmountForAvg) / _currentQtyForAvg : 0;
+      const _originalBuyCost = _effectiveBuyQty > 0 ? _effectiveBuyAmount / _effectiveBuyQty : 0;
+      const _buyRatio = _effectiveBuyQty > 0 ? sellTotalQty / _effectiveBuyQty : 0;
+      const _realizedPnl = sellTotalAmount - _originalBuyCost * sellTotalQty - buyFees * _buyRatio;
       const _cumulativeReturn = isCash ? 0 : (_useStoredMF && !isNaN(_storedCumulativeReturn) && !_isLegacyCum ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100);
       const _cumulativeReturnRate = isCash ? 0 : (_useStoredMF && !isNaN(_storedCumulativeReturnRate) && !_isLegacyCum ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0));
 
@@ -4713,7 +4851,11 @@ export default function Finance({ onAssetPenetration }) {
         code: a.code || '',
         assetType: a.kind || a.assetType || '',
         assetKind: a.assetKind || '',
-        account: a.accountId || a.account || '',
+        account: (() => {
+          const accId = a.accountId || a.account || '';
+          const matched = (stateData?.accounts || []).find(acc => acc.id === accId || acc.name === accId);
+          return matched ? matched.name : accId;
+        })(),
         categoryL1: a.category || a.categoryL1 || '',
         categoryL2: a.subcategory || a.categoryL2 || '',
         categoryL3: a.tertiaryCategory || a.categoryL3 || '',
@@ -6156,17 +6298,29 @@ export default function Finance({ onAssetPenetration }) {
                   {(() => {
                     const market = newAccount.market || '国内市场';
                     const at = newAccount.assetType || '';
-                    const newKey = `${market}__${newAccount.categoryL1}__${at}`;
-                    let options = categoryL2OptionsMap[newKey] || [];
-                    // 兼容旧 key
-                    if (!options.length && newAccount.categoryL1) options = categoryL2OptionsMap[newAccount.categoryL1] || [];
-                    // 合并系统默认项（用于展示，不可直接编辑默认项，但能看到完整列表）
-                    const cascade = getCascadeFor(market, newAccount.categoryL1, at);
-                    const defaults = cascade?.l2Options || [];
-                    const display = [...new Set([...defaults, ...options])];
+                    const l1 = newAccount.categoryL1 || '';
+                    const key = `${market}__${l1}__${at}`;
+                    const cascade = getCascadeFor(market, l1, at);
+                    const systemDefaults = _cleanOpts(cascade?.l2Options || []);
+                    const deletedSet = new Set(deletedL2Map[key] || []);
+                    const activeSystemDefaults = systemDefaults.filter(o => !deletedSet.has(o));
+                    const customOpts = _cleanOpts(categoryL2OptionsMap[key] || []);
+                    const legacyOpts = l1 && !customOpts.length ? _cleanOpts(categoryL2OptionsMap[l1] || []) : [];
+
+                    // 完整显示列表：与下拉一致的所有来源
+                    const moduleL2 = l1 && assetClasses && assetClasses.length > 0
+                      ? _cleanOpts(((assetClasses.find(c => c.name === l1)?.children)?.map(c => c.name) || []))
+                      : [];
+                    let typedFallback = [];
+                    if (at === '债券' || l1 === '债权类') typedFallback = ['中债', '美债'];
+                    else if (at === '现金' || at === '现金余额' || at === '货基') typedFallback = ['活期存款', '定期存款'];
+                    else if (at === '银行理财') typedFallback = ['活期存款', '定期存款'];
+                    else if (at === '外汇') typedFallback = ['欧元', '美元', '日元', '人民币'];
+
+                    const display = _cleanOpts([...new Set([...activeSystemDefaults, ...customOpts, ...legacyOpts, ...typedFallback, ...moduleL2])]);
                     return display.length > 0 ? (
                       display.map((item) => {
-                        const isBuiltin = defaults.includes(item);
+                        const isBuiltin = systemDefaults.includes(item);
                         return (
                           <div key={item} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
                             {categoryL2ToEdit === item ? (
@@ -6178,11 +6332,11 @@ export default function Finance({ onAssetPenetration }) {
                             ) : (
                               <>
                                 <span className="flex-1 text-gray-700 dark:text-gray-300">{item}{isBuiltin && <span className="ml-1 text-xs text-indigo-500">·系统</span>}</span>
-                                <button onClick={() => { setCategoryL2ToEdit(item); setNewCategoryL2Name(item); }} className={`p-1 text-blue-600 hover:bg-blue-100 rounded ${isBuiltin ? 'opacity-30 cursor-not-allowed' : ''}`} disabled={isBuiltin}><Edit2 className="w-4 h-4" /></button>
+                                <button onClick={() => { setCategoryL2ToEdit(item); setNewCategoryL2Name(item); }} className="p-1 text-blue-600 hover:bg-blue-100 rounded"><Edit2 className="w-4 h-4" /></button>
                                 {deleteConfirm === `catL2-${item}` ? (
-                                  <button onClick={() => handleDeleteCategoryL2(item)} className={`p-1 text-red-600 hover:bg-red-100 rounded ${isBuiltin ? 'opacity-30 cursor-not-allowed' : ''}`} disabled={isBuiltin}>确认</button>
+                                  <button onClick={() => handleDeleteCategoryL2(item)} className="p-1 text-red-600 hover:bg-red-100 rounded">确认</button>
                                 ) : (
-                                  <button onClick={() => setDeleteConfirm(`catL2-${item}`)} className={`p-1 text-red-500 hover:bg-red-100 rounded ${isBuiltin ? 'opacity-30 cursor-not-allowed' : ''}`} disabled={isBuiltin}><Trash2 className="w-4 h-4" /></button>
+                                  <button onClick={() => setDeleteConfirm(`catL2-${item}`)} className="p-1 text-red-500 hover:bg-red-100 rounded"><Trash2 className="w-4 h-4" /></button>
                                 )}
                               </>
                             )}
@@ -6218,15 +6372,36 @@ export default function Finance({ onAssetPenetration }) {
                   {(() => {
                     const market = newAccount.market || '国内市场';
                     const at = newAccount.assetType || '';
-                    const newKey = `${market}__${newAccount.categoryL1}__${at}__${newAccount.categoryL2}`;
-                    const legacyKey = `${newAccount.categoryL1}__${newAccount.categoryL2}`;
-                    let options = categoryL3OptionsMap[newKey] || categoryL3OptionsMap[legacyKey] || [];
-                    const cascade = getCascadeFor(market, newAccount.categoryL1, at);
-                    const defaults = (cascade?.l3Options && cascade.l3Options[newAccount.categoryL2]) ? cascade.l3Options[newAccount.categoryL2] : [];
-                    const display = [...new Set([...defaults, ...options])];
+                    const l1 = newAccount.categoryL1 || '';
+                    const l2 = newAccount.categoryL2 || '';
+                    const key = `${market}__${l1}__${at}__${l2}`;
+                    const cascade = getCascadeFor(market, l1, at);
+                    const systemDefaults = _cleanOpts((cascade?.l3Options && cascade.l3Options[l2]) || []);
+                    const deletedSet = new Set(deletedL3Map[key] || []);
+                    const activeSystemDefaults = systemDefaults.filter(o => !deletedSet.has(o));
+                    const customOpts = _cleanOpts(categoryL3OptionsMap[key] || []);
+                    const legacyKey = `${l1}__${l2}`;
+                    const legacyOpts = !customOpts.length ? _cleanOpts(categoryL3OptionsMap[legacyKey] || []) : [];
+                    const flatCustom = _cleanOpts(categoryL3CustomOptions || []);
+
+                    // 资产分类模块子项
+                    let moduleL3 = [];
+                    if (assetClasses && l1 && l2) {
+                      const l1Obj = assetClasses.find(c => c.name === l1);
+                      const l2Obj = l1Obj?.children?.find(c => c.name === l2);
+                      moduleL3 = _cleanOpts(l2Obj?.children?.map(c => c.name) || []);
+                    }
+
+                    // 兜底默认
+                    let fallbackDefaults = [];
+                    if (at === '基金' || at === '债券' || l1 === '债权类') fallbackDefaults = ['场内', '场外'];
+                    else if (at === '现金' || at === '现金余额' || at === '货基' || at === '银行理财') fallbackDefaults = ['场内', '场外'];
+                    else if (at === '外汇') fallbackDefaults = ['场内'];
+
+                    const display = _cleanOpts([...new Set([...activeSystemDefaults, ...customOpts, ...legacyOpts, ...flatCustom, ...moduleL3, ...fallbackDefaults])]);
                     return display.length > 0 ? (
                       display.map((item) => {
-                        const isBuiltin = defaults.includes(item);
+                        const isBuiltin = systemDefaults.includes(item);
                         return (
                           <div key={item} className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-slate-700 rounded-lg">
                             {categoryL3ToEdit === item ? (
@@ -6238,11 +6413,11 @@ export default function Finance({ onAssetPenetration }) {
                             ) : (
                               <>
                                 <span className="flex-1 text-gray-700 dark:text-gray-300">{item}{isBuiltin && <span className="ml-1 text-xs text-indigo-500">·系统</span>}</span>
-                                <button onClick={() => { setCategoryL3ToEdit(item); setNewCategoryL3Name(item); }} className={`p-1 text-blue-600 hover:bg-blue-100 rounded ${isBuiltin ? 'opacity-30 cursor-not-allowed' : ''}`} disabled={isBuiltin}><Edit2 className="w-4 h-4" /></button>
+                                <button onClick={() => { setCategoryL3ToEdit(item); setNewCategoryL3Name(item); }} className="p-1 text-blue-600 hover:bg-blue-100 rounded"><Edit2 className="w-4 h-4" /></button>
                                 {deleteConfirm === `catL3-${item}` ? (
-                                  <button onClick={() => handleDeleteCategoryL3(item)} className={`p-1 text-red-600 hover:bg-red-100 rounded ${isBuiltin ? 'opacity-30 cursor-not-allowed' : ''}`} disabled={isBuiltin}>确认</button>
+                                  <button onClick={() => handleDeleteCategoryL3(item)} className="p-1 text-red-600 hover:bg-red-100 rounded">确认</button>
                                 ) : (
-                                  <button onClick={() => setDeleteConfirm(`catL3-${item}`)} className={`p-1 text-red-500 hover:bg-red-100 rounded ${isBuiltin ? 'opacity-30 cursor-not-allowed' : ''}`} disabled={isBuiltin}><Trash2 className="w-4 h-4" /></button>
+                                  <button onClick={() => setDeleteConfirm(`catL3-${item}`)} className="p-1 text-red-500 hover:bg-red-100 rounded"><Trash2 className="w-4 h-4" /></button>
                                 )}
                               </>
                             )}
