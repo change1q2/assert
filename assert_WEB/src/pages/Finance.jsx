@@ -3046,13 +3046,15 @@ export default function Finance({ onAssetPenetration }) {
         const newAccNav = Number.isFinite(Number(fund.accumulatedNav)) ? Number(fund.accumulatedNav) : null;
         const newDate = fund.navDate || a.priceDate || '';
         const newChangePct = Number.isFinite(Number(fund.dailyChangePct)) ? Number(fund.dailyChangePct) : null;
-        // 仅在 API 返回有效数据时更新
-        if (newNav == null && newPrevNav == null) return a;
+        // 仅在 API 返回有效净值（> 0）时更新；否则保留上次存储的价格
+        const validNav = newNav != null && newNav > 0;
+        const validPrevNav = newPrevNav != null && newPrevNav > 0;
+        if (!validNav && !validPrevNav) return a;
         changed = true;
         return {
           ...a,
-          currentPrice: newNav != null ? String(newNav) : a.currentPrice,
-          prevPrice: newPrevNav != null ? String(newPrevNav) : a.prevPrice,
+          currentPrice: validNav ? String(newNav) : a.currentPrice,
+          prevPrice: validPrevNav ? String(newPrevNav) : a.prevPrice,
           accumulatedNav: newAccNav != null ? newAccNav : a.accumulatedNav,
           priceDate: newDate,
           dailyChangePct: newChangePct != null ? newChangePct : a.dailyChangePct,
@@ -4590,10 +4592,28 @@ export default function Finance({ onAssetPenetration }) {
       const _quotePrevClose = (isHKConnect && _quoteRawPrevClose) ? (_quoteRawPrevClose * _hkConnectValueFactor) : _quoteRawPrevClose;
 
       // 货币基金：现价默认为1（货币基金每份净值1元）
-      const _price = _isMF
-        ? 1  // 货币基金净值恒为1，避免被万份收益覆盖
-        : (_quotePrice || parseFloat(a.currentPrice) || 0);
-      const _prevClose = _quotePrevClose || parseFloat(a.prevPrice) || (_isMF ? 1 : 0);
+      // 现价优先级：quote实时价格 > 存储的currentPrice > 成本价（cost） > 上一轮估值（currentValue/qty）> 上一次prevPrice
+      // 当实时数据获取不到时，保留上次有效价格，不显示为0
+      const _pcCurrent = parseFloat(a.currentPrice);
+      const _pcCost = parseFloat(a.cost) || parseFloat(a.costPrice);
+      const _pcQty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
+      const _pcVal = parseFloat(a.currentValue) || parseFloat(a.balance);
+      const _pcPrev = parseFloat(a.prevPrice);
+      const _pcDerived = _pcQty > 0 && _pcVal > 0 ? (_pcVal / _pcQty) : 0;
+      const _validPriceCandidates = [
+        _quotePrice && _quotePrice > 0 ? _quotePrice : 0,
+        _pcCurrent && _pcCurrent > 0 ? _pcCurrent : 0,
+        _pcCost && _pcCost > 0 ? _pcCost : 0,
+        _pcDerived,
+        _pcPrev && _pcPrev > 0 ? _pcPrev : 0,
+      ];
+      const _bestPrice = _validPriceCandidates.find(p => p && p > 0) || 0;
+      const _price = _isMF ? 1 : _bestPrice;
+      const _prevClose = _quotePrevClose && _quotePrevClose > 0
+        ? _quotePrevClose
+        : (_pcPrev && _pcPrev > 0
+            ? _pcPrev
+            : (_price > 0 ? _price : (_isMF ? 1 : 0)));
       const _priceChange = _price > _prevClose ? 'up' : _price < _prevClose ? 'down' : 'unchanged';
 
       // 从交易明细动态计算持仓数据
@@ -4822,8 +4842,27 @@ export default function Finance({ onAssetPenetration }) {
     financeAccounts.forEach(a => {
       const cat = a.categoryL1 || a.category || '其他';
       if (!categorizedHoldings[cat]) categorizedHoldings[cat] = [];
-      const _price = parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0;
-      const _prevClose = parseFloat(quotesMap[a.code]?.prevClose) || parseFloat(a.prevPrice) || 0;
+      const _mf = isMoneyFund(a);
+      const _qCurrent = parseFloat(quotesMap[a.code]?.price);
+      const _aCurrent = parseFloat(a.currentPrice);
+      const _aCost = parseFloat(a.cost) || parseFloat(a.costPrice);
+      const _aQty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
+      const _aVal = parseFloat(a.currentValue) || parseFloat(a.balance);
+      const _aPrev = parseFloat(a.prevPrice);
+      const _derive = _aQty > 0 && _aVal > 0 ? (_aVal / _aQty) : 0;
+      const _price = _mf ? 1 : ([
+        _qCurrent && _qCurrent > 0 ? _qCurrent : 0,
+        _aCurrent && _aCurrent > 0 ? _aCurrent : 0,
+        _aCost && _aCost > 0 ? _aCost : 0,
+        _derive,
+        _aPrev && _aPrev > 0 ? _aPrev : 0,
+      ].find(p => p && p > 0) || 0);
+      const _qPrev = parseFloat(quotesMap[a.code]?.prevClose);
+      const _prevClose = _mf ? 1 : ([
+        _qPrev && _qPrev > 0 ? _qPrev : 0,
+        _aPrev && _aPrev > 0 ? _aPrev : 0,
+        _price,
+      ].find(p => p && p > 0) || (_mf ? 1 : 0));
       const _priceChange = _price > _prevClose ? 'up' : _price < _prevClose ? 'down' : 'unchanged';
       const _qty = parseFloat(a.quantity) || 0;
       categorizedHoldings[cat].push({

@@ -948,9 +948,32 @@ export default function AssetPenetration({ onBack }) {
 
   const financeAccounts = useMemo(() => {
     return (financeAssets || []).map(a => {
-      const _price = parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0;
-      const _cost = parseFloat(a.costPrice || a.cost) || 0;
-      const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
+      const _mf = (() => {
+        const catL2 = a.categoryL2 || a.subcategory || '';
+        const catL4 = a.categoryL4 || '';
+        const ptype = a.positionCategory || a.positionType || '';
+        const name = a.name || '';
+        if (catL2 === '货币型' || catL4 === '货币基金' || ptype === '货币基金') return true;
+        if (name.includes('货币')) return true;
+        if (a.code === '000509') return true;
+        return false;
+      })();
+      const _qCurrent = parseFloat(quotesMap[a.code]?.price);
+      const _aCurrent = parseFloat(a.currentPrice);
+      const _aCost = parseFloat(a.costPrice || a.cost);
+      const _aQty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
+      const _aVal = parseFloat(a.currentValue) || parseFloat(a.balance);
+      const _aPrev = parseFloat(a.prevPrice);
+      const _derive = _aQty > 0 && _aVal > 0 ? (_aVal / _aQty) : 0;
+      const _price = _mf ? 1 : ([
+        _qCurrent && _qCurrent > 0 ? _qCurrent : 0,
+        _aCurrent && _aCurrent > 0 ? _aCurrent : 0,
+        _aCost && _aCost > 0 ? _aCost : 0,
+        _derive,
+        _aPrev && _aPrev > 0 ? _aPrev : 0,
+      ].find(p => p && p > 0) || 0);
+      const _cost = _aCost || (_mf ? 1 : 0);
+      const _qty = _aQty;
       // currentValue：优先实时价格计算，价格无效时回退到原始 currentValue
       const _currentValue = _price > 0 && _qty > 0
         ? _price * _qty
