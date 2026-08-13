@@ -797,26 +797,152 @@ def _fetch_money_fund(code: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 通用基金净值（LOF/ETF/场外基金）：最新净值 + 前一日净值（多数据源降级）
+# 通用基金净值（LOF/ETF/场外基金）：多数据源降级，保证尽可能获取到 > 0 的现价
+# 数据源优先级（实测可用性排序）:
+#   1. 东方财富 FundMNFInfo (App API) — 结构化JSON，含NAV/ACCNAV/NAVCHGRT
+#   2. 东方财富 api.fund.eastmoney.com/f10/lsjz (JSON) — 历史净值，含前一日
+#   3. 东方财富 FundMNHisNetList (POST App API) — 历史净值
+#   4. 东方财富 pingzhongdata.js — 历史净值曲线
+#   5. 新浪基金 hq.sinajs.cn — 实时估值
+#   6. 东方财富 F10DataApi.aspx (HTML) — 历史净值表格
 # ---------------------------------------------------------------------------
-def _fetch_fund_nav_eastmoney_pingzhong(code: str) -> dict:
-    """数据源1: 东方财富 pingzhongdata.js (主力)."""
+
+_FUND_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://fund.eastmoney.com/",
+}
+
+
+def _fetch_fund_nav_em_app(code: str) -> dict:
+    """数据源1: 东方财富 FundMNFInfo (天天基金App API).
+    返回: NAV(最新净值), ACCNAV(累计净值), NAVCHGRT(日涨跌幅%), PDATE(净值日期), SHORTNAME
+    """
+    try:
+        url = "https://fundmobapi.eastmoney.com/FundMNewApi/FundMNFInfo"
+        params = {
+            "pageIndex": "1", "pageSize": "30",
+            "plat": "Android", "appType": "ttjj",
+            "product": "EFund", "Version": "6.2.4",
+            "deviceid": "fundnavtracker", "Fcodes": code,
+        }
+        r = requests.get(url, params=params, timeout=10, headers=_FUND_HEADERS)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if not data.get("Datas"):
+            return None
+        d = data["Datas"][0]
+        nav = float(d["NAV"]) if d.get("NAV") and d["NAV"] not in ("", "--", "0") else None
+        acc_nav = float(d["ACCNAV"]) if d.get("ACCNAV") and d["ACCNAV"] not in ("", "--", "0") else None
+        chg = float(d["NAVCHGRT"]) if d.get("NAVCHGRT") and d["NAVCHGRT"] not in ("", "--") else None
+        nav_date = d.get("PDATE", "")
+        name = d.get("SHORTNAME", "")
+        if not nav or nav <= 0:
+            return None
+        return {
+            "symbol": code, "name": name,
+            "nav": nav, "prev_nav": None,
+            "accumulated_nav": acc_nav,
+            "nav_date": nav_date, "daily_change_pct": chg,
+        }
+    except Exception as e:
+        print(f"  ❌ EM-App失败 {code}: {e}")
+        return None
+
+
+def _fetch_fund_nav_em_lsjz(code: str) -> dict:
+    """数据源2: 东方财富 api.fund.eastmoney.com/f10/lsjz (JSON历史净值).
+    返回最近2条: 最新净值 + 前一日净值
+    """
+    try:
+        url = "http://api.fund.eastmoney.com/f10/lsjz"
+        headers = {
+            **_FUND_HEADERS,
+            "Referer": f"http://fundf10.eastmoney.com/jjjz_{code}.html",
+        }
+        params = {
+            "fundCode": code, "pageIndex": 1, "pageSize": 5,
+            "startDate": "", "endDate": "",
+            "_": int(time.time() * 1000),
+        }
+        r = requests.get(url, headers=headers, params=params, timeout=10)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if data.get("ErrCode") != 0:
+            return None
+        items = data.get("Data", {}).get("LSJZList", [])
+        if not items:
+            return None
+        latest = items[0]
+        nav = float(latest["DWJZ"]) if latest.get("DWJZ") and latest["DWJZ"] not in ("", "--") else None
+        prev_nav = float(items[1]["DWJZ"]) if len(items) >= 2 and items[1].get("DWJZ") and items[1]["DWJZ"] not in ("", "--") else None
+        acc_nav = float(latest["LJJZ"]) if latest.get("LJJZ") and latest["LJJZ"] not in ("", "--") else None
+        chg = float(latest["JZZZL"]) if latest.get("JZZZL") and latest["JZZZL"] not in ("", "--") else None
+        nav_date = latest.get("FSRQ", "")
+        if not nav or nav <= 0:
+            return None
+        return {
+            "symbol": code, "name": "",
+            "nav": nav, "prev_nav": prev_nav,
+            "accumulated_nav": acc_nav,
+            "nav_date": nav_date, "daily_change_pct": chg,
+        }
+    except Exception as e:
+        print(f"  ❌ EM-lsjz失败 {code}: {e}")
+        return None
+
+
+def _fetch_fund_nav_em_hisnetlist(code: str) -> dict:
+    """数据源3: 东方财富 FundMNHisNetList (POST App API历史净值)."""
+    try:
+        url = "https://fundmobapi.eastmoney.com/FundMNewApi/FundMNHisNetList"
+        payload = {
+            "FCODE": code, "IsShareNet": "true",
+            "MobileKey": "1", "appType": "ttjj", "appVersion": "6.2.8",
+            "cToken": "1", "deviceid": "1",
+            "pageIndex": "1", "pageSize": "5",
+            "plat": "Iphone", "product": "EFund",
+            "serverVersion": "6.2.8", "uToken": "1",
+            "userId": "1", "version": "6.2.8",
+        }
+        r = requests.post(url, data=payload, timeout=10, headers=_FUND_HEADERS)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if not data.get("Datas"):
+            return None
+        latest = data["Datas"][0]
+        nav = float(latest["DWJZ"]) if latest.get("DWJZ") and latest["DWJZ"] not in ("", "--") else None
+        prev_nav = float(data["Datas"][1]["DWJZ"]) if len(data["Datas"]) >= 2 and data["Datas"][1].get("DWJZ") and data["Datas"][1]["DWJZ"] not in ("", "--") else None
+        acc_nav = float(latest["LJJZ"]) if latest.get("LJJZ") and latest["LJJZ"] not in ("", "--") else None
+        chg = float(latest["JZZZL"]) if latest.get("JZZZL") and latest["JZZZL"] not in ("", "--") else None
+        nav_date = latest.get("FSRQ", "")
+        if not nav or nav <= 0:
+            return None
+        return {
+            "symbol": code, "name": "",
+            "nav": nav, "prev_nav": prev_nav,
+            "accumulated_nav": acc_nav,
+            "nav_date": nav_date, "daily_change_pct": chg,
+        }
+    except Exception as e:
+        print(f"  ❌ EM-HisNetList失败 {code}: {e}")
+        return None
+
+
+def _fetch_fund_nav_em_pingzhong(code: str) -> dict:
+    """数据源4: 东方财富 pingzhongdata.js (历史净值曲线)."""
     try:
         url = f"https://fund.eastmoney.com/pingzhongdata/{code}.js"
-        r = requests.get(url, timeout=8, headers={
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://fund.eastmoney.com/",
-        })
+        r = requests.get(url, timeout=10, headers=_FUND_HEADERS)
         if r.status_code != 200:
             return None
         text = r.text
-
         name_m = re.search(r'var fS_name = "(.*?)";', text)
         nwt_m = re.search(r'var Data_netWorthTrend = (\[.*?\]);', text, re.S)
         acw_m = re.search(r"var Data_ACWorthTrend = (\[\[.*?\]\]);", text, re.S)
-
         name = name_m.group(1) if name_m else ""
-
         nav = None
         prev_nav = None
         nav_date = ""
@@ -833,7 +959,6 @@ def _fetch_fund_nav_eastmoney_pingzhong(code: str) -> dict:
                     prev_nav = arr[-2].get("y")
             except (ValueError, IndexError, KeyError):
                 pass
-
         accumulated_nav = None
         if acw_m:
             try:
@@ -842,110 +967,29 @@ def _fetch_fund_nav_eastmoney_pingzhong(code: str) -> dict:
                     accumulated_nav = arr[-1][1]
             except (ValueError, IndexError):
                 pass
-
-        if nav is None or nav <= 0:
+        if not nav or nav <= 0:
             return None
         daily_change_pct = None
         if nav and prev_nav and prev_nav > 0:
             daily_change_pct = round((nav - prev_nav) / prev_nav * 100, 4)
         return {
-            "symbol": code,
-            "name": name,
-            "nav": nav,
-            "prev_nav": prev_nav,
+            "symbol": code, "name": name,
+            "nav": nav, "prev_nav": prev_nav,
             "accumulated_nav": accumulated_nav,
-            "nav_date": nav_date,
-            "daily_change_pct": daily_change_pct,
+            "nav_date": nav_date, "daily_change_pct": daily_change_pct,
         }
     except Exception as e:
-        print(f"  ❌ 东方财富pingzhongdata失败 {code}: {e}")
-        return None
-
-
-def _fetch_fund_nav_eastmoney_fundgz(code: str) -> dict:
-    """数据源2: 东方财富 fundgz (json接口, 更稳定)."""
-    try:
-        timestamp = int(time.time() * 1000)
-        url = (
-            f"https://fundgz.1234567.com.cn/js/{code}.js?rt={timestamp}"
-        )
-        r = requests.get(url, timeout=8, headers={
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://fund.eastmoney.com/",
-        })
-        if r.status_code != 200:
-            return None
-        text = r.text
-        m = re.search(r'jsonpgz\((.*?)\);', text, re.S)
-        if not m:
-            return None
-        data = json.loads(m.group(1))
-        nav = float(data.get("dwjz")) if data.get("dwjz") not in (None, "", "0") else None
-        nav_date = data.get("jzrq", "")
-        name = data.get("name", "")
-        # fundgz 只返回估算净值(gsz)和单位净值(dwjz)，没有前一日净值，需要从历史推断
-        return {
-            "symbol": code,
-            "name": name,
-            "nav": nav if (nav and nav > 0) else None,
-            "prev_nav": None,
-            "accumulated_nav": None,
-            "nav_date": nav_date,
-            "daily_change_pct": None,
-        }
-    except Exception as e:
-        print(f"  ❌ 东方财富fundgz失败 {code}: {e}")
-        return None
-
-
-def _fetch_fund_nav_tencent(code: str) -> dict:
-    """数据源3: 腾讯基金行情接口."""
-    try:
-        # 腾讯基金接口, 代码规则: 代码前加 'of'
-        symbol = f"of{code}"
-        url = f"https://qt.gtimg.cn/q={symbol}"
-        r = requests.get(url, timeout=8, headers={
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://stockapp.finance.qq.com/",
-        })
-        if r.status_code != 200:
-            return None
-        r.encoding = "gbk"
-        text = r.text
-        m = re.search(r'v_="([^"]*)";', text)
-        if not m:
-            return None
-        parts = m.group(1).split("~")
-        if len(parts) < 30:
-            return None
-        name = parts[1] if len(parts) > 1 else ""
-        # parts[3] = 当前价(估算), parts[4] = 昨收
-        nav = float(parts[3]) if parts[3] not in ("", "0", "0.0000") else None
-        prev_nav = float(parts[4]) if parts[4] not in ("", "0", "0.0000") else None
-        nav_date = parts[30] if len(parts) > 30 else ""
-        daily_change_pct = None
-        if nav and prev_nav and prev_nav > 0:
-            daily_change_pct = round((nav - prev_nav) / prev_nav * 100, 4)
-        return {
-            "symbol": code,
-            "name": name,
-            "nav": nav if (nav and nav > 0) else None,
-            "prev_nav": prev_nav if (prev_nav and prev_nav > 0) else None,
-            "accumulated_nav": None,
-            "nav_date": nav_date,
-            "daily_change_pct": daily_change_pct,
-        }
-    except Exception as e:
-        print(f"  ❌ 腾讯基金接口失败 {code}: {e}")
+        print(f"  ❌ EM-pingzhong失败 {code}: {e}")
         return None
 
 
 def _fetch_fund_nav_sina(code: str) -> dict:
-    """数据源4: 新浪基金接口."""
+    """数据源5: 新浪基金实时行情 (hq.sinajs.cn).
+    格式: var hq_str_fu_161725="招商中证白酒指数A,16:04:00,0.5843,0.5809,2.2970,0,0.5852,2026-08-13,0.5857,0.8224";
+    parts: [0]=name [2]=估算净值 [3]=前日净值 [7]=日期 [9]=涨跌幅
+    """
     try:
-        symbol = f"fu_{code}"
-        timestamp = int(time.time() * 1000)
-        url = f"https://hq.sinajs.cn/list={symbol}&_={timestamp}"
+        url = f"https://hq.sinajs.cn/list=fu_{code}"
         r = requests.get(url, timeout=8, headers={
             "User-Agent": "Mozilla/5.0",
             "Referer": "https://finance.sina.com.cn/",
@@ -953,27 +997,73 @@ def _fetch_fund_nav_sina(code: str) -> dict:
         if r.status_code != 200:
             return None
         r.encoding = "gbk"
-        text = r.text
-        m = re.search(r'var hq_str_fu_\d+="([^"]*)";', text)
+        m = re.search(r'var hq_str_fu_\d+="([^"]*)";', r.text)
         if not m:
             return None
         parts = m.group(1).split(",")
         if len(parts) < 4:
             return None
-        name = parts[0] if len(parts) > 0 else ""
-        nav = float(parts[1]) if parts[1] not in ("", "0", "0.0000") else None
-        nav_date = parts[3] if len(parts) > 3 else ""
+        name = parts[0].strip()
+        # parts[2] = 估算净值(实时), parts[3] = 前日单位净值
+        nav = float(parts[2]) if parts[2] and parts[2] not in ("", "0", "0.0000") else None
+        prev_nav = float(parts[3]) if parts[3] and parts[3] not in ("", "0", "0.0000") else None
+        nav_date = parts[7].strip() if len(parts) > 7 else ""
+        chg = float(parts[9]) if len(parts) > 9 and parts[9] and parts[9] not in ("", "0", "0.0000") else None
+        # 累计净值
+        acc_nav = float(parts[4]) if len(parts) > 4 and parts[4] and parts[4] not in ("", "0", "0.0000") else None
+        if not nav or nav <= 0:
+            return None
+        if not chg and nav and prev_nav and prev_nav > 0:
+            chg = round((nav - prev_nav) / prev_nav * 100, 4)
         return {
-            "symbol": code,
-            "name": name,
-            "nav": nav if (nav and nav > 0) else None,
-            "prev_nav": None,
-            "accumulated_nav": None,
-            "nav_date": nav_date,
-            "daily_change_pct": None,
+            "symbol": code, "name": name,
+            "nav": nav, "prev_nav": prev_nav if (prev_nav and prev_nav > 0) else None,
+            "accumulated_nav": acc_nav,
+            "nav_date": nav_date, "daily_change_pct": chg,
         }
     except Exception as e:
-        print(f"  ❌ 新浪基金接口失败 {code}: {e}")
+        print(f"  ❌ 新浪基金失败 {code}: {e}")
+        return None
+
+
+def _fetch_fund_nav_em_f10html(code: str) -> dict:
+    """数据源6: 东方财富 F10DataApi.aspx (HTML表格历史净值)."""
+    try:
+        url = f"http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code={code}&page=1&per=5"
+        r = requests.get(url, timeout=10, headers={
+            **_FUND_HEADERS,
+            "Referer": f"http://fundf10.eastmoney.com/jjjz_{code}.html",
+        })
+        if r.status_code != 200:
+            return None
+        text = r.text
+        # 解析HTML表格行
+        rows = re.findall(r"<tr>(.*?)</tr>", text, re.S)
+        results = []
+        for row in rows:
+            cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+            cells = [re.sub(r"<[^>]+>", "", c).strip() for c in cells]
+            if len(cells) >= 4:
+                results.append(cells)
+        if not results:
+            return None
+        # cells: [净值日期, 单位净值, 累计净值, 日增长率, ...]
+        latest = results[0]
+        nav = float(latest[1]) if latest[1] and latest[1] not in ("", "--") else None
+        prev_nav = float(results[1][1]) if len(results) >= 2 and results[1][1] and results[1][1] not in ("", "--") else None
+        acc_nav = float(latest[2]) if latest[2] and latest[2] not in ("", "--") else None
+        chg = float(latest[3].rstrip("%")) if latest[3] and latest[3] not in ("", "--") else None
+        nav_date = latest[0]
+        if not nav or nav <= 0:
+            return None
+        return {
+            "symbol": code, "name": "",
+            "nav": nav, "prev_nav": prev_nav,
+            "accumulated_nav": acc_nav,
+            "nav_date": nav_date, "daily_change_pct": chg,
+        }
+    except Exception as e:
+        print(f"  ❌ EM-F10HTML失败 {code}: {e}")
         return None
 
 
@@ -990,13 +1080,15 @@ def _merge_fund_results(base: dict, extra: dict) -> dict:
 
 
 def _fetch_fund_nav(code: str) -> dict:
-    """通用基金净值：多数据源降级，保证尽可能获取到 > 0 的现价.
+    """通用基金净值：6个数据源逐个尝试，保证尽可能获取到 > 0 的现价.
 
-    数据源优先级:
-      1) 东方财富 pingzhongdata.js（历史净值曲线，含名称/前一日/累计）
-      2) 东方财富 fundgz（实时单位净值）
-      3) 腾讯基金行情（含昨收）
-      4) 新浪基金接口
+    数据源优先级（按实测可用性排序）:
+      1) 东方财富 FundMNFInfo (App API) — 结构化JSON
+      2) 东方财富 api.fund.eastmoney.com/f10/lsjz (JSON) — 历史净值
+      3) 东方财富 FundMNHisNetList (POST App API) — 历史净值
+      4) 东方财富 pingzhongdata.js — 历史净值曲线
+      5) 新浪基金 hq.sinajs.cn — 实时估值
+      6) 东方财富 F10DataApi.aspx (HTML) — 历史净值表格
 
     Returns:
         dict: { symbol, name, nav, prev_nav, accumulated_nav, nav_date, daily_change_pct } 或 None
@@ -1007,17 +1099,16 @@ def _fetch_fund_nav(code: str) -> dict:
 
     cached = _cache_get(f"fn_{code}")
     if cached is not None:
-        # 缓存的 nav 也必须 > 0
         if cached.get("nav") and cached.get("nav") > 0:
             return cached
-        # 缓存值为0，视为无效缓存，重新获取
-        pass
 
     sources = [
-        ("东方财富-pingzhongdata", _fetch_fund_nav_eastmoney_pingzhong),
-        ("东方财富-fundgz", _fetch_fund_nav_eastmoney_fundgz),
-        ("腾讯基金", _fetch_fund_nav_tencent),
+        ("EM-App", _fetch_fund_nav_em_app),
+        ("EM-lsjz", _fetch_fund_nav_em_lsjz),
+        ("EM-HisNetList", _fetch_fund_nav_em_hisnetlist),
+        ("EM-pingzhong", _fetch_fund_nav_em_pingzhong),
         ("新浪基金", _fetch_fund_nav_sina),
+        ("EM-F10HTML", _fetch_fund_nav_em_f10html),
     ]
 
     merged = {}
@@ -1028,36 +1119,32 @@ def _fetch_fund_nav(code: str) -> dict:
             if res and res.get("nav") and res.get("nav") > 0:
                 success_sources.append(sname)
                 merged = _merge_fund_results(merged, res)
-                # 只要获得完整的 nav + prev_nav 就可提前退出
+                # 获得完整的 nav + prev_nav 即可提前退出
                 if merged.get("nav") and merged.get("nav") > 0 and merged.get("prev_nav") and merged.get("prev_nav") > 0:
                     break
         except Exception as e:
             print(f"  ⚠️ 源 {sname} 异常: {e}")
             continue
 
-    # 如果只有 nav 没有 prev_nav，尝试从其他源补齐，或计算daily_change_pct
-    if merged.get("nav") and merged.get("nav") > 0 and not merged.get("daily_change_pct"):
-        if merged.get("prev_nav") and merged.get("prev_nav") > 0:
-            merged["daily_change_pct"] = round(
-                (merged["nav"] - merged["prev_nav"]) / merged["prev_nav"] * 100, 4
-            )
+    # 补齐 daily_change_pct
+    if merged.get("nav") and merged.get("nav") > 0:
+        if not merged.get("daily_change_pct"):
+            if merged.get("prev_nav") and merged.get("prev_nav") > 0:
+                merged["daily_change_pct"] = round(
+                    (merged["nav"] - merged["prev_nav"]) / merged["prev_nav"] * 100, 4
+                )
 
     if not merged or not merged.get("nav") or merged["nav"] <= 0:
-        print(f"  ❌ {code} 所有数据源均未获取到有效净值(>0)")
+        print(f"  ❌ {code} 所有6个数据源均未获取到有效净值(>0)")
         return None
 
-    if "symbol" not in merged:
-        merged["symbol"] = code
-    if "name" not in merged:
-        merged["name"] = ""
-    if "nav_date" not in merged:
-        merged["nav_date"] = datetime.now().strftime("%Y-%m-%d")
-    if "accumulated_nav" not in merged:
-        merged["accumulated_nav"] = None
-    if "prev_nav" not in merged:
-        merged["prev_nav"] = None
-    if "daily_change_pct" not in merged:
-        merged["daily_change_pct"] = None
+    # 确保所有字段存在
+    merged.setdefault("symbol", code)
+    merged.setdefault("name", "")
+    merged.setdefault("nav_date", datetime.now().strftime("%Y-%m-%d"))
+    merged.setdefault("accumulated_nav", None)
+    merged.setdefault("prev_nav", None)
+    merged.setdefault("daily_change_pct", None)
 
     print(f"  ✅ {code} 获取成功, 源: {', '.join(success_sources)}, nav={merged.get('nav')}, date={merged.get('nav_date')}")
     _cache_put(f"fn_{code}", merged)
