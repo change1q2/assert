@@ -5060,7 +5060,11 @@ export default function Finance({ onAssetPenetration }) {
         code: a.code || '',
         assetType: a.kind || a.assetType || '',
         assetKind: a.kind || a.assetType || '',
-        account: a.accountId || '',
+        account: (() => {
+          const accId = a.accountId || a.account || '';
+          const matched = (stateData?.accounts || []).find(acc => acc.id === accId || acc.name === accId);
+          return matched ? matched.name : accId;
+        })(),
         categoryL1: a.category || '',
         categoryL2: a.subcategory || '',
         categoryL3: a.tertiaryCategory || '',
@@ -5089,7 +5093,7 @@ export default function Finance({ onAssetPenetration }) {
         transactions: txs,
       };
     });
-  }, [stateData?.financeAssetArchives]);
+  }, [stateData?.financeAssetArchives, stateData?.accounts]);
 
   // 账户本分页
   const accountBookTotalPages = Math.max(1, Math.ceil(computed.accountBook.length / ACCOUNTS_PER_PAGE));
