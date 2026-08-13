@@ -1216,7 +1216,11 @@ export default function CategoryDetail({ categoryName, onBack }) {
         name: a.name || '',
         code: a.code || '',
         assetType: a.kind || a.assetType || a.category || '',
-        account: a.accountId || a.account || '',
+        account: (() => {
+          const raw = a.account || a.accountId || '';
+          const matched = (accounts || []).find(acc => acc.id === raw || acc.name === raw);
+          return matched ? matched.name : raw;
+        })(),
         categoryL1: a.categoryL1 || a.category || '',
         categoryL2: a.subcategory || a.categoryL2 || '',
         categoryL3: a.tertiaryCategory || a.categoryL3 || '',

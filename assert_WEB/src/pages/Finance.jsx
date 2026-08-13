@@ -4713,7 +4713,11 @@ export default function Finance({ onAssetPenetration }) {
         code: a.code || '',
         assetType: a.kind || a.assetType || '',
         assetKind: a.assetKind || '',
-        account: a.accountId || a.account || '',
+        account: (() => {
+          const raw = a.account || a.accountId || '';
+          const matched = (accounts || []).find(acc => acc.id === raw || acc.name === raw);
+          return matched ? matched.name : raw;
+        })(),
         categoryL1: a.category || a.categoryL1 || '',
         categoryL2: a.subcategory || a.categoryL2 || '',
         categoryL3: a.tertiaryCategory || a.categoryL3 || '',
