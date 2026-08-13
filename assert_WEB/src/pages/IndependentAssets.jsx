@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchState, saveState, lookupFinance, fetchFinanceQuotes } from '../api';
 import { convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency';
 import sanitizeText from '../utils/sanitizeText';
+import FinanceHoldingsTable from '../components/FinanceHoldingsTable';
+import { computeHoldingDays } from '../components/FinanceHoldingsTable.utils';
 import {
   Wallet,
   Plus,
@@ -164,6 +166,13 @@ const EQUITY_DEFAULT_CATEGORY_L2_OPTIONS = {
 };
 const EQUITY_DEFAULT_POSITION_GROUP_OPTIONS = ['核心仓位', '卫星仓位', '观察仓位', '套利仓位', '现金仓位'];
 const EQUITY_DEFAULT_POSITION_TYPE_OPTIONS = ['成长股', '价值股', '周期股', '消费股', '核心股票仓位', 'ETF仓位', '基金定投', '打新仓位', '波段操作', '其他'];
+
+// 与理财模块一致的市场分组结构
+const EQUITY_MARKET_GROUPS = [
+  { label: '国内市场', options: ['国内市场'] },
+  { label: '港澳台市场', options: ['港股市场'] },
+  { label: '海外市场', options: ['美股市场'] },
+];
 
 const COUNTRY_REGION_DATA = {
   '中国': {
@@ -434,6 +443,74 @@ export default function IndependentAssets() {
   const [insuranceTotalCurrency, setInsuranceTotalCurrency] = useState('CNY');
 
   const { accounts = [], independentAssets = {} } = stateData || {};
+
+  // 独立资产-股权 → 理财模块 holdings 格式的映射，使列显示与理财模块完全一致
+  const equityHoldings = useMemo(() => {
+    const items = independentAssets.equity || [];
+    return items.map(item => {
+      const accountName = item.accountName ||
+        accounts.find(a => (a.id || a.name) === item.accountId)?.name ||
+        item.accountId ||
+        '';
+      const qty = parseFloat(item.quantity) || 0;
+      const unitCost = parseFloat(item.cost) || 0;
+      const currentPrice = parseFloat(item.currentPrice) || 0;
+      const marketValue = parseFloat(item.marketValue) || qty * currentPrice;
+      const pnl = parseFloat(item.pnl);
+      const pnlRate = parseFloat(item.pnlRate);
+      const holdingCost = qty * unitCost;
+      return {
+        id: item.id,
+        market: item.market || '',
+        currency: item.currency || 'CNY',
+        assetKind: item.assetKind || '',
+        assetType: item.assetType || '股票',
+        name: item.name || '',
+        code: item.code || '',
+        categoryL1: item.categoryL1 || '',
+        categoryL2: item.categoryL2 || '',
+        categoryL3: item.categoryL3 || '',
+        categoryL4: item.categoryL4 || '',
+        positionGroup: item.positionGroup || '',
+        positionType: item.positionType || '',
+        cost: holdingCost,
+        costPrice: unitCost,
+        quantity: qty,
+        currentPrice,
+        currentValue: marketValue,
+        balance: marketValue,
+        holdingPnl: isNaN(pnl) ? (marketValue - holdingCost) : pnl,
+        holdingPnlRate: isNaN(pnlRate) ? (holdingCost > 0 ? ((marketValue - holdingCost) / holdingCost) * 100 : 0) : pnlRate,
+        dailyPnl: 0,
+        dailyPnlRate: 0,
+        holdingDaysDate: item.createdAt ? new Date(item.createdAt).toISOString().split('T')[0] : '',
+        account: accountName,
+        tags: item.tags && Array.isArray(item.tags) ? [...item.tags] : [],
+        isArchived: false,
+      };
+    });
+  }, [independentAssets.equity, accounts]);
+
+  // 股权模块汇总用 financeAccounts（持仓汇总卡片统计）
+  const equityFinanceAccounts = useMemo(() => equityHoldings, [equityHoldings]);
+
+  // 股权模块全部二级分类选项（扁平数组，供FinanceHoldingsTable筛选下拉使用）
+  const equityAllCategoryL2Options = useMemo(() => {
+    const set = new Set();
+    Object.values(equityCategoryL2OptionsMap).forEach(arr => (arr || []).forEach(o => set.add(o)));
+    return Array.from(set);
+  }, [equityCategoryL2OptionsMap]);
+
+  // 股权模块标签集合（所有item的tags去重）
+  const equityTags = useMemo(() => {
+    const set = new Set();
+    (independentAssets.equity || []).forEach(item => {
+      if (item.tags && Array.isArray(item.tags)) {
+        item.tags.forEach(t => set.add(t));
+      }
+    });
+    return Array.from(set);
+  }, [independentAssets.equity]);
 
   // loadData 后，如果后端提供了汇率，则用后端汇率覆盖默认
   useEffect(() => {
@@ -2623,66 +2700,76 @@ export default function IndependentAssets() {
   };
 
   const renderEquityTable = () => {
-    const items = getAssets('equity');
+    // 通过 holdings.id 找到独立资产中的原始对象，保证编辑/删除操作的数据源正确
+    const findRawEquityItem = (holding) => {
+      const items = independentAssets.equity || [];
+      return items.find(it => it.id === holding.id) || holding;
+    };
+
+    const handleEquityEdit = (holding) => {
+      if (!holding) return;
+      handleEdit(findRawEquityItem(holding));
+    };
+    const handleEquityDelete = (holding) => {
+      if (!holding) return;
+      handleDelete(findRawEquityItem(holding));
+    };
+
+    // 股权列表使用与理财模块完全一致的 FinanceHoldingsTable 组件
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
           <h3 className="font-semibold text-gray-900 dark:text-white">股权</h3>
-          <button onClick={handleAdd} className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors">
+          <button
+            onClick={handleAdd}
+            className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
+          >
             <Plus className="w-4 h-4" />
             <span>新增</span>
           </button>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-slate-700">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">名称</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">代码</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">成本</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">数量</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">当前价格</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">市值</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">盈亏</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">盈亏比例</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-              {items.map(item => {
-                const pnlValue = parseFloat(item.pnl || 0);
-                const pnlClass = pnlValue >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
-                return (
-                  <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{sanitizeText(item.name, item.name) || '—'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">{item.code}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.cost, item.currency)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatNumber(item.quantity)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.currentPrice, item.currency)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(item.marketValue, item.currency)}</td>
-                    <td className={`px-4 py-3 text-sm font-medium ${pnlClass}`}>{formatCurrency(item.pnl, item.currency)}</td>
-                    <td className={`px-4 py-3 text-sm font-medium ${pnlClass}`}>{formatPercentage(item.pnlRate)}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => handleEdit(item)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDelete(item)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {items.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无股权数据</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+
+        {equityHoldings.length > 0 ? (
+          <FinanceHoldingsTable
+            key="independent_equity"
+            categoryName="independent_equity"
+            holdings={equityHoldings}
+            colorIdx={0}
+            onEdit={handleEquityEdit}
+            onDelete={handleEquityDelete}
+            onDetail={null}
+            onAdd={handleAdd}
+            onBatchEdit={null}
+            marketOptions={EQUITY_MARKET_OPTIONS}
+            currencyOptions={EQUITY_CURRENCY_SUGGESTIONS}
+            assetTypeOptions={['股票']}
+            assetClassOptions={equityCategoryL1Options}
+            positionGroupOptions={equityPositionGroupOptions}
+            positionTypeOptions={equityPositionTypeOptions}
+            allCategoryL2Options={equityAllCategoryL2Options}
+            tags={equityTags}
+            marketGroups={EQUITY_MARKET_GROUPS}
+            categoryL3CustomOptions={['场内', '场外']}
+            categoryL4Options={{}}
+            selectedCurrency="CNY"
+            exchangeRates={exchangeRates}
+            financeAccounts={equityFinanceAccounts}
+            assetKindOptions={equityAssetKindOptions}
+            moneyFundMap={{}}
+            accountOptions={accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc => acc.name || acc.id)}
+          />
+        ) : (
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center shadow-sm border border-gray-100 dark:border-slate-700">
+            <Briefcase className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+            <p className="text-gray-400 text-sm">暂无股权数据</p>
+            <button
+              onClick={handleAdd}
+              className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-sm font-medium hover:from-indigo-600 hover:to-purple-700 active:scale-[0.97] transition-all shadow-md"
+            >
+              <Plus className="w-4 h-4" /> 新增持仓
+            </button>
+          </div>
+        )}
       </div>
     );
   };
@@ -2705,8 +2792,10 @@ export default function IndependentAssets() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">市场</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">地点</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">类型</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">名称</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">方式</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">货币种类</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">账户本</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">金额</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">利率</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">开始时间</th>
@@ -2736,8 +2825,10 @@ export default function IndependentAssets() {
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.market || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.location || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.type || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.usage || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.termType || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.currency || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.accountName || accounts.find(a => (a.id || a.name) === item.accountId)?.name || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.amount ? formatCurrency(item.amount, item.currency) : '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.interestRate !== undefined && item.interestRate !== '' ? formatPercentage(item.interestRate) : (item.interest ? formatPercentage(item.interest) : '—')}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.startDate || '—'}</td>
@@ -2763,7 +2854,7 @@ export default function IndependentAssets() {
               })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无定期资产数据</td>
+                  <td colSpan={15} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无定期资产数据</td>
                 </tr>
               )}
             </tbody>
@@ -4095,7 +4186,7 @@ export default function IndependentAssets() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">作用</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">名称</label>
               <input
                 type="text"
                 value={formData.usage || ''}

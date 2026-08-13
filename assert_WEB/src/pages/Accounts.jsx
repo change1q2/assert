@@ -1730,6 +1730,8 @@ export default function Accounts() {
           holdingPnlRate: _holdingPnlRate,
           dailyPnl: _dailyPnl,
           dailyPnlRate: _dailyPnlRate,
+          cumulativeReturn: (() => { const v = parseFloat(a.cumulativeReturn); return isNaN(v) ? _holdingPnl : v; })(),
+          cumulativeReturnRate: (() => { const v = parseFloat(a.cumulativeReturnRate); return isNaN(v) ? _holdingPnlRate : v; })(),
           positionRatio: 0,
         };
       });
@@ -1826,7 +1828,6 @@ export default function Accounts() {
       if (type === 'insurance') return <tr>{th('保单号')}{th('保险名称')}{th('已付金额')}{th('现金价值')}{th('累计分红')}</tr>;
       if (type === 'realestate') return <tr>{th('类型')}{th('用途')}{th('面积')}{th('购买价')}{th('市场估值')}</tr>;
       if (type === 'vehicle') return <tr>{th('厂商')}{th('型号')}{th('购买价格')}{th('现车残值')}</tr>;
-      if (type === 'equity') return <tr>{th('名称')}{th('代码')}{th('数量')}{th('市值')}</tr>;
       if (type === 'fixedinvestment') return <tr>{th('名称')}{th('投入本金')}{th('累计分红')}</tr>;
       if (type === 'fixeddeposit') return <tr>{th('名称')}{th('金额')}</tr>;
       return <tr>{th('名称')}</tr>;
@@ -1875,20 +1876,6 @@ export default function Accounts() {
           </tr>
         ));
       }
-      if (type === 'equity') {
-        return items.map(item => {
-          const qty = parseFloat(item.quantity || 0);
-          const mv = qty * (parseFloat(item.currentPrice || 0));
-          return (
-            <tr key={item.id}>
-              {td(item.name)}
-              {td(item.code)}
-              {td(qty, true)}
-              {td(fmt(mv, item.currency), true)}
-            </tr>
-          );
-        });
-      }
       if (type === 'fixedinvestment') {
         return items.map(item => {
           const records = item.dividendRecords || [];
@@ -1918,11 +1905,85 @@ export default function Accounts() {
       ));
     };
 
+    const equityItems = accountIndependentAssets.equity || [];
+    const equityHoldingsRaw = equityItems.map(item => {
+      const accountName = item.accountName ||
+        accounts.find(a => (a.id || a.name) === item.accountId)?.name ||
+        item.accountId ||
+        '';
+      const qty = parseFloat(item.quantity) || 0;
+      const unitCost = parseFloat(item.cost) || 0;
+      const currentPrice = parseFloat(item.currentPrice) || 0;
+      const marketValue = parseFloat(item.marketValue) || qty * currentPrice;
+      const pnl = parseFloat(item.pnl);
+      const pnlRate = parseFloat(item.pnlRate);
+      const holdingCost = qty * unitCost;
+      return {
+        id: item.id,
+        market: item.market || '',
+        currency: item.currency || 'CNY',
+        assetKind: item.assetKind || '',
+        assetType: item.assetType || '股票',
+        name: item.name || '',
+        code: item.code || '',
+        categoryL1: item.categoryL1 || '',
+        categoryL2: item.categoryL2 || '',
+        categoryL3: item.categoryL3 || '',
+        categoryL4: item.categoryL4 || '',
+        positionGroup: item.positionGroup || '',
+        positionType: item.positionType || '',
+        cost: holdingCost,
+        costPrice: unitCost,
+        quantity: qty,
+        currentPrice,
+        currentValue: marketValue,
+        balance: marketValue,
+        holdingPnl: isNaN(pnl) ? (marketValue - holdingCost) : pnl,
+        holdingPnlRate: isNaN(pnlRate) ? (holdingCost > 0 ? ((marketValue - holdingCost) / holdingCost) * 100 : 0) : pnlRate,
+        dailyPnl: 0,
+        dailyPnlRate: 0,
+        holdingDaysDate: item.createdAt ? new Date(item.createdAt).toISOString().split('T')[0] : '',
+        account: accountName,
+        tags: item.tags && Array.isArray(item.tags) ? [...item.tags] : [],
+        isArchived: false,
+      };
+    });
+    const scaledEquityHoldings = scaleAssetList(equityHoldingsRaw, s);
+
     return (
       <div className="space-y-4">
         <h3 className="text-base font-semibold text-gray-900 dark:text-white px-1">独立资产</h3>
         {types.map(type => {
           const items = accountIndependentAssets[type];
+          if (type === 'equity') {
+            return (
+              <div key={type} className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 overflow-hidden">
+                <div className="p-4 border-b border-gray-200 dark:border-slate-700">
+                  <h4 className="font-semibold text-gray-900 dark:text-white">{independentAssetTypeLabels[type] || type}</h4>
+                </div>
+                <FinanceHoldingsTable
+                  categoryName="account_detail_equity"
+                  holdings={scaledEquityHoldings}
+                  readOnly={true}
+                  colorIdx={0}
+                  marketOptions={marketOptions}
+                  currencyOptions={currencyOptions}
+                  assetTypeOptions={['股票']}
+                  assetClassOptions={assetClassOptions}
+                  positionGroupOptions={positionGroupOptions}
+                  positionTypeOptions={positionTypeOptions}
+                  allCategoryL2Options={allCategoryL2Options}
+                  marketGroups={marketGroups}
+                  tags={tags}
+                  categoryL3CustomOptions={categoryL3CustomOptions}
+                  categoryL4Options={categoryL4Options}
+                  selectedCurrency={selectedCurrency}
+                  exchangeRates={exchangeRates}
+                  assetKindOptions={assetKindOptions}
+                />
+              </div>
+            );
+          }
           return (
             <div key={type} className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 overflow-hidden">
               <div className="p-4 border-b border-gray-200 dark:border-slate-700">

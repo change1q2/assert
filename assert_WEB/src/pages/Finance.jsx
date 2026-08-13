@@ -716,6 +716,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     // 3. 特殊代码：000509
     return catL2 === '货币型' || catL4 === '货币基金' || positionType === '货币基金' || assetType === '货基' || kind === '货基' || kind === '货币基金' || name.includes('货币') || latestData.code === '000509';
   })();
+  // 非现金类（现金类不显示盈亏汇总和数据校验）
+  const isEquityIndoor = latestData.categoryL1 !== '现金类' && !_isDetailMoneyFund;
   const _quote = quotesMap && latestData.code ? quotesMap[latestData.code] : null;
   const _quotePrice = _quote && _quote.price != null ? parseFloat(_quote.price) : null;
   const _quotePrevClose = _quote && _quote.prevClose != null ? parseFloat(_quote.prevClose) : null;
@@ -840,6 +842,9 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     let buyFee = 0;
     let sellFee = 0;
     let dividendTotal = 0;
+    // 货基专用：快速过户转出总额、建仓日期
+    let transferOutTotal = 0;
+    let firstBuyDate = '';
 
     tradeRecords.forEach(record => {
       const amount = parseFloat(record.amount) || 0;
@@ -851,12 +856,18 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
         buyTotalAmount += amount;
         buyTotalQty += qty;
         if (!isNaN(fee)) buyFee += fee;
+        // 记录最早建仓/买入日期
+        const rDate = record.date || record.transaction_date || '';
+        if (rDate && (!firstBuyDate || rDate < firstBuyDate)) firstBuyDate = rDate;
       } else if (rType === '卖出' || rType === '清仓') {
         sellTotalAmount += Math.abs(amount);
         sellTotalQty += Math.abs(qty);
         if (!isNaN(fee)) sellFee += fee;
       } else if (rType === '分红') {
         dividendTotal += amount;
+      } else if (rType === '快速过户') {
+        // 货基快速过户：转出/消费金额累计
+        transferOutTotal += Math.abs(amount);
       }
       if (!isNaN(fee)) {
         totalFee += fee;
@@ -872,7 +883,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     const originalBuyCost = buyTotalQty > 0 ? buyTotalAmount / buyTotalQty : 0;
     const avgSellCost = sellTotalQty > 0 ? sellTotalAmount / sellTotalQty : 0;
 
-    return { buyTotalAmount, sellTotalAmount, buyTotalQty, sellTotalQty, avgBuyCost, originalBuyCost, avgSellCost, totalFee, buyFee, sellFee, dividendTotal };
+    return { buyTotalAmount, sellTotalAmount, buyTotalQty, sellTotalQty, avgBuyCost, originalBuyCost, avgSellCost, totalFee, buyFee, sellFee, dividendTotal, transferOutTotal, firstBuyDate };
   }, [tradeRecords]);
 
   const isFloatPos = floatPnl >= 0;
@@ -1064,14 +1075,20 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       .reduce((sum, r) => sum + (Math.abs(parseFloat(r.quantity) || 0)), 0);
     const availableAfterTrade = totalBought - soldShares - Math.abs(parseFloat(record.quantity) || 0);
 
-    // 清仓判断：显式选清仓 或 卖出/快速过户后份额归零
+    // 清仓判断：显式选清仓 或 卖出/快速过户后份额恰好归零
     const isLiquidation = record.type === '清仓' ||
-      ((record.type === '卖出' || record.type === '快速过户') && availableAfterTrade <= 0);
+      ((record.type === '卖出' || record.type === '快速过户') && availableAfterTrade === 0);
 
     if (isLiquidation) {
       record.type = '清仓';
       record.direction = '清仓';
       newRecords = newRecords.map(r => r.id === record.id ? { ...r, type: '清仓', direction: '清仓' } : r);
+      setTradeRecords(newRecords);
+    } else if (editingRecord && (editingRecord.type === '清仓' || editingRecord.direction === '清仓')) {
+      // 编辑的记录原是清仓，但修改后份额不再为0 → 恢复为卖出
+      record.type = '卖出';
+      record.direction = '卖出';
+      newRecords = newRecords.map(r => r.id === record.id ? { ...r, type: '卖出', direction: '卖出' } : r);
       setTradeRecords(newRecords);
     }
 
@@ -1233,19 +1250,11 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">累计收益(元)</p>
                         {(() => {
-                          const _buyRatio = tradeStats.buyTotalQty > 0 ? tradeStats.sellTotalQty / tradeStats.buyTotalQty : 0;
-                          const realizedPnl = tradeStats.sellTotalAmount - tradeStats.originalBuyCost * tradeStats.sellTotalQty - (tradeStats.buyFee || 0) * _buyRatio - (tradeStats.sellFee || 0);
-                          const mfHistoricalBase = parseFloat(latestData._mfHistoricalBase) || 0;
-                          const cumulativeProfit = realizedPnl + floatPnl + tradeStats.dividendTotal + mfHistoricalBase;
-                          const storedCum = parseFloat(latestData.cumulativeReturn);
-                          const isLegacy = storedCum === 342.07;
-                          const isTargetFund = latestData.code === '000509' || /广发钱袋子/.test(latestData.name || '');
-                          const finalProfit = isTargetFund && !isLegacy && storedCum > 0
-                            ? storedCum
-                            : cumulativeProfit;
+                          // 货基累计收益 = 当前市值 - 持仓成本（无历史每日万份收益，与持有收益同口径）
+                          const mfCumulative = Math.round((currentValue - costTotal) * 100) / 100;
                           return (
-                            <p className={`text-lg font-semibold ${finalProfit >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                              {finalProfit >= 0 ? '+' : ''}{convertCurrency(finalProfit, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
+                            <p className={`text-lg font-semibold ${mfCumulative >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                              {mfCumulative >= 0 ? '+' : ''}{convertCurrency(mfCumulative, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
                             </p>
                           );
                         })()}
@@ -1253,13 +1262,9 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">持有收益(元)</p>
                         {(() => {
-                          // 货基优先使用 latestData 中的派生字段，确保列表与明细一致
-                          const is000509 = latestData.code === '000509' || /广发钱袋子/.test(latestData.name || '');
-                          const storedHP = parseFloat(latestData.holdingPnl);
-                          const finalHP = (storedHP && is000509) ? storedHP : floatPnl;
                           return (
-                            <p className={`text-lg font-semibold ${finalHP >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                              {finalHP >= 0 ? '+' : ''}{convertCurrency(finalHP, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
+                            <p className={`text-lg font-semibold ${floatPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                              {floatPnl >= 0 ? '+' : ''}{convertCurrency(floatPnl, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
                             </p>
                           );
                         })()}
@@ -1269,12 +1274,9 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">持有收益率</p>
                         {(() => {
-                          const is000509 = latestData.code === '000509' || /广发钱袋子/.test(latestData.name || '');
-                          const storedHR = parseFloat(latestData.holdingPnlRate);
-                          const finalHR = (storedHR != null && !isNaN(storedHR) && is000509) ? storedHR : computedHoldingReturnRate;
                           return (
-                            <p className={`text-lg font-semibold ${finalHR >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                              {finalHR >= 0 ? '+' : ''}{finalHR.toFixed(2)}%
+                            <p className={`text-lg font-semibold ${computedHoldingReturnRate >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                              {computedHoldingReturnRate >= 0 ? '+' : ''}{computedHoldingReturnRate.toFixed(2)}%
                             </p>
                           );
                         })()}
@@ -1451,10 +1453,10 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           )}
 
           {/* 数据校验区域 */}
+          {isEquityIndoor && (
           <div className="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-3 mb-3">
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-semibold text-gray-900 dark:text-white">数据校验</h4>
-              {(() => {
+              <h4 className="text-sm font-semibold text-gray-900 dark:text-white">数据校验</h4>              {(() => {
                 const computedCost = tradeStats.buyTotalAmount - tradeStats.sellTotalAmount;
                 // 货币基金：列表持仓成本 = 当前市值（净值×份额），与列表保持一致
                 const listCost = _isDetailMoneyFund ? currentValue : costTotal;
@@ -1503,17 +1505,15 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
               })()}
             </div>
           </div>
+          )}
 
           {/* 盈亏汇总区域 */}
-          {(() => {
-            // 已实现盈亏 = 卖出金额 − 买入对应成本 − 买入费用(按比例分摊) − 卖出费用
-            // 买入对应成本 = 原始买入成本(不含手续费) × 卖出份额
+          {isEquityIndoor && (() => {
             const buyRatio = tradeStats.buyTotalQty > 0 ? tradeStats.sellTotalQty / tradeStats.buyTotalQty : 0;
             const realizedPnl = tradeStats.sellTotalAmount
               - (tradeStats.originalBuyCost * tradeStats.sellTotalQty)
               - ((tradeStats.buyFee || 0) * buyRatio)
               - (tradeStats.sellFee || 0);
-            // 累计收益 = 已实现盈亏 + 浮动盈亏
             const cumulativePnl = realizedPnl + floatPnl;
             return (
               <div className="grid grid-cols-2 gap-2 mb-3">
@@ -1869,7 +1869,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                               onClick={() => {
                                 setUserSeedOverride(true);
                                 const _txType = record.type || record.direction || '';
-                                if (record.isSeed || record.id?.startsWith('seed-transfer-') || _txType === '快速过户') {
+                                if (record.isSeed || String(record.id || '').startsWith('seed-transfer-') || _txType === '快速过户') {
                                   localStorage.setItem('mf_000509_seed_user_modified', 'true');
                                 }
                                 const newRecords = tradeRecords.filter(r => r.id !== record.id);
@@ -1937,7 +1937,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                               onClick={() => {
                                 setUserSeedOverride(true);
                                 const _txType = record.type || record.direction || '';
-                                if (record.isSeed || record.id?.startsWith('seed-transfer-') || _txType === '快速过户') {
+                                if (record.isSeed || String(record.id || '').startsWith('seed-transfer-') || _txType === '快速过户') {
                                   localStorage.setItem('mf_000509_seed_user_modified', 'true');
                                 }
                                 const newRecords = tradeRecords.filter(r => r.id !== record.id);
@@ -4791,11 +4791,15 @@ export default function Finance({ onAssetPenetration }) {
       const _effectiveQty = isCash ? (parseFloat(a.shares || a.quantity) || _cashValue) : _qty;
       const _effectivePrice = isCash ? 1 : _price;
       const _costTotal = isCash ? (_cost * _effectiveQty) : (_cost * _effectiveQty);
-      // 货币基金：当前市值优先使用存储的 cost（与明细中列表持仓成本一致），回退到计算值
-      const _mfNavValue = _isMF ? (_effectivePrice * _effectiveQty) : 0;
+      // 货币基金：使用扣减手续费后的成本单价（与明细弹窗 DetailModal L737-L766 一致）
+      const _mfAdjCostPrice = _isMF ? (buyTotalQty > 0 ? (buyTotalAmount - buyFees) / buyTotalQty : (_storedCostPrice || 1)) : 0;
+      const _mfCostTotal = _isMF ? (_mfAdjCostPrice * _effectiveQty) : 0;
+      const _mfCurrentValue = _isMF ? (1 * _effectiveQty) : 0;
+      const _mfHoldingPnl = _isMF ? Math.round((_mfCurrentValue - _mfCostTotal) * 100) / 100 : 0;
+      const _mfHoldingPnlRate = _isMF ? (_mfCostTotal > 0 ? Math.round((_mfHoldingPnl / _mfCostTotal) * 100 * 100) / 100 : 0) : 0;
       const _currentValue = isCash
         ? (_effectiveQty * _effectivePrice)
-        : (_isMF ? (parseFloat(a.cost) || _costTotal) : (parseFloat(a.currentValue) || (_price * _effectiveQty)));
+        : (_isMF ? _mfCurrentValue : (parseFloat(a.currentValue) || (_price * _effectiveQty)));
 
       // 持仓盈亏 = (现价 * 份额) - (平均买入成本 * 份额)
       // 货币基金：直接同步明细弹窗中的存储字段（与明细完全一致）
@@ -4805,11 +4809,12 @@ export default function Finance({ onAssetPenetration }) {
       const _storedCumulativeReturn = a.cumulativeReturn != null ? parseFloat(a.cumulativeReturn) : NaN;
       const _isLegacyCum = _storedCumulativeReturn === 342.07;
       const _storedCumulativeReturnRate = a.cumulativeReturnRate != null ? parseFloat(a.cumulativeReturnRate) : NaN;
-      // 货币基金：存储值非0才使用（0 视为未初始化），与明细弹窗 storedHP && is000509 一致
-      const _useStoredMF = _isMF && _storedHoldingPnl && !isNaN(_storedHoldingPnl);
+      // 货币基金：为保证与明细弹窗完全一致，列表侧始终按明细公式实时计算
+      // 明细公式（L737-L766）：holdingPnl = currentValue - costTotal，其中 currentValue = 1 * qty，costTotal = (buyAmt-buyFee)/buyQty * qty
+      const _useStoredMF = false;
 
-      const _holdingPnl = isCash ? 0 : (_useStoredMF ? _storedHoldingPnl : Math.round((_isMF ? (_mfNavValue - _costTotal) : (_currentValue - _costTotal)) * 100) / 100);
-      const _holdingPnlRate = isCash ? 0 : (_useStoredMF && !isNaN(_storedHoldingPnlRate) ? _storedHoldingPnlRate : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0));
+      const _holdingPnl = isCash ? 0 : (_isMF ? _mfHoldingPnl : Math.round((_currentValue - _costTotal) * 100) / 100);
+      const _holdingPnlRate = isCash ? 0 : (_isMF ? _mfHoldingPnlRate : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0));
 
       // 累计收益 = 已实现卖出收益 + 持有收益(浮动) + 分红
       // 已实现盈亏 = 卖出金额 − 原始买入成本×卖出份额 − 买入费用(按比例分摊) − 卖出费用
@@ -4820,16 +4825,20 @@ export default function Finance({ onAssetPenetration }) {
       const _originalBuyCost = _effectiveBuyQty > 0 ? _effectiveBuyAmount / _effectiveBuyQty : 0;
       const _buyRatio = _effectiveBuyQty > 0 ? sellTotalQty / _effectiveBuyQty : 0;
       const _realizedPnl = sellTotalAmount - _originalBuyCost * sellTotalQty - buyFees * _buyRatio;
-      const _cumulativeReturn = isCash ? 0 : (_useStoredMF && !isNaN(_storedCumulativeReturn) && !_isLegacyCum ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100);
-      const _cumulativeReturnRate = isCash ? 0 : (_useStoredMF && !isNaN(_storedCumulativeReturnRate) && !_isLegacyCum ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0));
+      const _cumulativeReturn = isCash ? 0 : (_isMF
+        ? Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100
+        : (_useStoredMF && !isNaN(_storedCumulativeReturn) && !_isLegacyCum ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100));
+      const _cumulativeReturnRate = isCash ? 0 : (_isMF
+        ? (_mfCostTotal > 0 ? Math.round((_cumulativeReturn / _mfCostTotal) * 100 * 100) / 100 : 0)
+        : (_useStoredMF && !isNaN(_storedCumulativeReturnRate) && !_isLegacyCum ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0)));
 
       // —— 港股处理逻辑
       // 国内市场·港股通：用户输入价格已是CNY，无需转换；仅实时获取的行情价格（上方quotePrice处）按参考汇率折算
       // 港股市场·港股：不做任何货币转换，保留原始货币HKD
-      const _finalCostTotal = _costTotal;
+      const _finalCostTotal = _isMF ? _mfCostTotal : _costTotal;
       const _finalCurrentValue = isCash
         ? _cashValue
-        : (_isMF ? (parseFloat(a.cost) || _costTotal) : _currentValue);
+        : (_isMF ? _mfCurrentValue : _currentValue);
 
       // 港股通：显示货币为CNY（用户已输入CNY）；其他：使用原始货币（港股市场保持HKD）
       const _isHKConnectDisplay = isHKConnect && !isCash;
