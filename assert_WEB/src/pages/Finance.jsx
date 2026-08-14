@@ -4859,7 +4859,7 @@ export default function Finance({ onAssetPenetration }) {
       // 港股市场·港股：不做任何货币转换，保留原始货币HKD
       const _finalCostTotal = _isMF ? _mfCostTotal : _costTotal;
       const _finalCurrentValue = isCash
-        ? _cashValue
+        ? _currentValue
         : (_isMF ? _mfCurrentValue : _currentValue);
 
       // 港股通：显示货币为CNY（用户已输入CNY）；其他：使用原始货币（港股市场保持HKD）
