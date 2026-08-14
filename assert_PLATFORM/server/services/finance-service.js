@@ -61,6 +61,12 @@ function tencentCodeFor(code, market) {
   if (market === "us" || market === "美股市场" || market === "美股") {
     return "us" + code.replace(/^us/i, "").toUpperCase();
   }
+  // 纯字母代码（如 QQQ、TSLA、GLD、NVDA）按美股处理
+  // 国内/港股代码均为数字或 hk/sh/sz 前缀，纯字母只可能是美股代码
+  // 覆盖市场字段被误填为"国内市场"的美股标的（如 QQQ/TSLA/GLD）
+  if (/^[A-Za-z]{1,8}$/.test(code)) {
+    return "us" + code.toUpperCase();
+  }
   if (market === "domestic" || market === "国内市场" || market === "国内" || /^sh/i.test(code) || /^sz/i.test(code)) {
     const raw = code.replace(/^(sh|sz)/i, "");
     return /^[569]/.test(raw) ? "sh" + raw : "sz" + raw;
