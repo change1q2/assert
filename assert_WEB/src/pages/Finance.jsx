@@ -550,7 +550,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           records.forEach(t => {
             const qty = parseFloat(t.quantity || t.shares) || 0;
             const amount = parseFloat(t.amount) || 0;
-            const fee = parseFloat(t.commission || t.fee) || 0;
+            // 与列表和tradeStats保持一致：仅使用 t.fee 字段计算手续费
+            const fee = parseFloat(t.fee) || 0;
             if (!isNaN(fee)) totalFees += fee;
             const txType = t.type || t.direction || '';
             if (txType === '建仓' || txType === '买入') {
@@ -558,11 +559,10 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
               buyTotalAmount += amount;
               if (!isNaN(fee)) buyFees += fee;
             } else if (txType === '卖出' || txType === '清仓') {
-              // 注意：不包含"快速过户"，因为货基快速过户是转账不减少份额
               sellTotalQty += Math.abs(qty);
               sellTotalAmount += Math.abs(amount);
             } else if (txType === '快速过户' && !_isMF) {
-              // 非货币基金才计为卖出
+              // 非货币基金才计为卖出（与列表financeAccounts保持一致）
               sellTotalQty += Math.abs(qty);
               sellTotalAmount += Math.abs(amount);
             }
@@ -575,7 +575,9 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           // 摊薄成本法（券商口径）：平均成本 = (累计买入总金额 + 买入手续费 - 累计卖出总金额) / 当前数量
           const _netAmount = _effectiveBuyAmount + buyFees - sellTotalAmount;
           const _computedCostPrice = _computedQty > 0 ? Math.max(0, _netAmount) / _computedQty : _storedCostPrice;
-          const currentPrice = _isMF ? 1 : (parseFloat(item.currentPrice) || 0);
+          const currentPrice = _isMF
+            ? (item.priceManualEdit ? (parseFloat(item.currentPrice) || 1) : 1)
+            : (parseFloat(item.currentPrice) || 0);
           const shares = _computedQty;
           const costPrice = _computedCostPrice;
           const cost = costPrice * shares;
@@ -727,14 +729,16 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   const _quoteChangePct = _quote && _quote.changePct != null ? parseFloat(_quote.changePct) : null;
   const isUSMarket = latestData.market === '美股市场' || latestData.market === '美股';
   const _storedPrevPrice = parseFloat(latestData.prevPrice) || 0;
+  const isManualPriceEdit = latestData.priceManualEdit === true;
 
   const prevPrice = _isDetailMoneyFund
     ? (_quotePrevClose != null ? _quotePrevClose : (parseFloat(latestData.prevPrice) || 1))
-    : (_quotePrevClose != null ? _quotePrevClose : (parseFloat(latestData.prevPrice) || 0));
+    : (isManualPriceEdit ? (parseFloat(latestData.prevPrice) || 0) : (_quotePrevClose != null ? _quotePrevClose : (parseFloat(latestData.prevPrice) || 0)));
   // 货币基金现价恒为1（净值=1，万份收益是收益指标非价格）
+  // 手动编辑时使用编辑的价格
   const currentPrice = _isDetailMoneyFund
-    ? 1
-    : (_quotePrice != null ? _quotePrice : (parseFloat(latestData.currentPrice || costPrice) || 0));
+    ? (isManualPriceEdit ? (parseFloat(latestData.currentPrice || costPrice) || 1) : 1)
+    : (isManualPriceEdit ? (parseFloat(latestData.currentPrice || costPrice) || 0) : (_quotePrice != null ? _quotePrice : (parseFloat(latestData.currentPrice || costPrice) || 0)));
   const priceDate = latestData.priceDate || '';
 
   const savedCostTotal = parseFloat(latestData.cost) || 0;
@@ -782,18 +786,18 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     } else {
       computedDailyPnl = parseFloat(latestData.todayPnl) || 0;
     }
-  } else if (_quotePrice != null && _quotePrevClose != null && _quotePrevClose !== 0 && quantity > 0) {
+  } else if (!isManualPriceEdit && _quotePrice != null && _quotePrevClose != null && _quotePrevClose !== 0 && quantity > 0) {
     // 美股市场：当实时价等于昨收价（盘外时间），改用昨收价与前一日收盘价计算
     if (isUSMarket && Math.abs(_quotePrice - _quotePrevClose) < 0.0001 && _storedPrevPrice > 0) {
       computedDailyPnl = Math.round((_quotePrevClose - _storedPrevPrice) * quantity * 100) / 100;
     } else {
       computedDailyPnl = Math.round((_quotePrice - _quotePrevClose) * quantity * 100) / 100;
     }
-  } else if (_quotePrice != null && _quoteChangePct != null && quantity > 0) {
+  } else if (!isManualPriceEdit && _quotePrice != null && _quoteChangePct != null && quantity > 0) {
     // prevClose为0但changePct可用时，用changePct反推prevClose
     const _prevClose = _quotePrice / (1 + _quoteChangePct / 100);
     computedDailyPnl = Math.round((_quotePrice - _prevClose) * quantity * 100) / 100;
-  } else if (isUSMarket && _quotePrevClose != null && _quotePrevClose > 0 && _storedPrevPrice > 0 && quantity > 0) {
+  } else if (!isManualPriceEdit && isUSMarket && _quotePrevClose != null && _quotePrevClose > 0 && _storedPrevPrice > 0 && quantity > 0) {
     // 美股市场：price为空但prevClose可用，用prevClose和前一日收盘价计算
     computedDailyPnl = Math.round((_quotePrevClose - _storedPrevPrice) * quantity * 100) / 100;
   } else if (prevPrice > 0 && currentPrice > 0 && quantity > 0) {
@@ -803,7 +807,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   }
   const dailyPnl = _isDetailMoneyFund
     ? computedDailyPnl
-    : ((_quotePrice != null && (_quotePrevClose != null || _quoteChangePct != null)) || (isUSMarket && _quotePrevClose != null) ? computedDailyPnl : (parseFloat(latestData.dailyPnl) || computedDailyPnl));
+    : (isManualPriceEdit ? computedDailyPnl : ((_quotePrice != null && (_quotePrevClose != null || _quoteChangePct != null)) || (isUSMarket && _quotePrevClose != null) ? computedDailyPnl : (parseFloat(latestData.dailyPnl) || computedDailyPnl)));
 
   let computedDailyPnlRate = 0;
   if (_isDetailMoneyFund) {
@@ -813,14 +817,14 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     } else {
       computedDailyPnlRate = 0;
     }
-  } else if (_quoteChangePct != null) {
+  } else if (!isManualPriceEdit && _quoteChangePct != null) {
     // 美股市场：当实时价等于昨收价（盘外时间），changePct为0，改用昨收价与前一日收盘价计算
     if (isUSMarket && _quotePrice != null && _quotePrevClose != null && Math.abs(_quotePrice - _quotePrevClose) < 0.0001 && _storedPrevPrice > 0 && _quotePrevClose > 0) {
       computedDailyPnlRate = ((_quotePrevClose - _storedPrevPrice) / _storedPrevPrice) * 100;
     } else {
       computedDailyPnlRate = _quoteChangePct;
     }
-  } else if (isUSMarket && _quotePrevClose != null && _quotePrevClose > 0 && _storedPrevPrice > 0) {
+  } else if (!isManualPriceEdit && isUSMarket && _quotePrevClose != null && _quotePrevClose > 0 && _storedPrevPrice > 0) {
     // 美股市场：price为空但prevClose可用
     computedDailyPnlRate = ((_quotePrevClose - _storedPrevPrice) / _storedPrevPrice) * 100;
   } else if (Number.isFinite(parseFloat(latestData.dailyChangePct))) {
@@ -832,7 +836,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   }
   const dailyPnlRate = _isDetailMoneyFund
     ? computedDailyPnlRate
-    : ((_quoteChangePct != null || (isUSMarket && _quotePrevClose != null)) ? computedDailyPnlRate : (parseFloat(latestData.dailyPnlRate) || computedDailyPnlRate));
+    : (isManualPriceEdit ? computedDailyPnlRate : ((_quoteChangePct != null || (isUSMarket && _quotePrevClose != null)) ? computedDailyPnlRate : (parseFloat(latestData.dailyPnlRate) || computedDailyPnlRate)));
 
   const computedHoldingReturnRate = floatPnlRate;
 
@@ -866,11 +870,17 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
         sellTotalAmount += Math.abs(amount);
         sellTotalQty += Math.abs(qty);
         if (!isNaN(fee)) sellFee += fee;
+      } else if (rType === '快速过户') {
+        // 货基快速过户：转出/消费金额累计（货基快速过户是转账，不减少份额）
+        // 非货基快速过户：计为卖出（减少份额）
+        if (_isDetailMoneyFund) {
+          transferOutTotal += Math.abs(amount);
+        } else {
+          sellTotalAmount += Math.abs(amount);
+          sellTotalQty += Math.abs(qty);
+        }
       } else if (rType === '分红') {
         dividendTotal += amount;
-      } else if (rType === '快速过户') {
-        // 货基快速过户：转出/消费金额累计
-        transferOutTotal += Math.abs(amount);
       }
       if (!isNaN(fee)) {
         totalFee += fee;
@@ -3161,9 +3171,10 @@ export default function Finance({ onAssetPenetration }) {
         // 仅在 API 返回有效数据时更新
         if (newNav == null && newPrevNav == null) return a;
         changed = true;
+        const isManualPrice = a.priceManualEdit === true;
         return {
           ...a,
-          currentPrice: newNav != null ? String(newNav) : a.currentPrice,
+          currentPrice: isManualPrice ? a.currentPrice : (newNav != null ? String(newNav) : a.currentPrice),
           prevPrice: newPrevNav != null ? String(newPrevNav) : a.prevPrice,
           accumulatedNav: newAccNav != null ? newAccNav : a.accumulatedNav,
           priceDate: newDate,
@@ -3436,6 +3447,7 @@ export default function Finance({ onAssetPenetration }) {
         annualized7d: _annualized7d,
         dataSource: newAccount.dataSource || '',
         dataSources: newAccount.dataSources || [],
+        priceManualEdit: newAccount.priceManualEdit || false,
       };
 
       // 获取当前的 financeAssets 数组
@@ -3624,6 +3636,7 @@ export default function Finance({ onAssetPenetration }) {
       currency: holding.originalCurrency || holding.currency || '',
       assetKind: holding.assetKind || '',
       assetType: holding.assetType || '股票',
+      kind: holding.kind || holding.assetType || '',
       account: resolvedAccountValue,
       categoryL1: holding.categoryL1 || '',
       categoryL2: holding.categoryL2 || '',
@@ -3650,6 +3663,7 @@ export default function Finance({ onAssetPenetration }) {
       tags: holding.tags || '',
       dataSource: holding.dataSource || '',
       dataSources: holding.dataSources || [],
+      priceManualEdit: holding.priceManualEdit || false,
     });
     setEditMode(true);
     setEditingId(holding.id);
@@ -4207,6 +4221,7 @@ export default function Finance({ onAssetPenetration }) {
         currentValue: (qty && price) ? currentValue.toFixed(2) : prev.currentValue,
         holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : prev.holdingPnl,
         holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
+        priceManualEdit: false,
       };
     });
 
@@ -4228,6 +4243,7 @@ export default function Finance({ onAssetPenetration }) {
               currentValue: (qty && price) ? currentValue.toFixed(2) : prev.currentValue,
               holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : prev.holdingPnl,
               holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
+              priceManualEdit: false,
             };
           });
         } else if (/^\d{6}$/.test(String(item.code).trim())) {
@@ -4248,6 +4264,7 @@ export default function Finance({ onAssetPenetration }) {
                 currentValue: (qty && price) ? currentValue.toFixed(2) : prev.currentValue,
                 holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : prev.holdingPnl,
                 holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
+                priceManualEdit: false,
               };
             });
           }
@@ -4298,11 +4315,11 @@ export default function Finance({ onAssetPenetration }) {
     // 规则2：国内市场·权益类·基金
     if (m === '国内市场' && l1Key === '权益类' && at === '基金') {
       return {
-        l2Options: ['基金'],
-        l2Default: '基金',
-        l3Options: { '基金': ['场内', '场外'] },
-        l3Default: { '基金': '场内' },
-        l4Options: { '基金': { '场内': ['长期', '短期'], '场外': ['长期', '短期'] } },
+        l2Options: ['主动基金', '被动基金'],
+        l2Default: '主动基金',
+        l3Options: { '主动基金': ['场内', '场外'], '被动基金': ['场内', '场外'] },
+        l3Default: { '主动基金': '场内', '被动基金': '场内' },
+        l4Options: { '主动基金': { '场内': ['长期', '短期'], '场外': ['长期', '短期'] }, '被动基金': { '场内': ['长期', '短期'], '场外': ['长期', '短期'] } },
       };
     }
     // 规则1：国内市场·权益类·股票
@@ -4366,11 +4383,11 @@ export default function Finance({ onAssetPenetration }) {
     '基金': {
       l1Options: ['权益类'],
       l1Default: '权益类',
-      l2Options: { '权益类': ['A股'] },
-      l2Default: { '权益类': 'A股' },
-      l3Options: { '权益类': { 'A股': ['场内', '场外'] } },
-      l3Default: { '权益类': { 'A股': '场内' } },
-      l4Options: { '权益类': { 'A股': { '场内': ['长期', '短期'], '场外': ['长期', '短期'] } } }
+      l2Options: { '权益类': ['主动基金', '被动基金'] },
+      l2Default: { '权益类': '主动基金' },
+      l3Options: { '权益类': { '主动基金': ['场内', '场外'], '被动基金': ['场内', '场外'] } },
+      l3Default: { '权益类': { '主动基金': '场内', '被动基金': '场内' } },
+      l4Options: { '权益类': { '主动基金': { '场内': ['长期', '短期'], '场外': ['长期', '短期'] }, '被动基金': { '场内': ['长期', '短期'], '场外': ['长期', '短期'] } } }
     },
     '债券': {
       l1Options: ['债权类'],
@@ -4569,7 +4586,7 @@ export default function Finance({ onAssetPenetration }) {
     const positionType = newAccount.positionType || '';
     const name = newAccount.name || '';
     const kind = newAccount.kind || newAccount.assetType || '';
-    return catL2 === '货币型' || catL4 === '货币基金' || positionType === '货币基金' || name.includes('货币') || kind === '货基' || newAccount.code === '000509';
+    return catL2 === '货币型' || catL4 === '货币基金' || positionType === '货币基金' || name.includes('货币') || kind === '货基' || kind === '货币基金' || newAccount.code === '000509';
   }, [newAccount.categoryL2, newAccount.categoryL4, newAccount.positionType, newAccount.name, newAccount.kind, newAccount.assetType, newAccount.code]);
 
   // ── 动态资产分类（从 assetClasses 获取，无数据时降级使用默认值）──
@@ -4587,9 +4604,9 @@ export default function Finance({ onAssetPenetration }) {
     const at = newAccount.assetType || '';
     const l1 = newAccount.categoryL1 || '';
 
-    // 海外市场兜底（港股市场/美股市场场景）
-    if (market === '港股市场') return ['港股'];
-    if (market === '美股市场') return ['美股'];
+    // 海外市场兜底（港股市场/美股市场场景）- 基金类型仍使用主动/被动基金
+    if (market === '港股市场' && at !== '基金') return ['港股'];
+    if (market === '美股市场' && at !== '基金') return ['美股'];
 
     // 按 (市场, L1, 资产类型) 匹配规则 → 返回系统默认 L2
     const cascade = getCascadeFor(market, l1, at);
@@ -4720,9 +4737,10 @@ export default function Finance({ onAssetPenetration }) {
         if (navPer10k > 0 && qty > 0) {
           return Math.round((navPer10k * qty / 10000) * 100) / 100;
         }
-        // 回退：用 prevPrice/currentPrice 计算（货币基金净值恒为1）
+        // 回退：用 prevPrice/currentPrice 计算（货币基金净值恒为1，手动编辑时使用编辑值）
         const _prevPrice = parseFloat(a.prevPrice) || 0;
-        const _currPrice = 1; // 货币基金净值恒为1
+        const _isManualPrice = a.priceManualEdit === true;
+        const _currPrice = _isManualPrice ? (parseFloat(a.currentPrice) || 1) : 1;
         if (_prevPrice > 0 && qty > 0) {
           return Math.round((_currPrice - _prevPrice) * qty * 100) / 100;
         }
@@ -4731,7 +4749,8 @@ export default function Finance({ onAssetPenetration }) {
       const q = a.code && quotesMap[a.code] ? quotesMap[a.code] : null;
       const isUSMarket = a.market === '美股市场' || a.market === '美股';
       const _storedPrevPrice = parseFloat(a.prevPrice) || 0;
-      if (q && q.price != null && q.prevClose != null && q.prevClose !== 0) {
+      const isManualPrice = a.priceManualEdit === true;
+      if (!isManualPrice && q && q.price != null && q.prevClose != null && q.prevClose !== 0) {
         const qty = parseFloat(a.shares || a.quantity) || 0;
         // 美股市场：当实时价等于昨收价（盘外时间），改用昨收价与前一日收盘价计算
         if (isUSMarket && Math.abs(q.price - q.prevClose) < 0.0001 && _storedPrevPrice > 0) {
@@ -4740,13 +4759,13 @@ export default function Finance({ onAssetPenetration }) {
         return (q.price - q.prevClose) * qty;
       }
       // prevClose为0但changePct可用时，用changePct反推prevClose
-      if (q && q.price != null && q.changePct != null) {
+      if (!isManualPrice && q && q.price != null && q.changePct != null) {
         const qty = parseFloat(a.shares || a.quantity) || 0;
         const prevClose = q.price / (1 + q.changePct / 100);
         return (q.price - prevClose) * qty;
       }
       // 美股市场：price为空但prevClose可用，用prevClose和前一日收盘价(prevPrice)计算
-      if (isUSMarket && q && q.prevClose != null && q.prevClose > 0 && _storedPrevPrice > 0) {
+      if (!isManualPrice && isUSMarket && q && q.prevClose != null && q.prevClose > 0 && _storedPrevPrice > 0) {
         const qty = parseFloat(a.shares || a.quantity) || 0;
         return (q.prevClose - _storedPrevPrice) * qty;
       }
@@ -4775,7 +4794,8 @@ export default function Finance({ onAssetPenetration }) {
       const q = a.code && quotesMap[a.code] ? quotesMap[a.code] : null;
       const isUSMarket = a.market === '美股市场' || a.market === '美股';
       const _storedPrevPrice = parseFloat(a.prevPrice) || 0;
-      if (q && q.changePct != null) {
+      const isManualPrice = a.priceManualEdit === true;
+      if (!isManualPrice && q && q.changePct != null) {
         // 美股市场：当实时价等于昨收价（盘外时间），changePct为0，改用昨收价与前一日收盘价计算
         if (isUSMarket && q.price != null && q.prevClose != null && Math.abs(q.price - q.prevClose) < 0.0001 && _storedPrevPrice > 0 && q.prevClose > 0) {
           return ((q.prevClose - _storedPrevPrice) / _storedPrevPrice) * 100;
@@ -4783,7 +4803,7 @@ export default function Finance({ onAssetPenetration }) {
         return q.changePct;
       }
       // 美股市场：price为空但prevClose可用
-      if (isUSMarket && q && q.prevClose != null && q.prevClose > 0 && _storedPrevPrice > 0) {
+      if (!isManualPrice && isUSMarket && q && q.prevClose != null && q.prevClose > 0 && _storedPrevPrice > 0) {
         return ((q.prevClose - _storedPrevPrice) / _storedPrevPrice) * 100;
       }
       const _prevPrice = _storedPrevPrice;
@@ -4805,7 +4825,9 @@ export default function Finance({ onAssetPenetration }) {
       const _isMF = _isMoneyFund(a);
       const _market = a.market || '国内市场';
       const _currency = a.currency || 'CNY';
-      // 国内市场·港股通：自动获取的行情价格为港币，需按参考汇率折算为人民币（成本用sellRef，市值用buyRef）
+      // 国内市场·港股通：自动获取的行情价格为港币，需按参考汇率折算为人民币
+      // 成本用sellReferenceRate（买入结算汇率 = 中间价 × 1.03）
+      // 市值/现价用中间价mid（资产估值不扣除买卖价差）
       // 港股市场·港股：不做任何转换，直接使用原始货币
       const isHKConnect = _market === '国内市场' && (
         a.categoryL2 === '港股通' || (a.subcategory || a.categoryL3) === '港股通'
@@ -4816,11 +4838,11 @@ export default function Finance({ onAssetPenetration }) {
       if (isHKConnect) {
         if (hkConnectRate) {
           _hkConnectCostFactor = hkConnectRate.sellReferenceRate || (hkConnectRate.mid * 1.03);
-          _hkConnectValueFactor = hkConnectRate.buyReferenceRate || (hkConnectRate.mid * 0.97);
+          _hkConnectValueFactor = hkConnectRate.mid || hkConnectRate.buyReferenceRate || (hkConnectRate.mid * 0.97);
         } else {
           const hkdDefault = exchangeRates.HKD || 0.86;
           _hkConnectCostFactor = hkdDefault * 1.03;
-          _hkConnectValueFactor = hkdDefault * 0.97;
+          _hkConnectValueFactor = hkdDefault;
         }
       }
       // 从 quotesMap 取到的实时行情：港股通时转换成 CNY，其他情况直接使用
@@ -4829,11 +4851,12 @@ export default function Finance({ onAssetPenetration }) {
       const _quotePrice = (isHKConnect && _quoteRawPrice) ? (_quoteRawPrice * _hkConnectValueFactor) : _quoteRawPrice;
       const _quotePrevClose = (isHKConnect && _quoteRawPrevClose) ? (_quoteRawPrevClose * _hkConnectValueFactor) : _quoteRawPrevClose;
 
-      // 货币基金：现价默认为1（货币基金每份净值1元）
+      // 货币基金：现价默认为1（货币基金每份净值1元），手动编辑时使用编辑值
+      const _isManualPrice = a.priceManualEdit === true;
       const _price = _isMF
-        ? 1  // 货币基金净值恒为1，避免被万份收益覆盖
-        : (_quotePrice || parseFloat(a.currentPrice) || 0);
-      const _prevClose = _quotePrevClose || parseFloat(a.prevPrice) || (_isMF ? 1 : 0);
+        ? (_isManualPrice ? (parseFloat(a.currentPrice) || 1) : 1)
+        : (_isManualPrice ? (parseFloat(a.currentPrice) || 0) : (_quotePrice || parseFloat(a.currentPrice) || 0));
+      const _prevClose = _isManualPrice ? (parseFloat(a.prevPrice) || 0) : (_quotePrevClose || parseFloat(a.prevPrice) || (_isMF ? 1 : 0));
       const _priceChange = _price > _prevClose ? 'up' : _price < _prevClose ? 'down' : 'unchanged';
 
       // 从交易明细动态计算持仓数据
@@ -4848,7 +4871,8 @@ export default function Finance({ onAssetPenetration }) {
       transactions.forEach(t => {
         const qty = parseFloat(t.quantity || t.shares) || 0;
         const amount = parseFloat(t.amount) || 0;
-        const fee = parseFloat(t.commission || t.fee) || 0;
+        // 与DetailModal tradeStats保持一致：仅使用 t.fee 字段计算手续费
+        const fee = parseFloat(t.fee) || 0;
         if (!isNaN(fee)) totalFees += fee;
         const txType = t.type || t.direction || '';
         if (txType === '建仓' || txType === '买入') {
@@ -4856,7 +4880,6 @@ export default function Finance({ onAssetPenetration }) {
           buyTotalAmount += amount;
           if (!isNaN(fee)) buyFees += fee;
         } else if (txType === '卖出' || txType === '清仓') {
-          // 货币基金的"快速过户"是转账，不减少份额，不在此处计入卖出
           sellTotalQty += Math.abs(qty);
           sellTotalAmount += Math.abs(amount);
         } else if (txType === '快速过户' && !_isMF) {
@@ -4902,7 +4925,9 @@ export default function Finance({ onAssetPenetration }) {
       // 货币基金：使用扣减手续费后的成本单价（与明细弹窗 DetailModal L737-L766 一致）
       const _mfAdjCostPrice = _isMF ? (buyTotalQty > 0 ? (buyTotalAmount - buyFees) / buyTotalQty : (_storedCostPrice || 1)) : 0;
       const _mfCostTotal = _isMF ? (_mfAdjCostPrice * _effectiveQty) : 0;
-      const _mfCurrentValue = _isMF ? (1 * _effectiveQty) : 0;
+      // 货币基金：手动编辑时使用编辑的价格计算市值，否则净值恒为1
+      const _mfPrice = _isMF ? (_isManualPrice ? _price : 1) : 0;
+      const _mfCurrentValue = _isMF ? (_mfPrice * _effectiveQty) : 0;
       const _mfHoldingPnl = _isMF ? Math.round((_mfCurrentValue - _mfCostTotal) * 100) / 100 : 0;
       const _mfHoldingPnlRate = _isMF ? (_mfCostTotal > 0 ? Math.round((_mfHoldingPnl / _mfCostTotal) * 100 * 100) / 100 : 0) : 0;
       const _currentValue = isCash
@@ -4987,7 +5012,7 @@ export default function Finance({ onAssetPenetration }) {
         priceDate: a.priceDate || '',
         prevClose: _prevClose,
         priceChange: _priceChange,
-        avgBuyPrice: a.avgBuyPrice || 0,
+        avgBuyPrice: isCash ? 1 : _cost,
         holdingDays: computeHoldingDays(a),
         balance: _finalCurrentValue,
         currentValue: _finalCurrentValue,
@@ -5077,8 +5102,9 @@ export default function Finance({ onAssetPenetration }) {
     financeAccounts.forEach(a => {
       const cat = a.categoryL1 || a.category || '其他';
       if (!categorizedHoldings[cat]) categorizedHoldings[cat] = [];
-      const _price = parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0;
-      const _prevClose = parseFloat(quotesMap[a.code]?.prevClose) || parseFloat(a.prevPrice) || 0;
+      const _isManual = a.priceManualEdit === true;
+      const _price = _isManual ? (parseFloat(a.currentPrice) || 0) : (parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0);
+      const _prevClose = _isManual ? (parseFloat(a.prevPrice) || 0) : (parseFloat(quotesMap[a.code]?.prevClose) || parseFloat(a.prevPrice) || 0);
       const _priceChange = _price > _prevClose ? 'up' : _price < _prevClose ? 'down' : 'unchanged';
       const _qty = parseFloat(a.quantity) || 0;
       categorizedHoldings[cat].push({
@@ -5101,7 +5127,7 @@ export default function Finance({ onAssetPenetration }) {
         priceDate: a.priceDate || '',
         prevClose: _prevClose,
         priceChange: _priceChange,
-        avgBuyPrice: a.avgBuyPrice || 0,
+        avgBuyPrice: a.avgBuyPrice || (a.costPrice || 0),
         holdingDays: computeHoldingDays(a),
         balance: a.currentValue || (_price * _qty),
         currentValue: a.currentValue || (_price * _qty),
@@ -5999,6 +6025,7 @@ export default function Finance({ onAssetPenetration }) {
                                 currentValue: currentValue ? currentValue.toFixed(2) : p.currentValue,
                                 holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : p.holdingPnl,
                                 holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : p.holdingPnlRate,
+                                priceManualEdit: true,
                               };
                             });
                           }} placeholder="搜索资产自动获取，或手动输入"
@@ -6017,7 +6044,7 @@ export default function Finance({ onAssetPenetration }) {
                       )}
 
                       {/* 港股货基数据源选择 — 仅港股市场+货基时显示 */}
-                      {isNewMoneyFund && newAccount.market === '港股市场' && (
+                      {isNewMoneyFund && (newAccount.market === '港股市场' || newAccount.market === '港股') && (
                         <>
                           <FormField label="数据源" markRequired>
                             <select

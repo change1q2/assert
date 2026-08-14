@@ -1698,8 +1698,9 @@ export default function Accounts() {
         // 数量始终使用实际数量，不能用 currentValue 覆盖
         const _effectiveQty = _qty;
         const _quotePrice = parseFloat(quotesMap[a.code]?.price) || 0;
+        const _isManualPrice = a.priceManualEdit === true;
         // 允许现金类资产使用用户输入的价格，不再强制设为1
-        const _effectivePrice = _quotePrice || parseFloat(a.currentPrice) || 0;
+        const _effectivePrice = _isManualPrice ? (parseFloat(a.currentPrice) || 0) : (_quotePrice || parseFloat(a.currentPrice) || 0);
 
         const _unitCost = _costPrice;
         const _totalCost = _unitCost * _effectiveQty;
@@ -1710,7 +1711,7 @@ export default function Accounts() {
 
         // 使用行情数据中的 prevClose（昨收价）判断涨跌颜色，优先级：行情prevClose > 存储prevPrice
         const _quotePrevClose = parseFloat(quotesMap[a.code]?.prevClose) || 0;
-        const _prevPrice = _quotePrevClose > 0 ? _quotePrevClose : (parseFloat(a.prevPrice) || 0);
+        const _prevPrice = _isManualPrice ? (parseFloat(a.prevPrice) || 0) : (_quotePrevClose > 0 ? _quotePrevClose : (parseFloat(a.prevPrice) || 0));
         const _dailyPnl = isCash ? 0 : ((_prevPrice > 0 && _effectivePrice > 0)
           ? (_effectivePrice - _prevPrice) * _effectiveQty
           : (parseFloat(a.todayPnl) || parseFloat(a.dailyPnl) || 0));

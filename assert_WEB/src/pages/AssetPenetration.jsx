@@ -948,7 +948,8 @@ export default function AssetPenetration({ onBack }) {
 
   const financeAccounts = useMemo(() => {
     return (financeAssets || []).map(a => {
-      const _price = parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0;
+      const _isManualPrice = a.priceManualEdit === true;
+      const _price = _isManualPrice ? (parseFloat(a.currentPrice) || 0) : (parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0);
       const _cost = parseFloat(a.costPrice || a.cost) || 0;
       const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
       // currentValue：优先实时价格计算，价格无效时回退到原始 currentValue
@@ -963,9 +964,9 @@ export default function AssetPenetration({ onBack }) {
       // 3) 最后回退到资产字段 todayPnl / dailyPnl
       let _dailyPnl = 0;
       const _quote = quotesMap[a.code];
-      if (_quote && _quote.price != null && _quote.prevClose != null && _quote.prevClose !== 0) {
+      if (!_isManualPrice && _quote && _quote.price != null && _quote.prevClose != null && _quote.prevClose !== 0) {
         _dailyPnl = (parseFloat(_quote.price) - parseFloat(_quote.prevClose)) * _qty;
-      } else if (_quote && _quote.price != null && _quote.changePct != null) {
+      } else if (!_isManualPrice && _quote && _quote.price != null && _quote.changePct != null) {
         const _prevClose = parseFloat(_quote.price) / (1 + parseFloat(_quote.changePct) / 100);
         _dailyPnl = (parseFloat(_quote.price) - _prevClose) * _qty;
       } else {
