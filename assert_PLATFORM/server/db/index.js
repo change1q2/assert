@@ -33,6 +33,18 @@ const schemaSql = fs.readFileSync(path.resolve(__dirname, "..", "schema.sql"), "
 const initDb = pool.query(schemaSql).then(async () => {
   await runMigrations(pool);
   console.log("MySQL schema initialized");
+
+  const { startPriceSync } = await import("../services/price-sync.js");
+  const enabled = process.env.PRICE_SYNC_ENABLED !== "0";
+  const intervalMs = Number(process.env.PRICE_SYNC_INTERVAL_MS || 60000);
+  if (enabled) {
+    startPriceSync(pool, {
+      intervalMs,
+      runOnStart: process.env.PRICE_SYNC_RUN_ON_START !== "0",
+    });
+  } else {
+    console.log("Price sync disabled via PRICE_SYNC_ENABLED=0");
+  }
 }).catch((err) => {
   console.error("Failed to initialize MySQL schema:", err.message);
   process.exit(1);
