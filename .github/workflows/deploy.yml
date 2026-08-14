@@ -21,6 +21,11 @@ jobs:
           script: |
             set -e
             export PATH=/usr/local/lighthouse/softwares/nodejs/node/bin:$PATH
+            echo "=== node version ==="
+            node --version
+            which node
+            echo "=== fetch availability test ==="
+            node -e "console.log('global fetch:', typeof fetch)"
             cd /opt/asset-platform
             echo "=== git info ==="
             git fetch origin main
