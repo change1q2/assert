@@ -390,7 +390,7 @@ export default function IndependentAssets() {
     setEquityShowLookupDropdown(true);
     equityLookupTimerRef.current = setTimeout(async () => {
       try {
-        const results = await lookupFinance(q.trim());
+        const results = await lookupFinance(q.trim(), formData.market);
         setEquityLookupResults(results);
       } catch (e) {
         console.error('Equity lookup failed:', e);

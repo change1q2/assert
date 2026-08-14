@@ -4104,7 +4104,7 @@ export default function Finance({ onAssetPenetration }) {
     setShowLookupDropdown(true);
     lookupTimerRef.current = setTimeout(async () => {
       try {
-        let results = await lookupFinance(q.trim());
+        let results = await lookupFinance(q.trim(), newAccount.market);
         // 货基/货币基金选中时：过滤掉股票数据，只保留基金类
         const isMoneyFundType = newAccount.assetType === '货基' || newAccount.positionType === '货币基金';
         if (isMoneyFundType) {
@@ -4249,6 +4249,26 @@ export default function Finance({ onAssetPenetration }) {
         l4Options: { 'A股': { '场内': ['长期', '短期'], '场外': ['长期', '短期'] }, '港股通': { '场内': ['长期', '短期'], '场外': ['长期', '短期'] } },
       };
     }
+    // 规则1b：港股市场·权益类·股票
+    if ((m === '港股市场' || m === '港股') && l1Key === '权益类' && at === '股票') {
+      return {
+        l2Options: ['港股'],
+        l2Default: '港股',
+        l3Options: { '港股': ['场内', '场外'] },
+        l3Default: { '港股': '场内' },
+        l4Options: { '港股': { '场内': ['长期', '短期'], '场外': ['长期', '短期'] } },
+      };
+    }
+    // 规则1c：美股市场·权益类·股票
+    if ((m === '美股市场' || m === '美股') && l1Key === '权益类' && at === '股票') {
+      return {
+        l2Options: ['美股'],
+        l2Default: '美股',
+        l3Options: { '美股': ['场内', '场外'] },
+        l3Default: { '美股': '场内' },
+        l4Options: { '美股': { '场内': ['长期', '短期'], '场外': ['长期', '短期'] } },
+      };
+    }
     // 其他场景：按 CASCADE_OPTIONS 通用配置（兼容历史资产类型）
     const base = CASCADE_OPTIONS[at];
     if (!base) return null;
@@ -4273,9 +4293,9 @@ export default function Finance({ onAssetPenetration }) {
       l1Default: '权益类',
       l2Options: { '权益类': ['A股', '港股', '美股'], '分红类': ['A股'] },
       l2Default: { '权益类': 'A股', '分红类': 'A股' },
-      l3Options: { '权益类': { 'A股': ['场内'] }, '分红类': { 'A股': ['场内'] } },
-      l3Default: { '权益类': { 'A股': '场内' }, '分红类': { 'A股': '场内' } },
-      l4Options: { '权益类': { 'A股': { '场内': ['长期', '短期'] } }, '分红类': { 'A股': { '场内': ['吃息'] } } }
+      l3Options: { '权益类': { 'A股': ['场内'], '港股': ['场内'], '美股': ['场内'] }, '分红类': { 'A股': ['场内'] } },
+      l3Default: { '权益类': { 'A股': '场内', '港股': '场内', '美股': '场内' }, '分红类': { 'A股': '场内' } },
+      l4Options: { '权益类': { 'A股': { '场内': ['长期', '短期'] }, '港股': { '场内': ['长期', '短期'] }, '美股': { '场内': ['长期', '短期'] } }, '分红类': { 'A股': { '场内': ['吃息'] } } }
     },
     '基金': {
       l1Options: ['权益类'],
@@ -5492,7 +5512,11 @@ export default function Finance({ onAssetPenetration }) {
                       else if (market === '港股市场') currency = 'HKD';
                       else if (market === '美股市场') currency = 'USD';
 
-                      setNewAccount({ ...newAccount, market, currency });
+                      // 切换市场时重新计算级联选项
+                      const cascade = getCascadeFor(market, newAccount.categoryL1, newAccount.assetType);
+                      const l2 = cascade?.l2Default || '';
+                      const l3 = (cascade?.l3Default && cascade.l3Default[l2]) ? cascade.l3Default[l2] : '';
+                      setNewAccount({ ...newAccount, market, currency, categoryL2: l2, categoryL3: l3, categoryL4: '' });
                     }}
                       className={FORM_SELECT}>
                       {MARKET_GROUPS.map(g => (

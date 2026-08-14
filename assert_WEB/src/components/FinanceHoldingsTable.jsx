@@ -21,6 +21,7 @@ import {
 } from './FinanceHoldingsTable.utils';
 import { HoldingsSummaryCard, Pagination } from './FinanceHoldingsTable.subcomponents';
 import sanitizeText from '../utils/sanitizeText';
+import { CURRENCIES, getCurrencyName } from '../utils/currency';
 
 export default function FinanceHoldingsTable({
   readOnly = false,
@@ -101,6 +102,7 @@ export default function FinanceHoldingsTable({
   const filterSettingsRef = useRef(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showBatchEdit, setShowBatchEdit] = useState(false);
+  const [totalCurrency, setTotalCurrency] = useState(selectedCurrency || 'CNY');
   const [savedFilters, setSavedFilters] = useState(() => {
     try {
       const saved = localStorage.getItem(`${storagePrefix}saved_filters`);
@@ -615,7 +617,7 @@ export default function FinanceHoldingsTable({
   const mfVisibleColumns = useMemo(() => MONEY_FUND_COLUMNS.filter(c => c.visible), []);
 
   const mfSummary = useMemo(() => {
-    const target = selectedCurrency || 'CNY';
+    const target = totalCurrency || selectedCurrency || 'CNY';
     const totalValue = moneyFundItems.reduce((s, h) => {
       const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
       const currency = h.currency || 'CNY';
@@ -643,10 +645,10 @@ export default function FinanceHoldingsTable({
       cumulative: totalCumulative,
       pnlRate: totalCost > 0 ? (totalValue - totalCost) / totalCost * 100 : 0,
     };
-  }, [moneyFundItems, exchangeRates, selectedCurrency]);
+  }, [moneyFundItems, exchangeRates, totalCurrency, selectedCurrency]);
 
   const summary = useMemo(() => {
-    const target = selectedCurrency || 'CNY';
+    const target = totalCurrency || selectedCurrency || 'CNY';
     const totalValue = paged.reduce((s, h) => {
       const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
       const currency = h.currency || 'CNY';
@@ -675,10 +677,10 @@ export default function FinanceHoldingsTable({
       dailyPnl: totalDailyPnl,
       dailyPnlRate: totalValue > 0 ? (totalDailyPnl / totalValue) * 100 : 0,
     };
-  }, [paged, exchangeRates, selectedCurrency]);
+  }, [paged, exchangeRates, totalCurrency, selectedCurrency]);
 
   const filteredSummary = useMemo(() => {
-    const target = selectedCurrency || 'CNY';
+    const target = totalCurrency || selectedCurrency || 'CNY';
     if (categoryName === 'archived') {
       const totalFinalPnl = paged.reduce((sum, a) => {
         const pnl = parseFloat(a.finalPnl) || 0;
@@ -726,7 +728,7 @@ export default function FinanceHoldingsTable({
         totalDailyPnlRate: totalMarketValue > 0 ? (totalDailyPnl / totalMarketValue) * 100 : 0,
       };
     }
-  }, [paged, exchangeRates, categoryName, financeAccounts, selectedCurrency]);
+  }, [paged, exchangeRates, categoryName, financeAccounts, totalCurrency, selectedCurrency]);
 
   const showCheckboxCol = !readOnly && showBatchEdit;
   const showOpsCol = !readOnly;
@@ -737,7 +739,7 @@ export default function FinanceHoldingsTable({
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700">
       {filtered.length > 0 && (
-        <HoldingsSummaryCard summary={filteredSummary} selectedCurrency={selectedCurrency} exchangeRates={exchangeRates} categoryName={categoryName} />
+        <HoldingsSummaryCard summary={filteredSummary} selectedCurrency={totalCurrency || selectedCurrency} exchangeRates={exchangeRates} categoryName={categoryName} />
       )}
 
       <div className="p-4 pb-3 space-y-2.5">
@@ -1282,7 +1284,18 @@ export default function FinanceHoldingsTable({
                     if (idx === 0) {
                       return (
                         <td key={col.key} className="py-2 px-1.5 text-xs text-emerald-700/70 dark:text-emerald-400/70">
-                          合计 ({moneyFundItems.length}只)
+                          <div className="flex items-center gap-2">
+                            <span>合计 ({moneyFundItems.length}只)</span>
+                            <select
+                              value={totalCurrency}
+                              onChange={(e) => setTotalCurrency(e.target.value)}
+                              className="text-xs border border-emerald-300 dark:border-emerald-700 rounded px-1 py-0.5 bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 cursor-pointer focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            >
+                              {CURRENCIES.map(c => (
+                                <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+                              ))}
+                            </select>
+                          </div>
                         </td>
                       );
                     }
@@ -1293,7 +1306,7 @@ export default function FinanceHoldingsTable({
                     if (col.key === 'currentValue') {
                       return (
                         <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
-                          {formatCurrencyWithRate(mfSummary.value, selectedCurrency || 'CNY', selectedCurrency, exchangeRates)}
+                          {formatCurrencyWithRate(mfSummary.value, totalCurrency, totalCurrency, exchangeRates)}
                         </td>
                       );
                     }
@@ -1301,8 +1314,8 @@ export default function FinanceHoldingsTable({
                       return (
                         <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(mfSummary.cumulative)}`}>
                           {pnlSign(mfSummary.cumulative)}
-                          {formatCurrencyWithRate(mfSummary.cumulative, selectedCurrency || 'CNY', selectedCurrency, exchangeRates)
-                            .replace(getCurrencySymbol(selectedCurrency), '')}
+                          {formatCurrencyWithRate(mfSummary.cumulative, totalCurrency, totalCurrency, exchangeRates)
+                            .replace(getCurrencySymbol(totalCurrency), '')}
                         </td>
                       );
                     }
@@ -1310,8 +1323,8 @@ export default function FinanceHoldingsTable({
                       return (
                         <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(mfSummary.pnl)}`}>
                           {pnlSign(mfSummary.pnl)}
-                          {formatCurrencyWithRate(mfSummary.pnl, selectedCurrency || 'CNY', selectedCurrency, exchangeRates)
-                            .replace(getCurrencySymbol(selectedCurrency), '')}
+                          {formatCurrencyWithRate(mfSummary.pnl, totalCurrency, totalCurrency, exchangeRates)
+                            .replace(getCurrencySymbol(totalCurrency), '')}
                         </td>
                       );
                     }
@@ -1330,7 +1343,7 @@ export default function FinanceHoldingsTable({
                         return s + (isNaN(cp) ? (parseFloat(h.cost) || 0) : cp * q);
                       }, 0);
                       const avg = qty > 0 ? costBase / qty : 1;
-                      return <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">{formatCurrencyWithRate(avg, selectedCurrency || 'CNY', selectedCurrency, exchangeRates)}</td>;
+                      return <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">{formatCurrencyWithRate(avg, totalCurrency, totalCurrency, exchangeRates)}</td>;
                     }
                     return <td key={col.key} className="py-2 px-1.5"></td>;
                   })}
@@ -1474,11 +1487,22 @@ export default function FinanceHoldingsTable({
                         key={col.key}
                         className="py-2 px-1.5 text-xs text-gray-500"
                       >
-                        合计 ({otherItems.length}项)
+                        <div className="flex items-center gap-2">
+                          <span>合计 ({otherItems.length}项)</span>
+                          <select
+                            value={totalCurrency}
+                            onChange={(e) => setTotalCurrency(e.target.value)}
+                            className="text-xs border border-gray-300 dark:border-slate-600 rounded px-1 py-0.5 bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          >
+                            {CURRENCIES.map(c => (
+                              <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+                            ))}
+                          </select>
+                        </div>
                       </td>
                     );
                   }
-                  const target = selectedCurrency || 'CNY';
+                  const target = totalCurrency || selectedCurrency || 'CNY';
                   if (col.key === 'cost') {
                     const otherCost = otherItems.reduce((s, h) => {
                       const cost = parseFloat(h.cost) || 0;
@@ -1487,7 +1511,7 @@ export default function FinanceHoldingsTable({
                     }, 0);
                     return (
                       <td key={col.key} className="py-2 px-1.5 text-right tabular-nums">
-                        {formatCurrencyWithRate(otherCost, target, selectedCurrency, exchangeRates)}
+                        {formatCurrencyWithRate(otherCost, target, target, exchangeRates)}
                       </td>
                     );
                   }
@@ -1499,7 +1523,7 @@ export default function FinanceHoldingsTable({
                     }, 0);
                     return (
                       <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
-                        {formatCurrencyWithRate(otherValue, target, selectedCurrency, exchangeRates)}
+                        {formatCurrencyWithRate(otherValue, target, target, exchangeRates)}
                       </td>
                     );
                   }
@@ -1511,7 +1535,7 @@ export default function FinanceHoldingsTable({
                     }, 0);
                     return (
                       <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(otherPnl)}`}>
-                        {pnlSign(otherPnl)}{formatCurrencyWithRate(otherPnl, target, selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+                        {pnlSign(otherPnl)}{formatCurrencyWithRate(otherPnl, target, target, exchangeRates).replace(getCurrencySymbol(target), '')}
                       </td>
                     );
                   }
@@ -1541,7 +1565,7 @@ export default function FinanceHoldingsTable({
                     }, 0);
                     return (
                       <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums font-semibold ${pnlClass(otherDaily)}`}>
-                        {pnlSign(otherDaily)}{formatCurrencyWithRate(otherDaily, target, selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+                        {pnlSign(otherDaily)}{formatCurrencyWithRate(otherDaily, target, target, exchangeRates).replace(getCurrencySymbol(target), '')}
                       </td>
                     );
                   }

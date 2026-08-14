@@ -82,8 +82,11 @@ function tencentCodeFor(code, market) {
 // 当所有数据源都取不到有效价格时，回退使用上一次保留的不为0的数据
 const lastValidQuotesCache = new Map();
 
-async function lookupSecurities(q) {
+async function lookupSecurities(q, market) {
   const normalizedQuery = q.trim().toUpperCase();
+  const normalizedMarket = String(market || '').toLowerCase();
+  const isHKMarket = normalizedMarket === 'hk' || normalizedMarket === '港股市场' || normalizedMarket === '港股';
+  const isUSMarket = normalizedMarket === 'us' || normalizedMarket === '美股市场' || normalizedMarket === '美股';
   const localInstruments = [
     { code: "XAU", name: "现货黄金", classify: "Commodity", typeName: "贵金属", marketType: "overseas", mktNum: "" },
     { code: "XAG", name: "现货白银", classify: "Commodity", typeName: "贵金属", marketType: "overseas", mktNum: "" },
@@ -120,8 +123,17 @@ async function lookupSecurities(q) {
       }
     }
     const rows = searchData?.QuotationCodeTable?.Data || [];
+    // 根据市场类型过滤搜索结果
+    let filteredClassifies = ["AStock", "OTCFUND", "ETF", "Index", "HK", "UsStock", "UsADR"];
+    if (isHKMarket) {
+      // 港股市场：只保留港股和美股，过滤掉A股
+      filteredClassifies = ["HK", "UsStock", "UsADR", "OTCFUND", "ETF"];
+    } else if (isUSMarket) {
+      // 美股市场：只保留美股
+      filteredClassifies = ["UsStock", "UsADR"];
+    }
     const items = rows
-      .filter((r) => ["AStock", "OTCFUND", "ETF", "Index", "HK", "UsStock", "UsADR"].includes(r.Classify))
+      .filter((r) => filteredClassifies.includes(r.Classify))
       .slice(0, 8)
       .map((r) => ({
         code: r.Code,
@@ -138,7 +150,7 @@ async function lookupSecurities(q) {
 
     // 补充：若东方财富搜索无结果/不足且输入是纯6位数字，直接查腾讯接口获取名称
     const trimmedQ = q.trim();
-    if (items.length < 3 && /^\d{6}$/.test(trimmedQ)) {
+    if (items.length < 3 && /^\d{6}$/.test(trimmedQ) && !isHKMarket && !isUSMarket) {
       try {
         const tencentSearchCodes = [`sh${trimmedQ}`, `sz${trimmedQ}`];
         const tsUrl = `http://qt.gtimg.cn/q=${tencentSearchCodes.join(",")}`;
@@ -278,7 +290,7 @@ async function lookupSecurities(q) {
     }
 
     // 同花顺(10jqka) fallback：当东方财富搜索结果不足且为纯6位代码时，用同花顺接口补充名称和价格
-    if (items.length < 3 && /^\d{6}$/.test(trimmedQ)) {
+    if (items.length < 3 && /^\d{6}$/.test(trimmedQ) && !isHKMarket && !isUSMarket) {
       try {
         const thsCode = thsCodeFor(trimmedQ);
         if (thsCode) {
@@ -318,7 +330,7 @@ async function lookupSecurities(q) {
     }
 
     // Ashare/akshare style fallback：当东方财富搜索无结果时，尝试新浪行情接口验证 A 股代码
-    if (items.length === 0 && /^\d{6}$/.test(trimmedQ)) {
+    if (items.length === 0 && /^\d{6}$/.test(trimmedQ) && !isHKMarket && !isUSMarket) {
       try {
         const tencentSearchCodes = [`sh${trimmedQ}`, `sz${trimmedQ}`];
         const akUrl = `http://qt.gtimg.cn/q=${tencentSearchCodes.join(",")}`;
@@ -350,6 +362,35 @@ async function lookupSecurities(q) {
               changeAmt: parseFloat(parts[31]) || null,
             });
           }
+        }
+      } catch (_) { }
+    }
+
+    // 港股市场专用搜索：当东方财富搜索无结果且为港股市场时，尝试港股专用接口
+    if (isHKMarket && items.length === 0) {
+      try {
+        const hkCode = String(q).trim().padStart(5, '0');
+        const hkUrl = `https://push2.eastmoney.com/api/qt/stock/get?secid=116.${hkCode}&fields=f43,f44,f45,f47,f57,f58,f60,f169,f170`;
+        const hkRes = await fetch(hkUrl, {
+          headers: { "User-Agent": "Mozilla/5.0" },
+          signal: AbortSignal.timeout(6000),
+        });
+        const hkData = (await hkRes.json())?.data;
+        if (hkData && Number.isFinite(Number(hkData.f43))) {
+          const scaled = (value) => Number.isFinite(Number(value)) ? Number(value) / 100 : null;
+          items.push({
+            code: String(q).trim(),
+            name: hkData.f58 || String(q).trim(),
+            classify: "HK",
+            typeName: "港股",
+            marketType: "hk",
+            mktNum: "116",
+            jys: "HKEX",
+            price: scaled(hkData.f43),
+            prevClose: scaled(hkData.f60),
+            changePct: scaled(hkData.f170),
+            changeAmt: scaled(hkData.f169),
+          });
         }
       } catch (_) { }
     }
