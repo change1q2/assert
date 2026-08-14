@@ -3520,7 +3520,6 @@ export default function Finance({ onAssetPenetration }) {
       setShowBatchEditModal(false);
       setBatchEditData({ market: '', currency: '', assetType: '', account: '', categoryL1: '', categoryL2: '', categoryL3: '', positionGroup: '', positionType: '', tag: '' });
       setSelectedIds(new Set());
-      setShowBatchEdit(false);
       loadData();
     } catch (err) {
       console.error('Failed to batch save:', err);
