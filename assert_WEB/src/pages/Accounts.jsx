@@ -1829,7 +1829,11 @@ export default function Accounts() {
       if (type === 'realestate') return <tr>{th('类型')}{th('用途')}{th('面积')}{th('购买价')}{th('市场估值')}</tr>;
       if (type === 'vehicle') return <tr>{th('厂商')}{th('型号')}{th('购买价格')}{th('现车残值')}</tr>;
       if (type === 'fixedinvestment') return <tr>{th('名称')}{th('投入本金')}{th('累计分红')}</tr>;
-      if (type === 'fixeddeposit') return <tr>{th('名称')}{th('金额')}</tr>;
+      if (type === 'fixeddeposit') return (
+        <tr>
+          {th('市场')}{th('地点')}{th('类型')}{th('名称')}{th('方式')}{th('货币种类')}{th('账户本')}{th('金额')}{th('利率')}{th('开始时间')}{th('结束时间')}{th('到期总利息')}{th('到期总金额')}{th('到期日倒计时')}
+        </tr>
+      );
       return <tr>{th('名称')}</tr>;
     };
 
@@ -1893,12 +1897,39 @@ export default function Accounts() {
         });
       }
       if (type === 'fixeddeposit') {
-        return items.map(item => (
-          <tr key={item.id}>
-            {td(item.name)}
-            {td(fmt(item.amount, item.currency), true)}
-          </tr>
-        ));
+        return items.map(item => {
+          const calcAmount = scaleAmountByOwner(parseFloat(item.amount || 0), s);
+          const calcRate = parseFloat(item.interestRate !== undefined && item.interestRate !== '' ? item.interestRate : (item.interest || 0));
+          const calcYears = (() => {
+            if (!item.startDate || !item.endDate) return 0;
+            const sd = new Date(item.startDate);
+            const ed = new Date(item.endDate);
+            if (ed <= sd) return 0;
+            return (ed - sd) / (1000 * 60 * 60 * 24) / 365;
+          })();
+          const listTotalReturn = calcAmount > 0 && calcRate > 0 && calcYears > 0 ? calcAmount * (calcRate / 100) * calcYears : null;
+          const listTotalAmount = calcAmount > 0 && listTotalReturn !== null ? calcAmount + listTotalReturn : null;
+          const listDaysToMaturity = item.endDate ? Math.max(0, Math.ceil((new Date(item.endDate) - new Date()) / (1000 * 60 * 60 * 24))) : null;
+          const accountName = item.accountName || accounts.find(a => (a.id || a.name) === item.accountId)?.name || '';
+          return (
+            <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+              {td(item.market || '—')}
+              {td(item.location || '—')}
+              {td(item.type || '—')}
+              {td(item.usage || '—')}
+              {td(item.termType || '—')}
+              {td(item.currency || '—')}
+              {td(accountName || '—')}
+              {td(item.amount ? formatCurrencyWithRate(calcAmount, item.currency || 'CNY', selectedCurrency, exchangeRates) : '—', true)}
+              {td(item.interestRate !== undefined && item.interestRate !== '' ? formatPercentage(item.interestRate) : (item.interest ? formatPercentage(item.interest) : '—'), true)}
+              {td(item.startDate || '—')}
+              {td(item.endDate || '—')}
+              {td(listTotalReturn !== null ? formatCurrencyWithRate(listTotalReturn, item.currency || 'CNY', selectedCurrency, exchangeRates) : '—', true)}
+              {td(listTotalAmount !== null ? formatCurrencyWithRate(listTotalAmount, item.currency || 'CNY', selectedCurrency, exchangeRates) : '—', true)}
+              {td(listDaysToMaturity !== null ? <span className="text-orange-600 dark:text-orange-400 font-medium">{`${listDaysToMaturity} 天`}</span> : '—')}
+            </tr>
+          );
+        });
       }
       return items.map(item => (
         <tr key={item.id}>{td(item.name || item.id)}</tr>

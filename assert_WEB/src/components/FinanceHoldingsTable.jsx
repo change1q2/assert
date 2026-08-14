@@ -671,7 +671,7 @@ export default function FinanceHoldingsTable({
       value: totalValue,
       cost: totalCost,
       pnl: totalPnl,
-      pnlRate: totalCost > 0 ? (totalValue - totalCost) / totalCost * 100 : 0,
+      pnlRate: totalCost > 0 ? (totalPnl / totalCost) * 100 : 0,
       dailyPnl: totalDailyPnl,
       dailyPnlRate: totalValue > 0 ? (totalDailyPnl / totalValue) * 100 : 0,
     };
@@ -721,7 +721,7 @@ export default function FinanceHoldingsTable({
         totalCost,
         totalMarketValue,
         totalPnl,
-        totalPnlRate: totalCost > 0 ? (totalMarketValue - totalCost) / totalCost * 100 : 0,
+        totalPnlRate: totalCost > 0 ? (totalPnl / totalCost) * 100 : 0,
         totalDailyPnl,
         totalDailyPnlRate: totalMarketValue > 0 ? (totalDailyPnl / totalMarketValue) * 100 : 0,
       };
@@ -1521,15 +1521,15 @@ export default function FinanceHoldingsTable({
                       const currency = h.currency || 'CNY';
                       return s + convertCurrency(cost, currency, target, exchangeRates);
                     }, 0);
-                    const otherValue = otherItems.reduce((s, h) => {
-                      const value = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
+                    const otherPnl = otherItems.reduce((s, h) => {
+                      const pnl = parseFloat(h.holdingPnl) || 0;
                       const currency = h.currency || 'CNY';
-                      return s + convertCurrency(value, currency, target, exchangeRates);
+                      return s + convertCurrency(pnl, currency, target, exchangeRates);
                     }, 0);
-                    const rate = otherCost > 0 ? (otherValue - otherCost) / otherCost * 100 : 0;
+                    const rate = otherCost > 0 ? (otherPnl / otherCost) * 100 : 0;
                     return (
                       <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(rate)}`}>
-                        {otherValue > 0 ? formatPercentage(rate) : '—'}
+                        {otherCost > 0 ? formatPercentage(rate) : '—'}
                       </td>
                     );
                   }
