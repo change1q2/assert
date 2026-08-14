@@ -2952,9 +2952,18 @@ export default function Finance({ onAssetPenetration }) {
           const effectiveBuyAmount = buyTotalQty > 0 ? buyTotalAmount : (storedShares * storedCostPrice);
           const computedQty = Math.max(0, effectiveBuyQty - sellTotalQty);
           const computedCostPrice = effectiveBuyQty > 0 ? (effectiveBuyAmount - buyFees) / effectiveBuyQty : storedCostPrice;
-          const cost = computedCostPrice * computedQty;
+
+          // 关键修复：用户手动编辑过份额（storedShares 非0 且与交易记录计算值不一致）时，
+          // 优先保留用户编辑的 shares，不要强制用 computedQty 覆盖
+          const userEditedShares = storedShares > 0 && Math.abs(storedShares - computedQty) > 0.0001;
+          const finalShares = userEditedShares ? storedShares : computedQty;
+          // 成本价：若用户编辑过 shares，优先保留存储的 costPrice，保持用户编辑的一致性
+          const finalCostPrice = userEditedShares
+            ? (parseFloat(asset.costPrice) || computedCostPrice)
+            : computedCostPrice;
+          const cost = finalCostPrice * finalShares;
           const currentPrice = parseFloat(asset.currentPrice) || 1;
-          const currentValue = currentPrice * computedQty;
+          const currentValue = currentPrice * finalShares;
 
           // 优先使用已有存储值（非0），否则用目标值
           // 注意：货币基金 currentPrice=1, costPrice≈1，(currentValue - cost) 恒为 0，
@@ -2977,11 +2986,13 @@ export default function Finance({ onAssetPenetration }) {
             : (cost > 0 ? Math.round((cumulativeReturn / cost) * 100 * 100) / 100 : 0);
           const newTodayPnl = parseFloat(asset.todayPnl) || 0.45;
 
+          // 修复：用户编辑过 shares 时，shares 差异不再强制触发重算覆盖
+          const needsSharesUpdate = !userEditedShares && Math.abs((parseFloat(asset.shares) || 0) - finalShares) > 0.0001;
           const fieldsChanged =
             seedUpdated ||
             asset.transactions !== finalTxs ||
-            Math.abs((parseFloat(asset.shares) || 0) - computedQty) > 0.0001 ||
-            Math.abs((parseFloat(asset.costPrice) || 0) - computedCostPrice) > 0.0000001 ||
+            needsSharesUpdate ||
+            Math.abs((parseFloat(asset.costPrice) || 0) - finalCostPrice) > 0.0000001 ||
             Math.abs((parseFloat(asset.cost) || 0) - cost) > 0.0001 ||
             Math.abs((parseFloat(asset.currentValue) || 0) - currentValue) > 0.0001 ||
             (!hasStoredPnl && Math.abs((parseFloat(asset.holdingPnl) || 0) - finalHoldingPnl) > 0.0001) ||
@@ -2991,10 +3002,10 @@ export default function Finance({ onAssetPenetration }) {
           return {
             ...asset,
             transactions: finalTxs,
-            shares: computedQty,
-            costPrice: computedCostPrice,
+            shares: finalShares,
+            costPrice: finalCostPrice,
             cost,
-            availableShares: computedQty,
+            availableShares: finalShares,
             currentValue,
             holdingPnl: finalHoldingPnl,
             holdingPnlRate,
