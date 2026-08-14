@@ -40,4 +40,6 @@ jobs:
             sleep 3
             echo "=== health check ==="
             curl -sf http://127.0.0.1/api/health || (echo "HEALTH FAILED"; systemctl status asset-platform --no-pager -l | tail -30; exit 1)
+            echo "=== recent service logs (price sync) ==="
+            journalctl -u asset-platform --no-pager --since "1 min ago" --output=cat 2>/dev/null | grep -iE "price-sync|MySQL schema initialized|Price sync disabled" || journalctl -u asset-platform --no-pager -n 20 --output=cat 2>/dev/null | tail -20
             echo "=== deploy done ==="
