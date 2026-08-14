@@ -16,12 +16,23 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: true
+          command_timeout: 15m
           script: |
-            cd /opt/asset-platform
-            git fetch origin main
-            git reset --hard origin/main
+            set -e
             export PATH=/usr/local/lighthouse/softwares/nodejs/node/bin:$PATH
+            cd /opt/asset-platform
+            echo "=== git info ==="
+            git fetch origin main
+            BEFORE=$(git rev-parse --short HEAD)
+            git reset --hard origin/main
+            AFTER=$(git rev-parse --short HEAD)
+            echo "BEFORE=$BEFORE AFTER=$AFTER"
+            echo "=== install deps ==="
             npm install --omit=dev
+            echo "=== restart service ==="
             systemctl restart asset-platform
-            sleep 2
-            curl -sf http://127.0.0.1/api/health
+            sleep 3
+            echo "=== health check ==="
+            curl -sf http://127.0.0.1/api/health || (echo "HEALTH FAILED"; systemctl status asset-platform --no-pager -l | tail -30; exit 1)
+            echo "=== deploy done ==="
