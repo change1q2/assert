@@ -345,6 +345,9 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     ? data
     : (stateData?.financeAssets?.find(item => String(item.id) === String(data?.id)) || data);
   if (!latestData) return null;
+  // 单个持仓明细弹窗：所有金额使用该持仓自身的原始货币显示（不按全局 selectedCurrency 换算）
+  // 例如美股 NVDA 显示 USD 数据和 $ 符号，港股显示 HKD 数据和 HK$ 符号
+  const detailCurrency = latestData.originalCurrency || latestData.currency || 'CNY';
 
   const [uploadedImages, setUploadedImages] = useState([]);
   const [showAddRecord, setShowAddRecord] = useState(false);
@@ -1132,7 +1135,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                 <div className="flex items-baseline gap-1 min-w-0">
                   <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0">总额</span>
                   <span className="text-sm font-bold text-gray-900 dark:text-white truncate">
-                    {formatCurrencyWithRate(currentValue, latestData.currency || 'CNY', selectedCurrency, exchangeRates)}
+                    {formatCurrencyWithRate(currentValue, latestData.currency || 'CNY', detailCurrency, exchangeRates)}
                   </span>
                 </div>
               </div>
@@ -1164,7 +1167,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                 <p className={`font-medium ${(computedArchive?.finalPnl ?? latestData.holdingPnl ?? 0) >= 0 ? 'text-red-500' : 'text-green-600'}`}>
                   {(() => {
                     const v = computedArchive ? computedArchive.finalPnl : (latestData.holdingPnl || 0);
-                    return `${v >= 0 ? '+' : ''}${formatCurrencyWithRate(v, latestData.currency || 'CNY', selectedCurrency, exchangeRates)}`;
+                    return `${v >= 0 ? '+' : ''}${formatCurrencyWithRate(v, latestData.currency || 'CNY', detailCurrency, exchangeRates)}`;
                   })()}
                 </p>
               </div>
@@ -1188,8 +1191,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                 <>
                   {/* 货币基金专属布局 */}
                   <div className="text-center mb-4">
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">货币基金（{getCurrencyName(selectedCurrency)}）</p>
-                    <p className="text-3xl font-bold text-gray-900 dark:text-white">{formatCurrencyWithRate(currentValue, latestData.currency || 'CNY', selectedCurrency, exchangeRates)}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">货币基金（{getCurrencyName(detailCurrency)}）</p>
+                    <p className="text-3xl font-bold text-gray-900 dark:text-white">{formatCurrencyWithRate(currentValue, latestData.currency || 'CNY', detailCurrency, exchangeRates)}</p>
                     {latestData.positionGroup && (
                       <span className="inline-block mt-2 px-3 py-1 text-sm bg-gray-200 dark:bg-slate-600 text-gray-600 dark:text-gray-300 rounded-full">关联组合: {latestData.positionGroup}</span>
                     )}
@@ -1244,7 +1247,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">最新收益</p>
                         <p className={`text-lg font-semibold ${computedDailyPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                          {computedDailyPnl >= 0 ? '+' : ''}{convertCurrency(computedDailyPnl, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
+                          {computedDailyPnl >= 0 ? '+' : ''}{convertCurrency(computedDailyPnl, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
                         </p>
                       </div>
                       <div>
@@ -1254,7 +1257,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           const mfCumulative = Math.round((currentValue - costTotal) * 100) / 100;
                           return (
                             <p className={`text-lg font-semibold ${mfCumulative >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                              {mfCumulative >= 0 ? '+' : ''}{convertCurrency(mfCumulative, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
+                              {mfCumulative >= 0 ? '+' : ''}{convertCurrency(mfCumulative, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
                             </p>
                           );
                         })()}
@@ -1264,7 +1267,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                         {(() => {
                           return (
                             <p className={`text-lg font-semibold ${floatPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                              {floatPnl >= 0 ? '+' : ''}{convertCurrency(floatPnl, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
+                              {floatPnl >= 0 ? '+' : ''}{convertCurrency(floatPnl, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
                             </p>
                           );
                         })()}
@@ -1298,8 +1301,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                 <>
                   {/* 非货币基金的原有布局 */}
                   <div className="text-center mb-4">
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">资产（{getCurrencyName(selectedCurrency)}）</p>
-                    <p className="text-4xl font-bold text-gray-900 dark:text-white">{formatCurrencyWithRate(currentValue, latestData.currency || 'CNY', selectedCurrency, exchangeRates)}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">资产（{getCurrencyName(detailCurrency)}）</p>
+                    <p className="text-4xl font-bold text-gray-900 dark:text-white">{formatCurrencyWithRate(currentValue, latestData.currency || 'CNY', detailCurrency, exchangeRates)}</p>
                     {latestData.positionGroup && (
                       <span className="inline-block mt-2 px-3 py-1 text-sm bg-gray-200 dark:bg-slate-600 text-gray-600 dark:text-gray-300 rounded-full">关联组合: {latestData.positionGroup}</span>
                     )}
@@ -1308,13 +1311,13 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                     <div className="text-center">
                       <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">昨日收益</p>
                       <p className={`text-2xl font-semibold ${computedDailyPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                        {computedDailyPnl >= 0 ? '+' : ''}{convertCurrency(computedDailyPnl, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
+                        {computedDailyPnl >= 0 ? '+' : ''}{convertCurrency(computedDailyPnl, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
                       </p>
                     </div>
                     <div className="text-center">
                       <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">持仓收益</p>
                       <p className={`text-2xl font-semibold ${floatPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                        {floatPnl >= 0 ? '+' : ''}{convertCurrency(floatPnl, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
+                        {floatPnl >= 0 ? '+' : ''}{convertCurrency(floatPnl, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
                       </p>
                     </div>
                     <div className="text-center">
@@ -1358,7 +1361,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                       {/* 第4行：持有收益 | 值 | 持有收益率 | 值 */}
                       <span className="text-base text-gray-600 dark:text-gray-300">持有收益</span>
                       <span className={`text-lg font-semibold ${floatPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                        {floatPnl >= 0 ? '+' : ''}{convertCurrency(floatPnl, latestData.currency || 'CNY', selectedCurrency, exchangeRates).toFixed(2)}
+                        {floatPnl >= 0 ? '+' : ''}{convertCurrency(floatPnl, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
                       </span>
                       <span className="text-base text-gray-600 dark:text-gray-300">持有收益率</span>
                       <span className={`text-lg font-semibold ${computedHoldingReturnRate >= 0 ? 'text-red-500' : 'text-green-600'}`}>
@@ -1375,7 +1378,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                 <div className={`${isFloatPos ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'} rounded-xl p-3`}>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">浮动盈亏</p>
                   <p className={`text-lg font-bold ${isFloatPos ? 'text-green-600' : 'text-red-500'}`}>
-                    {isFloatPos ? '+' : '-'}{formatCurrencyWithRate(Math.abs(floatPnl), latestData.currency || 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+                    {isFloatPos ? '+' : '-'}{formatCurrencyWithRate(Math.abs(floatPnl), latestData.currency || 'CNY', detailCurrency, exchangeRates).replace(getCurrencySymbol(detailCurrency), '')}
                   </p>
                   <p className={`text-xs ${isFloatPos ? 'text-green-600' : 'text-red-500'}`}>
                     {isFloatPos ? '+' : ''}{floatPnlRate.toFixed(2)}%
@@ -1384,7 +1387,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                 <div className={`${isDayPos ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'} rounded-xl p-3`}>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">当日参考盈亏</p>
                   <p className={`text-lg font-bold ${isDayPos ? 'text-green-600' : 'text-red-500'}`}>
-                    {isDayPos ? '+' : '-'}{formatCurrencyWithRate(Math.abs(dailyPnl), latestData.currency || 'CNY', selectedCurrency, exchangeRates).replace(getCurrencySymbol(selectedCurrency), '')}
+                    {isDayPos ? '+' : '-'}{formatCurrencyWithRate(Math.abs(dailyPnl), latestData.currency || 'CNY', detailCurrency, exchangeRates).replace(getCurrencySymbol(detailCurrency), '')}
                   </p>
                   <p className={`text-xs ${isDayPos ? 'text-green-600' : 'text-red-500'}`}>
                     {isDayPos ? '+' : ''}{dailyPnlRate.toFixed(2)}%
@@ -1402,7 +1405,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                   <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 mb-4">
                     <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{linkedAccount.name} 账户余额</p>
                     <p className={`text-lg font-bold ${balance >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
-                      {formatCurrencyWithRate(balance, linkedAccount.currency || latestData.currency || 'CNY', selectedCurrency, exchangeRates)}
+                      {formatCurrencyWithRate(balance, linkedAccount.currency || latestData.currency || 'CNY', detailCurrency, exchangeRates)}
                     </p>
                   </div>
                 );
