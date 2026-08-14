@@ -86,8 +86,17 @@ async function loadUserState(userId) {
   indoorTransactionRows.forEach(row => addTransaction(row, false));
   outdoorTransactionRows.forEach(row => addTransaction(row, true));
   legacyTransactionRows.forEach(row => addTransaction(row, false));
+
+  const accountLookup = new Map();
+  for (const acc of accounts) {
+    accountLookup.set(String(acc.id), acc.name);
+    accountLookup.set(String(acc.name), acc.name);
+  }
+
   const financeAssets = (await safeSqlAll(pool, "SELECT id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, quantity, available_shares, current_price, pnl, pnl_percent, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order FROM finance_assets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
-    id: numericIfPossible(row.id), kind: row.kind, assetKind: row.asset_kind || '', accountId: row.account_id, category: row.category,
+    id: numericIfPossible(row.id), kind: row.kind, assetKind: row.asset_kind || '', accountId: row.account_id,
+    account: accountLookup.get(String(row.account_id)) || row.account_id || '',
+    category: row.category,
     subcategory: row.subcategory, tertiaryCategory: row.tertiary_category, market: row.market,
     currency: row.currency, name: row.name, code: row.code, positionGroup: row.position_group,
     positionCategory: row.position_category, positionType: row.position_category, costPrice: row.cost_price, shares: row.shares,
@@ -102,7 +111,9 @@ async function loadUserState(userId) {
     id: numericIfPossible(row.id), originalAssetId: row.original_asset_id, name: row.name, code: row.code,
     market: row.market, currency: row.currency, kind: row.kind, category: row.category,
     subcategory: row.subcategory, tertiaryCategory: row.tertiary_category,
-    accountId: row.account_id, costPrice: row.cost_price, shares: row.shares,
+    accountId: row.account_id,
+    account: accountLookup.get(String(row.account_id)) || row.account_id || '',
+    costPrice: row.cost_price, shares: row.shares,
     finalPnl: row.final_pnl, finalPnlPercent: row.final_pnl_percent,
     archiveDate: row.archive_date, status: row.status,
   }));
@@ -210,7 +221,7 @@ async function loadUserState(userId) {
     if (val == null) return fallback;
     const str = String(val).trim();
     if (!str) return fallback;
-    // 检测乱码：包含特殊 Unicode 控制/显示字符
+    // 只在明确命中乱码正则时才 fallback；否则保留原值（含 ASCII 字母数字/短名称等合法内容）
     if (GARBLED_PATTERN.test(str)) return fallback;
     // 市场字段：精确匹配有效值
     if (isMarket && VALID_MARKETS.indexOf(str) === -1) return fallback;
@@ -219,15 +230,28 @@ async function loadUserState(userId) {
 
   // 清理 financeAssets 中的乱码字段
   if (result.financeAssets && result.financeAssets.length > 0) {
-    result.financeAssets = result.financeAssets.map(a => ({
-      ...a,
-      name: sanitizeStr(a.name),
-      market: sanitizeStr(a.market, '国内市场', true),
-      assetKind: sanitizeStr(a.assetKind),
-      category: sanitizeStr(a.category),
-      subcategory: sanitizeStr(a.subcategory),
-      tertiaryCategory: sanitizeStr(a.tertiaryCategory),
-    }));
+    result.financeAssets = result.financeAssets.map(a => {
+      const sanitizedName = sanitizeStr(a.name);
+      const sanitizedMarket = sanitizeStr(a.market, '国内市场', true);
+      const sanitizedAssetKind = sanitizeStr(a.assetKind);
+      const sanitizedCategory = sanitizeStr(a.category);
+      const sanitizedSubcategory = sanitizeStr(a.subcategory);
+      const sanitizedTertiary = sanitizeStr(a.tertiaryCategory);
+      // 如果乱码清理后名称为空，用 code 兜底；最后仍为空则保留原始值（避免整行名称被清空导致列表"看起来没数据"）
+      const finalName = sanitizedName || (a.code ? `(代码 ${a.code})` : a.name);
+      if (!sanitizedName) {
+        console.warn(`[state-service] financeAsset id=${a.id} name sanitized empty, fallback finalName=`, finalName, `raw=`, String(a.name||'').slice(0,80));
+      }
+      return {
+        ...a,
+        name: finalName,
+        market: sanitizedMarket,
+        assetKind: sanitizedAssetKind,
+        category: sanitizedCategory,
+        subcategory: sanitizedSubcategory,
+        tertiaryCategory: sanitizedTertiary,
+      };
+    });
   }
 
   return result;

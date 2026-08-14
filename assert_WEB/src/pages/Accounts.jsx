@@ -1067,20 +1067,35 @@ export default function Accounts() {
             : a
         );
 
-        if (oldName !== newName && stateData?.financeAssets && stateData.financeAssets.length > 0) {
-          stateData.financeAssets = stateData.financeAssets.map(asset => {
-            if (asset.accountId === editingAccount.id || asset.account === oldName) {
-              return { ...asset, account: newName, accountId: editingAccount.id };
+        if (oldName !== newName) {
+          const accId = editingAccount.id;
+          const syncItem = (item) => {
+            if (item.accountId === accId || item.account === oldName) {
+              return { ...item, account: newName, accountId: accId };
             }
-            return asset;
-          });
-          if (stateData.financeAssetArchives) {
-            stateData.financeAssetArchives = stateData.financeAssetArchives.map(asset => {
-              if (asset.accountId === editingAccount.id || asset.account === oldName) {
-                return { ...asset, account: newName, accountId: editingAccount.id };
-              }
-              return asset;
+            if (item.accountName === oldName) {
+              return { ...item, accountName: newName };
+            }
+            return item;
+          };
+          if (stateData?.financeAssets && stateData.financeAssets.length > 0) {
+            stateData.financeAssets = stateData.financeAssets.map(syncItem);
+          }
+          if (stateData?.financeAssetArchives && stateData.financeAssetArchives.length > 0) {
+            stateData.financeAssetArchives = stateData.financeAssetArchives.map(syncItem);
+          }
+          if (stateData?.independentAssets && typeof stateData.independentAssets === 'object') {
+            const newIndependent = {};
+            Object.entries(stateData.independentAssets).forEach(([type, items]) => {
+              newIndependent[type] = Array.isArray(items) ? items.map(syncItem) : items;
             });
+            stateData.independentAssets = newIndependent;
+          }
+          if (stateData?.records && stateData.records.length > 0) {
+            stateData.records = stateData.records.map(syncItem);
+          }
+          if (stateData?.debts && stateData.debts.length > 0) {
+            stateData.debts = stateData.debts.map(syncItem);
           }
         }
       } else {
@@ -1110,6 +1125,7 @@ export default function Accounts() {
       const newState = { ...stateData, accounts: newAccounts };
 
       localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+      localStorage.setItem('wealth_os_full_state', JSON.stringify(newState));
 
       const result = await saveState(newState);
       if (result.success !== false) {

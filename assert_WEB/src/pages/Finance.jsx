@@ -3478,7 +3478,13 @@ export default function Finance({ onAssetPenetration }) {
       const finalState = updatedAccounts
         ? { ...stateData, financeAssets: updatedFinanceAssets, accounts: updatedAccounts }
         : { ...stateData, financeAssets: updatedFinanceAssets };
-      await saveState(finalState);
+      // 立即同步前端状态，避免依赖后端异步拉取延迟
+      setStateData(finalState);
+      try {
+        await saveState(finalState);
+      } catch (apiErr) {
+        console.error('[handleSaveAccount] saveState API failed:', apiErr);
+      }
 
       setShowAddModal(false);
       resetForm();
@@ -3497,12 +3503,18 @@ export default function Finance({ onAssetPenetration }) {
       const currentFinanceAssets = stateData?.financeAssets || [];
       const updatedFinanceAssets = currentFinanceAssets.map(item => {
         if (!selectedIds.has(item.id)) return item;
+        const accountPatch = {};
+        if (batchEditData.account) {
+          const matchedAcc = accounts.find(acc => acc.id === batchEditData.account || acc.name === batchEditData.account);
+          accountPatch.accountId = matchedAcc?.id || batchEditData.account;
+          accountPatch.account = matchedAcc?.name || batchEditData.account;
+        }
         return {
           ...item,
           ...(batchEditData.market ? { market: batchEditData.market } : {}),
           ...(batchEditData.currency ? { currency: batchEditData.currency } : {}),
           ...(batchEditData.assetType ? { kind: batchEditData.assetType } : {}),
-          ...(batchEditData.account ? { accountId: batchEditData.account } : {}),
+          ...accountPatch,
           ...(batchEditData.categoryL1 ? { category: batchEditData.categoryL1 } : {}),
           ...(batchEditData.categoryL2 ? { subcategory: batchEditData.categoryL2 } : {}),
           ...(batchEditData.categoryL3 ? { tertiaryCategory: batchEditData.categoryL3 } : {}),
@@ -3512,10 +3524,16 @@ export default function Finance({ onAssetPenetration }) {
         };
       });
 
-      await saveState({
+      const batchFinalState = {
         ...stateData,
         financeAssets: updatedFinanceAssets,
-      });
+      };
+      setStateData(batchFinalState);
+      try {
+        await saveState(batchFinalState);
+      } catch (apiErr) {
+        console.error('[handleBatchSave] saveState API failed:', apiErr);
+      }
 
       setShowBatchEditModal(false);
       setBatchEditData({ market: '', currency: '', assetType: '', account: '', categoryL1: '', categoryL2: '', categoryL3: '', positionGroup: '', positionType: '', tag: '' });
@@ -3530,12 +3548,17 @@ export default function Finance({ onAssetPenetration }) {
   };
 
   const handleEdit = (holding) => {
+    const rawAccountRef = holding.accountId || holding.account || '';
+    const matchedAccount = accounts.find(acc => acc.id === rawAccountRef || acc.name === rawAccountRef);
+    const resolvedAccountValue = matchedAccount
+      ? (matchedAccount.id || matchedAccount.name || rawAccountRef)
+      : rawAccountRef;
     setNewAccount({
       market: holding.market || '国内市场',
       currency: holding.originalCurrency || holding.currency || '',
       assetKind: holding.assetKind || '',
       assetType: holding.assetType || '股票',
-      account: holding.account || '',
+      account: resolvedAccountValue,
       categoryL1: holding.categoryL1 || '',
       categoryL2: holding.categoryL2 || '',
       categoryL3: holding.categoryL3 || '',
@@ -4855,14 +4878,14 @@ export default function Finance({ onAssetPenetration }) {
         market: a.market || '国内市场',
         currency: _isHKConnectDisplay ? 'CNY' : (a.currency || 'CNY'),
         originalCurrency: a.currency || 'CNY',
-        name: a.name,
+        name: a.name || (a.code ? `(代码 ${a.code})` : '未命名资产'),
         code: a.code || '',
         assetType: a.kind || a.assetType || '',
         assetKind: a.assetKind || '',
         account: (() => {
           const accId = a.accountId || a.account || '';
-          const matched = (stateData?.accounts || []).find(acc => acc.id === accId || acc.name === accId);
-          return matched ? matched.name : accId;
+          const linkedAcc = (stateData?.accounts || accounts || []).find(acc => acc.id === accId || acc.name === accId);
+          return linkedAcc?.name || a.account || a.accountId || '';
         })(),
         categoryL1: a.category || a.categoryL1 || '',
         categoryL2: a.subcategory || a.categoryL2 || '',
@@ -5070,8 +5093,8 @@ export default function Finance({ onAssetPenetration }) {
         assetKind: a.kind || a.assetType || '',
         account: (() => {
           const accId = a.accountId || a.account || '';
-          const matched = (stateData?.accounts || []).find(acc => acc.id === accId || acc.name === accId);
-          return matched ? matched.name : accId;
+          const linkedAcc = (stateData?.accounts || accounts || []).find(acc => acc.id === accId || acc.name === accId);
+          return linkedAcc?.name || a.account || a.accountId || '';
         })(),
         categoryL1: a.category || '',
         categoryL2: a.subcategory || '',
@@ -5570,8 +5593,9 @@ export default function Finance({ onAssetPenetration }) {
                   <FormField label="所属账户" required>
                     <select value={newAccount.account} onChange={e => {
                       const accName = e.target.value;
+                      setNewAccount({ ...newAccount, account: accName });
                       if (accName) {
-                        // 仅在非现金类资产时检查是否存在现金类资产（现金类资产本身不需要此检查）
+                        // 非现金类资产时提示是否存在现金类资产（仅警告，不阻止选择）
                         const isCashCategory = newAccount.categoryL1 === '现金类' || newAccount.category === '现金类';
                         if (!isCashCategory) {
                           const hasCashAsset = stateData.financeAssets.some(a => {
@@ -5583,12 +5607,12 @@ export default function Finance({ onAssetPenetration }) {
                             return accMatch || linkMatch;
                           });
                           if (!hasCashAsset) {
-                            window.alert('所选账户尚未创建现金类资产，请先在该账户下创建一个"现金类"资产后再进行增添资产。');
-                            return;
+                            setTimeout(() => {
+                              window.confirm('提示：所选账户尚未创建现金类资产，建议先在该账户下创建"现金类"资产后再进行增添。是否继续？');
+                            }, 0);
                           }
                         }
                       }
-                      setNewAccount({ ...newAccount, account: accName });
                     }}
                       className={FORM_SELECT}>
                       <option value="">请选择账户</option>
@@ -6135,7 +6159,7 @@ export default function Finance({ onAssetPenetration }) {
                 <FormField label="所属账户">
                   <select value={batchEditData.account} onChange={e => setBatchEditData({ ...batchEditData, account: e.target.value })} className={FORM_SELECT}>
                     <option value="">不修改</option>
-                    {accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc => <option key={acc.id || acc.name} value={acc.name}>{sanitizeText(acc.name, acc.name)}</option>)}
+                    {accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc => <option key={acc.id || acc.name} value={acc.id || acc.name}>{sanitizeText(acc.name, acc.name)}</option>)}
                   </select>
                 </FormField>
 

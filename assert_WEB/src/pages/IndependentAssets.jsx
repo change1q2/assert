@@ -157,7 +157,7 @@ const EQUITY_DEFAULT_ASSET_KIND_OPTIONS = ['流动资产', '非流动资产'];
 const EQUITY_DEFAULT_CATEGORY_L1_OPTIONS = ['权益类', '债权类', '现金类', '商品类', '分红类', '固收类', '另类投资'];
 const EQUITY_DEFAULT_CATEGORY_L2_OPTIONS = {
   '权益类': ['A股', '港股', '美股', '其他'],
-  '债权类': ['A股', '中债', '美债', '其他'],
+  '债权类': ['中债', '美债'],
   '现金类': ['活期存款', '定期存款', 'A股', '其他'],
   '商品类': ['A股', '其他'],
   '分红类': ['A股', '固定投资', '其他'],
@@ -314,7 +314,47 @@ export default function IndependentAssets() {
   });
   const [equityCategoryL2OptionsMap, setEquityCategoryL2OptionsMap] = useState(() => {
     const saved = localStorage.getItem('ia_equity_category_l2_options');
-    return saved ? JSON.parse(saved) : EQUITY_DEFAULT_CATEGORY_L2_OPTIONS;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // 迁移：清理债权类的旧选项，仅保留中债/美债及用户自定义项
+        if (parsed && Array.isArray(parsed['债权类'])) {
+          const l2 = parsed['债权类'];
+          const bondOptions = ['中债', '美债'];
+          const filtered = l2.filter(x => !['A股', '港股通', '港股', '美股', '其他'].includes(x));
+          const remaining = filtered.filter(x => !bondOptions.includes(x));
+          const migrated = [...bondOptions, ...remaining];
+          if (migrated.length !== l2.length || !bondOptions.every(o => l2.includes(o))) {
+            parsed['债权类'] = migrated;
+            localStorage.setItem('ia_equity_category_l2_options', JSON.stringify(parsed));
+          }
+        }
+        // 清理其他类目中残留的 A 股等不相关选项
+        if (parsed && Array.isArray(parsed['固收类'])) {
+          const cleaned = parsed['固收类'].filter(x => !['A股', '港股通'].includes(x));
+          if (cleaned.length !== parsed['固收类'].length) {
+            parsed['固收类'] = cleaned.length > 0 ? cleaned : ['其他'];
+            localStorage.setItem('ia_equity_category_l2_options', JSON.stringify(parsed));
+          }
+        }
+        if (parsed && Array.isArray(parsed['现金类'])) {
+          const cleaned = parsed['现金类'].filter(x => x !== 'A股');
+          if (cleaned.length !== parsed['现金类'].length) {
+            parsed['现金类'] = cleaned;
+            localStorage.setItem('ia_equity_category_l2_options', JSON.stringify(parsed));
+          }
+        }
+        if (parsed && Array.isArray(parsed['商品类'])) {
+          const cleaned = parsed['商品类'].filter(x => x !== 'A股');
+          if (cleaned.length !== parsed['商品类'].length) {
+            parsed['商品类'] = cleaned.length > 0 ? cleaned : ['其他'];
+            localStorage.setItem('ia_equity_category_l2_options', JSON.stringify(parsed));
+          }
+        }
+        return parsed;
+      } catch {}
+    }
+    return EQUITY_DEFAULT_CATEGORY_L2_OPTIONS;
   });
   const [equityPositionGroupOptions, setEquityPositionGroupOptions] = useState(() => {
     const saved = localStorage.getItem('ia_equity_position_group_options');
