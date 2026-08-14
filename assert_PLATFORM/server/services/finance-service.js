@@ -770,6 +770,147 @@ async function getQuotes(codes) {
     } catch (_) { }
   }));
 
+  // 基金净值兜底：当所有股票行情源都取不到时，用天天基金网净值接口获取基金净值
+  // 覆盖 ETF/LOF/场外基金等代码（如 050025、008701、160140 等）
+  // 同时覆盖 tencentCodeFor 返回 null 的纯基金代码，以及股票源返回 0 的情况
+  const fundNavFallbackItems = [];
+  for (let i = 0; i < results.length; i++) {
+    const code = String(results[i].code || '').trim();
+    if (!/^\d{6}$/.test(code)) continue;
+    const price = results[i].price;
+    if (price == null || price === 0) {
+      fundNavFallbackItems.push({ index: i, code });
+    }
+  }
+  if (fundNavFallbackItems.length > 0) {
+    const batchCodes = fundNavFallbackItems.map(x => x.code);
+    try {
+      // 批量获取基金净值（天天基金 lsjz 接口，主源）
+      const navUrl = `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${batchCodes.join(',')}&pageIndex=1&pageSize=3`;
+      const navRes = await fetch(navUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": "https://fund.eastmoney.com/",
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (navRes.ok) {
+        const navData = await navRes.json();
+        // 东方财富批量接口返回格式可能不同，这里逐码获取
+      }
+    } catch (_) {}
+
+    // 逐码获取（更可靠，支持单个失败不影响其他）
+    await Promise.all(fundNavFallbackItems.map(async ({ index, code }) => {
+      const rawCode = String(code).trim();
+      if (!/^\d{6}$/.test(rawCode)) return;
+      let fundName = null;
+      let navResult = null;
+
+      // 获取基金名称：pingzhongdata 接口
+      try {
+        const nameUrl = `http://fund.eastmoney.com/pingzhongdata/${rawCode}.js`;
+        const nameRes = await fetch(nameUrl, {
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://fund.eastmoney.com/" },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (nameRes.ok) {
+          const nameText = await nameRes.text();
+          const nameMatch = nameText.match(/fS_name\s*=\s*"([^"]+)"/);
+          if (nameMatch) fundName = nameMatch[1];
+        }
+      } catch (_) {}
+
+      // 先尝试 fundgz 实时估值接口（有实时估值）
+      try {
+        const gzUrl = `https://fundgz.1234567.com.cn/js/${rawCode}.js?rt=${Date.now()}`;
+        const gzRes = await fetch(gzUrl, {
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://fund.eastmoney.com/" },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (gzRes.ok) {
+          const gzText = await gzRes.text();
+          const gzMatch = gzText.match(/jsonpgz\((.*)\);?/);
+          if (gzMatch && gzMatch[1]) {
+            const gzData = JSON.parse(gzMatch[1]);
+            fundName = fundName || gzData.name || null;
+            const gsz = Number.parseFloat(gzData.gsz);
+            const gszzl = Number.parseFloat(gzData.gszzl);
+            const dwjz = Number.parseFloat(gzData.dwjz);
+            const jzrq = gzData.jzrq || null;
+            if (Number.isFinite(gsz) && gsz > 0) {
+              navResult = {
+                price: gsz,
+                prevClose: Number.isFinite(dwjz) ? dwjz : null,
+                changePct: Number.isFinite(gszzl) ? gszzl : null,
+                changeAmt: null,
+                source: 'fund_gz',
+                navDate: jzrq,
+              };
+            } else if (Number.isFinite(dwjz) && dwjz > 0) {
+              navResult = {
+                price: dwjz,
+                prevClose: null,
+                changePct: null,
+                changeAmt: null,
+                source: 'fund_gz',
+                navDate: jzrq,
+              };
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 如果 fundgz 没拿到价格，回退到 lsjz 净值接口
+      if (!navResult) {
+        try {
+          const navUrl = `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${rawCode}&pageIndex=1&pageSize=5&startDate=&endDate=`;
+          const navRes = await fetch(navUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Referer": "https://fund.eastmoney.com/",
+            },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (navRes.ok) {
+            const navData = await navRes.json();
+            const list = navData?.Data?.LSJZList || [];
+            if (list.length > 0) {
+              const latest = list[0];
+              const prev = list.length > 1 ? list[1] : null;
+              const nav = Number.parseFloat(latest.DWJZ);
+              if (Number.isFinite(nav) && nav > 0) {
+                const prevNav = prev ? Number.parseFloat(prev.DWJZ) : null;
+                const pct = Number.parseFloat(latest.JZZZL);
+                const changeAmt = Number.isFinite(nav) && Number.isFinite(prevNav) ? (nav - prevNav) : null;
+                navResult = {
+                  price: nav,
+                  prevClose: Number.isFinite(prevNav) ? prevNav : null,
+                  changePct: Number.isFinite(pct) ? pct : null,
+                  changeAmt,
+                  source: 'fund_nav',
+                  navDate: latest.FSRQ || null,
+                  prevNavDate: prev?.FSRQ || null,
+                };
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (navResult) {
+        results[index] = {
+          ...results[index],
+          ...navResult,
+          name: fundName || results[index].name || null,
+          high: null,
+          low: null,
+          volume: null,
+        };
+      }
+    }));
+  }
+
   // 当现价取不到最新值或为0时，使用上一次保留不为0的数据
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
