@@ -5412,7 +5412,7 @@ export default function Finance({ onAssetPenetration }) {
                 financeAccounts={computed.financeAccounts}
                 assetKindOptions={assetKindOptions}
                 moneyFundMap={moneyFundMap}
-                accountOptions={accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc => acc.name || acc.id)}
+                accountOptions={accounts.filter(acc => acc.type === '理财资产' || acc.type === '打新').map(acc => acc.name || acc.id)}
               />
             ) : (
               <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-12 text-center shadow-soft border border-gray-100/80 dark:border-slate-700/50">
@@ -5450,7 +5450,7 @@ export default function Finance({ onAssetPenetration }) {
                 exchangeRates={exchangeRates}
                 financeAccounts={computed.financeAccounts}
                 assetKindOptions={assetKindOptions}
-                accountOptions={accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc => acc.name || acc.id)}
+                accountOptions={accounts.filter(acc => acc.type === '理财资产' || acc.type === '打新').map(acc => acc.name || acc.id)}
               />
             ) : (
               <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-12 text-center shadow-soft border border-gray-100/80 dark:border-slate-700/50">
@@ -5640,7 +5640,7 @@ export default function Finance({ onAssetPenetration }) {
                     }}
                       className={FORM_SELECT}>
                       <option value="">请选择账户</option>
-                      {accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc =>
+                      {accounts.filter(acc => acc.type === '理财资产' || acc.type === '打新').map(acc =>
                         <option key={acc.id || acc.name} value={acc.id || acc.name}>{sanitizeText(acc.name, acc.name)}</option>
                       )}
                     </select>
@@ -6183,7 +6183,7 @@ export default function Finance({ onAssetPenetration }) {
                 <FormField label="所属账户">
                   <select value={batchEditData.account} onChange={e => setBatchEditData({ ...batchEditData, account: e.target.value })} className={FORM_SELECT}>
                     <option value="">不修改</option>
-                    {accounts.filter(acc => !acc.liability && acc.type !== '负债').map(acc => <option key={acc.id || acc.name} value={acc.id || acc.name}>{sanitizeText(acc.name, acc.name)}</option>)}
+                    {accounts.filter(acc => acc.type === '理财资产' || acc.type === '打新').map(acc => <option key={acc.id || acc.name} value={acc.id || acc.name}>{sanitizeText(acc.name, acc.name)}</option>)}
                   </select>
                 </FormField>
 

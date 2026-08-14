@@ -124,6 +124,22 @@ export default function StrategyDetail({ strategyId, onBack, onNavigate }) {
   const [newPhilosophy, setNewPhilosophy] = useState({ title: '', description: '', icon: 'Lightbulb', color: 'gray' });
   const [showAddAsset, setShowAddAsset] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [addAssetAccount, setAddAssetAccount] = useState('');
+
+  useEffect(() => {
+    if (!showAddAsset) {
+      setAddAssetAccount('');
+    }
+  }, [showAddAsset]);
+
+  const accountsForStrategy = useMemo(() => {
+    const accountNames = new Set();
+    (stateData?.financeAssets || []).forEach(a => {
+      const accountName = a.account || a.accountId || '';
+      if (accountName) accountNames.add(accountName);
+    });
+    return [...accountNames];
+  }, [stateData]);
 
   useEffect(() => {
     loadData();
@@ -223,8 +239,16 @@ export default function StrategyDetail({ strategyId, onBack, onNavigate }) {
 
   const availableAssets = useMemo(() => {
     const poolIdSet = new Set(poolIds.map((id) => String(id)));
-    return financeAssets.filter((a) => !poolIdSet.has(String(a.id)) && !(a.isArchived || a.status === 'archived'));
-  }, [financeAssets, poolIds]);
+    return financeAssets.filter((a) => {
+      if (poolIdSet.has(String(a.id))) return false;
+      if (a.isArchived || a.status === 'archived') return false;
+      if (addAssetAccount) {
+        const assetAccount = String(a.account || a.accountId || '');
+        if (assetAccount !== String(addAssetAccount)) return false;
+      }
+      return true;
+    });
+  }, [financeAssets, poolIds, addAssetAccount]);
 
   const handleSaveState = async (newState) => {
     const prevState = stateData;
@@ -691,6 +715,19 @@ export default function StrategyDetail({ strategyId, onBack, onNavigate }) {
               >
                 <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
               </button>
+            </div>
+            <div className="p-4 border-b border-gray-200 dark:border-slate-700">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">账户本</label>
+              <select
+                value={addAssetAccount}
+                onChange={(e) => { setAddAssetAccount(e.target.value); setSelectedIds([]); }}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">全部账户</option>
+                {accountsForStrategy.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
               {availableAssets.length > 0 ? (

@@ -804,8 +804,14 @@ export default function Accounts() {
     return accounts.filter(account => {
       if (filters.name && !account.name.includes(filters.name)) return false;
       if (filters.category && account.category !== filters.category) return false;
-      if (filters.type === 'asset' && getEffectiveType(account) === '负债') return false;
-      if (filters.type === 'liability' && getEffectiveType(account) !== '负债') return false;
+      if (filters.type) {
+        const effType = getEffectiveType(account);
+        const dispType = effType === '资产' ? '独立资产' : effType;
+        // 兼容旧值 asset / liability
+        if (filters.type === 'asset' && dispType === '负债') return false;
+        if (filters.type === 'liability' && dispType !== '负债') return false;
+        if (filters.type !== 'asset' && filters.type !== 'liability' && dispType !== filters.type) return false;
+      }
       return true;
     });
   }, [accounts, filters]);
@@ -2461,15 +2467,16 @@ export default function Accounts() {
                 ))}
               </select>
             </div>
-            <div style={{ width: '100px' }}>
+            <div style={{ width: '110px' }}>
               <select
                 value={filters.type}
                 onChange={(e) => { setFilters({ ...filters, type: e.target.value }); setCurrentPage(1); }}
                 className="w-full px-2 py-1 text-xs border border-gray-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-white"
               >
                 <option value="">全部类型</option>
-                <option value="asset">资产</option>
-                <option value="liability">负债</option>
+                {accountTypesList.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
               </select>
             </div>
             {(filters.name || filters.category || filters.type) && (
