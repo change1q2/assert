@@ -3,6 +3,7 @@ import {
   Search, Settings, Edit2, Trash2, Plus, X,
   Filter, Save, ChevronUp, ChevronDown, Check, Download,
 } from 'lucide-react';
+import MultiSelect from './MultiSelect';
 import {
   getCurrencySymbol,
   formatCurrencyWithRate,
@@ -82,19 +83,19 @@ export default function FinanceHoldingsTable({
     }
     return defaultPageSize;
   });
-  const [filterAccount, setFilterAccount] = useState(persistedFilters.filterAccount ?? defaultAccountFilter);
-  const [filterMarket, setFilterMarket] = useState(persistedFilters.filterMarket || '');
-  const [filterCurrency, setFilterCurrency] = useState(persistedFilters.filterCurrency || '');
-  const [filterAssetKind, setFilterAssetKind] = useState(persistedFilters.filterAssetKind || '');
+  const [filterAccount, setFilterAccount] = useState(persistedFilters.filterAccount ? (Array.isArray(persistedFilters.filterAccount) ? persistedFilters.filterAccount : [persistedFilters.filterAccount]) : []);
+  const [filterMarket, setFilterMarket] = useState(persistedFilters.filterMarket ? (Array.isArray(persistedFilters.filterMarket) ? persistedFilters.filterMarket : [persistedFilters.filterMarket]) : []);
+  const [filterCurrency, setFilterCurrency] = useState(persistedFilters.filterCurrency ? (Array.isArray(persistedFilters.filterCurrency) ? persistedFilters.filterCurrency : [persistedFilters.filterCurrency]) : []);
+  const [filterAssetKind, setFilterAssetKind] = useState(persistedFilters.filterAssetKind ? (Array.isArray(persistedFilters.filterAssetKind) ? persistedFilters.filterAssetKind : [persistedFilters.filterAssetKind]) : []);
 
-  const [filterAssetType, setFilterAssetType] = useState(persistedFilters.filterAssetType || '');
-  const [filterCategoryL1, setFilterCategoryL1] = useState(persistedFilters.filterCategoryL1 || '');
-  const [filterCategoryL2, setFilterCategoryL2] = useState(persistedFilters.filterCategoryL2 || '');
-  const [filterCategoryL3, setFilterCategoryL3] = useState(persistedFilters.filterCategoryL3 || '');
-  const [filterCategoryL4, setFilterCategoryL4] = useState(persistedFilters.filterCategoryL4 || '');
-  const [filterPositionGroup, setFilterPositionGroup] = useState(persistedFilters.filterPositionGroup || '');
-  const [filterPositionType, setFilterPositionType] = useState(persistedFilters.filterPositionType || '');
-  const [filterTag, setFilterTag] = useState(persistedFilters.filterTag || '');
+  const [filterAssetType, setFilterAssetType] = useState(persistedFilters.filterAssetType ? (Array.isArray(persistedFilters.filterAssetType) ? persistedFilters.filterAssetType : [persistedFilters.filterAssetType]) : []);
+  const [filterCategoryL1, setFilterCategoryL1] = useState(persistedFilters.filterCategoryL1 ? (Array.isArray(persistedFilters.filterCategoryL1) ? persistedFilters.filterCategoryL1 : [persistedFilters.filterCategoryL1]) : []);
+  const [filterCategoryL2, setFilterCategoryL2] = useState(persistedFilters.filterCategoryL2 ? (Array.isArray(persistedFilters.filterCategoryL2) ? persistedFilters.filterCategoryL2 : [persistedFilters.filterCategoryL2]) : []);
+  const [filterCategoryL3, setFilterCategoryL3] = useState(persistedFilters.filterCategoryL3 ? (Array.isArray(persistedFilters.filterCategoryL3) ? persistedFilters.filterCategoryL3 : [persistedFilters.filterCategoryL3]) : []);
+  const [filterCategoryL4, setFilterCategoryL4] = useState(persistedFilters.filterCategoryL4 ? (Array.isArray(persistedFilters.filterCategoryL4) ? persistedFilters.filterCategoryL4 : [persistedFilters.filterCategoryL4]) : []);
+  const [filterPositionGroup, setFilterPositionGroup] = useState(persistedFilters.filterPositionGroup ? (Array.isArray(persistedFilters.filterPositionGroup) ? persistedFilters.filterPositionGroup : [persistedFilters.filterPositionGroup]) : []);
+  const [filterPositionType, setFilterPositionType] = useState(persistedFilters.filterPositionType ? (Array.isArray(persistedFilters.filterPositionType) ? persistedFilters.filterPositionType : [persistedFilters.filterPositionType]) : []);
+  const [filterTag, setFilterTag] = useState(persistedFilters.filterTag ? (Array.isArray(persistedFilters.filterTag) ? persistedFilters.filterTag : [persistedFilters.filterTag]) : []);
   const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [showFilterSettings, setShowFilterSettings] = useState(false);
   const [columnSettingsPosition, setColumnSettingsPosition] = useState('bottom');
@@ -488,6 +489,7 @@ export default function FinanceHoldingsTable({
   }, [tags]);
 
   const filtered = useMemo(() => {
+    const inArr = (arr, val) => Array.isArray(arr) && arr.length > 0 && arr.map(v => String(v)).includes(String(val));
     return holdings.filter(h => {
       if (filterText.trim()) {
         const q = filterText.toLowerCase();
@@ -498,18 +500,21 @@ export default function FinanceHoldingsTable({
           (h.positionGroup || '').toLowerCase().includes(q);
         if (!matchText) return false;
       }
-      if (filterAccount && h.account !== filterAccount) return false;
-      if (filterMarket && h.market !== filterMarket) return false;
-      if (filterCurrency && h.currency !== filterCurrency) return false;
-      if (filterAssetKind && h.assetKind !== filterAssetKind) return false;
-      if (filterAssetType && h.assetType !== filterAssetType) return false;
-      if (filterCategoryL1 && (h.categoryL1 || h.category) !== filterCategoryL1) return false;
-      if (filterCategoryL2 && h.categoryL2 !== filterCategoryL2) return false;
-      if (filterCategoryL3 && h.categoryL3 !== filterCategoryL3) return false;
-      if (filterCategoryL4 && h.categoryL4 !== filterCategoryL4) return false;
-      if (filterPositionGroup && h.positionGroup !== filterPositionGroup) return false;
-      if (filterPositionType && h.positionType !== filterPositionType) return false;
-      if (filterTag && !(h.tags?.includes(filterTag))) return false;
+      if (filterAccount.length > 0 && !inArr(filterAccount, h.account)) return false;
+      if (filterMarket.length > 0 && !inArr(filterMarket, h.market)) return false;
+      if (filterCurrency.length > 0 && !inArr(filterCurrency, h.currency)) return false;
+      if (filterAssetKind.length > 0 && !inArr(filterAssetKind, h.assetKind)) return false;
+      if (filterAssetType.length > 0 && !inArr(filterAssetType, h.assetType)) return false;
+      if (filterCategoryL1.length > 0 && !inArr(filterCategoryL1, h.categoryL1 || h.category)) return false;
+      if (filterCategoryL2.length > 0 && !inArr(filterCategoryL2, h.categoryL2)) return false;
+      if (filterCategoryL3.length > 0 && !inArr(filterCategoryL3, h.categoryL3)) return false;
+      if (filterCategoryL4.length > 0 && !inArr(filterCategoryL4, h.categoryL4)) return false;
+      if (filterPositionGroup.length > 0 && !inArr(filterPositionGroup, h.positionGroup)) return false;
+      if (filterPositionType.length > 0 && !inArr(filterPositionType, h.positionType)) return false;
+      if (filterTag.length > 0) {
+        const tags = h.tags || [];
+        if (!filterTag.some(t => tags.includes(t))) return false;
+      }
       return true;
     });
   }, [holdings, filterText, filterAccount, filterMarket, filterCurrency, filterAssetKind, filterAssetType, filterCategoryL1, filterCategoryL2, filterCategoryL3, filterCategoryL4, filterPositionGroup, filterPositionType, filterTag]);
@@ -524,18 +529,18 @@ export default function FinanceHoldingsTable({
 
   const resetFilters = () => {
     setFilterText('');
-    setFilterAccount('');
-    setFilterMarket('');
-    setFilterCurrency('');
-    setFilterAssetKind('');
-    setFilterAssetType('');
-    setFilterCategoryL1('');
-    setFilterCategoryL2('');
-    setFilterCategoryL3('');
-    setFilterCategoryL4('');
-    setFilterPositionGroup('');
-    setFilterPositionType('');
-    setFilterTag('');
+    setFilterAccount([]);
+    setFilterMarket([]);
+    setFilterCurrency([]);
+    setFilterAssetKind([]);
+    setFilterAssetType([]);
+    setFilterCategoryL1([]);
+    setFilterCategoryL2([]);
+    setFilterCategoryL3([]);
+    setFilterCategoryL4([]);
+    setFilterPositionGroup([]);
+    setFilterPositionType([]);
+    setFilterTag([]);
     setPage(1);
     try {
       sessionStorage.removeItem(filtersStorageKey);
@@ -745,152 +750,111 @@ export default function FinanceHoldingsTable({
       <div className="p-4 pb-3 space-y-2.5">
         <div className="flex items-center gap-2 flex-wrap">
           {filterSettings.find(f => f.key === 'account')?.visible && uniqueAccounts.length > 0 && (
-            <select
+            <MultiSelect
               value={filterAccount}
-              onChange={e => { setFilterAccount(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部账户</option>
-              {uniqueAccounts.map(a => <option key={a} value={a}>{sanitizeText(a, a)}</option>)}
-            </select>
+              onChange={(val) => { setFilterAccount(val); setPage(1); }}
+              options={uniqueAccounts.map(a => ({ value: a, label: sanitizeText(a, a) }))}
+              placeholder="全部账户"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'market')?.visible && (
-            <select
+            <MultiSelect
               value={filterMarket}
-              onChange={e => { setFilterMarket(e.target.value); setFilterCurrency(''); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部市场</option>
-              {marketGroups.map(g => (
-                g.options.length === 1
-                  ? <option key={g.options[0]} value={g.options[0]}>{g.options[0]}</option>
-                  : <optgroup key={g.label} label={g.label}>
-                    {g.options.map(o => <option key={o} value={o}>{o}</option>)}
-                  </optgroup>
-              ))}
-            </select>
+              onChange={(val) => { setFilterMarket(val); setFilterCurrency([]); setPage(1); }}
+              options={marketGroups.flatMap(g => g.options)}
+              placeholder="全部市场"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'categoryL1')?.visible && (
-            <select
+            <MultiSelect
               value={filterCategoryL1}
-              onChange={e => { setFilterCategoryL1(e.target.value); setFilterCategoryL2(''); setFilterCategoryL3(''); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部一级分类</option>
-              {assetClassOptions.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+              onChange={(val) => { setFilterCategoryL1(val); setFilterCategoryL2([]); setFilterCategoryL3([]); setPage(1); }}
+              options={assetClassOptions}
+              placeholder="全部一级分类"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'categoryL2')?.visible && (
-            <select
+            <MultiSelect
               value={filterCategoryL2}
-              onChange={e => { setFilterCategoryL2(e.target.value); setFilterCategoryL3(''); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部二级分类</option>
-              {allCategoryL2Options.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+              onChange={(val) => { setFilterCategoryL2(val); setFilterCategoryL3([]); setPage(1); }}
+              options={allCategoryL2Options}
+              placeholder="全部二级分类"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'categoryL3')?.visible && (
-            <select
+            <MultiSelect
               value={filterCategoryL3}
-              onChange={e => { setFilterCategoryL3(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部三级分类</option>
-              {['场内', '场外', ...categoryL3CustomOptions].map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+              onChange={(val) => { setFilterCategoryL3(val); setPage(1); }}
+              options={['场内', '场外', ...categoryL3CustomOptions]}
+              placeholder="全部三级分类"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'categoryL4')?.visible && (
-            <select
+            <MultiSelect
               value={filterCategoryL4}
-              onChange={e => { setFilterCategoryL4(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部四级分类</option>
-              {[...new Set(Object.values(categoryL4Options).flat())].map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+              onChange={(val) => { setFilterCategoryL4(val); setPage(1); }}
+              options={[...new Set(Object.values(categoryL4Options).flat())]}
+              placeholder="全部四级分类"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'positionGroup')?.visible && (
-            <select
+            <MultiSelect
               value={filterPositionGroup}
-              onChange={e => { setFilterPositionGroup(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部持仓分组</option>
-              {positionGroupOptions.map(g => <option key={g} value={g}>{g}</option>)}
-            </select>
+              onChange={(val) => { setFilterPositionGroup(val); setPage(1); }}
+              options={positionGroupOptions}
+              placeholder="全部持仓分组"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'positionType')?.visible && (
-            <select
+            <MultiSelect
               value={filterPositionType}
-              onChange={e => { setFilterPositionType(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部持仓分类</option>
-              {positionTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          )}
-
-          {filterSettings.find(f => f.key === 'account')?.visible && (
-            <select
-              value={filterAccount}
-              onChange={e => { setFilterAccount(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部账户</option>
-              {uniqueAccounts.map(a => <option key={a} value={a}>{sanitizeText(a, a)}</option>)}
-            </select>
+              onChange={(val) => { setFilterPositionType(val); setPage(1); }}
+              options={positionTypeOptions}
+              placeholder="全部持仓分类"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'currency')?.visible && (
-            <select
+            <MultiSelect
               value={filterCurrency}
-              onChange={e => { setFilterCurrency(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部货币</option>
-              {getFilteredCurrencies(filterMarket).map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+              onChange={(val) => { setFilterCurrency(val); setPage(1); }}
+              options={getFilteredCurrencies(filterMarket).map(c => c)}
+              placeholder="全部货币"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'assetKind')?.visible && (
-            <select
+            <MultiSelect
               value={filterAssetKind}
-              onChange={e => { setFilterAssetKind(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部资产种类</option>
-              {assetKindOptions.map(k => <option key={k} value={k}>{k}</option>)}
-            </select>
+              onChange={(val) => { setFilterAssetKind(val); setPage(1); }}
+              options={assetKindOptions}
+              placeholder="全部资产种类"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'assetType')?.visible && (
-            <select
+            <MultiSelect
               value={filterAssetType}
-              onChange={e => { setFilterAssetType(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部资产类型</option>
-              {assetTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+              onChange={(val) => { setFilterAssetType(val); setPage(1); }}
+              options={assetTypeOptions}
+              placeholder="全部资产类型"
+            />
           )}
 
           {filterSettings.find(f => f.key === 'tag')?.visible && uniqueTags.length > 0 && (
-            <select
+            <MultiSelect
               value={filterTag}
-              onChange={e => { setFilterTag(e.target.value); setPage(1); }}
-              className="px-2.5 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 appearance-none cursor-pointer"
-            >
-              <option value="">全部标签</option>
-              {uniqueTags.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+              onChange={(val) => { setFilterTag(val); setPage(1); }}
+              options={uniqueTags}
+              placeholder="全部标签"
+            />
           )}
 
           <div className="relative" ref={filterSettingsRef}>
