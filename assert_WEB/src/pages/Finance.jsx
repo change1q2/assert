@@ -2341,9 +2341,12 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
 // ═══════════════════════════════════════════
 
 export default function Finance({ onAssetPenetration }) {
+  const CACHE_KEY = 'wealth_os_finance_state_snapshot_v1';
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isSilentRefreshing, setIsSilentRefreshing] = useState(false);
+  const initialMountRef = useRef(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [detailData, setDetailData] = useState(null);
@@ -2626,7 +2629,25 @@ export default function Finance({ onAssetPenetration }) {
   const ACCOUNTS_PER_PAGE = 6;
 
   useEffect(() => {
-    loadData();
+    // 阶段1：立即尝试从缓存读取，秒级显示数据
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.payload && (parsed.payload.financeAssets || parsed.payload.accounts)) {
+          // 软过期：即使过期也先展示旧缓存，再后台刷新，不显示骨架屏
+          setStateData(parsed.payload);
+          setLoading(false);
+        }
+      }
+    } catch (err) {
+      console.warn('[Finance] read cache failed:', err);
+    }
+
+    // 阶段2：后台静默拉取最新 state 数据（不 setLoading=true）
+    loadData({ silent: initialMountRef.current });
+    initialMountRef.current = false;
+
     loadBooksAndTags();
     loadExchangeRates();
     loadHkConnectRate();
@@ -2639,6 +2660,24 @@ export default function Finance({ onAssetPenetration }) {
       }
     }
   }, []);
+
+  // stateData 变化时异步写入缓存（防抖：500ms 合并连续变更）
+  useEffect(() => {
+    if (!stateData) return;
+    const t = setTimeout(() => {
+      try {
+        const snapshot = {
+          payload: stateData,
+          timestamp: Date.now(),
+          version: 1,
+        };
+        localStorage.setItem(CACHE_KEY, JSON.stringify(snapshot));
+      } catch (err) {
+        console.warn('[Finance] write cache failed:', err);
+      }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [stateData]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -2761,8 +2800,13 @@ export default function Finance({ onAssetPenetration }) {
     localStorage.setItem('finance_position_type_deleted_map', JSON.stringify(deletedPositionTypeMap));
   }, [deletedPositionTypeMap]);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (opts = {}) => {
+    const { silent = false } = opts;
+    if (!silent) {
+      setLoading(true);
+    } else {
+      setIsSilentRefreshing(true);
+    }
     setError(null);
     try {
       const data = await fetchState();
@@ -2998,22 +3042,28 @@ export default function Finance({ onAssetPenetration }) {
       setStateData(data);
       const financeAssetsData = data?.financeAssets || [];
       if (financeAssetsData.length > 0) {
+        // 行情/基金净值等更新后台静默跑，不阻塞 loading
         Promise.allSettled([
-          loadQuotes(financeAssetsData),
-          loadFundNav(financeAssetsData, data),
+          loadQuotes(financeAssetsData, { silent }),
+          loadFundNav(financeAssetsData, data, { silent }),
           repairMoneyFundSharesFromTxs(financeAssetsData, data),
-          loadMoneyFunds(financeAssetsData),
+          loadMoneyFunds(financeAssetsData, { silent }),
         ]);
       }
     } catch (err) {
       console.error('Failed to load finance data:', err);
-      setError('加载数据失败');
+      if (!silent) setError('加载数据失败');
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      } else {
+        setIsSilentRefreshing(false);
+      }
     }
   };
 
-  const loadQuotes = async (financeAssetsData) => {
+  const loadQuotes = async (financeAssetsData, opts = {}) => {
+    const { silent = false } = opts;
     if (!financeAssetsData || financeAssetsData.length === 0) return;
     const codes = financeAssetsData
       .filter(a => {
@@ -3027,7 +3077,7 @@ export default function Finance({ onAssetPenetration }) {
       })
       .map(a => ({ code: a.code, market: a.market || '国内市场' }));
     if (codes.length === 0) return;
-    setQuotesLoading(true);
+    if (!silent) setQuotesLoading(true);
     try {
       const quotes = await fetchFinanceQuotes(codes);
       const map = {};
@@ -3065,12 +3115,13 @@ export default function Finance({ onAssetPenetration }) {
     } catch (err) {
       console.error('Failed to load quotes:', err);
     } finally {
-      setQuotesLoading(false);
+      if (!silent) setQuotesLoading(false);
     }
   };
 
   // 天天基金网：场外基金净值自动获取
-  const loadFundNav = async (financeAssetsData, currentState) => {
+  const loadFundNav = async (financeAssetsData, currentState, opts = {}) => {
+    // const { silent = false } = opts;
     if (!financeAssetsData || financeAssetsData.length === 0) return;
     const fundItems = financeAssetsData.filter(a => {
       if (!a.code || !/^\d{6}$/.test(String(a.code).trim())) return false;
@@ -3131,7 +3182,8 @@ export default function Finance({ onAssetPenetration }) {
     if (a.code === '000509') return true;
     return false;
   };
-  const loadMoneyFunds = async (financeAssetsData) => {
+  const loadMoneyFunds = async (financeAssetsData, opts = {}) => {
+    // const { silent = false } = opts;
     if (!financeAssetsData || financeAssetsData.length === 0) return;
     const fundItems = financeAssetsData.filter(a => {
       if (!a.code || !/^\d{6}$/.test(String(a.code).trim())) return false;
@@ -5242,7 +5294,7 @@ export default function Finance({ onAssetPenetration }) {
               </button>
               <button onClick={loadData}
                 className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-indigo-300 text-indigo-600 text-sm font-medium hover:bg-indigo-50 active:scale-[0.97] transition-all">
-                <RefreshCw className={`w-4 h-4 ${loading || quotesLoading ? 'animate-spin' : ''}`} /> 刷新
+                <RefreshCw className={`w-4 h-4 ${loading || quotesLoading || isSilentRefreshing ? 'animate-spin' : ''}`} /> 刷新
               </button>
             </div>
           </div>
