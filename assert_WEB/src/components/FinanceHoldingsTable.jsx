@@ -27,6 +27,7 @@ import { CURRENCIES, getCurrencyName } from '../utils/currency';
 export default function FinanceHoldingsTable({
   readOnly = false,
   defaultAccountFilter = '',
+  lockedAccountFilter = '',
   categoryName,
   holdings,
   colorIdx,
@@ -83,7 +84,23 @@ export default function FinanceHoldingsTable({
     }
     return defaultPageSize;
   });
-  const [filterAccount, setFilterAccount] = useState(persistedFilters.filterAccount ? (Array.isArray(persistedFilters.filterAccount) ? persistedFilters.filterAccount : [persistedFilters.filterAccount]) : []);
+  // 账户筛选：lockedAccountFilter 优先（锁定模式，不可修改），其次 defaultAccountFilter，最后 sessionStorage
+  const _initialAccountFilter = (() => {
+    if (lockedAccountFilter) return [lockedAccountFilter];
+    if (persistedFilters.filterAccount) {
+      return Array.isArray(persistedFilters.filterAccount) ? persistedFilters.filterAccount : [persistedFilters.filterAccount];
+    }
+    if (defaultAccountFilter) return [defaultAccountFilter];
+    return [];
+  })();
+  const [filterAccount, _setFilterAccount] = useState(_initialAccountFilter);
+  // 锁定模式下强制使用 lockedAccountFilter
+  const effectiveFilterAccount = lockedAccountFilter ? [lockedAccountFilter] : filterAccount;
+  const setFilterAccount = (v) => {
+    if (lockedAccountFilter) return;
+    _setFilterAccount(v);
+    setPage(1);
+  };
   const [filterMarket, setFilterMarket] = useState(persistedFilters.filterMarket ? (Array.isArray(persistedFilters.filterMarket) ? persistedFilters.filterMarket : [persistedFilters.filterMarket]) : []);
   const [filterCurrency, setFilterCurrency] = useState(persistedFilters.filterCurrency ? (Array.isArray(persistedFilters.filterCurrency) ? persistedFilters.filterCurrency : [persistedFilters.filterCurrency]) : []);
   const [filterAssetKind, setFilterAssetKind] = useState(persistedFilters.filterAssetKind ? (Array.isArray(persistedFilters.filterAssetKind) ? persistedFilters.filterAssetKind : [persistedFilters.filterAssetKind]) : []);
@@ -231,7 +248,7 @@ export default function FinanceHoldingsTable({
     try {
       sessionStorage.setItem(filtersStorageKey, JSON.stringify({
         filterText,
-        filterAccount,
+        filterAccount: effectiveFilterAccount,
         filterMarket,
         filterCurrency,
         filterAssetKind,
@@ -247,7 +264,7 @@ export default function FinanceHoldingsTable({
     } catch (e) {
       console.error('Failed to save filters:', e);
     }
-  }, [filterText, filterAccount, filterMarket, filterCurrency, filterAssetKind, filterAssetType, filterCategoryL1, filterCategoryL2, filterCategoryL3, filterCategoryL4, filterPositionGroup, filterPositionType, filterTag, filtersStorageKey]);
+  }, [filterText, effectiveFilterAccount, filterMarket, filterCurrency, filterAssetKind, filterAssetType, filterCategoryL1, filterCategoryL2, filterCategoryL3, filterCategoryL4, filterPositionGroup, filterPositionType, filterTag, filtersStorageKey]);
 
   const handlePageSizeChange = (newSize) => {
     setPageSize(newSize);
@@ -500,7 +517,7 @@ export default function FinanceHoldingsTable({
           (h.positionGroup || '').toLowerCase().includes(q);
         if (!matchText) return false;
       }
-      if (filterAccount.length > 0 && !inArr(filterAccount, h.account)) return false;
+      if (effectiveFilterAccount.length > 0 && !inArr(effectiveFilterAccount, h.account)) return false;
       if (filterMarket.length > 0 && !inArr(filterMarket, h.market)) return false;
       if (filterCurrency.length > 0 && !inArr(filterCurrency, h.currency)) return false;
       if (filterAssetKind.length > 0 && !inArr(filterAssetKind, h.assetKind)) return false;
@@ -517,7 +534,7 @@ export default function FinanceHoldingsTable({
       }
       return true;
     });
-  }, [holdings, filterText, filterAccount, filterMarket, filterCurrency, filterAssetKind, filterAssetType, filterCategoryL1, filterCategoryL2, filterCategoryL3, filterCategoryL4, filterPositionGroup, filterPositionType, filterTag]);
+  }, [holdings, filterText, effectiveFilterAccount, filterMarket, filterCurrency, filterAssetKind, filterAssetType, filterCategoryL1, filterCategoryL2, filterCategoryL3, filterCategoryL4, filterPositionGroup, filterPositionType, filterTag]);
 
   const filteredWithRatio = useMemo(() => {
     const totalValue = filtered.reduce((sum, h) => sum + (parseFloat(h.currentValue) || parseFloat(h.balance) || 0), 0);
@@ -751,10 +768,11 @@ export default function FinanceHoldingsTable({
         <div className="flex items-center gap-2 flex-wrap">
           {filterSettings.find(f => f.key === 'account')?.visible && uniqueAccounts.length > 0 && (
             <MultiSelect
-              value={filterAccount}
+              value={effectiveFilterAccount}
               onChange={(val) => { setFilterAccount(val); setPage(1); }}
               options={uniqueAccounts.map(a => ({ value: a, label: sanitizeText(a, a) }))}
               placeholder="全部账户"
+              disabled={!!lockedAccountFilter}
             />
           )}
 
@@ -925,7 +943,7 @@ export default function FinanceHoldingsTable({
                         if (name && name.trim()) {
                           const currentFilters = {
                             name: name.trim(),
-                            account: filterAccount,
+                            account: effectiveFilterAccount,
                             market: filterMarket,
                             currency: filterCurrency,
                             assetKind: filterAssetKind,

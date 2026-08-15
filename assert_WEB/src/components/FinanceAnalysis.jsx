@@ -226,7 +226,7 @@ export default function FinanceAnalysis({ stateData, timeMode, startDate, endDat
           for (let i = 0; i < updated.length; i++) {
             const asset = updated[i];
             const quote = quotesMap[asset.code];
-            const isManualPrice = asset.priceManualEdit === true;
+            const isManualPrice = asset.priceManualEdit === true || asset.priceManualEdit === 'true';
             if (quote && quote.price != null && !isManualPrice) {
               const price = parseFloat(quote.price);
               const quantity = parseFloat(asset.shares || asset.quantity) || 0;
@@ -255,7 +255,7 @@ export default function FinanceAnalysis({ stateData, timeMode, startDate, endDat
           for (let i = 0; i < updated.length; i++) {
             const asset = updated[i];
             const fund = funds.find(f => f.code === asset.code);
-            const isManualPrice = asset.priceManualEdit === true;
+            const isManualPrice = asset.priceManualEdit === true || asset.priceManualEdit === 'true';
             if (fund && !isManualPrice) {
               const newNav = Number.isFinite(Number(fund.nav)) ? Number(fund.nav) : null;
               if (newNav != null) {

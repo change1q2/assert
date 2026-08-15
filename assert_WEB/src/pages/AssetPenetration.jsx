@@ -948,7 +948,7 @@ export default function AssetPenetration({ onBack }) {
 
   const financeAccounts = useMemo(() => {
     return (financeAssets || []).map(a => {
-      const _isManualPrice = a.priceManualEdit === true;
+      const _isManualPrice = a.priceManualEdit === true || a.priceManualEdit === 'true';
       const _price = _isManualPrice ? (parseFloat(a.currentPrice) || 0) : (parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0);
       const _cost = parseFloat(a.costPrice || a.cost) || 0;
       const _qty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;

@@ -1669,6 +1669,15 @@ export default function Accounts() {
         return accId === account.id || accId === account.name;
       })
       .map((a) => {
+        // —— 港股通算法：与 Finance.jsx 保持一致
+        const _market = a.market || '国内市场';
+        const _l2ForDetect = (a.subcategory || a.categoryL2 || '').toString().trim();
+        const isHKConnect = _market === '国内市场' && _l2ForDetect === '港股通';
+        const _hkdRate = exchangeRates?.HKD || 0.86;
+        const _hkCostFactor = isHKConnect ? (_hkdRate * 1.03) : 1;
+        const _hkValueFactor = isHKConnect ? _hkdRate : 1;
+        const _isManualPrice = a.priceManualEdit === true || a.priceManualEdit === 'true';
+
         const transactions = a.transactions || [];
         let buyTotalQty = 0;
         let buyTotalAmount = 0;
@@ -1677,9 +1686,12 @@ export default function Accounts() {
         let totalFees = 0;
         transactions.forEach(t => {
           const qty = parseFloat(t.quantity || t.shares) || 0;
-          const amount = parseFloat(t.amount) || 0;
+          let amount = parseFloat(t.amount) || 0;
           const fee = parseFloat(t.commission || t.fee) || 0;
-          if (!isNaN(fee)) totalFees += fee;
+          if (isHKConnect && !_isManualPrice) {
+            amount = amount * _hkCostFactor;
+          }
+          if (!isNaN(fee)) totalFees += (isHKConnect && !_isManualPrice) ? (fee * _hkCostFactor) : fee;
           if (t.type === '建仓' || t.type === '买入') {
             buyTotalQty += qty;
             buyTotalAmount += amount;
@@ -1692,15 +1704,24 @@ export default function Accounts() {
         const _computedQty = buyTotalQty - sellTotalQty;
         const _qty = buyTotalQty > 0 ? _computedQty : (parseFloat(a.shares || a.quantity) || 0);
         const _computedCostPrice = buyTotalQty > 0 ? buyTotalAmount / buyTotalQty : 0;
-        const _costPrice = buyTotalQty > 0 ? _computedCostPrice : (parseFloat(a.costPrice || a.cost) || 0);
+        const _storedCostRaw = parseFloat(a.costPrice || a.cost) || 0;
+        const _storedCost = (isHKConnect && !_isManualPrice && _storedCostRaw > 0) ? (_storedCostRaw * _hkCostFactor) : _storedCostRaw;
+        const _costPrice = buyTotalQty > 0 ? _computedCostPrice : _storedCost;
 
         const isCash = isCashCategory(a);
         // 数量始终使用实际数量，不能用 currentValue 覆盖
         const _effectiveQty = _qty;
-        const _quotePrice = parseFloat(quotesMap[a.code]?.price) || 0;
-        const _isManualPrice = a.priceManualEdit === true;
+        // 港股通：行情报价和存储值按 factor 折算
+        const _quoteRawPrice = parseFloat(quotesMap[a.code]?.price) || 0;
+        const _quoteRawPrevClose = parseFloat(quotesMap[a.code]?.prevClose) || 0;
+        const _quotePriceConv = (isHKConnect && _quoteRawPrice > 0) ? (_quoteRawPrice * _hkValueFactor) : _quoteRawPrice;
+        const _quotePrevConv = (isHKConnect && _quoteRawPrevClose > 0) ? (_quoteRawPrevClose * _hkValueFactor) : _quoteRawPrevClose;
+        const _storedPriceRaw = parseFloat(a.currentPrice) || 0;
+        const _storedPrevRaw = parseFloat(a.prevPrice) || 0;
+        const _storedPriceConv = (isHKConnect && !_isManualPrice && _storedPriceRaw > 0) ? (_storedPriceRaw * _hkValueFactor) : _storedPriceRaw;
+        const _storedPrevConv = (isHKConnect && !_isManualPrice && _storedPrevRaw > 0) ? (_storedPrevRaw * _hkValueFactor) : _storedPrevRaw;
         // 允许现金类资产使用用户输入的价格，不再强制设为1
-        const _effectivePrice = _isManualPrice ? (parseFloat(a.currentPrice) || 0) : (_quotePrice || parseFloat(a.currentPrice) || 0);
+        const _effectivePrice = _isManualPrice ? _storedPriceRaw : (_quotePriceConv || _storedPriceConv || 0);
 
         const _unitCost = _costPrice;
         const _totalCost = _unitCost * _effectiveQty;
@@ -1710,11 +1731,12 @@ export default function Accounts() {
         const _holdingPnlRate = _totalCost > 0 ? (_holdingPnl / _totalCost) * 100 : 0;
 
         // 使用行情数据中的 prevClose（昨收价）判断涨跌颜色，优先级：行情prevClose > 存储prevPrice
-        const _quotePrevClose = parseFloat(quotesMap[a.code]?.prevClose) || 0;
-        const _prevPrice = _isManualPrice ? (parseFloat(a.prevPrice) || 0) : (_quotePrevClose > 0 ? _quotePrevClose : (parseFloat(a.prevPrice) || 0));
+        const _prevPrice = _isManualPrice ? _storedPrevRaw : (_quotePrevConv > 0 ? _quotePrevConv : _storedPrevConv);
+        const _dailyRaw = parseFloat(a.todayPnl) || parseFloat(a.dailyPnl) || 0;
+        const _dailyConv = (isHKConnect && !_isManualPrice) ? (_dailyRaw * _hkValueFactor) : _dailyRaw;
         const _dailyPnl = isCash ? 0 : ((_prevPrice > 0 && _effectivePrice > 0)
           ? (_effectivePrice - _prevPrice) * _effectiveQty
-          : (parseFloat(a.todayPnl) || parseFloat(a.dailyPnl) || 0));
+          : _dailyConv);
         const _dailyPnlRate = isCash ? 0 : ((_prevPrice > 0 && _effectivePrice > 0)
           ? ((_effectivePrice - _prevPrice) / _prevPrice) * 100
           : (parseFloat(a.todayPnlPercent) || parseFloat(a.dailyPnlRate) || 0));
@@ -2020,6 +2042,7 @@ export default function Accounts() {
                   categoryName="account_detail_equity"
                   holdings={scaledEquityHoldings}
                   readOnly={true}
+                  lockedAccountFilter={accounts.find(a => a.id === selectedAccountId)?.name || ''}
                   colorIdx={0}
                   marketOptions={marketOptions}
                   currencyOptions={currencyOptions}
@@ -2289,7 +2312,7 @@ export default function Accounts() {
           categoryName="account_detail"
           holdings={scaledAccountHoldings}
           readOnly={true}
-          defaultAccountFilter={account?.name || ''}
+          lockedAccountFilter={account?.name || ''}
           colorIdx={0}
           marketOptions={marketOptions}
           currencyOptions={currencyOptions}
