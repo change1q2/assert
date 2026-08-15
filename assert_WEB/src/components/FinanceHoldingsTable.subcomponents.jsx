@@ -48,11 +48,17 @@ export function HoldingsSummaryCard({ summary, selectedCurrency = 'CNY', exchang
         <span className="font-semibold text-gray-900 dark:text-white text-sm">筛选汇总</span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 text-center mb-2">
+      <div className="grid grid-cols-4 gap-2 text-center mb-2">
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当前总市值</p>
           <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(summary.totalMarketValue, src, selectedCurrency, exchangeRates)}</p>
         </div>
+        {summary.totalCash != null && (
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">当前总现金</p>
+            <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(summary.totalCash, src, selectedCurrency, exchangeRates)}</p>
+          </div>
+        )}
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">持仓总成本</p>
           <p className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{formatCurrencyWithRate(summary.totalCost, src, selectedCurrency, exchangeRates)}</p>

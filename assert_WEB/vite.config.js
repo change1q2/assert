@@ -12,6 +12,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/vi-api/, '/api'),
       },
+      '/api/eastmoney': {
+        target: 'https://fund.eastmoney.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api\/eastmoney/, ''),
+      },
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,

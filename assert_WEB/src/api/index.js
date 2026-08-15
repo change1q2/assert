@@ -556,6 +556,64 @@ export async function fetchMoneyFund(code) {
   }
 }
 
+// 货币基金网页兜底：从天天基金网页直接抓取万份收益和七日年化
+// 当 API 接口无法获取数据时，通过 Vite 代理请求天天基金基金详情页 HTML 并解析
+export async function fetchMoneyFundFromWeb(code) {
+  try {
+    // 天天基金基金详情页：https://fund.eastmoney.com/{code}.html
+    // 页面中包含"每万份收益"和"7日年化"数据
+    const url = `/api/eastmoney/${encodeURIComponent(code)}.html`
+    const response = await fetch(url)
+    if (!response.ok) return null
+    const html = await response.text()
+
+    // 解析万份收益：页面中格式为 "每万份收益</a> (MM-DD)\n 数值"
+    // 或 <span class="Mingcheng">每万份收益</span> ... 数值
+    let navPer10k = null
+    let annualized7d = null
+    let navDate = ''
+    let name = ''
+
+    // 提取基金名称
+    const nameMatch = html.match(/<title>([^<]+?)\(/)
+    if (nameMatch) name = nameMatch[1].trim()
+
+    // 提取万份收益：匹配 "每万份收益" 后面的数值
+    // 页面格式: 每万份收益</a> (08-14)\n0.3773
+    const navMatch = html.match(/每万份收益[\s\S]*?\(([\d-]+)\)[\s\S]*?>([\d.]+)</)
+    if (navMatch) {
+      navPer10k = parseFloat(navMatch[2])
+      navDate = navMatch[1]
+    } else {
+      // 备用正则：更宽松匹配
+      const navMatch2 = html.match(/每万份收益[\s\S]{0,200}?>([\d.]+)</)
+      if (navMatch2) navPer10k = parseFloat(navMatch2[1])
+    }
+
+    // 提取七日年化：匹配 "7日年化" 后面的数值
+    const annMatch = html.match(/7日年化[\s\S]*?\(([\d-]+)\)[\s\S]*?>([\d.]+)%?</)
+    if (annMatch) {
+      annualized7d = parseFloat(annMatch[2])
+      if (!navDate) navDate = annMatch[1]
+    } else {
+      // 备用正则
+      const annMatch2 = html.match(/7日年化[\s\S]{0,200}?>([\d.]+)%?</)
+      if (annMatch2) annualized7d = parseFloat(annMatch2[1])
+    }
+
+    if (navPer10k == null && annualized7d == null) return null
+    return {
+      nav_per_10k: navPer10k,
+      annualized_7d: annualized7d,
+      date: navDate || '',
+      name: name || '',
+      _source: 'web',
+    }
+  } catch {
+    return null
+  }
+}
+
 // 通用基金净值（LOF/ETF/场外基金）：最新净值 + 前一日净值（走 python-server）
 export async function fetchFundNavQuote(code) {
   try {

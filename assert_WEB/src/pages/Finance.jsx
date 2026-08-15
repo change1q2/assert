@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchRealTimeExchangeRates, fetchMoneyFund, fetchMoneyFundData, fetchFundNavQuote, fetchHkConnectRate } from '../api';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { fetchState, saveState, createAccount, updateAccount, deleteAccount, fetchBooks, saveBooks, lookupFinance, fetchFinanceQuotes, fetchFundNav, fetchRealTimeExchangeRates, fetchMoneyFund, fetchMoneyFundData, fetchMoneyFundFromWeb, fetchFundNavQuote, fetchHkConnectRate } from '../api';
 import { CURRENCIES, getCurrencySymbol, getCurrencyName } from '../utils/currency';
 import sanitizeText from '../utils/sanitizeText';
 import {
@@ -352,6 +352,29 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
   const [uploadedImages, setUploadedImages] = useState([]);
   const [showAddRecord, setShowAddRecord] = useState(false);
   const [userSeedOverride, setUserSeedOverride] = useState(false);
+  // 累计收益/收益率手动编辑：允许用户覆盖自动计算值
+  const storedCumRaw = latestData.cumulativeReturn;
+  const storedCum = storedCumRaw != null ? parseFloat(storedCumRaw) : NaN;
+  const storedCumRateRaw = latestData.cumulativeReturnRate;
+  const storedCumRate = storedCumRateRaw != null ? parseFloat(storedCumRateRaw) : NaN;
+  const hasManualCum = storedCumRaw != null && !isNaN(storedCum);
+  const hasManualCumRate = storedCumRateRaw != null && !isNaN(storedCumRate);
+  const [editCumReturn, setEditCumReturn] = useState(() => (hasManualCum ? String(storedCum) : ''));
+  const [savingCum, setSavingCum] = useState(false);
+  // 持有收益手动编辑（只有持有收益本身可编辑，持有收益率不允许编辑）
+  const storedHoldingPnlRaw = latestData.holdingPnl;
+  const storedHoldingPnl = storedHoldingPnlRaw != null ? parseFloat(storedHoldingPnlRaw) : NaN;
+  const hasManualHoldingPnl = storedHoldingPnlRaw != null && !isNaN(storedHoldingPnl) && storedHoldingPnlRaw !== '';
+  const [editHoldingPnl, setEditHoldingPnl] = useState(() => (hasManualHoldingPnl ? String(storedHoldingPnl) : ''));
+  const [savingHoldingPnl, setSavingHoldingPnl] = useState(false);
+  // 字段级编辑模式：'cum' | 'pnl' | null —— 默认 null 显示只读文本，点击铅笔图标后切换为输入框
+  const [editingField, setEditingField] = useState(null);
+  const editFieldInputRef = useRef(null);
+  useEffect(() => {
+    if (editingField && editFieldInputRef.current) {
+      editFieldInputRef.current.focus();
+    }
+  }, [editingField]);
   const [tradeRecords, setTradeRecords] = useState(() => {
     if (data.transactions && Array.isArray(data.transactions)) {
       return data.transactions.map(t => {
@@ -812,7 +835,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     const _networkNav = _mfNetwork && _mfNetwork.nav_per_10k != null ? parseFloat(_mfNetwork.nav_per_10k) : 0;
     const navPer10k = parseFloat(latestData.navPer10k) || _networkNav || 0;
     if (navPer10k > 0 && quantity > 0) {
-      computedDailyPnl = Math.round((navPer10k * quantity / 10000) * 100) / 100;
+      // 最新收益 = 持有份额 × 成本单价 × 万份收益 / 10000
+      computedDailyPnl = Math.round((navPer10k * quantity * _moneyFundAdjCostPrice / 10000) * 100) / 100;
     } else if (prevPrice > 0 && currentPrice > 0 && quantity > 0) {
       computedDailyPnl = Math.round((currentPrice - prevPrice) * quantity * 100) / 100;
     } else {
@@ -933,6 +957,23 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
 
     return { buyTotalAmount, sellTotalAmount, buyTotalQty, sellTotalQty, avgBuyCost, originalBuyCost, avgSellCost, totalFee, buyFee, sellFee, dividendTotal, transferOutTotal, firstBuyDate };
   }, [tradeRecords]);
+
+  // 货基专用持有收益：优先使用存储的用户编辑值，缺失时按公式计算
+  const _mfAutoHoldingPnl = _isDetailMoneyFund
+    ? Math.round((tradeStats.buyTotalAmount - costTotal) * 100) / 100
+    : floatPnl;
+  const _mfHoldingPnl = _isDetailMoneyFund
+    ? (hasManualHoldingPnl ? storedHoldingPnl : _mfAutoHoldingPnl)
+    : floatPnl;
+  const _mfHoldingPnlRate = _isDetailMoneyFund
+    ? (costTotal > 0 ? Math.round((_mfHoldingPnl / costTotal) * 100 * 100) / 100 : 0)
+    : floatPnlRate;
+  const _mfHoldingReturnRate = _isDetailMoneyFund ? _mfHoldingPnlRate : computedHoldingReturnRate;
+
+  // 货基累计收益 = 原有累计收益 + 今日最新收益（每日累加）
+  const _mfAutoCumulative = _isDetailMoneyFund
+    ? Math.round(((hasManualCum ? storedCum : 0) + computedDailyPnl) * 100) / 100
+    : Math.round((currentValue - costTotal) * 100) / 100;
 
   const isFloatPos = floatPnl >= 0;
   const isDayPos = dailyPnl >= 0;
@@ -1079,6 +1120,62 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
 
     return accounts;
   };
+
+  // 累计收益手动保存：写入 asset 并调用 setStateData + saveState
+  const saveCumulativeEdit = useCallback(async () => {
+    setSavingCum(true);
+    try {
+      const currentItems = stateData?.financeAssets || [];
+      const rawValCum = editCumReturn;
+      const nextCum = rawValCum && rawValCum !== '' && !isNaN(parseFloat(rawValCum)) ? parseFloat(rawValCum) : null;
+      const updatedItems = currentItems.map(item => {
+        if (String(item.id) !== String(latestData.id)) return item;
+        return { ...item, cumulativeReturn: nextCum, cumulativePnl: nextCum };
+      });
+      const nextState = { ...(stateData || {}), financeAssets: updatedItems };
+      setStateData(nextState);
+      try {
+        await saveState(nextState);
+      } catch (err) {
+        console.error('[DetailModal] save cumulative failed:', err);
+      }
+    } finally {
+      setSavingCum(false);
+    }
+  }, [editCumReturn, latestData?.id, setStateData, stateData, saveState]);
+
+  // 持有收益手动保存：写入 asset 并调用 setStateData + saveState（同步重新计算持有收益率）
+  const saveHoldingPnlEdit = useCallback(async () => {
+    setSavingHoldingPnl(true);
+    try {
+      const currentItems = stateData?.financeAssets || [];
+      const rawValPnl = editHoldingPnl;
+      const nextPnl = rawValPnl && rawValPnl !== '' && !isNaN(parseFloat(rawValPnl)) ? parseFloat(rawValPnl) : null;
+      const updatedItems = currentItems.map(item => {
+        if (String(item.id) !== String(latestData.id)) return item;
+        const cost = parseFloat(item.cost) || (parseFloat(item.costPrice) || 0) * (parseFloat(item.quantity) || parseFloat(item.shares) || 0);
+        const rate = (cost > 0 && nextPnl != null)
+          ? Math.round((nextPnl / cost) * 100 * 100) / 100
+          : null;
+        return {
+          ...item,
+          holdingPnl: nextPnl,
+          pnl: nextPnl,
+          holdingPnlRate: rate,
+          pnlPercent: rate,
+        };
+      });
+      const nextState = { ...(stateData || {}), financeAssets: updatedItems };
+      setStateData(nextState);
+      try {
+        await saveState(nextState);
+      } catch (err) {
+        console.error('[DetailModal] save holdingPnl failed:', err);
+      }
+    } finally {
+      setSavingHoldingPnl(false);
+    }
+  }, [editHoldingPnl, latestData?.id, setStateData, stateData, saveState]);
 
   const handleAddRecord = async () => {
     const record = {
@@ -1295,25 +1392,117 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           {computedDailyPnl >= 0 ? '+' : ''}{convertCurrency(computedDailyPnl, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
                         </p>
                       </div>
-                      <div>
+                      <div className="relative">
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">累计收益(元)</p>
                         {(() => {
-                          // 货基累计收益 = 当前市值 - 持仓成本（无历史每日万份收益，与持有收益同口径）
-                          const mfCumulative = Math.round((currentValue - costTotal) * 100) / 100;
+                          // 货基累计收益 = 原有累计收益 + 今日最新收益（每日累加）；用户手动编辑时优先使用编辑值
+                          const mfCumulative = editCumReturn && editCumReturn !== ''
+                            ? parseFloat(editCumReturn)
+                            : _mfAutoCumulative;
+                          const dispVal = isNaN(mfCumulative) ? 0 : mfCumulative;
+                          const editMode = editingField === 'cum' && !readOnly;
+                          if (readOnly || !editMode) {
+                            return (
+                              <div className="relative group min-h-[32px]">
+                                <p className={`text-lg font-semibold ${dispVal >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                                  {dispVal >= 0 ? '+' : ''}{convertCurrency(dispVal, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
+                                </p>
+                                {!readOnly && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (editCumReturn === '' || editCumReturn == null) {
+                                        setEditCumReturn(String(dispVal));
+                                      }
+                                      setEditingField('cum');
+                                    }}
+                                    className="absolute -top-1 -right-2 p-1 rounded text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 opacity-0 group-hover:opacity-100 transition-all"
+                                    title="编辑累计收益（回车保存）"
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          }
                           return (
-                            <p className={`text-lg font-semibold ${mfCumulative >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                              {mfCumulative >= 0 ? '+' : ''}{convertCurrency(mfCumulative, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
-                            </p>
+                            <div className="relative">
+                              <input
+                                ref={editingField === 'cum' ? editFieldInputRef : null}
+                                type="number"
+                                step="0.001"
+                                value={editCumReturn}
+                                disabled={savingCum}
+                                onChange={(e) => setEditCumReturn(e.target.value)}
+                                onBlur={async () => {
+                                  await saveCumulativeEdit();
+                                  setEditingField(null);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+                                  else if (e.key === 'Escape') { e.preventDefault(); setEditingField(null); }
+                                }}
+                                placeholder={dispVal.toFixed(2)}
+                                className="w-full px-2 py-1 pr-5 text-center text-base font-semibold rounded-md border border-indigo-400 dark:border-indigo-500 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-70"
+                                style={{ color: (editCumReturn || dispVal) >= 0 ? '#ef4444' : '#059669' }}
+                              />
+                              <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 pointer-events-none">{getCurrencySymbol(detailCurrency)}</span>
+                            </div>
                           );
                         })()}
                       </div>
-                      <div>
+                      <div className="relative">
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">持有收益(元)</p>
                         {(() => {
+                          const dispVal = _mfHoldingPnl;
+                          const editMode = editingField === 'pnl' && !readOnly;
+                          if (readOnly || !editMode) {
+                            return (
+                              <div className="relative group min-h-[32px]">
+                                <p className={`text-lg font-semibold ${dispVal >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                                  {dispVal >= 0 ? '+' : ''}{convertCurrency(dispVal, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
+                                </p>
+                                {!readOnly && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (editHoldingPnl === '' || editHoldingPnl == null) {
+                                        setEditHoldingPnl(String(dispVal));
+                                      }
+                                      setEditingField('pnl');
+                                    }}
+                                    className="absolute -top-1 -right-2 p-1 rounded text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 opacity-0 group-hover:opacity-100 transition-all"
+                                    title="编辑持有收益（回车保存）"
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          }
                           return (
-                            <p className={`text-lg font-semibold ${floatPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                              {floatPnl >= 0 ? '+' : ''}{convertCurrency(floatPnl, latestData.currency || 'CNY', detailCurrency, exchangeRates).toFixed(2)}
-                            </p>
+                            <div className="relative">
+                              <input
+                                ref={editingField === 'pnl' ? editFieldInputRef : null}
+                                type="number"
+                                step="0.001"
+                                value={editHoldingPnl}
+                                disabled={savingHoldingPnl}
+                                onChange={(e) => setEditHoldingPnl(e.target.value)}
+                                onBlur={async () => {
+                                  await saveHoldingPnlEdit();
+                                  setEditingField(null);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+                                  else if (e.key === 'Escape') { e.preventDefault(); setEditingField(null); }
+                                }}
+                                placeholder={dispVal.toFixed(2)}
+                                className="w-full px-2 py-1 pr-5 text-center text-base font-semibold rounded-md border border-indigo-400 dark:border-indigo-500 dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-70"
+                                style={{ color: ((editHoldingPnl && editHoldingPnl !== '') ? parseFloat(editHoldingPnl) : dispVal) >= 0 ? '#ef4444' : '#059669' }}
+                              />
+                              <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 pointer-events-none">{getCurrencySymbol(detailCurrency)}</span>
+                            </div>
                           );
                         })()}
                       </div>
@@ -1322,9 +1511,26 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">持有收益率</p>
                         {(() => {
+                          const safeRate = isNaN(_mfHoldingReturnRate) ? 0 : _mfHoldingReturnRate;
                           return (
-                            <p className={`text-lg font-semibold ${computedHoldingReturnRate >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                              {computedHoldingReturnRate >= 0 ? '+' : ''}{computedHoldingReturnRate.toFixed(2)}%
+                            <p className={`text-lg font-semibold ${safeRate >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                              {safeRate >= 0 ? '+' : ''}{safeRate.toFixed(2)}%
+                            </p>
+                          );
+                        })()}
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">累计收益率</p>
+                        {(() => {
+                          const mfCum = editCumReturn && editCumReturn !== ''
+                            ? parseFloat(editCumReturn)
+                            : _mfAutoCumulative;
+                          const autoRate = costTotal > 0 && !isNaN(mfCum) ? Math.round((mfCum / costTotal) * 100 * 100) / 100 : 0;
+                          const displayRate = hasManualCumRate ? storedCumRate : autoRate;
+                          const safeRate = isNaN(displayRate) ? 0 : displayRate;
+                          return (
+                            <p className={`text-lg font-semibold ${safeRate >= 0 ? 'text-red-500' : 'text-green-600'}`}>
+                              {safeRate >= 0 ? '+' : ''}{safeRate.toFixed(2)}%
                             </p>
                           );
                         })()}
@@ -1562,19 +1768,12 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
               - (tradeStats.originalBuyCost * tradeStats.sellTotalQty)
               - ((tradeStats.buyFee || 0) * buyRatio)
               - (tradeStats.sellFee || 0);
-            const cumulativePnl = realizedPnl + floatPnl;
             return (
-              <div className="grid grid-cols-2 gap-2 mb-3">
+              <div className="grid grid-cols-1 gap-2 mb-3">
                 <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-2 text-center">
                   <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">已实现盈亏</p>
                   <p className={`text-sm font-semibold ${realizedPnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
                     {realizedPnl >= 0 ? '+' : ''}{formatNum(realizedPnl)}
-                  </p>
-                </div>
-                <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-2 text-center">
-                  <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">累计收益</p>
-                  <p className={`text-sm font-semibold ${cumulativePnl >= 0 ? 'text-red-500' : 'text-green-600'}`}>
-                    {cumulativePnl >= 0 ? '+' : ''}{formatNum(cumulativePnl)}
                   </p>
                 </div>
               </div>
@@ -2637,6 +2836,8 @@ export default function Finance({ onAssetPenetration }) {
     holdingDays: '',
     holdingPnl: '',
     holdingPnlRate: '',
+    cumulativeReturn: '',
+    cumulativeReturnRate: '',
     dailyPnl: '',
     dailyPnlRate: '',
     currentValue: '',
@@ -3270,9 +3471,12 @@ export default function Finance({ onAssetPenetration }) {
     if (!a) return false;
     const catL2 = a.categoryL2 || a.subcategory || '';
     const catL4 = a.categoryL4 || '';
+    const catL1 = a.category || a.categoryL1 || '';
     const positionType = a.positionCategory || a.positionType || '';
+    const kind = a.kind || a.assetType || '';
     const name = a.name || '';
     if (catL2 === '货币型' || catL4 === '货币基金' || positionType === '货币基金') return true;
+    if (kind === '货基' || kind === '货币基金' || catL1 === '货币基金') return true;
     if (name.includes('货币')) return true;
     if (a.code === '000509') return true;
     return false;
@@ -3326,6 +3530,15 @@ export default function Finance({ onAssetPenetration }) {
         if (data && (data.nav_per_10k != null || data.annualized_7d != null)) {
           moneyFundCacheRef.current[code] = data;
           next[code] = data;
+        }
+      }));
+      // 最终兜底：API 都获取失败时，从天天基金网页直接抓取
+      const stillMissing = codesToFetch.filter(c => !next[c]);
+      await Promise.all(stillMissing.map(async (code) => {
+        const webData = await fetchMoneyFundFromWeb(code);
+        if (webData && (webData.nav_per_10k != null || webData.annualized_7d != null)) {
+          moneyFundCacheRef.current[code] = webData;
+          next[code] = webData;
         }
       }));
     }
@@ -3462,12 +3675,26 @@ export default function Finance({ onAssetPenetration }) {
       const _navPer10k = parseFloat(newAccount.navPer10k) || 0;
       const _annualized7d = parseFloat(newAccount.annualized7d) || 0;
       const _unitPnl = _currentPrice - _costPrice;
-      const _holdingPnl = Math.round(_unitPnl * _quantity * 100) / 100;
+      const _autoHoldingPnl = Math.round(_unitPnl * _quantity * 100) / 100;
+      // 用户有手动输入的持仓盈亏值则优先使用，否则自动计算
+      const _hasManualHoldingPnl = newAccount.holdingPnl !== '' && newAccount.holdingPnl != null && !isNaN(parseFloat(newAccount.holdingPnl));
+      const _holdingPnl = _hasManualHoldingPnl ? parseFloat(newAccount.holdingPnl) : _autoHoldingPnl;
       // 持仓盈亏率 = 持仓盈亏 / (平均买入成本 * 份额) * 100%
       const _costTotal = _costPrice * _quantity;
-      const _holdingPnlRate = _costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0;
+      const _autoHoldingPnlRate = _costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0;
+      const _hasManualHoldingPnlRate = newAccount.holdingPnlRate !== '' && newAccount.holdingPnlRate != null && !isNaN(parseFloat(newAccount.holdingPnlRate));
+      const _holdingPnlRate = _hasManualHoldingPnlRate ? parseFloat(newAccount.holdingPnlRate) : _autoHoldingPnlRate;
       const _dailyPnl = _prevPrice > 0 ? Math.round((_currentPrice - _prevPrice) * _quantity * 100) / 100 : 0;
       const _dailyPnlRate = _prevPrice > 0 ? Math.round(((_currentPrice - _prevPrice) / _prevPrice) * 100 * 100) / 100 : 0;
+
+      // 累计收益：用户手动输入优先；否则按（持仓盈亏 + 已实现盈亏）计算。
+      // 简易模式下默认没有交易记录，已实现盈亏按 0 处理，因此与持仓盈亏同口径。
+      const _hasManualCum = newAccount.cumulativeReturn !== '' && newAccount.cumulativeReturn != null && !isNaN(parseFloat(newAccount.cumulativeReturn));
+      const _autoCum = _holdingPnl;
+      const _cumulativeReturn = _hasManualCum ? parseFloat(newAccount.cumulativeReturn) : _autoCum;
+      const _hasManualCumRate = newAccount.cumulativeReturnRate !== '' && newAccount.cumulativeReturnRate != null && !isNaN(parseFloat(newAccount.cumulativeReturnRate));
+      const _autoCumRate = _costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0;
+      const _cumulativeReturnRate = _hasManualCumRate ? parseFloat(newAccount.cumulativeReturnRate) : _autoCumRate;
 
       const selectedAccount = accounts.find(acc => acc.id === newAccount.account || acc.name === newAccount.account);
       const resolvedAccountId = selectedAccount?.id || newAccount.account || '';
@@ -3507,6 +3734,8 @@ export default function Finance({ onAssetPenetration }) {
         todayPnlPercent: _dailyPnlRate,
         holdingPnl: _holdingPnl,
         holdingPnlRate: _holdingPnlRate,
+        cumulativeReturn: _cumulativeReturn,
+        cumulativeReturnRate: _cumulativeReturnRate,
         dailyPnl: _dailyPnl,
         dailyPnlRate: _dailyPnlRate,
         currentValue: _currentPrice * _quantity,
@@ -3726,6 +3955,8 @@ export default function Finance({ onAssetPenetration }) {
       holdingDays: holding.holdingDays || '',
       holdingPnl: holding.holdingPnl || '',
       holdingPnlRate: holding.holdingPnlRate || '',
+      cumulativeReturn: holding.cumulativeReturn != null ? holding.cumulativeReturn : '',
+      cumulativeReturnRate: holding.cumulativeReturnRate != null ? holding.cumulativeReturnRate : '',
       dailyPnl: holding.dailyPnl || '',
       dailyPnlRate: holding.dailyPnlRate || '',
       currentValue: holding.currentValue || '',
@@ -3798,6 +4029,8 @@ export default function Finance({ onAssetPenetration }) {
       holdingDays: '',
       holdingPnl: '',
       holdingPnlRate: '',
+      cumulativeReturn: '',
+      cumulativeReturnRate: '',
       dailyPnl: '',
       dailyPnlRate: '',
       currentValue: '',
@@ -4780,6 +5013,75 @@ export default function Finance({ onAssetPenetration }) {
     return _cleanOpts([...new Set([...defaults, ...customL3, ...legacyL3, ...flatCustom, ...moduleL3])]);
   }, [assetClasses, newAccount.market, newAccount.categoryL1, newAccount.categoryL2, newAccount.assetType, categoryL3OptionsMap, categoryL3CustomOptions, deletedL3Map]);
 
+  // 批量编辑：二级分类下拉项（与单项编辑一致的级联规则，但用 batchEditData 驱动）
+  const batchCategoryL2Options = useMemo(() => {
+    const market = batchEditData.market || '国内市场';
+    const at = batchEditData.assetType || '';
+    const l1 = batchEditData.categoryL1 || '';
+
+    if (market === '港股市场' && at !== '基金') return ['港股'];
+    if (market === '美股市场' && at !== '基金') return ['美股'];
+
+    const cascade = getCascadeFor(market, l1, at);
+    const newKey = `${market}__${l1}__${at}`;
+    const deletedL2 = new Set(deletedL2Map[newKey] || []);
+    const cascadeL2 = _cleanOpts(cascade?.l2Options || []).filter(o => !deletedL2.has(o));
+
+    let typedFallback = [];
+    if (at === '债券' || l1 === '债权类') typedFallback = ['中债', '美债'];
+    else if (at === '现金' || at === '现金余额' || at === '货基') typedFallback = ['活期存款', '定期存款'];
+    else if (at === '银行理财') typedFallback = ['活期存款', '定期存款'];
+    else if (at === '外汇') typedFallback = ['欧元', '美元', '日元', '人民币'];
+
+    const moduleL2 = l1 && assetClasses && assetClasses.length > 0
+      ? _cleanOpts(((assetClasses.find(c => c.name === l1)?.children)?.map(c => c.name) || []))
+      : [];
+
+    const customL2 = _cleanOpts(categoryL2OptionsMap[newKey] || []);
+    const legacyL2 = !customL2.length ? _cleanOpts(categoryL2OptionsMap[l1] || []) : [];
+
+    if (cascadeL2.length > 0) return _cleanOpts([...new Set([...cascadeL2, ...customL2, ...legacyL2, ...typedFallback, ...moduleL2])]);
+    if (typedFallback.length > 0) return _cleanOpts([...new Set([...typedFallback, ...customL2, ...legacyL2, ...moduleL2])]);
+    if (market === '国内市场' && !l1 && !at) return ['A股', '港股通'];
+    return _cleanOpts([...new Set([...moduleL2, ...customL2, ...legacyL2, ...DEFAULT_CATEGORY_L2])]);
+  }, [batchEditData.market, batchEditData.assetType, batchEditData.categoryL1, assetClasses, categoryL2OptionsMap, deletedL2Map]);
+
+  // 批量编辑：三级分类下拉项（用 batchEditData 驱动）
+  const batchCategoryL3Options = useMemo(() => {
+    const market = batchEditData.market || '国内市场';
+    const at = batchEditData.assetType || '';
+    const l1 = batchEditData.categoryL1 || '';
+    const l2 = batchEditData.categoryL2 || '';
+
+    const cascade = getCascadeFor(market, l1, at);
+    const newKey = `${market}__${l1}__${at}__${l2}`;
+    const deletedL3 = new Set(deletedL3Map[newKey] || []);
+    const cascadeL3Raw = (cascade?.l3Options && cascade.l3Options[l2]) ? _cleanOpts(cascade.l3Options[l2]) : [];
+    const cascadeL3 = cascadeL3Raw.filter(o => !deletedL3.has(o));
+
+    const customL3 = _cleanOpts(categoryL3OptionsMap[newKey] || []);
+    const legacyKey = `${l1}__${l2}`;
+    const legacyL3 = !customL3.length ? _cleanOpts(categoryL3OptionsMap[legacyKey] || []) : [];
+    const flatCustom = _cleanOpts(categoryL3CustomOptions || []);
+
+    let moduleL3 = [];
+    if (assetClasses && l1 && l2) {
+      const l1Obj = assetClasses.find(c => c.name === l1);
+      const l2Obj = l1Obj?.children?.find(c => c.name === l2);
+      moduleL3 = _cleanOpts(l2Obj?.children?.map(c => c.name) || []);
+    }
+
+    if (cascadeL3.length > 0) return _cleanOpts([...new Set([...cascadeL3, ...customL3, ...legacyL3, ...flatCustom, ...moduleL3])]);
+
+    let defaults = [];
+    if (at === '基金' || at === '债券' || l1 === '债权类') defaults = ['场内', '场外'];
+    else if (at === '现金' || at === '现金余额' || at === '货基' || at === '银行理财') defaults = ['场内', '场外'];
+    else if (at === '外汇') defaults = ['场内'];
+    else if (moduleL3.length > 0) defaults = moduleL3;
+
+    return _cleanOpts([...new Set([...defaults, ...customL3, ...legacyL3, ...flatCustom, ...moduleL3])]);
+  }, [batchEditData.market, batchEditData.assetType, batchEditData.categoryL1, batchEditData.categoryL2, assetClasses, categoryL3OptionsMap, categoryL3CustomOptions, deletedL3Map]);
+
   // ══════════════════════════════════════
   //  数据计算（核心）
   // ══════════════════════════════════════
@@ -5019,13 +5321,17 @@ export default function Finance({ onAssetPenetration }) {
       // 货币基金：手动编辑时使用编辑的价格计算市值，否则净值恒为1
       const _mfPrice = _isMF ? (_isManualPrice ? _price : 1) : 0;
       const _mfCurrentValue = _isMF ? (_mfPrice * _effectiveQty) : 0;
-      const _mfHoldingPnl = _isMF ? Math.round((_mfCurrentValue - _mfCostTotal) * 100) / 100 : 0;
+      // 货币基金：优先使用存储的 holdingPnl（支持内嵌编辑），缺失时按公式计算
+      const _mfHoldingPnlCalc = _isMF ? Math.round((_mfCurrentValue - _mfCostTotal) * 100) / 100 : 0;
+      const _mfHoldingPnlStored = _isMF && a.holdingPnl != null ? parseFloat(a.holdingPnl) : NaN;
+      const _mfHoldingPnl = _isMF ? (isNaN(_mfHoldingPnlStored) ? _mfHoldingPnlCalc : _mfHoldingPnlStored) : 0;
       const _mfHoldingPnlRate = _isMF ? (_mfCostTotal > 0 ? Math.round((_mfHoldingPnl / _mfCostTotal) * 100 * 100) / 100 : 0) : 0;
       const _currentValue = isCash
         ? (_effectiveQty * _effectivePrice)
         : (_isMF ? _mfCurrentValue : (parseFloat(a.currentValue) || (_price * _effectiveQty)));
 
       // 持仓盈亏 = (现价 * 份额) - (平均买入成本 * 份额)
+      // 注意：现金类不再硬编码为0，按当前市值 - 持仓成本计算
       // 货币基金：直接同步明细弹窗中的存储字段（与明细完全一致）
       // 注意：使用真值判断（0 为 falsy），与明细弹窗逻辑一致
       const _storedHoldingPnl = a.holdingPnl != null ? parseFloat(a.holdingPnl) : NaN;
@@ -5037,24 +5343,28 @@ export default function Finance({ onAssetPenetration }) {
       // 明细公式（L737-L766）：holdingPnl = currentValue - costTotal，其中 currentValue = 1 * qty，costTotal = (buyAmt-buyFee)/buyQty * qty
       const _useStoredMF = false;
 
-      const _holdingPnl = isCash ? 0 : (_isMF ? _mfHoldingPnl : Math.round((_currentValue - _costTotal) * 100) / 100);
-      const _holdingPnlRate = isCash ? 0 : (_isMF ? _mfHoldingPnlRate : (_costTotal > 0 ? Math.round((_holdingPnl / _costTotal) * 100 * 100) / 100 : 0));
+      const _holdingPnlCalc = Math.round((_currentValue - _costTotal) * 100) / 100;
+      const _holdingPnl = _isMF ? _mfHoldingPnl : _holdingPnlCalc;
+      const _holdingPnlRateCalc = _costTotal > 0 ? Math.round((_holdingPnlCalc / _costTotal) * 100 * 100) / 100 : 0;
+      const _holdingPnlRate = _isMF ? _mfHoldingPnlRate : _holdingPnlRateCalc;
 
       // 累计收益 = 已实现卖出收益 + 持有收益(浮动) + 分红
-      // 已实现盈亏 = 卖出金额 − 原始买入成本×卖出份额 − 买入费用(按比例分摊) − 卖出费用
-      // 摊薄平均成本(券商口径) = (累计买入总金额 + 买入手续费 - 累计卖出总金额) / 当前数量
+      // 现金类同样按公式计算，不再硬编码0
+      // 货币基金：优先使用存储的 cumulativeReturn（支持内嵌编辑），缺失时按公式计算
       const _currentQtyForAvg = _effectiveBuyQty - sellTotalQty;
       const _netAmountForAvg = _effectiveBuyAmount + buyFees - sellTotalAmount;
       const _avgBuyCost = _currentQtyForAvg > 0 ? Math.max(0, _netAmountForAvg) / _currentQtyForAvg : 0;
       const _originalBuyCost = _effectiveBuyQty > 0 ? _effectiveBuyAmount / _effectiveBuyQty : 0;
       const _buyRatio = _effectiveBuyQty > 0 ? sellTotalQty / _effectiveBuyQty : 0;
       const _realizedPnl = sellTotalAmount - _originalBuyCost * sellTotalQty - buyFees * _buyRatio;
-      const _cumulativeReturn = isCash ? 0 : (_isMF
-        ? Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100
-        : (_useStoredMF && !isNaN(_storedCumulativeReturn) && !_isLegacyCum ? _storedCumulativeReturn : Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100));
-      const _cumulativeReturnRate = isCash ? 0 : (_isMF
+      const _cumulativeReturnBase = Math.round((_realizedPnl + _holdingPnl + dividendTotal) * 100) / 100;
+      const _cumulativeReturn = _isMF
+        ? (!isNaN(_storedCumulativeReturn) ? _storedCumulativeReturn : _cumulativeReturnBase)
+        : (_useStoredMF && !isNaN(_storedCumulativeReturn) && !_isLegacyCum ? _storedCumulativeReturn : _cumulativeReturnBase);
+      const _cumDenom = _isMF ? _mfCostTotal : _costTotal;
+      const _cumulativeReturnRate = _isMF
         ? (_mfCostTotal > 0 ? Math.round((_cumulativeReturn / _mfCostTotal) * 100 * 100) / 100 : 0)
-        : (_useStoredMF && !isNaN(_storedCumulativeReturnRate) && !_isLegacyCum ? _storedCumulativeReturnRate : (_costTotal > 0 ? Math.round((_cumulativeReturn / _costTotal) * 100 * 100) / 100 : 0)));
+        : (_useStoredMF && !isNaN(_storedCumulativeReturnRate) && !_isLegacyCum ? _storedCumulativeReturnRate : (_cumDenom > 0 ? Math.round((_cumulativeReturn / _cumDenom) * 100 * 100) / 100 : 0));
 
       // —— 港股处理逻辑
       // 国内市场·港股通：用户输入价格已是CNY，无需转换；仅实时获取的行情价格（上方quotePrice处）按参考汇率折算
@@ -5118,6 +5428,11 @@ export default function Finance({ onAssetPenetration }) {
         archiveDate: a.archiveDate || '',
         isArchived: a.status === 'archived',
         priceManualEdit: a.priceManualEdit === true || a.priceManualEdit === 'true',
+        // 货基专用字段（海外货基也需要透传，用于列表渲染和 detail 弹窗）
+        navPer10k: a.navPer10k != null ? a.navPer10k : '',
+        annualized7d: a.annualized7d != null ? a.annualized7d : '',
+        dataSource: a.dataSource || '',
+        dataSources: a.dataSources || [],
       };
     });
 
@@ -5329,6 +5644,55 @@ export default function Finance({ onAssetPenetration }) {
       };
     });
   }, [stateData?.financeAssetArchives, stateData?.accounts]);
+
+  // 打开批量编辑弹窗：批量选中数据中相同字段自动预填
+  const openBatchEditModal = useCallback((ids) => {
+    const allHoldings = [...(activeHoldings || []), ...(archivedHoldings || [])];
+    const selected = allHoldings.filter(h => ids.has(h.id));
+    setSelectedIds(ids);
+
+    const uniform = { market: '', currency: '', assetType: '', account: '', categoryL1: '', categoryL2: '', categoryL3: '', positionGroup: '', positionType: '', tag: '' };
+    if (selected.length === 0) {
+      setBatchEditData(uniform);
+      setShowBatchEditModal(true);
+      return;
+    }
+
+    // 计算所有选中项一致的字段值
+    const _first = selected[0];
+    const sameVal = (extract) => {
+      const v = extract(_first);
+      if (v == null || String(v).trim() === '') return '';
+      const ok = selected.every(s => extract(s) === v);
+      return ok ? v : '';
+    };
+    uniform.market = sameVal(s => s.market || '');
+    uniform.currency = sameVal(s => s.currency || '');
+    uniform.assetType = sameVal(s => s.assetType || s.assetKind || s.kind || '');
+    uniform.categoryL1 = sameVal(s => s.categoryL1 || s.category || '');
+    uniform.categoryL2 = sameVal(s => s.categoryL2 || s.subcategory || '');
+    uniform.categoryL3 = sameVal(s => s.categoryL3 || s.tertiaryCategory || '');
+    uniform.positionGroup = sameVal(s => s.positionGroup || '');
+    uniform.positionType = sameVal(s => s.positionType || s.positionCategory || '');
+    // 标签：只有所有 tags 数组完全一致才预填（取首个非空值）
+    const _fstTags = _first.tags && Array.isArray(_first.tags) ? _first.tags : [];
+    if (_fstTags.length > 0 && selected.every(s => {
+      const ts = (s.tags && Array.isArray(s.tags)) ? s.tags : [];
+      return ts.length === _fstTags.length && ts.every((t, i) => t === _fstTags[i]);
+    })) {
+      uniform.tag = _fstTags[0] || '';
+    }
+    // 所属账户：优先用 accountId 兜底 name
+    const _fstAccId = _first.accountId || '';
+    const _fstAccName = _first.account || '';
+    if (_fstAccId || _fstAccName) {
+      const sameAcc = selected.every(s => (s.accountId || '') === _fstAccId && (s.account || '') === _fstAccName);
+      if (sameAcc) uniform.account = _fstAccId || _fstAccName;
+    }
+
+    setBatchEditData(uniform);
+    setShowBatchEditModal(true);
+  }, [activeHoldings, archivedHoldings]);
 
   // 账户本分页
   const accountBookTotalPages = Math.max(1, Math.ceil(computed.accountBook.length / ACCOUNTS_PER_PAGE));
@@ -5579,7 +5943,7 @@ export default function Finance({ onAssetPenetration }) {
                 onDelete={handleDelete}
                 onDetail={handleDetail}
                 onAdd={() => { resetForm(); setShowAddModal(true); }}
-                onBatchEdit={(ids) => { setSelectedIds(ids); setShowBatchEditModal(true); }}
+                onBatchEdit={openBatchEditModal}
                 marketOptions={MARKET_OPTIONS}
                 currencyOptions={CURRENCY_SUGGESTIONS}
                 assetTypeOptions={ASSET_TYPE_OPTIONS}
@@ -5618,7 +5982,7 @@ export default function Finance({ onAssetPenetration }) {
                 onEdit={null}
                 onDelete={handleDeleteArchive}
                 onDetail={handleDetail}
-                onBatchEdit={(ids) => { setSelectedIds(ids); setShowBatchEditModal(true); }}
+                onBatchEdit={openBatchEditModal}
                 marketOptions={MARKET_OPTIONS}
                 currencyOptions={CURRENCY_SUGGESTIONS}
                 assetTypeOptions={ASSET_TYPE_OPTIONS}
@@ -6232,6 +6596,27 @@ export default function Finance({ onAssetPenetration }) {
                         </>
                       )}
 
+                      {/* 累计收益 — 所有资产明细都允许编辑，默认自动计算（持仓盈亏+已实现盈亏），支持手动覆盖 */}
+                      <FormField label="累计收益">
+                        <div className="relative">
+                          <input type="number" step="0.001" value={newAccount.cumulativeReturn}
+                            onChange={e => setNewAccount({ ...newAccount, cumulativeReturn: e.target.value })}
+                            placeholder="自动计算 或 手动输入"
+                            className={`${FORM_INPUT} pl-7 ${pnlClass(newAccount.cumulativeReturn)}`} />
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">{getCurrencySymbol(newAccount.currency)}</span>
+                        </div>
+                      </FormField>
+
+                      <FormField label="累计收益率">
+                        <div className="relative">
+                          <input type="number" step="0.001" value={newAccount.cumulativeReturnRate}
+                            onChange={e => setNewAccount({ ...newAccount, cumulativeReturnRate: e.target.value })}
+                            placeholder="自动计算 或 手动输入"
+                            className={`${FORM_INPUT} pr-7 ${pnlClass(newAccount.cumulativeReturnRate)}`} />
+                          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                        </div>
+                      </FormField>
+
                       {/* 标签 — 全宽 */}
                       <div className="sm:col-span-2">
                         <FormField label="标签" fullWidth>
@@ -6386,7 +6771,7 @@ export default function Finance({ onAssetPenetration }) {
                     setBatchEditData({ ...batchEditData, categoryL2: e.target.value, categoryL3: '' });
                   }} className={FORM_SELECT}>
                     <option value="">不修改</option>
-                    {categoryL2Options.map(o => <option key={o} value={o}>{o}</option>)}
+                    {batchCategoryL2Options.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </FormField>
 
@@ -6394,7 +6779,7 @@ export default function Finance({ onAssetPenetration }) {
                   <select value={batchEditData.categoryL3} onChange={e => setBatchEditData({ ...batchEditData, categoryL3: e.target.value })} className={FORM_SELECT}>
                     <option value="">不修改</option>
                     <option value="">未分类</option>
-                    {categoryL3Options.map(o => <option key={o} value={o}>{o}</option>)}
+                    {batchCategoryL3Options.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </FormField>
 

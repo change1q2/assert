@@ -122,7 +122,6 @@ export const MONEY_FUND_COLUMNS = [
   { key: 'annualized7d', label: '七日年化(%)', visible: true, align: 'right' },
   { key: 'cumulativeReturn', label: '累计收益', visible: true, align: 'right', bold: true, pnl: true },
   { key: 'holdingPnl', label: '持有收益', visible: true, align: 'right', bold: true, pnl: true },
-  { key: 'holdingPnlRate', label: '持有收益率(%)', visible: true, align: 'right', pnl: true },
   { key: 'quantity', label: '持有份额', visible: true, align: 'right' },
   { key: 'avgCost', label: '成本单价', visible: true, align: 'right' },
   { key: 'currentValue', label: '当前市值', visible: true, align: 'right', bold: true },

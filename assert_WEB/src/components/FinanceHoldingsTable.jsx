@@ -295,11 +295,15 @@ export default function FinanceHoldingsTable({
   // 判断是否为货币基金（货基）
   const isMoneyFundHold = (h) => {
     if (!h) return false;
-    if (h.assetType === '货基') return true;
+    const at = h.assetType || '';
+    const ak = h.assetKind || '';
+    const catL1 = h.categoryL1 || '';
     const catL2 = h.categoryL2 || '';
     const catL4 = h.categoryL4 || '';
     const pType = h.positionType || '';
     const name = h.name || '';
+    if (at === '货基' || ak === '货基' || at === '货币基金' || ak === '货币基金') return true;
+    if (catL1 === '货币基金') return true;
     return catL2 === '货币型' || catL4 === '货币基金' || pType === '货币基金' || name.includes('货币');
   };
 
@@ -741,9 +745,20 @@ export default function FinanceHoldingsTable({
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(dailyPnl, currency, target, exchangeRates);
       }, 0);
+      // 当前总现金 = 一级分类为现金类的资产总和
+      const totalCash = paged.reduce((sum, a) => {
+        const catL1 = a.categoryL1 || a.category || '';
+        if (catL1 === '现金类') {
+          const value = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
+          const currency = a.currency || 'CNY';
+          return sum + convertCurrency(value, currency, target, exchangeRates);
+        }
+        return sum;
+      }, 0);
       return {
         totalCost,
         totalMarketValue,
+        totalCash,
         totalPnl,
         totalPnlRate: totalCost > 0 ? (totalPnl / totalCost) * 100 : 0,
         totalDailyPnl,
@@ -1188,7 +1203,7 @@ export default function FinanceHoldingsTable({
                   <tr
                     key={`mf-${h.id || i}`}
                     onClick={() => onDetail && onDetail(h)}
-                    className="border-b border-emerald-50/70 dark:border-emerald-900/20 hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20 cursor-pointer">
+                    className="border-b border-emerald-50/70 dark:border-emerald-900/20 hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20 cursor-pointer group">
                     {showCheckboxCol && (
                       <td className="py-2 px-1.5 text-center" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1">
@@ -1207,7 +1222,8 @@ export default function FinanceHoldingsTable({
                         </div>
                       </td>
                     )}
-                    {mfVisibleColumns.map(col => (
+                    {mfVisibleColumns.map(col => {
+                      return (
                       <td
                         key={col.key}
                         className={`py-2 px-1.5 ${
@@ -1224,7 +1240,7 @@ export default function FinanceHoldingsTable({
                           ? formatNum(h.currentValue || h.balance)
                           : renderCell(h, col)}
                       </td>
-                    ))}
+                    )})}
                     {showOpsCol && (
                       <td className="py-2 px-1.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1">
@@ -1307,13 +1323,6 @@ export default function FinanceHoldingsTable({
                           {pnlSign(mfSummary.pnl)}
                           {formatCurrencyWithRate(mfSummary.pnl, totalCurrency, totalCurrency, exchangeRates)
                             .replace(getCurrencySymbol(totalCurrency), '')}
-                        </td>
-                      );
-                    }
-                    if (col.key === 'holdingPnlRate') {
-                      return (
-                        <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(mfSummary.pnlRate)}`}>
-                          {mfSummary.cost > 0 ? formatPercentage(mfSummary.pnlRate) : '—'}
                         </td>
                       );
                     }

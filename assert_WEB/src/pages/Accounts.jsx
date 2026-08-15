@@ -398,7 +398,7 @@ export default function Accounts() {
     currentPrice = _effectivePrice;
     mv = _effectivePrice * _effectiveQty;
     cost = costPrice * quantity;
-    holdingPnl = isCashCategory ? 0 : (mv - cost);
+    holdingPnl = mv - cost;
     holdingPnlRate = cost > 0 ? (holdingPnl / cost) * 100 : 0;
     return { mv, cost, quantity, costPrice, currentPrice, holdingPnl, holdingPnlRate };
   };
@@ -1727,7 +1727,8 @@ export default function Accounts() {
         const _totalCost = _unitCost * _effectiveQty;
         // 当前市值始终使用 price × qty 计算，不依赖存储的 currentValue
         const _currentValue = _effectivePrice * _effectiveQty;
-        const _holdingPnl = isCash ? 0 : (_currentValue - _totalCost);
+        // 现金类持仓盈亏 = 当前市值 - 持仓成本，不再强制为0
+        const _holdingPnl = _currentValue - _totalCost;
         const _holdingPnlRate = _totalCost > 0 ? (_holdingPnl / _totalCost) * 100 : 0;
 
         // 使用行情数据中的 prevClose（昨收价）判断涨跌颜色，优先级：行情prevClose > 存储prevPrice
