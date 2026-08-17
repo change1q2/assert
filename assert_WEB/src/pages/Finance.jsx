@@ -29,6 +29,7 @@ import {
   Check,
   Save,
   Archive,
+  Link2,
 } from 'lucide-react';
 import FinanceHoldingsTable from '../components/FinanceHoldingsTable';
 import { Pagination } from '../components/FinanceHoldingsTable.subcomponents';
@@ -2869,6 +2870,7 @@ export default function Finance({ onAssetPenetration }) {
     tags: '',
     dataSource: '',
     dataSources: [],
+    forceBinding: false,
   });
 
   // 自动计算当前市值
@@ -2896,6 +2898,7 @@ export default function Finance({ onAssetPenetration }) {
   const verifiedPairRef = useRef({ code: '', name: '' });
   const newAccountRef = useRef(newAccount);
   const lookupReqSeqRef = useRef(0);
+  const boundPairRef = useRef({ name: '', code: '' });
 
   // 同步最新 newAccount 到 ref，供异步回调（setTimeout/API）读取，避免闭包陈旧值
   useEffect(() => {
@@ -3997,7 +4000,10 @@ export default function Finance({ onAssetPenetration }) {
       dataSource: holding.dataSource || '',
       dataSources: holding.dataSources || [],
       priceManualEdit: holding.priceManualEdit || false,
+      forceBinding: false,
     });
+    // 编辑时重置绑定对（避免残留上次绑定）
+    boundPairRef.current = { name: '', code: '' };
     setEditMode(true);
     setEditingId(holding.id);
     setShowAddModal(true);
@@ -4068,7 +4074,12 @@ export default function Finance({ onAssetPenetration }) {
       navPer10k: '',
       annualized7d: '',
       tags: '',
+      dataSource: '',
+      dataSources: [],
+      forceBinding: false,
     });
+    // 重置绑定对
+    boundPairRef.current = { name: '', code: '' };
     setUploadedImage(null);
     setOcrResult(null);
     setEditMode(false);
@@ -4578,6 +4589,17 @@ export default function Finance({ onAssetPenetration }) {
 
   const handleSelectLookup = async (item) => {
     setShowLookupDropdown(false);
+    // 强制绑定校验：若已开启绑定，所选数据必须匹配绑定的名称-代码对
+    const cur = newAccountRef.current;
+    if (cur.forceBinding) {
+      const bp = boundPairRef.current;
+      if (bp.name && bp.code) {
+        if ((item.code && item.code !== bp.code) || (item.name && item.name !== bp.name)) {
+          alert('强制绑定已开启：所选数据与绑定的名称-代码对不匹配，已忽略');
+          return;
+        }
+      }
+    }
     // 记录已验证的代码-名称对，避免重复校验
     verifiedPairRef.current = { code: item.code || '', name: item.name || '' };
     setNewAccount(prev => {
@@ -4701,7 +4723,27 @@ export default function Finance({ onAssetPenetration }) {
       }
 
       if (results.length > 0) {
-        const matchItem = results.find(r => r.code === code) || results[0];
+        // 确定匹配项：强制绑定时只接受匹配绑定对的结果，其他视为错误
+        let matchItem;
+        if (cur.forceBinding) {
+          const bp = boundPairRef.current;
+          if (bp.name && bp.code) {
+            matchItem = results.find(r => r.code === bp.code && r.name === bp.name);
+            if (!matchItem) {
+              // 没有匹配绑定对的数据，视为错误，不更新，保留上次现价
+              verifiedPairRef.current = { code, name };
+              setNewAccount(prev => ({
+                ...prev,
+                _codeVerified: false,
+              }));
+              return;
+            }
+          } else {
+            matchItem = results.find(r => r.code === code) || results[0];
+          }
+        } else {
+          matchItem = results.find(r => r.code === code) || results[0];
+        }
         verifiedPairRef.current = { code: matchItem.code, name: matchItem.name };
 
         setNewAccount(prev => {
@@ -6511,7 +6553,7 @@ export default function Finance({ onAssetPenetration }) {
                           {newAccount.market === '国内市场' && newAccount.assetType === '基金' && newAccount.categoryL3 === '场外' && '· 场外基金'}
                         </span>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-x-2 gap-y-4 items-end">
                       {/* 资产名称 */}
                       <FormField label="资产名称" required>
                         <div className="relative">
@@ -6561,6 +6603,40 @@ export default function Finance({ onAssetPenetration }) {
                         </div>
                       </FormField>
 
+                      {/* 强制绑定图标（名称与代码锁定为一对，仅获取匹配此对的数据） */}
+                      <div className="flex justify-center pb-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewAccount(prev => {
+                              const next = !prev.forceBinding;
+                              if (next) {
+                                // 激活绑定：记录当前 name-code 对（需两者都非空）
+                                const curName = (prev.name || '').trim();
+                                const curCode = (prev.code || '').trim();
+                                if (curName && curCode) {
+                                  boundPairRef.current = { name: curName, code: curCode };
+                                } else {
+                                  alert('请先填写资产名称和资产代码后再开启强制绑定');
+                                  return prev;
+                                }
+                              } else {
+                                boundPairRef.current = { name: '', code: '' };
+                              }
+                              return { ...prev, forceBinding: next };
+                            });
+                          }}
+                          className={`p-1.5 rounded-full border-2 transition-all ${
+                            newAccount.forceBinding
+                              ? 'bg-indigo-500 text-white border-indigo-500 shadow-md shadow-indigo-300 dark:shadow-indigo-900'
+                              : 'bg-white dark:bg-slate-700 text-gray-400 border-gray-300 dark:border-slate-600 hover:text-indigo-500 hover:border-indigo-400'
+                          }`}
+                          title={newAccount.forceBinding ? '强制绑定已开启：仅获取匹配此名称-代码对的数据，点击关闭' : '点击开启强制绑定（名称与代码锁定为一对）'}
+                        >
+                          <Link2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
                       {/* 资产代码 */}
                       <FormField label="资产代码" required>
                         <div className="relative">
@@ -6609,7 +6685,9 @@ export default function Finance({ onAssetPenetration }) {
                           )}
                         </div>
                       </FormField>
+                      </div>{/* end 名称+绑定+代码 三列 grid */}
 
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
                       {/* 平均买入成本 */}
                       <FormField label="平均买入成本" required>
                         <input type="number" step="0.001"
