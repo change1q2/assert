@@ -546,7 +546,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestData?.code, latestData?.name, userSeedOverride, tradeRecords]);
 
-  const saveTradeRecords = async (records, updatedAccounts, updatedFinanceAssetsFromSync) => {
+  const saveTradeRecords = async (records, updatedAccounts, updatedFinanceAssetsFromSync, options = {}) => {
+    const { skipRefresh = false } = options;
     if (!saveState || !stateData) return;
     try {
       const currentFinanceAssets = stateData?.financeAssets || [];
@@ -571,16 +572,16 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           let totalFees = 0;
           let buyFees = 0;
           records.forEach(t => {
-            const qty = parseFloat(t.quantity || t.shares) || 0;
+            const qty = parseFloat(t.shares != null ? t.shares : t.quantity) || parseFloat(t.quantity || t.shares) || 0;
             const amount = parseFloat(t.amount) || 0;
-            // 与列表和tradeStats保持一致：仅使用 t.fee 字段计算手续费
-            const fee = parseFloat(t.fee) || 0;
-            if (!isNaN(fee)) totalFees += fee;
+            // 与 DetailModal / 列表 financeAccounts 保持一致：commission || fee
+            const feeVal = (t.commission != null && !isNaN(parseFloat(t.commission))) ? parseFloat(t.commission) : (parseFloat(t.fee) || 0);
+            if (!isNaN(feeVal)) totalFees += feeVal;
             const txType = t.type || t.direction || '';
             if (txType === '建仓' || txType === '买入') {
               buyTotalQty += qty;
               buyTotalAmount += amount;
-              if (!isNaN(fee)) buyFees += fee;
+              if (!isNaN(feeVal)) buyFees += feeVal;
             } else if (txType === '卖出' || txType === '清仓') {
               sellTotalQty += Math.abs(qty);
               sellTotalAmount += Math.abs(amount);
@@ -667,7 +668,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
         setStateData(newState);
       }
       await saveState(newState);
-      if (onRefresh) await onRefresh();
+      if (!skipRefresh && onRefresh) await onRefresh();
     } catch (err) {
       console.error('Failed to save trade records:', err);
     }
@@ -1580,28 +1581,42 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                   </div>
                   <div className="bg-white dark:bg-slate-800 rounded-lg p-4">
                     <div className="grid grid-cols-[minmax(90px,auto)_1fr_minmax(80px,auto)_1fr] gap-x-3 gap-y-3 items-center">
-                      {/* 第1行：七日年化 | 值 */}
-                      <span className="text-base text-gray-600 dark:text-gray-300">七日年化</span>
-                      {(() => {
-                        const _userAnn = parseFloat(latestData.annualized7d) || 0;
-                        const _mfAnn = latestData.code && moneyFundMap ? moneyFundMap[latestData.code] : null;
-                        const _netAnn = _mfAnn && _mfAnn.annualized_7d != null ? parseFloat(_mfAnn.annualized_7d) : 0;
-                        const _displayAnn = _userAnn > 0 ? _userAnn : _netAnn;
-                        const _annCls = _displayAnn >= 0 ? 'text-red-500' : 'text-green-600';
-                        return (
-                          <span className={`text-lg font-semibold ${_annCls}`} title={_userAnn > 0 ? '手动输入' : (_netAnn !== 0 && _mfAnn?.date ? `网络获取 (${_mfAnn.date})` : '')}>
-                            {_displayAnn > 0 ? `${_displayAnn.toFixed(4)}%` : '—'}
-                          </span>
-                        );
-                      })()}
-                      <span></span>
-                      <span></span>
+                      {/* 第1行：七日年化 | 值 — 仅货币基金显示 */}
+                      {_isDetailMoneyFund ? (
+                        <>
+                          <span className="text-base text-gray-600 dark:text-gray-300">七日年化</span>
+                          {(() => {
+                            const _userAnn = parseFloat(latestData.annualized7d) || 0;
+                            const _mfAnn = latestData.code && moneyFundMap ? moneyFundMap[latestData.code] : null;
+                            const _netAnn = _mfAnn && _mfAnn.annualized_7d != null ? parseFloat(_mfAnn.annualized_7d) : 0;
+                            const _displayAnn = _userAnn > 0 ? _userAnn : _netAnn;
+                            const _annCls = _displayAnn >= 0 ? 'text-red-500' : 'text-green-600';
+                            return (
+                              <span className={`text-lg font-semibold ${_annCls}`} title={_userAnn > 0 ? '手动输入' : (_netAnn !== 0 && _mfAnn?.date ? `网络获取 (${_mfAnn.date})` : '')}>
+                                {_displayAnn > 0 ? `${_displayAnn.toFixed(4)}%` : '—'}
+                              </span>
+                            );
+                          })()}
+                          <span></span>
+                          <span></span>
+                        </>
+                      ) : null}
 
                       {/* 第2行：持仓成本单价 | 值 | 累计净值/每万份收益 | 值 */}
                       <span className="text-base text-gray-600 dark:text-gray-300">持仓成本单价</span>
                       <span className="text-xl font-semibold text-gray-900 dark:text-white">{costPrice > 0 ? costPrice.toFixed(4) : '—'}</span>
-                      <span className="text-base text-gray-600 dark:text-gray-300">累计净值</span>
-                      <span className="text-xl font-semibold text-gray-900 dark:text-white">{latestData.accumulatedNav > 0 ? latestData.accumulatedNav.toFixed(4) : '—'}</span>
+                      <span className="text-base text-gray-600 dark:text-gray-300">{_isDetailMoneyFund ? '每万份收益' : '累计净值'}</span>
+                      {_isDetailMoneyFund ? (
+                        (() => {
+                          const _userNav = parseFloat(latestData.navPer10k) || 0;
+                          const _mfNav = latestData.code && moneyFundMap ? moneyFundMap[latestData.code] : null;
+                          const _netNav = _mfNav && _mfNav.nav_per_10k != null ? Number(_mfNav.nav_per_10k) : 0;
+                          const _displayNav = _userNav > 0 ? _userNav : _netNav;
+                          return <span className="text-xl font-semibold text-gray-900 dark:text-white">{_displayNav > 0 ? _displayNav.toFixed(4) : '—'}</span>;
+                        })()
+                      ) : (
+                        <span className="text-xl font-semibold text-gray-900 dark:text-white">{latestData.accumulatedNav > 0 ? latestData.accumulatedNav.toFixed(4) : '—'}</span>
+                      )}
 
                       {/* 第3行：全部份额 | 值 | 可用份额 | 值 */}
                       <span className="text-base text-gray-600 dark:text-gray-300">全部份额</span>
@@ -2113,7 +2128,11 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           )}
                           {!readOnly && (
                             <button
-                              onClick={() => {
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (!confirm('确定删除这条交易记录吗？')) return;
                                 setUserSeedOverride(true);
                                 const _txType = record.type || record.direction || '';
                                 if (record.isSeed || String(record.id || '').startsWith('seed-transfer-') || _txType === '快速过户') {
@@ -2121,7 +2140,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                                 }
                                 const newRecords = tradeRecords.filter(r => r.id !== record.id);
                                 setTradeRecords(newRecords);
-                                saveTradeRecords(newRecords);
+                                saveTradeRecords(newRecords, undefined, undefined, { skipRefresh: true });
                               }}
                               className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
                               title="删除"
@@ -2181,7 +2200,11 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           )}
                           {!readOnly && (
                             <button
-                              onClick={() => {
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (!confirm('确定删除这条交易记录吗？')) return;
                                 setUserSeedOverride(true);
                                 const _txType = record.type || record.direction || '';
                                 if (record.isSeed || String(record.id || '').startsWith('seed-transfer-') || _txType === '快速过户') {
@@ -2189,7 +2212,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                                 }
                                 const newRecords = tradeRecords.filter(r => r.id !== record.id);
                                 setTradeRecords(newRecords);
-                                saveTradeRecords(newRecords);
+                                saveTradeRecords(newRecords, undefined, undefined, { skipRefresh: true });
                               }}
                               className="p-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
                               title="删除"
@@ -5385,16 +5408,18 @@ export default function Finance({ onAssetPenetration }) {
       let buyFees = 0;
       let dividendTotal = 0;
       transactions.forEach(t => {
-        const qty = parseFloat(t.quantity || t.shares) || 0;
+        // 与 DetailModal tradeRecords 初始化完全一致：
+        //   detail: quantity = t.shares || t.quantity
+        //   detail: fee = t.commission || t.fee  (先取 commission，再取 fee)
+        const qty = parseFloat(t.shares != null ? t.shares : t.quantity) || parseFloat(t.quantity || t.shares) || 0;
         const amount = parseFloat(t.amount) || 0;
-        // 与DetailModal tradeStats保持一致：仅使用 t.fee 字段计算手续费
-        const fee = parseFloat(t.fee) || 0;
-        if (!isNaN(fee)) totalFees += fee;
+        const feeVal = (t.commission != null && !isNaN(parseFloat(t.commission))) ? parseFloat(t.commission) : (parseFloat(t.fee) || 0);
+        if (!isNaN(feeVal)) totalFees += feeVal;
         const txType = t.type || t.direction || '';
         if (txType === '建仓' || txType === '买入') {
           buyTotalQty += qty;
           buyTotalAmount += amount;
-          if (!isNaN(fee)) buyFees += fee;
+          if (!isNaN(feeVal)) buyFees += feeVal;
         } else if (txType === '卖出' || txType === '清仓') {
           sellTotalQty += Math.abs(qty);
           sellTotalAmount += Math.abs(amount);

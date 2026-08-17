@@ -336,15 +336,16 @@ export default function FinanceHoldingsTable({
         return formatCurrencyWithRate(totalCost, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
       }
       case 'avgCost': {
+        // 优先使用 costPrice（与明细弹窗 avgBuyCost 计算公式一致，避免 cost/qty 四舍五入差异）
+        const costPrice = parseFloat(h.costPrice) || 0;
+        if (costPrice > 0) {
+          return formatCurrencyWithRate(costPrice, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
+        }
         const costVal = parseFloat(h.cost) || 0;
         const qtyVal = parseFloat(h.quantity) || 0;
         if (costVal > 0 && qtyVal > 0) {
           const avg = costVal / qtyVal;
           return formatCurrencyWithRate(avg, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
-        }
-        const costPrice = parseFloat(h.costPrice) || 0;
-        if (costPrice > 0) {
-          return formatCurrencyWithRate(costPrice, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
         }
         return '—';
       }

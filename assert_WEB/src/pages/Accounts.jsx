@@ -403,6 +403,116 @@ export default function Accounts() {
     return { mv, cost, quantity, costPrice, currentPrice, holdingPnl, holdingPnlRate };
   };
 
+  // —— 提取理财资产→持仓映射逻辑（列表余额与详情页共用，确保一致）——
+  const mapFinanceAssetToHolding = (a, account, _quotesMap, _exchangeRates) => {
+    const _market = a.market || '国内市场';
+    const _l2ForDetect = (a.subcategory || a.categoryL2 || '').toString().trim();
+    const isHKConnect = _market === '国内市场' && _l2ForDetect === '港股通';
+    const _hkdRate = _exchangeRates?.HKD || 0.86;
+    const _hkCostFactor = isHKConnect ? (_hkdRate * 1.03) : 1;
+    const _hkValueFactor = isHKConnect ? _hkdRate : 1;
+    const _isManualPrice = a.priceManualEdit === true || a.priceManualEdit === 'true';
+
+    const transactions = a.transactions || [];
+    let buyTotalQty = 0;
+    let buyTotalAmount = 0;
+    let sellTotalQty = 0;
+    let sellTotalAmount = 0;
+    let totalFees = 0;
+    transactions.forEach(t => {
+      const qty = parseFloat(t.quantity || t.shares) || 0;
+      let amount = parseFloat(t.amount) || 0;
+      const fee = parseFloat(t.commission || t.fee) || 0;
+      if (isHKConnect && !_isManualPrice) {
+        amount = amount * _hkCostFactor;
+      }
+      if (!isNaN(fee)) totalFees += (isHKConnect && !_isManualPrice) ? (fee * _hkCostFactor) : fee;
+      if (t.type === '建仓' || t.type === '买入') {
+        buyTotalQty += qty;
+        buyTotalAmount += amount;
+      } else if (t.type === '卖出' || t.type === '清仓') {
+        sellTotalQty += Math.abs(qty);
+        sellTotalAmount += Math.abs(amount);
+      }
+    });
+
+    const _computedQty = buyTotalQty - sellTotalQty;
+    const _qty = buyTotalQty > 0 ? _computedQty : (parseFloat(a.shares || a.quantity) || 0);
+    const _computedCostPrice = buyTotalQty > 0 ? buyTotalAmount / buyTotalQty : 0;
+    const _storedCostRaw = parseFloat(a.costPrice || a.cost) || 0;
+    const _storedCost = (isHKConnect && !_isManualPrice && _storedCostRaw > 0) ? (_storedCostRaw * _hkCostFactor) : _storedCostRaw;
+    const _costPrice = buyTotalQty > 0 ? _computedCostPrice : _storedCost;
+
+    const isCashCategory = (a) => a.category === '现金类' || a.categoryL1 === '现金类';
+    const isCash = isCashCategory(a);
+    const _effectiveQty = _qty;
+    const _quoteRawPrice = parseFloat(_quotesMap[a.code]?.price) || 0;
+    const _quoteRawPrevClose = parseFloat(_quotesMap[a.code]?.prevClose) || 0;
+    const _quotePriceConv = (isHKConnect && _quoteRawPrice > 0) ? (_quoteRawPrice * _hkValueFactor) : _quoteRawPrice;
+    const _quotePrevConv = (isHKConnect && _quoteRawPrevClose > 0) ? (_quoteRawPrevClose * _hkValueFactor) : _quoteRawPrevClose;
+    const _storedPriceRaw = parseFloat(a.currentPrice) || 0;
+    const _storedPrevRaw = parseFloat(a.prevPrice) || 0;
+    const _storedPriceConv = (isHKConnect && !_isManualPrice && _storedPriceRaw > 0) ? (_storedPriceRaw * _hkValueFactor) : _storedPriceRaw;
+    const _storedPrevConv = (isHKConnect && !_isManualPrice && _storedPrevRaw > 0) ? (_storedPrevRaw * _hkValueFactor) : _storedPrevRaw;
+    const _effectivePrice = _isManualPrice ? _storedPriceRaw : (_quotePriceConv || _storedPriceConv || 0);
+
+    const _unitCost = _costPrice;
+    const _totalCost = _unitCost * _effectiveQty;
+    const _currentValue = _effectivePrice * _effectiveQty;
+    const _holdingPnl = _currentValue - _totalCost;
+    const _holdingPnlRate = _totalCost > 0 ? (_holdingPnl / _totalCost) * 100 : 0;
+
+    const _prevPrice = _isManualPrice ? _storedPrevRaw : (_quotePrevConv > 0 ? _quotePrevConv : _storedPrevConv);
+    const _dailyRaw = parseFloat(a.todayPnl) || parseFloat(a.dailyPnl) || 0;
+    const _dailyConv = (isHKConnect && !_isManualPrice) ? (_dailyRaw * _hkValueFactor) : _dailyRaw;
+    const _dailyPnl = isCash ? 0 : ((_prevPrice > 0 && _effectivePrice > 0)
+      ? (_effectivePrice - _prevPrice) * _effectiveQty
+      : _dailyConv);
+    const _dailyPnlRate = isCash ? 0 : ((_prevPrice > 0 && _effectivePrice > 0)
+      ? ((_effectivePrice - _prevPrice) / _prevPrice) * 100
+      : (parseFloat(a.todayPnlPercent) || parseFloat(a.dailyPnlRate) || 0));
+
+    const _priceChange = _effectivePrice > 0 && _prevPrice > 0
+      ? (_effectivePrice > _prevPrice ? 'up' : _effectivePrice < _prevPrice ? 'down' : 'unchanged')
+      : 'unchanged';
+
+    return {
+      id: a.id,
+      market: a.market || '国内市场',
+      currency: a.currency || 'CNY',
+      name: a.name || '-',
+      code: a.code || '',
+      assetType: a.kind || a.assetType || '',
+      assetKind: a.assetKind || a.kind || '',
+      account: account?.name || '',
+      categoryL1: a.category || a.categoryL1 || '',
+      categoryL2: a.subcategory || a.categoryL2 || '',
+      categoryL3: a.tertiaryCategory || a.categoryL3 || '',
+      categoryL4: a.categoryL4 || '',
+      positionGroup: a.positionGroup || '',
+      positionType: a.positionCategory || a.positionType || '',
+      tags: a.tags || [],
+      costPrice: _unitCost,
+      avgCost: _unitCost,
+      quantity: _effectiveQty,
+      cost: _totalCost,
+      currentPrice: _effectivePrice,
+      prevPrice: _prevPrice,
+      priceChange: _priceChange,
+      holdingDays: a.holdingDays || 0,
+      balance: _currentValue,
+      currentValue: _currentValue,
+      holdingPnl: _holdingPnl,
+      holdingPnlRate: _holdingPnlRate,
+      dailyPnl: _dailyPnl,
+      dailyPnlRate: _dailyPnlRate,
+      cumulativeReturn: (() => { const v = parseFloat(a.cumulativeReturn); return isNaN(v) ? _holdingPnl : v; })(),
+      cumulativeReturnRate: (() => { const v = parseFloat(a.cumulativeReturnRate); return isNaN(v) ? _holdingPnlRate : v; })(),
+      positionRatio: 0,
+      isCash,
+    };
+  };
+
   // 判断一条资产/记录是否明确归属到指定账户（accountId 或 account === 账户 id 或 name）
   function belongsToAccount(assetAccId, assetAccName, account) {
     if (!account) return false;
@@ -777,10 +887,28 @@ export default function Accounts() {
   const calculateAccountBalance = useMemo(() => {
     const balanceMap = {};
     accounts.forEach(account => {
-      balanceMap[account.id] = parseFloat(account.balance) || 0;
+      // 与详情页 holdingsSummary 保持完全一致：
+      //   只统计 categoryL1 === '现金类' 的持仓的 currentValue（含 quotesMap 实时行情）
+      if (Array.isArray(financeAssets)) {
+        let cashMv = 0;
+        financeAssets.forEach(a => {
+          if (a.status === 'archived' || a.isArchived) return;
+          const accId = a.accountId || a.account || '';
+          if (!(accId === account.id || accId === account.name)) return;
+          // 使用与 accountHoldings 相同的映射逻辑
+          const h = mapFinanceAssetToHolding(a, account, quotesMap, exchangeRates);
+          if (h.isCash) {
+            const currency = h.currency || 'CNY';
+            cashMv += convertCurrency(parseFloat(h.currentValue) || 0, currency, 'CNY', exchangeRates);
+          }
+        });
+        balanceMap[account.id] = cashMv > 0 ? cashMv : (parseFloat(account.balance) || 0);
+      } else {
+        balanceMap[account.id] = parseFloat(account.balance) || 0;
+      }
     });
     return balanceMap;
-  }, [accounts]);
+  }, [accounts, financeAssets, quotesMap, exchangeRates]);
 
   const computeStats = () => {
     const accountList = accounts || [];
@@ -1660,129 +1788,14 @@ export default function Accounts() {
     const account = accounts.find(a => a.id === selectedAccountId);
     if (!account) return [];
 
-    const isCashCategory = (a) => a.category === '现金类' || a.categoryL1 === '现金类';
-
     return (financeAssets || [])
       .filter(a => {
         if (a.status === 'archived' || a.isArchived) return false;
         const accId = a.accountId || a.account || '';
         return accId === account.id || accId === account.name;
       })
-      .map((a) => {
-        // —— 港股通算法：与 Finance.jsx 保持一致
-        const _market = a.market || '国内市场';
-        const _l2ForDetect = (a.subcategory || a.categoryL2 || '').toString().trim();
-        const isHKConnect = _market === '国内市场' && _l2ForDetect === '港股通';
-        const _hkdRate = exchangeRates?.HKD || 0.86;
-        const _hkCostFactor = isHKConnect ? (_hkdRate * 1.03) : 1;
-        const _hkValueFactor = isHKConnect ? _hkdRate : 1;
-        const _isManualPrice = a.priceManualEdit === true || a.priceManualEdit === 'true';
-
-        const transactions = a.transactions || [];
-        let buyTotalQty = 0;
-        let buyTotalAmount = 0;
-        let sellTotalQty = 0;
-        let sellTotalAmount = 0;
-        let totalFees = 0;
-        transactions.forEach(t => {
-          const qty = parseFloat(t.quantity || t.shares) || 0;
-          let amount = parseFloat(t.amount) || 0;
-          const fee = parseFloat(t.commission || t.fee) || 0;
-          if (isHKConnect && !_isManualPrice) {
-            amount = amount * _hkCostFactor;
-          }
-          if (!isNaN(fee)) totalFees += (isHKConnect && !_isManualPrice) ? (fee * _hkCostFactor) : fee;
-          if (t.type === '建仓' || t.type === '买入') {
-            buyTotalQty += qty;
-            buyTotalAmount += amount;
-          } else if (t.type === '卖出' || t.type === '清仓') {
-            sellTotalQty += Math.abs(qty);
-            sellTotalAmount += Math.abs(amount);
-          }
-        });
-
-        const _computedQty = buyTotalQty - sellTotalQty;
-        const _qty = buyTotalQty > 0 ? _computedQty : (parseFloat(a.shares || a.quantity) || 0);
-        const _computedCostPrice = buyTotalQty > 0 ? buyTotalAmount / buyTotalQty : 0;
-        const _storedCostRaw = parseFloat(a.costPrice || a.cost) || 0;
-        const _storedCost = (isHKConnect && !_isManualPrice && _storedCostRaw > 0) ? (_storedCostRaw * _hkCostFactor) : _storedCostRaw;
-        const _costPrice = buyTotalQty > 0 ? _computedCostPrice : _storedCost;
-
-        const isCash = isCashCategory(a);
-        // 数量始终使用实际数量，不能用 currentValue 覆盖
-        const _effectiveQty = _qty;
-        // 港股通：行情报价和存储值按 factor 折算
-        const _quoteRawPrice = parseFloat(quotesMap[a.code]?.price) || 0;
-        const _quoteRawPrevClose = parseFloat(quotesMap[a.code]?.prevClose) || 0;
-        const _quotePriceConv = (isHKConnect && _quoteRawPrice > 0) ? (_quoteRawPrice * _hkValueFactor) : _quoteRawPrice;
-        const _quotePrevConv = (isHKConnect && _quoteRawPrevClose > 0) ? (_quoteRawPrevClose * _hkValueFactor) : _quoteRawPrevClose;
-        const _storedPriceRaw = parseFloat(a.currentPrice) || 0;
-        const _storedPrevRaw = parseFloat(a.prevPrice) || 0;
-        const _storedPriceConv = (isHKConnect && !_isManualPrice && _storedPriceRaw > 0) ? (_storedPriceRaw * _hkValueFactor) : _storedPriceRaw;
-        const _storedPrevConv = (isHKConnect && !_isManualPrice && _storedPrevRaw > 0) ? (_storedPrevRaw * _hkValueFactor) : _storedPrevRaw;
-        // 允许现金类资产使用用户输入的价格，不再强制设为1
-        const _effectivePrice = _isManualPrice ? _storedPriceRaw : (_quotePriceConv || _storedPriceConv || 0);
-
-        const _unitCost = _costPrice;
-        const _totalCost = _unitCost * _effectiveQty;
-        // 当前市值始终使用 price × qty 计算，不依赖存储的 currentValue
-        const _currentValue = _effectivePrice * _effectiveQty;
-        // 现金类持仓盈亏 = 当前市值 - 持仓成本，不再强制为0
-        const _holdingPnl = _currentValue - _totalCost;
-        const _holdingPnlRate = _totalCost > 0 ? (_holdingPnl / _totalCost) * 100 : 0;
-
-        // 使用行情数据中的 prevClose（昨收价）判断涨跌颜色，优先级：行情prevClose > 存储prevPrice
-        const _prevPrice = _isManualPrice ? _storedPrevRaw : (_quotePrevConv > 0 ? _quotePrevConv : _storedPrevConv);
-        const _dailyRaw = parseFloat(a.todayPnl) || parseFloat(a.dailyPnl) || 0;
-        const _dailyConv = (isHKConnect && !_isManualPrice) ? (_dailyRaw * _hkValueFactor) : _dailyRaw;
-        const _dailyPnl = isCash ? 0 : ((_prevPrice > 0 && _effectivePrice > 0)
-          ? (_effectivePrice - _prevPrice) * _effectiveQty
-          : _dailyConv);
-        const _dailyPnlRate = isCash ? 0 : ((_prevPrice > 0 && _effectivePrice > 0)
-          ? ((_effectivePrice - _prevPrice) / _prevPrice) * 100
-          : (parseFloat(a.todayPnlPercent) || parseFloat(a.dailyPnlRate) || 0));
-
-        // 涨跌颜色基于昨收价判断：现价 > 昨收 = 绿色（涨），现价 < 昨收 = 红色（跌）
-        const _priceChange = _effectivePrice > 0 && _prevPrice > 0
-          ? (_effectivePrice > _prevPrice ? 'up' : _effectivePrice < _prevPrice ? 'down' : 'unchanged')
-          : 'unchanged';
-
-        return {
-          id: a.id,
-          market: a.market || '国内市场',
-          currency: a.currency || 'CNY',
-          name: a.name || '-',
-          code: a.code || '',
-          assetType: a.kind || a.assetType || '',
-          assetKind: a.assetKind || a.kind || '',
-          account: account.name || '',
-          categoryL1: a.category || a.categoryL1 || '',
-          categoryL2: a.subcategory || a.categoryL2 || '',
-          categoryL3: a.tertiaryCategory || a.categoryL3 || '',
-          categoryL4: a.categoryL4 || '',
-          positionGroup: a.positionGroup || '',
-          positionType: a.positionCategory || a.positionType || '',
-          tags: a.tags || [],
-          costPrice: _unitCost,
-          avgCost: _unitCost,
-          quantity: _effectiveQty,
-          cost: _totalCost,
-          currentPrice: _effectivePrice,
-          prevPrice: _prevPrice,
-          priceChange: _priceChange,
-          holdingDays: a.holdingDays || 0,
-          balance: _currentValue,
-          currentValue: _currentValue,
-          holdingPnl: _holdingPnl,
-          holdingPnlRate: _holdingPnlRate,
-          dailyPnl: _dailyPnl,
-          dailyPnlRate: _dailyPnlRate,
-          cumulativeReturn: (() => { const v = parseFloat(a.cumulativeReturn); return isNaN(v) ? _holdingPnl : v; })(),
-          cumulativeReturnRate: (() => { const v = parseFloat(a.cumulativeReturnRate); return isNaN(v) ? _holdingPnlRate : v; })(),
-          positionRatio: 0,
-        };
-      });
-  }, [selectedAccountId, accounts, financeAssets, quotesMap]);
+      .map((a) => mapFinanceAssetToHolding(a, account, quotesMap, exchangeRates));
+  }, [selectedAccountId, accounts, financeAssets, quotesMap, exchangeRates]);
 
   // 账户详情汇总：基于 accountHoldings（与持仓表合计行一致）
   // 总市值 = Σ currentValue（按币种转换为 CNY）；总成本 = Σ cost（按币种转换为 CNY）；余额 = Σ currentValue(一级分类为现金类)
