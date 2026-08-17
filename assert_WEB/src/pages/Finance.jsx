@@ -376,6 +376,23 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       editFieldInputRef.current.focus();
     }
   }, [editingField]);
+  // 同步 editCumReturn / editHoldingPnl 与 latestData 变化（仅在非编辑模式下同步，避免覆盖用户正在输入的值）
+  useEffect(() => {
+    if (editingField !== 'cum') {
+      const raw = latestData.cumulativeReturn;
+      const parsed = raw != null ? parseFloat(raw) : NaN;
+      const hasManual = raw != null && !isNaN(parsed);
+      setEditCumReturn(hasManual ? String(parsed) : '');
+    }
+  }, [latestData.cumulativeReturn, editingField]);
+  useEffect(() => {
+    if (editingField !== 'pnl') {
+      const raw = latestData.holdingPnl;
+      const parsed = raw != null ? parseFloat(raw) : NaN;
+      const hasManual = raw != null && !isNaN(parsed) && raw !== '';
+      setEditHoldingPnl(hasManual ? String(parsed) : '');
+    }
+  }, [latestData.holdingPnl, editingField]);
   const [tradeRecords, setTradeRecords] = useState(() => {
     if (data.transactions && Array.isArray(data.transactions)) {
       return data.transactions.map(t => {
@@ -520,6 +537,11 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       const holdingPnlRate = finalCost > 0 ? Math.round((finalHoldingPnl / finalCost) * 100 * 100) / 100 : 0;
       const updatedAssets = (stateData.financeAssets || []).map(asset => {
         if (String(asset.id) === String(data?.id)) {
+          // 保留用户手动编辑过的 holdingPnl / cumulativeReturn，不被种子硬编码覆盖
+          const hasStoredPnl = asset.holdingPnl != null && !isNaN(parseFloat(asset.holdingPnl));
+          const rawCum = parseFloat(asset.cumulativeReturn);
+          const isLegacyHardcodedCum = rawCum === 342.07;
+          const hasStoredCum = asset.cumulativeReturn != null && !isNaN(rawCum) && !isLegacyHardcodedCum;
           return {
             ...asset,
             transactions: merged,
@@ -528,10 +550,14 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
             cost: finalCost,
             availableShares: computedQty,
             currentValue,
-            holdingPnl: finalHoldingPnl,
-            holdingPnlRate,
-            cumulativeReturn: 342.07,
-            cumulativeReturnRate: finalCost > 0 ? Math.round((342.07 / finalCost) * 100 * 100) / 100 : 0,
+            holdingPnl: hasStoredPnl ? parseFloat(asset.holdingPnl) : finalHoldingPnl,
+            holdingPnlRate: hasStoredPnl
+              ? (asset.holdingPnlRate != null ? parseFloat(asset.holdingPnlRate) : holdingPnlRate)
+              : holdingPnlRate,
+            cumulativeReturn: hasStoredCum ? parseFloat(asset.cumulativeReturn) : 342.07,
+            cumulativeReturnRate: hasStoredCum
+              ? (asset.cumulativeReturnRate != null ? parseFloat(asset.cumulativeReturnRate) : (finalCost > 0 ? Math.round((parseFloat(asset.cumulativeReturn) / finalCost) * 100 * 100) / 100 : 0))
+              : (finalCost > 0 ? Math.round((342.07 / finalCost) * 100 * 100) / 100 : 0),
             todayPnl: parseFloat(asset.todayPnl) || 0.45,
             dailyPnl: parseFloat(asset.todayPnl) || 0.45,
           };
@@ -972,9 +998,9 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     : floatPnlRate;
   const _mfHoldingReturnRate = _isDetailMoneyFund ? _mfHoldingPnlRate : computedHoldingReturnRate;
 
-  // 货基累计收益 = 原有累计收益 + 今日最新收益（每日累加）
+  // 货基累计收益：用户手动编辑过则直接使用编辑值；否则用历史基数 + 今日收益
   const _mfAutoCumulative = _isDetailMoneyFund
-    ? Math.round(((hasManualCum ? storedCum : 0) + computedDailyPnl) * 100) / 100
+    ? (hasManualCum ? storedCum : Math.round(((parseFloat(latestData._mfHistoricalBase) || 0) + computedDailyPnl) * 100) / 100)
     : Math.round((currentValue - costTotal) * 100) / 100;
 
   const isFloatPos = floatPnl >= 0;
@@ -1123,61 +1149,73 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     return accounts;
   };
 
-  // 累计收益手动保存：写入 asset 并调用 setStateData + saveState
+  // 累计收益手动保存：写入 asset 并调用 setStateData + saveState（使用函数式 setState 避免闭包陈旧值）
   const saveCumulativeEdit = useCallback(async () => {
     setSavingCum(true);
     try {
-      const currentItems = stateData?.financeAssets || [];
       const rawValCum = editCumReturn;
       const nextCum = rawValCum && rawValCum !== '' && !isNaN(parseFloat(rawValCum)) ? parseFloat(rawValCum) : null;
-      const updatedItems = currentItems.map(item => {
-        if (String(item.id) !== String(latestData.id)) return item;
-        return { ...item, cumulativeReturn: nextCum, cumulativePnl: nextCum };
+      const targetId = String(latestData.id);
+      let nextState = null;
+      setStateData(prev => {
+        const currentItems = prev?.financeAssets || [];
+        const updatedItems = currentItems.map(item => {
+          if (String(item.id) !== targetId) return item;
+          return { ...item, cumulativeReturn: nextCum, cumulativePnl: nextCum };
+        });
+        nextState = { ...(prev || {}), financeAssets: updatedItems };
+        return nextState;
       });
-      const nextState = { ...(stateData || {}), financeAssets: updatedItems };
-      setStateData(nextState);
-      try {
-        await saveState(nextState);
-      } catch (err) {
-        console.error('[DetailModal] save cumulative failed:', err);
+      if (nextState && saveState) {
+        try {
+          await saveState(nextState);
+        } catch (err) {
+          console.error('[DetailModal] save cumulative failed:', err);
+        }
       }
     } finally {
       setSavingCum(false);
     }
-  }, [editCumReturn, latestData?.id, setStateData, stateData, saveState]);
+  }, [editCumReturn, latestData?.id, setStateData, saveState]);
 
-  // 持有收益手动保存：写入 asset 并调用 setStateData + saveState（同步重新计算持有收益率）
+  // 持有收益手动保存：写入 asset 并调用 setStateData + saveState（使用函数式 setState 避免闭包陈旧值）
   const saveHoldingPnlEdit = useCallback(async () => {
     setSavingHoldingPnl(true);
     try {
-      const currentItems = stateData?.financeAssets || [];
       const rawValPnl = editHoldingPnl;
       const nextPnl = rawValPnl && rawValPnl !== '' && !isNaN(parseFloat(rawValPnl)) ? parseFloat(rawValPnl) : null;
-      const updatedItems = currentItems.map(item => {
-        if (String(item.id) !== String(latestData.id)) return item;
-        const cost = parseFloat(item.cost) || (parseFloat(item.costPrice) || 0) * (parseFloat(item.quantity) || parseFloat(item.shares) || 0);
-        const rate = (cost > 0 && nextPnl != null)
-          ? Math.round((nextPnl / cost) * 100 * 100) / 100
-          : null;
-        return {
-          ...item,
-          holdingPnl: nextPnl,
-          pnl: nextPnl,
-          holdingPnlRate: rate,
-          pnlPercent: rate,
-        };
+      const targetId = String(latestData.id);
+      let nextState = null;
+      setStateData(prev => {
+        const currentItems = prev?.financeAssets || [];
+        const updatedItems = currentItems.map(item => {
+          if (String(item.id) !== targetId) return item;
+          const cost = parseFloat(item.cost) || (parseFloat(item.costPrice) || 0) * (parseFloat(item.quantity) || parseFloat(item.shares) || 0);
+          const rate = (cost > 0 && nextPnl != null)
+            ? Math.round((nextPnl / cost) * 100 * 100) / 100
+            : null;
+          return {
+            ...item,
+            holdingPnl: nextPnl,
+            pnl: nextPnl,
+            holdingPnlRate: rate,
+            pnlPercent: rate,
+          };
+        });
+        nextState = { ...(prev || {}), financeAssets: updatedItems };
+        return nextState;
       });
-      const nextState = { ...(stateData || {}), financeAssets: updatedItems };
-      setStateData(nextState);
-      try {
-        await saveState(nextState);
-      } catch (err) {
-        console.error('[DetailModal] save holdingPnl failed:', err);
+      if (nextState && saveState) {
+        try {
+          await saveState(nextState);
+        } catch (err) {
+          console.error('[DetailModal] save holdingPnl failed:', err);
+        }
       }
     } finally {
       setSavingHoldingPnl(false);
     }
-  }, [editHoldingPnl, latestData?.id, setStateData, stateData, saveState]);
+  }, [editHoldingPnl, latestData?.id, setStateData, saveState]);
 
   const handleAddRecord = async () => {
     const record = {
@@ -3093,9 +3131,13 @@ export default function Finance({ onAssetPenetration }) {
     setError(null);
     try {
       const data = await fetchState();
-      // 保留当前状态中手动编辑过的资产，防止后端数据延迟覆盖 priceManualEdit
+      // 保留当前状态中手动编辑过的资产，防止后端数据延迟覆盖 priceManualEdit / cumulativeReturn / holdingPnl
       if (stateData?.financeAssets && Array.isArray(stateData.financeAssets)) {
-        const manualAssets = stateData.financeAssets.filter(a => a && (a.priceManualEdit === true || a.priceManualEdit === 'true'));
+        const manualAssets = stateData.financeAssets.filter(a => a && (
+          a.priceManualEdit === true || a.priceManualEdit === 'true' ||
+          a.cumulativeReturn != null || a.cumulativePnl != null ||
+          a.holdingPnl != null || a.pnl != null
+        ));
         if (manualAssets.length > 0) {
           const manualMap = new Map(manualAssets.map(a => [String(a.id), a]));
           data.financeAssets = (data.financeAssets || []).map(a => {
@@ -3106,6 +3148,13 @@ export default function Finance({ onAssetPenetration }) {
                 currentPrice: manual.currentPrice,
                 priceManualEdit: true,
                 currentValue: manual.currentValue,
+                cumulativeReturn: manual.cumulativeReturn,
+                cumulativePnl: manual.cumulativePnl,
+                cumulativeReturnRate: manual.cumulativeReturnRate,
+                holdingPnl: manual.holdingPnl,
+                pnl: manual.pnl,
+                holdingPnlRate: manual.holdingPnlRate,
+                pnlPercent: manual.pnlPercent,
               };
             }
             return a;
@@ -4542,9 +4591,10 @@ export default function Finance({ onAssetPenetration }) {
             /基金|货币/.test(r.typeName || '') || /基金|货币/.test(r.name || '')
           );
         }
-        // 三级分类为"场外"时：过滤掉股票类资产(AStock/UsStock/UsADR/HK)，只保留场外基金和债券
+        // 三级分类为"场外" 且 资产类型为非股票（基金/债券等）时：过滤掉股票类资产
         const categoryL3 = cur.categoryL3 || cur.tertiaryCategory || '';
-        if (categoryL3 === '场外') {
+        const curAssetType = cur.assetType || '';
+        if (categoryL3 === '场外' && curAssetType !== '股票') {
           results = results.filter(r => {
             const classify = r.classify || '';
             // 排除股票类
@@ -4702,7 +4752,8 @@ export default function Finance({ onAssetPenetration }) {
 
       // 过滤：根据当前三级分类（与 handleCodeSearch 保持一致）
       const categoryL3 = cur.categoryL3 || cur.tertiaryCategory || '';
-      if (categoryL3 === '场外') {
+      const curAssetType = cur.assetType || '';
+      if (categoryL3 === '场外' && curAssetType !== '股票') {
         results = results.filter(r => {
           const classify = r.classify || '';
           // 排除股票类
