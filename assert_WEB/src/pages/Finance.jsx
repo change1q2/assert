@@ -2894,6 +2894,13 @@ export default function Finance({ onAssetPenetration }) {
   const [lookupLoading, setLookupLoading] = useState(false);
   const lookupTimerRef = useRef(null);
   const verifiedPairRef = useRef({ code: '', name: '' });
+  const newAccountRef = useRef(newAccount);
+  const lookupReqSeqRef = useRef(0);
+
+  // 同步最新 newAccount 到 ref，供异步回调（setTimeout/API）读取，避免闭包陈旧值
+  useEffect(() => {
+    newAccountRef.current = newAccount;
+  }, [newAccount]);
 
   const { accounts = [], assetClasses = [], financeAssets = [] } = stateData || {};
 
@@ -4511,10 +4518,13 @@ export default function Finance({ onAssetPenetration }) {
     setLookupLoading(true);
     setShowLookupDropdown(true);
     lookupTimerRef.current = setTimeout(async () => {
+      const currentSeq = ++lookupReqSeqRef.current;
       try {
-        let results = await lookupFinance(q.trim(), newAccount.market);
+        // 使用 ref 获取最新的 newAccount，避免闭包陈旧值
+        const cur = newAccountRef.current;
+        let results = await lookupFinance(q.trim(), cur.market);
         // 货基/货币基金选中时：过滤掉股票数据，只保留基金类
-        const isMoneyFundType = newAccount.assetType === '货基' || newAccount.positionType === '货币基金';
+        const isMoneyFundType = cur.assetType === '货基' || cur.positionType === '货币基金';
         if (isMoneyFundType) {
           results = results.filter(r =>
             r.classify === 'OTCFUND' || r.classify === 'ETF' ||
@@ -4522,7 +4532,7 @@ export default function Finance({ onAssetPenetration }) {
           );
         }
         // 三级分类为"场外"时：过滤掉股票类资产(AStock/UsStock/UsADR/HK)，只保留场外基金和债券
-        const categoryL3 = newAccount.categoryL3 || newAccount.tertiaryCategory || '';
+        const categoryL3 = cur.categoryL3 || cur.tertiaryCategory || '';
         if (categoryL3 === '场外') {
           results = results.filter(r => {
             const classify = r.classify || '';
@@ -4532,27 +4542,36 @@ export default function Finance({ onAssetPenetration }) {
             if (classify === 'AStock' || classify === 'UsStock' || classify === 'UsADR' || classify === 'HK') return false;
             return true;
           });
-          // 去重：同代码保留一个（名称以最新输入匹配为准，保留名称匹配输入的项）
-          const seen = new Set();
-          results = results.filter(r => {
-            if (seen.has(r.code)) {
-              // 已存在相同代码：优先保留名称包含查询词的项
-              const existing = results.find(x => x.code === r.code);
-              if (existing && !existing.name.includes(q.trim()) && r.name.includes(q.trim())) {
-                return false; // 用当前项替换已存在的
+          // 去重：同代码只保留一个，优先保留名称包含查询词的项
+          const byCode = new Map();
+          for (const r of results) {
+            const existing = byCode.get(r.code);
+            if (!existing) {
+              byCode.set(r.code, r);
+            } else {
+              // 已存在：如果当前项名称更匹配查询词，则替换
+              const curMatch = (r.name || '').includes(q.trim());
+              const existMatch = (existing.name || '').includes(q.trim());
+              if (curMatch && !existMatch) {
+                byCode.set(r.code, r);
               }
-              return false;
             }
-            seen.add(r.code);
-            return true;
-          });
+          }
+          results = Array.from(byCode.values());
         }
-        setLookupResults(results);
+        // 仅当本次请求是最新时才更新结果，避免旧请求覆盖新请求
+        if (currentSeq === lookupReqSeqRef.current) {
+          setLookupResults(results);
+        }
       } catch (e) {
         console.error('Lookup failed:', e);
-        setLookupResults([]);
+        if (currentSeq === lookupReqSeqRef.current) {
+          setLookupResults([]);
+        }
       } finally {
-        setLookupLoading(false);
+        if (currentSeq === lookupReqSeqRef.current) {
+          setLookupLoading(false);
+        }
       }
     }, 300);
   };
@@ -4633,8 +4652,10 @@ export default function Finance({ onAssetPenetration }) {
 
   // 当资产代码或名称失去焦点时，校验一致性并重新获取现价
   const verifyAndFetchAsset = async (type) => {
-    const code = (newAccount.code || '').trim();
-    const name = (newAccount.name || '').trim();
+    // 使用 ref 获取最新值，避免闭包陈旧值
+    const cur = newAccountRef.current;
+    const code = (cur.code || '').trim();
+    const name = (cur.name || '').trim();
     if (!code && !name) return;
 
     // 记录本次验证结果，避免重复请求
@@ -4652,14 +4673,31 @@ export default function Finance({ onAssetPenetration }) {
         return;
       }
 
-      // 过滤：根据当前三级分类
-      const categoryL3 = newAccount.categoryL3 || newAccount.tertiaryCategory || '';
+      // 过滤：根据当前三级分类（与 handleCodeSearch 保持一致）
+      const categoryL3 = cur.categoryL3 || cur.tertiaryCategory || '';
       if (categoryL3 === '场外') {
         results = results.filter(r => {
           const classify = r.classify || '';
+          if (classify === 'OTCFUND' || classify === 'ETF') return true;
           if (classify === 'AStock' || classify === 'UsStock' || classify === 'UsADR' || classify === 'HK') return false;
           return true;
         });
+        // 同代码去重（与 handleCodeSearch 保持一致）
+        const byCode = new Map();
+        for (const r of results) {
+          const existing = byCode.get(r.code);
+          if (!existing) {
+            byCode.set(r.code, r);
+          } else {
+            const q = type === 'code' ? code : name;
+            const curMatch = (r.name || '').includes(q);
+            const existMatch = (existing.name || '').includes(q);
+            if (curMatch && !existMatch) {
+              byCode.set(r.code, r);
+            }
+          }
+        }
+        results = Array.from(byCode.values());
       }
 
       if (results.length > 0) {
@@ -6481,10 +6519,14 @@ export default function Finance({ onAssetPenetration }) {
                             type="text"
                             value={newAccount.name}
                             onChange={e => {
-                              setNewAccount({ ...newAccount, name: e.target.value });
-                              handleCodeSearch(e.target.value);
+                              const val = e.target.value;
+                              setNewAccount(prev => ({ ...prev, name: val }));
+                              handleCodeSearch(val);
                             }}
-                            onFocus={() => newAccount.name && handleCodeSearch(newAccount.name)}
+                            onFocus={() => {
+                              const curName = newAccountRef.current.name;
+                              if (curName) handleCodeSearch(curName);
+                            }}
                             onBlur={() => {
                               setShowLookupDropdown(false);
                               verifyAndFetchAsset('name');
@@ -6526,10 +6568,14 @@ export default function Finance({ onAssetPenetration }) {
                             type="text"
                             value={newAccount.code}
                             onChange={e => {
-                              setNewAccount({ ...newAccount, code: e.target.value });
-                              handleCodeSearch(e.target.value);
+                              const val = e.target.value;
+                              setNewAccount(prev => ({ ...prev, code: val }));
+                              handleCodeSearch(val);
                             }}
-                            onFocus={() => newAccount.code && handleCodeSearch(newAccount.code)}
+                            onFocus={() => {
+                              const curCode = newAccountRef.current.code;
+                              if (curCode) handleCodeSearch(curCode);
+                            }}
                             onBlur={() => {
                               setShowLookupDropdown(false);
                               verifyAndFetchAsset('code');
