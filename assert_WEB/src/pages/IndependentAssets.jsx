@@ -292,6 +292,7 @@ export default function IndependentAssets() {
   const [customFixedDepositTypes, setCustomFixedDepositTypes] = useState([]);
   const [showInsuranceDetailModal, setShowInsuranceDetailModal] = useState(false);
   const [selectedInsurance, setSelectedInsurance] = useState(null);
+  const [insuranceDetailDirty, setInsuranceDetailDirty] = useState(false);
   const [insurancePaginationPage, setInsurancePaginationPage] = useState(1);
   const INSURANCE_PAGE_SIZE = 20;
   const [showCalculationModal, setShowCalculationModal] = useState(false);
@@ -1347,32 +1348,44 @@ export default function IndependentAssets() {
       }
       return item;
     });
-    try {
+    // 只更新本地 state，不立即保存到后端（改为关闭时全量保存）
+    const currentData = stateData || {};
+    setStateData({
+      ...currentData,
+      independentAssets: {
+        ...(currentData.independentAssets || {}),
+        insurance: nextItems,
+      },
+    });
+    setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
+    setInsuranceDetailDirty(true);
+  };
+
+  // 关闭保险详情时保存所有未保存的更改
+  const handleCloseInsuranceDetail = async () => {
+    if (insuranceDetailDirty && selectedInsurance) {
       try {
+        const currentItems = independentAssets.insurance || [];
+        // 关键：使用 selectedInsurance（已包含最新 transactionRecords 修改）
+        // 构造 nextItems，而不是使用可能陈旧的 independentAssets.insurance
+        const nextItems = currentItems.map(item =>
+          item.id === selectedInsurance.id ? selectedInsurance : item
+        );
         await updateAssets('insurance', nextItems);
+        // 同步本地 stateData，避免保存后列表数据回退
+        setStateData(prevState => ({
+          ...prevState,
+          independentAssets: {
+            ...(prevState.independentAssets || {}),
+            insurance: nextItems,
+          },
+        }));
       } catch (err) {
-        console.error('Failed to update transaction field:', err);
-        try {
-          const saved = localStorage.getItem('wealth_os_independent_assets');
-          const localAssets = saved ? JSON.parse(saved) : {};
-          localAssets.insurance = nextItems;
-          localStorage.setItem('wealth_os_independent_assets', JSON.stringify(localAssets));
-          const currentData = stateData || {};
-          setStateData({
-            ...currentData,
-            independentAssets: {
-              ...(currentData.independentAssets || {}),
-              insurance: nextItems,
-            },
-          });
-        } catch (storageErr) {
-          console.error('Failed to write fallback to localStorage:', storageErr);
-        }
+        console.error('Failed to save insurance detail on close:', err);
       }
-      setSelectedInsurance(nextItems.find(i => i.id === selectedInsurance.id));
-    } catch (err) {
-      console.error('Error updating transaction field:', err);
+      setInsuranceDetailDirty(false);
     }
+    setShowInsuranceDetailModal(false);
   };
 
   const handleAttachmentUpload = async (e) => {
@@ -1620,6 +1633,41 @@ export default function IndependentAssets() {
       id: editingItem?.id || Date.now().toString(),
       createdAt: editingItem?.createdAt || new Date().toISOString(),
     };
+
+    // 编辑模式下保留已有交易记录和其他子数据
+    if (editingItem) {
+      // 关键：若当前正在查看详情（selectedInsurance/selectedFixedInvestment），
+      // 优先使用详情中的最新数据（包含未保存的表单编辑，如年末现金价值等）
+      const latestInsuranceRecords =
+        activeTab === 'insurance' && selectedInsurance && selectedInsurance.id === editingItem.id
+          ? selectedInsurance.transactionRecords
+          : null;
+      const latestFixedDividendRecords =
+        activeTab === 'fixedinvestment' && selectedFixedInvestment && selectedFixedInvestment.id === editingItem.id
+          ? selectedFixedInvestment.dividendRecords
+          : null;
+
+      if (latestInsuranceRecords) {
+        newItem.transactionRecords = latestInsuranceRecords;
+      } else if (editingItem.transactionRecords) {
+        newItem.transactionRecords = editingItem.transactionRecords;
+      }
+      if (editingItem.cashValue !== undefined && !itemData.cashValue) {
+        newItem.cashValue = editingItem.cashValue;
+      }
+      // 保留分红险等其他保险类型的特定字段
+      if (editingItem.dividendRecords) {
+        newItem.dividendRecords = editingItem.dividendRecords;
+      }
+      // 固定投资：优先使用详情中的最新现金流数据
+      if (latestFixedDividendRecords) {
+        newItem.dividendRecords = latestFixedDividendRecords;
+      }
+      // 保留固定投资的现金流数据（旧字段名兜底）
+      if (editingItem.cashFlowRecords && !newItem.dividendRecords) {
+        newItem.cashFlowRecords = editingItem.cashFlowRecords;
+      }
+    }
 
     if (activeTab === 'insurance' && !editingItem && itemData.insuranceType === '年金险') {
       const policyDate = itemData.policyDate ? new Date(itemData.policyDate) : new Date();
@@ -4447,7 +4495,7 @@ export default function IndependentAssets() {
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
           <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">保险明细 - {item.policyName || item.policyNumber || '保单'}</h2>
-            <button onClick={() => setShowInsuranceDetailModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
+            <button onClick={handleCloseInsuranceDetail} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
               <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
@@ -4582,20 +4630,23 @@ export default function IndependentAssets() {
               {records.length > 0 ? (
                 <div className="overflow-x-auto">
                   {(() => {
-                    // Sort records - 年金险支持 YYYY-MM（年月）或纯数字年份
+                    // Sort records - 年金险支持 YYYY-MM（年月）或纯数字年份，倒序排列（最新在前）
                     const sortedRecords = records.slice().sort((a, b) => {
-                      const va = a.year || '';
-                      const vb = b.year || '';
-                      // 优先作为年月字符串比较
-                      if ((/^\d{4}-\d{2}$/.test(va) || /^\d{4}$/.test(va)) && (/^\d{4}-\d{2}$/.test(vb) || /^\d{4}$/.test(vb))) {
-                        return va.localeCompare(vb);
+                      const va = a.date || a.year || '';
+                      const vb = b.date || b.year || '';
+                      // 优先作为日期字符串比较
+                      if (/^\d{4}-\d{2}-\d{2}$/.test(va) && /^\d{4}-\d{2}-\d{2}$/.test(vb)) {
+                        return vb.localeCompare(va); // 倒序
+                      }
+                      if (/^\d{4}-\d{2}$/.test(va) && /^\d{4}-\d{2}$/.test(vb)) {
+                        return vb.localeCompare(va); // 倒序
                       }
                       const na = parseInt(va) || 0;
                       const nb = parseInt(vb) || 0;
                       if (na === 0 && nb !== 0) return 1;
                       if (na !== 0 && nb === 0) return -1;
                       if (na === 0 && nb === 0) return 0;
-                      return na - nb;
+                      return nb - na; // 倒序
                     });
                     const totalPages = Math.max(1, Math.ceil(sortedRecords.length / INSURANCE_PAGE_SIZE));
                     const currentPage = Math.min(insurancePaginationPage, totalPages);
@@ -4689,7 +4740,21 @@ export default function IndependentAssets() {
 
                                 return (
                                   <tr key={record.id || index} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{record.year || '—'}</td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                      {(() => {
+                                        const d = record.date;
+                                        if (d) {
+                                          // 支持 YYYY-MM-DD / YYYY-MM / YYYY 格式，统一显示为 "YYYY年MM月"
+                                          const s = String(d);
+                                          const m = s.match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/);
+                                          if (m) return `${m[1]}年${m[2].padStart(2, '0')}月`;
+                                          const y = s.match(/^(\d{4})$/);
+                                          if (y) return `${y[1]}年`;
+                                          return s;
+                                        }
+                                        return record.year ? `第${record.year}年` : '—';
+                                      })()}
+                                    </td>
                                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                                       <input type="number" value={record.annualPremium || ''} onChange={(e) => {
                                         const newRecords = selectedInsurance.transactionRecords.map(r => {
@@ -5041,7 +5106,7 @@ export default function IndependentAssets() {
           </div>
 
           <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end">
-            <button onClick={() => setShowInsuranceDetailModal(false)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+            <button onClick={handleCloseInsuranceDetail} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
               关闭
             </button>
           </div>
@@ -6146,17 +6211,23 @@ export default function IndependentAssets() {
       const updatedItem = { ...item, dividendRecords: updatedRecords };
       setSelectedFixedInvestment(updatedItem);
 
-      const allItems = getAssets('fixedinvestment');
-      const nextItems = allItems.map(i => i.id === item.id ? updatedItem : i);
-      setStateData({
-        ...stateData,
-        independentAssets: {
-          ...stateData.independentAssets,
-          fixedinvestment: nextItems,
-        },
+      // 使用函数式 setState 避免陈旧快照，确保与其他并发更新隔离
+      setStateData(prevState => {
+        const prevAssets = prevState.independentAssets || {};
+        const allItems = prevAssets.fixedinvestment || [];
+        const nextItems = allItems.map(i => i.id === item.id ? updatedItem : i);
+        return {
+          ...prevState,
+          independentAssets: {
+            ...prevAssets,
+            fixedinvestment: nextItems,
+          },
+        };
       });
 
       try {
+        const allItems = getAssets('fixedinvestment');
+        const nextItems = allItems.map(i => i.id === item.id ? updatedItem : i);
         await updateAssets('fixedinvestment', nextItems);
       } catch (err) {
         console.error('Failed to save dividend records:', err);
@@ -6174,12 +6245,32 @@ export default function IndependentAssets() {
       return dateStr;
     };
 
+    // 关闭明细：把本地 dividendRecords（可能含有未通过 saveDividendRecords 保存的编辑）
+    // 同步到全局 stateData，保证列表数据与详情一致
+    const handleCloseDetail = () => {
+      const latestItem = { ...item, dividendRecords };
+      setStateData(prevState => {
+        const prevAssets = prevState.independentAssets || {};
+        const allItems = prevAssets.fixedinvestment || [];
+        const nextItems = allItems.map(i => i.id === item.id ? latestItem : i);
+        return {
+          ...prevState,
+          independentAssets: {
+            ...prevAssets,
+            fixedinvestment: nextItems,
+          },
+        };
+      });
+      setSelectedFixedInvestment(latestItem);
+      setShowFixedInvestmentDetailModal(false);
+    };
+
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
           <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between sticky top-0 bg-white dark:bg-slate-800 z-10">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">固定投资明细</h2>
-            <button onClick={() => setShowFixedInvestmentDetailModal(false)} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
+            <button onClick={handleCloseDetail} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded transition-colors">
               <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>

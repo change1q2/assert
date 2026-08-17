@@ -172,12 +172,36 @@ async function loadUserState(userId) {
   const debtCategories = (await safeSqlAll(pool, "SELECT * FROM debt_categories WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: row.id, name: row.name, sortOrder: row.sort_order,
   }));
-  const strategies = (await safeSqlAll(pool, "SELECT * FROM strategies WHERE user_id = ? ORDER BY id", [userId])).map((row) => ({
-    id: row.id, name: row.name, active: Boolean(row.active), target: row.target,
-    allocation: maybeParseJson(row.allocation_json), debtLimit: row.debt_limit,
-    annualReturn: row.annual_return, risk: row.risk,
-  }));
-  const settings = await safeSqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json FROM user_settings WHERE user_id = ?", [userId]);
+  const settings = await safeSqlGet(pool, "SELECT finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json, strategies_json FROM user_settings WHERE user_id = ?", [userId]);
+  
+  // 优先从 strategies_json 读取新格式，否则从旧 strategies 表迁移
+  let strategies;
+  if (settings?.strategies_json) {
+    strategies = maybeParseJson(settings.strategies_json);
+  } else {
+    const oldStrategies = (await safeSqlAll(pool, "SELECT * FROM strategies WHERE user_id = ? ORDER BY id", [userId])).map((row) => ({
+      id: row.id, name: row.name, active: Boolean(row.active), target: row.target,
+      allocation: maybeParseJson(row.allocation_json), debtLimit: row.debt_limit,
+      annualReturn: row.annual_return, risk: row.risk,
+    }));
+    // 转换旧格式为新格式
+    if (oldStrategies.length > 0) {
+      strategies = {
+        list: oldStrategies.map(s => ({
+          id: String(s.id),
+          title: s.name,
+          description: s.target || '',
+          icon: 'Lightbulb',
+          color: 'gray',
+          preset: false,
+          philosophies: [],
+        })),
+        pools: {},
+      };
+    } else {
+      strategies = { list: [], pools: {} };
+    }
+  }
   const yearlyRecords = (await safeSqlAll(pool, "SELECT year, opening_asset, closing_asset, target_profit, actual_profit FROM yearly_records WHERE user_id = ? ORDER BY year", [userId])).map((row) => ({
     year: row.year,
     openingAsset: row.opening_asset,
@@ -305,7 +329,7 @@ async function saveUserState(conn, userId, state) {
     console.warn(`[state-service] 无法检查现有数据量: ${e.message}`);
   }
 
-  const previousSettings = await sqlGet(conn, "SELECT hk_ipo_rules_json, independent_assets_json, finance_asset_draft_json, fee_config_json, overview_goals_json, account_categories_json FROM user_settings WHERE user_id = ?", [userId]);
+  const previousSettings = await sqlGet(conn, "SELECT hk_ipo_rules_json, independent_assets_json, finance_asset_draft_json, fee_config_json, overview_goals_json, account_categories_json, strategies_json FROM user_settings WHERE user_id = ?", [userId]);
   await sqlRun(conn, `
     UPDATE user_profiles SET name=?, phone=?, email=?, currency=?, theme=?, avatar=?, birthday=?, city=?,
     occupation=?, risk_level=?, privacy_lock=?, data_mask=?, device_name=? WHERE user_id=?
@@ -513,16 +537,18 @@ async function saveUserState(conn, userId, state) {
       [userId, text(cat.id), text(cat.name), index]);
   }
 
-  for (const row of (state.strategies || [])) {
-    await sqlRun(conn, "INSERT INTO strategies (user_id, id, name, active, target, allocation_json, debt_limit, annual_return, risk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [userId, Number(row.id), text(row.name), row.active ? 1 : 0, text(row.target),
-       JSON.stringify(row.allocation || []), number(row.debtLimit), number(row.annualReturn), text(row.risk)]);
-  }
+  // strategies 改为保存到 user_settings 的 strategies_json 字段
+  const incomingStrategies = state.strategies;
+  const effectiveStrategies = (incomingStrategies && typeof incomingStrategies === 'object')
+    ? incomingStrategies
+    : { list: [], pools: {} };
+
   // Preserve existing settings for fields not provided in state
   const prevFinAssetDraft = previousSettings ? previousSettings.finance_asset_draft_json : null;
   const prevFeeConfig = previousSettings ? previousSettings.fee_config_json : null;
   const prevOverviewGoals = previousSettings ? previousSettings.overview_goals_json : null;
   const prevAccountCategories = previousSettings ? previousSettings.account_categories_json : null;
+  const prevStrategies = previousSettings ? previousSettings.strategies_json : null;
 
   const effectiveFinAssetDraft = state.financeAssetDraft !== undefined
     ? JSON.stringify(state.financeAssetDraft || {})
@@ -536,6 +562,9 @@ async function saveUserState(conn, userId, state) {
   const effectiveAccountCategories = state.accountCategories !== undefined
     ? JSON.stringify(state.accountCategories || {})
     : (prevAccountCategories || '{}');
+  const effectiveStrategiesJson = (incomingStrategies !== undefined)
+    ? JSON.stringify(effectiveStrategies)
+    : (prevStrategies || '{}');
 
   // Preserve existing independentAssets if not provided in state
   const incomingIndependentAssets = state.independentAssets;
@@ -543,10 +572,11 @@ async function saveUserState(conn, userId, state) {
     ? incomingIndependentAssets
     : (previousSettings ? maybeParseJson(previousSettings.independent_assets_json, {}) : {});
 
-  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  await sqlRun(conn, "INSERT INTO user_settings (user_id, finance_asset_draft_json, fee_config_json, overview_goals_json, hk_ipo_rules_json, independent_assets_json, account_categories_json, strategies_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     [userId, effectiveFinAssetDraft, effectiveFeeConfig, effectiveOverviewGoals,
      previousSettings?.hk_ipo_rules_json || null,
-     JSON.stringify(effectiveIndependentAssets), effectiveAccountCategories]);
+     JSON.stringify(effectiveIndependentAssets), effectiveAccountCategories,
+     effectiveStrategiesJson]);
 
   for (const row of (state.yearlyRecords || [])) {
     await sqlRun(conn, `INSERT INTO yearly_records (user_id, year, opening_asset, closing_asset, target_profit, actual_profit)

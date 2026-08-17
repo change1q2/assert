@@ -153,9 +153,50 @@ export default function StrategyDetail({ strategyId, onBack, onNavigate }) {
       if (data.strategies && !data.strategies.list) {
         data.strategies = migrateStrategies(data);
       }
+      // 如果 strategies 为空，尝试从 localStorage 恢复
+      if (!data.strategies || !data.strategies.list || data.strategies.list.length === 0) {
+        try {
+          const saved = localStorage.getItem('strategies_cache');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed && Array.isArray(parsed.list)) {
+              data.strategies = parsed;
+              await saveState(data);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to restore strategies from cache:', e);
+        }
+      }
       setStateData(data);
     } catch (err) {
       console.error('Failed to load data:', err);
+      // 加载失败时，尝试从缓存恢复
+      try {
+        const cachedState = localStorage.getItem('asset_platform_state');
+        if (cachedState) {
+          const parsed = JSON.parse(cachedState);
+          const data = parsed?.data || parsed;
+          if (data) {
+            if (!data.strategies || !data.strategies.list || data.strategies.list.length === 0) {
+              const saved = localStorage.getItem('strategies_cache');
+              if (saved) {
+                const stratParsed = JSON.parse(saved);
+                if (stratParsed && Array.isArray(stratParsed.list)) {
+                  data.strategies = stratParsed;
+                }
+              }
+            }
+            if (data.strategies && data.strategies.list) {
+              setStateData(data);
+              setError(null);
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to restore from cache:', e);
+      }
       setError('加载数据失败');
     } finally {
       setLoading(false);
@@ -253,6 +294,12 @@ export default function StrategyDetail({ strategyId, onBack, onNavigate }) {
   const handleSaveState = async (newState) => {
     const prevState = stateData;
     setStateData(newState);
+    // 保存到 localStorage 作为备份
+    try {
+      localStorage.setItem('strategies_cache', JSON.stringify(newState.strategies));
+    } catch (e) {
+      console.warn('Failed to save strategies cache:', e);
+    }
     try {
       await saveState(newState);
     } catch (err) {

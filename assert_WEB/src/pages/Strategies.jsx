@@ -131,9 +131,50 @@ export default function Strategies({ onNavigate }) {
           console.warn('Failed to persist migration:', e);
         }
       }
+      // 从 localStorage 恢复策略（如果 fetchState 返回空）
+      if (!data.strategies || data.strategies.list.length === 0) {
+        try {
+          const saved = localStorage.getItem('strategies_cache');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed && Array.isArray(parsed.list)) {
+              data.strategies = parsed;
+              await saveState(data);
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to restore strategies from cache:', e);
+        }
+      }
       setStateData(data);
     } catch (err) {
       console.error('Failed to load strategies data:', err);
+      // 加载失败时，尝试从缓存恢复
+      try {
+        const cachedState = localStorage.getItem('asset_platform_state');
+        if (cachedState) {
+          const parsed = JSON.parse(cachedState);
+          const data = parsed?.data || parsed;
+          if (data) {
+            if (!data.strategies || !data.strategies.list) {
+              const saved = localStorage.getItem('strategies_cache');
+              if (saved) {
+                const stratParsed = JSON.parse(saved);
+                if (stratParsed && Array.isArray(stratParsed.list)) {
+                  data.strategies = stratParsed;
+                }
+              }
+            }
+            if (data.strategies && data.strategies.list) {
+              setStateData(data);
+              setError(null);
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to restore from cache:', e);
+      }
       setError('加载数据失败');
     } finally {
       setLoading(false);
@@ -196,6 +237,7 @@ export default function Strategies({ onNavigate }) {
     if (!formData.title.trim()) return;
     setSaving(true);
     try {
+      let newState;
       if (editingStrategy) {
         const newList = strategies.map((s) =>
           s.id === editingStrategy.id
@@ -208,12 +250,10 @@ export default function Strategies({ onNavigate }) {
               }
             : s
         );
-        const newState = {
+        newState = {
           ...stateData,
           strategies: { ...stateData.strategies, list: newList },
         };
-        setStateData(newState);
-        await saveState(newState);
       } else {
         const newId = `custom-${Date.now()}`;
         const newStrategy = {
@@ -225,7 +265,7 @@ export default function Strategies({ onNavigate }) {
           preset: false,
           philosophies: [],
         };
-        const newState = {
+        newState = {
           ...stateData,
           strategies: {
             ...stateData.strategies,
@@ -233,9 +273,15 @@ export default function Strategies({ onNavigate }) {
             pools: { ...stateData.strategies.pools, [newId]: [] },
           },
         };
-        setStateData(newState);
-        await saveState(newState);
       }
+      setStateData(newState);
+      // 保存到 localStorage 作为备份
+      try {
+        localStorage.setItem('strategies_cache', JSON.stringify(newState.strategies));
+      } catch (e) {
+        console.warn('Failed to save strategies cache:', e);
+      }
+      await saveState(newState);
       setShowModal(false);
     } catch (err) {
       console.error('Failed to save strategy:', err);
@@ -258,6 +304,12 @@ export default function Strategies({ onNavigate }) {
         strategies: { ...stateData.strategies, list: newList, pools: newPools },
       };
       setStateData(newState);
+      // 更新 localStorage 备份
+      try {
+        localStorage.setItem('strategies_cache', JSON.stringify(newState.strategies));
+      } catch (e) {
+        console.warn('Failed to update strategies cache:', e);
+      }
       await saveState(newState);
     } catch (err) {
       console.error('Failed to delete strategy:', err);

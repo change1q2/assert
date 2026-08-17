@@ -223,9 +223,21 @@ export async function fetchState() {
     console.warn('Fetch state failed, using cache:', err.message)
     const cached = getCache('state')
     if (cached) return cached
+    // 没有缓存且请求失败：返回默认状态，但不覆盖已有缓存
+    // 检查是否有 strategies_cache 备份
+    try {
+      const saved = localStorage.getItem('strategies_cache')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed && Array.isArray(parsed.list)) {
+          const defaultState = getDefaultState()
+          defaultState.strategies = parsed
+          return defaultState
+        }
+      }
+    } catch {}
     console.info('No cache found, using default state')
     const defaultState = getDefaultState()
-    setCache('state', defaultState)
     return defaultState
   }
 }
@@ -251,7 +263,7 @@ function getDefaultState() {
     reminders: [],
     debtPayments: [],
     debtCategories: [],
-    strategies: [],
+    strategies: { list: [], pools: {} },
     userSettings: {},
     financeAssets: [],
     financeAssetTransactions: [],

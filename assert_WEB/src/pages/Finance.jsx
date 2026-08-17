@@ -2870,6 +2870,7 @@ export default function Finance({ onAssetPenetration }) {
   const [showLookupDropdown, setShowLookupDropdown] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
   const lookupTimerRef = useRef(null);
+  const verifiedPairRef = useRef({ code: '', name: '' });
 
   const { accounts = [], assetClasses = [], financeAssets = [] } = stateData || {};
 
@@ -4497,6 +4498,32 @@ export default function Finance({ onAssetPenetration }) {
             /基金|货币/.test(r.typeName || '') || /基金|货币/.test(r.name || '')
           );
         }
+        // 三级分类为"场外"时：过滤掉股票类资产(AStock/UsStock/UsADR/HK)，只保留场外基金和债券
+        const categoryL3 = newAccount.categoryL3 || newAccount.tertiaryCategory || '';
+        if (categoryL3 === '场外') {
+          results = results.filter(r => {
+            const classify = r.classify || '';
+            // 保留 OTCFUND(场外基金)、ETF、债券相关
+            if (classify === 'OTCFUND' || classify === 'ETF') return true;
+            // 排除股票类
+            if (classify === 'AStock' || classify === 'UsStock' || classify === 'UsADR' || classify === 'HK') return false;
+            return true;
+          });
+          // 去重：同代码保留一个（名称以最新输入匹配为准，保留名称匹配输入的项）
+          const seen = new Set();
+          results = results.filter(r => {
+            if (seen.has(r.code)) {
+              // 已存在相同代码：优先保留名称包含查询词的项
+              const existing = results.find(x => x.code === r.code);
+              if (existing && !existing.name.includes(q.trim()) && r.name.includes(q.trim())) {
+                return false; // 用当前项替换已存在的
+              }
+              return false;
+            }
+            seen.add(r.code);
+            return true;
+          });
+        }
         setLookupResults(results);
       } catch (e) {
         console.error('Lookup failed:', e);
@@ -4509,6 +4536,8 @@ export default function Finance({ onAssetPenetration }) {
 
   const handleSelectLookup = async (item) => {
     setShowLookupDropdown(false);
+    // 记录已验证的代码-名称对，避免重复校验
+    verifiedPairRef.current = { code: item.code || '', name: item.name || '' };
     setNewAccount(prev => {
       const qty = parseFloat(prev.quantity) || 0;
       const cost = parseFloat(prev.cost) || 0;
@@ -4576,6 +4605,109 @@ export default function Finance({ onAssetPenetration }) {
       } catch (e) {
         console.error('Fetch quotes failed:', e);
       }
+    }
+  };
+
+  // 当资产代码或名称失去焦点时，校验一致性并重新获取现价
+  const verifyAndFetchAsset = async (type) => {
+    const code = (newAccount.code || '').trim();
+    const name = (newAccount.name || '').trim();
+    if (!code && !name) return;
+
+    // 记录本次验证结果，避免重复请求
+    const pairKey = `${code}|${name}`;
+    const lastVerified = `${verifiedPairRef.current.code}|${verifiedPairRef.current.name}`;
+    if (pairKey === lastVerified) return;
+
+    try {
+      let results = [];
+      if (type === 'code' && code) {
+        results = await lookupFinance(code);
+      } else if (type === 'name' && name) {
+        results = await lookupFinance(name);
+      } else {
+        return;
+      }
+
+      // 过滤：根据当前三级分类
+      const categoryL3 = newAccount.categoryL3 || newAccount.tertiaryCategory || '';
+      if (categoryL3 === '场外') {
+        results = results.filter(r => {
+          const classify = r.classify || '';
+          if (classify === 'AStock' || classify === 'UsStock' || classify === 'UsADR' || classify === 'HK') return false;
+          return true;
+        });
+      }
+
+      if (results.length > 0) {
+        const matchItem = results.find(r => r.code === code) || results[0];
+        verifiedPairRef.current = { code: matchItem.code, name: matchItem.name };
+
+        setNewAccount(prev => {
+          const qty = parseFloat(prev.quantity) || 0;
+          const cost = parseFloat(prev.cost) || 0;
+          const prevPrice = parseFloat(prev.currentPrice) || 0;
+          const newPrice = matchItem.price ? parseFloat(matchItem.price) : prevPrice;
+          const currentValue = qty * newPrice;
+          const unitPnl = newPrice - cost;
+          const holdingPnl = unitPnl * qty;
+          const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+
+          // 保留用户未提交的输入（以用户最后输入为准）
+          const finalCode = code || matchItem.code || prev.code;
+          const finalName = name || matchItem.name || prev.name;
+          const codeMatches = !code || matchItem.code === code;
+          const nameMatches = !name || matchItem.name === name;
+
+          return {
+            ...prev,
+            code: finalCode,
+            name: finalName,
+            currentPrice: newPrice ? String(newPrice) : prev.currentPrice,
+            currentValue: (qty && newPrice) ? currentValue.toFixed(2) : prev.currentValue,
+            holdingPnl: (cost || qty || newPrice) ? holdingPnl.toFixed(2) : prev.holdingPnl,
+            holdingPnlRate: (cost || qty || newPrice) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
+            _codeVerified: codeMatches && nameMatches,
+          };
+        });
+
+        // 如果搜索结果没有价格，尝试获取
+        if (!matchItem.price && matchItem.code) {
+          try {
+            const quotes = await fetchFinanceQuotes([matchItem.code]);
+            if (quotes && quotes.length > 0 && quotes[0].price) {
+              setNewAccount(prev => {
+                const qty = parseFloat(prev.quantity) || 0;
+                const cost = parseFloat(prev.cost) || 0;
+                const price = parseFloat(quotes[0].price) || 0;
+                const currentValue = qty * price;
+                const unitPnl = price - cost;
+                const holdingPnl = unitPnl * qty;
+                const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+                return {
+                  ...prev,
+                  currentPrice: String(price),
+                  currentValue: (qty && price) ? currentValue.toFixed(2) : prev.currentValue,
+                  holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : prev.holdingPnl,
+                  holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
+                };
+              });
+            }
+          } catch (_) {
+            // 获取失败，保留当前价格
+          }
+        }
+      } else {
+        // 未找到匹配：保留当前价格，不做更改
+        verifiedPairRef.current = { code, name };
+        setNewAccount(prev => ({
+          ...prev,
+          _codeVerified: false,
+        }));
+      }
+    } catch (_) {
+      // 网络错误：保留上一次的现价
+      verifiedPairRef.current = { code, name };
     }
   };
 
@@ -6328,7 +6460,10 @@ export default function Finance({ onAssetPenetration }) {
                               handleCodeSearch(e.target.value);
                             }}
                             onFocus={() => newAccount.name && handleCodeSearch(newAccount.name)}
-                            onBlur={() => setTimeout(() => setShowLookupDropdown(false), 200)}
+                            onBlur={() => {
+                              setShowLookupDropdown(false);
+                              verifyAndFetchAsset('name');
+                            }}
                             placeholder="基金、股票或自定义资产名称"
                             className={FORM_INPUT}
                           />
@@ -6369,7 +6504,10 @@ export default function Finance({ onAssetPenetration }) {
                               handleCodeSearch(e.target.value);
                             }}
                             onFocus={() => newAccount.code && handleCodeSearch(newAccount.code)}
-                            onBlur={() => setTimeout(() => setShowLookupDropdown(false), 200)}
+                            onBlur={() => {
+                              setShowLookupDropdown(false);
+                              verifyAndFetchAsset('code');
+                            }}
                             placeholder="输入代码如 600519"
                             className={`${FORM_INPUT} font-mono`}
                           />

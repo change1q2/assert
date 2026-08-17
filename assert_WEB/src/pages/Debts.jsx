@@ -589,6 +589,19 @@ export default function Debts() {
     setForm((prev) => ({ ...prev, attachment: '' }));
   };
 
+  // 统一构造提交给 saveState 的全量 state：始终基于 stateData（已包含 accounts/financeAssets 等），
+  // 避免 Strict Mode 下 setStateData updater 被双调用导致 newStateData 被覆盖，同时确保核心字段齐全以通过后端防清空校验。
+  const buildStateWithUpdatedDebt = (updatedDebt) => {
+    const base = stateData || {};
+    const debts = Array.isArray(base.debts) ? base.debts : [];
+    const newDebts = debts.length > 0
+      ? debts.map((d) => (String(d.id) === String(updatedDebt.id) ? { ...d, ...updatedDebt } : d))
+      : [{ ...updatedDebt }];
+    // 确保带上全部核心字段以通过后端 DATA_LOSS_PREVENTION 校验。
+    // stateData 来自 fetchState，本身应完整；此处再做兜底以避免局部 state 造成误判。
+    return { ...base, debts: newDebts };
+  };
+
   const handlePaymentToggle = async (debt, period) => {
     const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount, isConsumerLoan(debt.debtCategory), debt.investmentDays);
     const paymentItem = plan?.schedule?.find((s) => s.period === period);
@@ -596,7 +609,7 @@ export default function Debts() {
 
     const newPayments = { ...(debt.payments || {}) };
     const isPaid = newPayments[period] === true;
-    
+
     if (isPaid) {
       delete newPayments[period];
     } else {
@@ -605,60 +618,56 @@ export default function Debts() {
 
     const paidPeriods = Object.keys(newPayments).filter((k) => newPayments[k] === true);
     const newPaidAmount = paidPeriods.reduce((sum, p) => {
-      const item = plan.schedule.find((s) => s.period === parseInt(p));
+      const item = (plan?.schedule || []).find((s) => s.period === parseInt(p, 10));
       return sum + (item?.total || 0);
     }, 0);
 
     const updatedDebt = { ...debt, payments: newPayments, paidAmount: newPaidAmount };
+    const newStateData = buildStateWithUpdatedDebt(updatedDebt);
 
-    let newStateData;
-    setStateData((prev) => {
-      const debts = prev?.debts || [];
-      const newDebts = debts.map((d) => (d.id === debt.id ? updatedDebt : d));
-      newStateData = { ...prev, debts: newDebts };
-      return newStateData;
-    });
-
-    await saveState(newStateData);
+    // 立即更新前端状态以即时反馈
+    setStateData(newStateData);
+    const result = await saveState(newStateData);
+    // 如果保存失败（例如后端拒绝），重新拉取一次保证本地与后端一致
+    if (result && result.success === false) {
+      console.error('[handlePaymentToggle] saveState failed:', result);
+      await loadData();
+    }
   };
 
   const handlePeriodPenaltyChange = async (debt, period, value) => {
     const penaltyValue = parseFloat(value) || 0;
     const newPeriodPenalties = { ...(debt.periodPenalties || {}) };
-    
+
     if (penaltyValue > 0) {
       newPeriodPenalties[period] = penaltyValue;
     } else {
       delete newPeriodPenalties[period];
     }
 
-    const totalPenalty = Object.values(newPeriodPenalties).reduce((sum, val) => sum + val, 0);
+    const totalPenalty = Object.values(newPeriodPenalties).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
     const updatedDebt = { ...debt, periodPenalties: newPeriodPenalties, penaltyInterest: totalPenalty };
+    const newStateData = buildStateWithUpdatedDebt(updatedDebt);
 
-    let newStateData;
-    setStateData((prev) => {
-      const debts = prev?.debts || [];
-      const newDebts = debts.map((d) => (d.id === debt.id ? updatedDebt : d));
-      newStateData = { ...prev, debts: newDebts };
-      return newStateData;
-    });
-
-    await saveState(newStateData);
+    setStateData(newStateData);
+    const result = await saveState(newStateData);
+    if (result && result.success === false) {
+      console.error('[handlePeriodPenaltyChange] saveState failed:', result);
+      await loadData();
+    }
   };
 
   const handleStatusToggle = async (debt) => {
     const newStatus = debt.status === 'overdue' ? 'normal' : 'overdue';
     const updatedDebt = { ...debt, status: newStatus };
+    const newStateData = buildStateWithUpdatedDebt(updatedDebt);
 
-    let newStateData;
-    setStateData((prev) => {
-      const debts = prev?.debts || [];
-      const newDebts = debts.map((d) => (d.id === debt.id ? updatedDebt : d));
-      newStateData = { ...prev, debts: newDebts };
-      return newStateData;
-    });
-
-    await saveState(newStateData);
+    setStateData(newStateData);
+    const result = await saveState(newStateData);
+    if (result && result.success === false) {
+      console.error('[handleStatusToggle] saveState failed:', result);
+      await loadData();
+    }
   };
 
   // 判断债务类别是否为消费贷（按日计息）
@@ -955,14 +964,20 @@ export default function Debts() {
         updatedDebts = [...debts, debtData];
       }
 
-      await saveState({
-        ...stateData,
+      const newState = {
+        ...(stateData || {}),
         debts: updatedDebts,
-      });
+      };
+      // 立即更新前端以避免延迟感
+      setStateData(newState);
+      const result = await saveState(newState);
 
       setShowAddModal(false);
       setTotalAmountOverridden(false);
       resetForm();
+      if (result && result.success === false) {
+        console.error('[handleSave] saveState failed:', result);
+      }
       loadData();
     } catch (err) {
       console.error('Failed to save debt:', err);
@@ -975,10 +990,15 @@ export default function Debts() {
     if (!window.confirm('确定要删除这条债务记录吗？')) return;
     try {
       const updatedDebts = debts.filter((d) => d.id !== debt.id);
-      await saveState({
-        ...stateData,
+      const newState = {
+        ...(stateData || {}),
         debts: updatedDebts,
-      });
+      };
+      setStateData(newState);
+      const result = await saveState(newState);
+      if (result && result.success === false) {
+        console.error('[handleDelete] saveState failed:', result);
+      }
       loadData();
     } catch (err) {
       console.error('Failed to delete debt:', err);
