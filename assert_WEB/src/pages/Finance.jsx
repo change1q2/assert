@@ -340,7 +340,7 @@ const updateAccountBalance = (asset, record, accounts, fallbackAccounts, finance
   return { accounts: accountsCopy, financeAssets: financeAssetsCopy };
 };
 
-function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, setStateData, onRefresh, selectedCurrency = 'CNY', exchangeRates = {}, quotesMap = {}, moneyFundMap = {}, readOnly = false }) {
+function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, setStateData, onRefresh, selectedCurrency = 'CNY', exchangeRates = {}, quotesMap = {}, moneyFundMap = {}, hkConnectRate = null, readOnly = false }) {
   const latestData = data?.isArchived
     ? data
     : (stateData?.financeAssets?.find(item => String(item.id) === String(data?.id)) || data);
@@ -6026,6 +6026,7 @@ export default function Finance({ onAssetPenetration }) {
             exchangeRates={exchangeRates}
             quotesMap={quotesMap}
             moneyFundMap={moneyFundMap}
+            hkConnectRate={hkConnectRate}
             readOnly={detailData?.isArchived || detailData?.status === 'archived'}
           />
         )}
