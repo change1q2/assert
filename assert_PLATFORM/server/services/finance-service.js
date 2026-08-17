@@ -169,12 +169,17 @@ async function lookupSecurities(q, market) {
           if (parts.length > 32 && parts[1]) {
             const code = fullCode.replace(/^(sh|sz)/, "");
             const prefix = fullCode.startsWith("sh") ? "sh" : "sz";
+            const name = cleanName(parts[1]);
+            // 根据名称判断类型：含ETF/基金则为ETF，否则为AStock（股票）
+            const isEtfLike = /ETF|基金/.test(name);
+            const classify = isEtfLike ? "ETF" : "AStock";
+            const typeName = isEtfLike ? "ETF" : "股票";
             if (!items.some((entry) => entry.code === code)) {
               items.push({
                 code,
-                name: cleanName(parts[1]),
-                classify: "ETF",
-                typeName: "ETF",
+                name,
+                classify,
+                typeName,
                 marketType: prefix === "sh" ? "1" : "2",
                 mktNum: "",
                 jys: prefix === "sh" ? "SH" : "SZ",

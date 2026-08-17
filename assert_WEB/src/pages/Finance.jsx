@@ -4547,10 +4547,15 @@ export default function Finance({ onAssetPenetration }) {
         if (categoryL3 === '场外') {
           results = results.filter(r => {
             const classify = r.classify || '';
-            // 保留 OTCFUND(场外基金)、ETF、债券相关
-            if (classify === 'OTCFUND' || classify === 'ETF') return true;
             // 排除股票类
             if (classify === 'AStock' || classify === 'UsStock' || classify === 'UsADR' || classify === 'HK') return false;
+            // 保留 OTCFUND(场外基金)
+            if (classify === 'OTCFUND') return true;
+            // ETF：仅保留名称含 ETF/基金 的（排除被错误标记为 ETF 的股票）
+            if (classify === 'ETF') {
+              return /ETF|基金/.test(r.name || '');
+            }
+            // 其他分类（债券、指数等）保留
             return true;
           });
           // 去重：同代码只保留一个，优先保留名称包含查询词的项
@@ -4700,8 +4705,14 @@ export default function Finance({ onAssetPenetration }) {
       if (categoryL3 === '场外') {
         results = results.filter(r => {
           const classify = r.classify || '';
-          if (classify === 'OTCFUND' || classify === 'ETF') return true;
+          // 排除股票类
           if (classify === 'AStock' || classify === 'UsStock' || classify === 'UsADR' || classify === 'HK') return false;
+          // 保留 OTCFUND(场外基金)
+          if (classify === 'OTCFUND') return true;
+          // ETF：仅保留名称含 ETF/基金 的
+          if (classify === 'ETF') {
+            return /ETF|基金/.test(r.name || '');
+          }
           return true;
         });
         // 同代码去重（与 handleCodeSearch 保持一致）
