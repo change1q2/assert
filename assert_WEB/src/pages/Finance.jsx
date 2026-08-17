@@ -6502,6 +6502,7 @@ export default function Finance({ onAssetPenetration }) {
                                 lookupResults.map((item, idx) => (
                                   <div
                                     key={idx}
+                                    onMouseDown={(e) => e.preventDefault()}
                                     onClick={() => handleSelectLookup(item)}
                                     className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
                                   >
@@ -6546,6 +6547,7 @@ export default function Finance({ onAssetPenetration }) {
                                 lookupResults.map((item, idx) => (
                                   <div
                                     key={idx}
+                                    onMouseDown={(e) => e.preventDefault()}
                                     onClick={() => handleSelectLookup(item)}
                                     className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 border-b border-gray-100 dark:border-slate-600 last:border-b-0"
                                   >
