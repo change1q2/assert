@@ -2972,9 +2972,15 @@ export default function Finance({ onAssetPenetration }) {
 
   const handleSelectTemplate = (templateId) => {
     setSelectedTemplateId(templateId);
-    if (!templateId) return;
+    if (!templateId) {
+      setTemplateNameInput('');
+      return;
+    }
     const tpl = templateList.find(t => t.id === templateId);
-    if (tpl) applyTemplate(tpl);
+    if (tpl) {
+      applyTemplate(tpl);
+      setTemplateNameInput(tpl.name);
+    }
   };
 
   const handleSaveTemplate = () => {
