@@ -57,6 +57,8 @@ const menuItems = [
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('overview');
+  // Keep-alive: 记录已渲染过的页面菜单id，保持DOM挂载(display:none)避免重复mount触发重新加载
+  const [mountedMenus, setMountedMenus] = useState(() => new Set(['overview']));
   const [currentPage, setCurrentPage] = useState('login');
   const [loggedIn, setLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -175,22 +177,32 @@ export default function App() {
     setSelectedCategory(null);
   };
 
+  // Keep-alive: 切换菜单时将新菜单记录到 mountedMenus，后续返回不会重新 mount
+  const handleSetActiveMenu = (menuId) => {
+    setActiveMenu(menuId);
+    setSelectedCategory(null);
+    // 同时处理 strategy-detail:<id> 形式
+    const baseId = typeof menuId === 'string' && menuId.includes(':') ? menuId.split(':')[0] : menuId;
+    setMountedMenus(prev => {
+      if (prev.has(menuId)) return prev;
+      const next = new Set(prev);
+      next.add(menuId);
+      if (baseId !== menuId) next.add(baseId);
+      return next;
+    });
+  };
+
   const getInitial = (name) => {
     return name ? name.charAt(0).toUpperCase() : 'U';
   };
 
-  const renderContent = () => {
-    if (showAssetPenetration) {
-      return <AssetPenetration onBack={() => setShowAssetPenetration(false)} />;
-    }
-    if (selectedCategory) {
-      return <CategoryDetail categoryName={selectedCategory} onBack={handleBackFromDetail} />;
-    }
-    switch (activeMenu) {
+  // 为某个菜单id生成页面组件（含props），返回null表示该id不是主菜单项
+  const buildPageForMenu = (menuId) => {
+    switch (menuId) {
       case 'overview':
         return <Overview />;
       case 'records':
-        return <Records onNavigate={setActiveMenu} />;
+        return <Records onNavigate={handleSetActiveMenu} />;
       case 'finance':
         return <Finance onAssetPenetration={() => setShowAssetPenetration(true)} />;
       case 'independent-assets':
@@ -200,13 +212,13 @@ export default function App() {
       case 'classes':
         return <AssetClasses onCategorySelect={handleCategorySelect} />;
       case 'analysis':
-        return <Analysis onNavigate={setActiveMenu} />;
+        return <Analysis onNavigate={handleSetActiveMenu} />;
       case 'tools':
-        return <Tools onNavigate={setActiveMenu} />;
+        return <Tools onNavigate={handleSetActiveMenu} />;
       case 'strategies':
-        return <Strategies onNavigate={setActiveMenu} />;
+        return <Strategies onNavigate={handleSetActiveMenu} />;
       case 'value-investing':
-        return <StrategyDetail strategyId="value-investing" onBack={() => setActiveMenu('strategies')} onNavigate={setActiveMenu} />;
+        return <StrategyDetail strategyId="value-investing" onBack={() => handleSetActiveMenu('strategies')} onNavigate={handleSetActiveMenu} />;
       case 'accounts':
         return <Accounts />;
       case 'downloads':
@@ -214,28 +226,67 @@ export default function App() {
       case 'profile':
         return <UserProfile onAdmin={() => setCurrentPage('admin-login')} isAdmin={isAdmin} />;
       case 'premium-check':
-        return <PremiumCheck onBack={() => setActiveMenu('tools')} />;
+        return <PremiumCheck onBack={() => handleSetActiveMenu('tools')} />;
       case 'hk-ipo':
-        return <HkIpo onBack={() => setActiveMenu('tools')} />;
+        return <HkIpo onBack={() => handleSetActiveMenu('tools')} />;
       case 'hkipo-calculator':
-        return <HkipoCalculator onBack={() => setActiveMenu('tools')} />;
+        return <HkipoCalculator onBack={() => handleSetActiveMenu('tools')} />;
       case 'value-investing-tool':
-        return <ValueInvestingTool onBack={() => setActiveMenu('tools')} />;
+        return <ValueInvestingTool onBack={() => handleSetActiveMenu('tools')} />;
       case 'budget':
-        return <BudgetManagement onBack={() => setActiveMenu('records')} />;
+        return <BudgetManagement onBack={() => handleSetActiveMenu('records')} />;
       default:
-        if (activeMenu.startsWith('strategy-detail:')) {
-          const strategyId = activeMenu.slice('strategy-detail:'.length);
-          return <StrategyDetail strategyId={strategyId} onBack={() => setActiveMenu('strategies')} onNavigate={setActiveMenu} />;
+        if (typeof menuId === 'string' && menuId.startsWith('strategy-detail:')) {
+          const strategyId = menuId.slice('strategy-detail:'.length);
+          return <StrategyDetail strategyId={strategyId} onBack={() => handleSetActiveMenu('strategies')} onNavigate={handleSetActiveMenu} />;
         }
-        return (
-          <div className="flex items-center justify-center min-h-[400px]">
-            <div className="text-center">
-              <p className="text-gray-400 dark:text-gray-400 font-mono">功能开发中...</p>
-            </div>
-          </div>
-        );
+        return null;
     }
+  };
+
+  const renderContent = () => {
+    if (showAssetPenetration) {
+      return <AssetPenetration onBack={() => setShowAssetPenetration(false)} />;
+    }
+    if (selectedCategory) {
+      return <CategoryDetail categoryName={selectedCategory} onBack={handleBackFromDetail} />;
+    }
+    // Keep-alive 渲染：已mounted的页面保留DOM，非活跃页display:none
+    const entries = [];
+    // 先将当前activeMenu加入mountedMenus（若尚未）
+    if (!mountedMenus.has(activeMenu)) {
+      // 同步地在渲染前加入，避免额外render
+      mountedMenus.add(activeMenu);
+    }
+    for (const menuId of mountedMenus) {
+      const pageNode = buildPageForMenu(menuId);
+      if (pageNode === null) continue;
+      const isActive = menuId === activeMenu;
+      entries.push(
+        <div key={menuId} style={{ display: isActive ? 'block' : 'none' }}>
+          {pageNode}
+        </div>
+      );
+    }
+    // 兜底：如果activeMenu对应的buildPageForMenu返回null（例如策略详情未正确加入mountedMenus），
+    // 仍然渲染一次以保证功能
+    const currentPageNode = buildPageForMenu(activeMenu);
+    const alreadyIncluded = Array.from(mountedMenus).some(m => buildPageForMenu(m) !== null);
+    if (currentPageNode !== null && entries.length === 0 && !alreadyIncluded) {
+      return currentPageNode;
+    }
+    // 对于未被buildPageForMenu覆盖的activeMenu（动态strategy-detail等），直接渲染
+    if (currentPageNode === null) {
+      // 默认兜底页
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <p className="text-gray-400 dark:text-gray-400 font-mono">功能开发中...</p>
+          </div>
+        </div>
+      );
+    }
+    return <>{entries}</>;
   };
 
   if (!loggedIn) {
@@ -323,8 +374,7 @@ export default function App() {
               <button
                 key={item.id}
                 onClick={() => {
-                  setActiveMenu(item.id);
-                  setSelectedCategory(null);
+                  handleSetActiveMenu(item.id);
                 }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 ease-out ${
                   isActive && !selectedCategory

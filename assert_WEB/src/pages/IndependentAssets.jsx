@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, lookupFinance, fetchFinanceQuotes } from '../api';
+import { fetchState, saveState, lookupFinance, fetchFinanceQuotes, peekCachedState, invalidateStateCache } from '../api';
 import { convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency';
 import sanitizeText from '../utils/sanitizeText';
 import FinanceHoldingsTable from '../components/FinanceHoldingsTable';
@@ -271,8 +271,9 @@ const COUNTRY_REGION_DATA = {
 };
 
 export default function IndependentAssets() {
-  const [stateData, setStateData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // SWR: 同步预填缓存数据，避免"加载中"闪烁；若无缓存才显示loading
+  const [stateData, setStateData] = useState(() => peekCachedState() || null);
+  const [loading, setLoading] = useState(() => !peekCachedState());
   const [activeTab, setActiveTab] = useState('insurance');
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -585,7 +586,9 @@ export default function IndependentAssets() {
   const loadData = async () => {
     if (loadingRef.current) return;
     loadingRef.current = true;
-    setLoading(true);
+    // SWR: 已有数据时不显示loading spinner，后台静默更新；无数据时才显示
+    const hasExistingData = !!stateData;
+    if (!hasExistingData) setLoading(true);
     try {
       const data = await fetchState();
       if (!data.accounts || data.accounts.length === 0) {
@@ -631,6 +634,7 @@ export default function IndependentAssets() {
     const result = await saveState(newState);
     localStorage.setItem('wealth_os_independent_assets', JSON.stringify(newState.independentAssets || {}));
     setStateData(newState);
+    invalidateStateCache();
     if (!result.cached) {
       await loadData();
     }

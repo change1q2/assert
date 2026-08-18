@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { fetchState, saveState } from '../api';
+import { fetchState, saveState, peekCachedState, invalidateStateCache } from '../api';
 import { calcCooperationFunds } from './Accounts';
 import { getCache, setCache } from '../utils/cache';
 import { truncateNum } from '../utils/currency';
@@ -244,12 +244,26 @@ function formatPercentage(value) {
 }
 
 export default function Overview() {
-  const [stateData, setStateData] = useState(null);
+  // SWR: 同步预填缓存，避免闪烁；仅首次无缓存时显示loading
+  const initialCache = peekCachedState() || null;
+  const [stateData, setStateData] = useState(initialCache);
   const [excludeCooperationFunds, setExcludeCooperationFunds] = useState(() => {
     try { return localStorage.getItem('overview_exclude_cooperation') === '1'; } catch (_) { return false; }
   });
-  const [assets, setAssets] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [assets, setAssets] = useState(() => {
+    if (initialCache?.accounts) {
+      const nonLiabilityAccounts = initialCache.accounts.filter(a => !a.liability);
+      return initialCache.assets || nonLiabilityAccounts.map(a => ({
+        id: a.id,
+        name: a.name,
+        category: a.category || '其他',
+        rmbValue: a.balance || 0,
+        costValue: a.balance || 0,
+      }));
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState(() => !initialCache);
   const [timePeriod, setTimePeriod] = useState('month');
   const [selectedMonth, setSelectedMonth] = useState('current');
   const [expandedSections, setExpandedSections] = useState({
@@ -281,7 +295,9 @@ export default function Overview() {
   }, []);
 
   const loadData = async () => {
-    setLoading(true);
+    const hasExistingData = !!stateData;
+    // SWR: 有数据时不显示loading，后台静默更新
+    if (!hasExistingData) setLoading(true);
     try {
       const data = await fetchState();
       setStateData(data);

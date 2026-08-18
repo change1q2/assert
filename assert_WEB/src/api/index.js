@@ -5,6 +5,43 @@ export { getPendingSyncs }
 
 const API_BASE = '/api'
 
+// 内存级内存缓存 + 并发去重：避免多个页面同时mount时重复请求/state/接口
+const MEM_CACHE_TTL = 10 * 1000 // 10秒内相同请求直接返回内存缓存
+const memCache = new Map() // key -> { data, expireAt }
+const pendingRequests = new Map() // key -> Promise
+
+function getMemCache(key) {
+  const entry = memCache.get(key)
+  if (!entry) return null
+  if (Date.now() > entry.expireAt) {
+    memCache.delete(key)
+    return null
+  }
+  return entry.data
+}
+
+function setMemCache(key, data, ttl = MEM_CACHE_TTL) {
+  memCache.set(key, { data, expireAt: Date.now() + ttl })
+}
+
+async function withMemCache(key, fetcher, ttl) {
+  const cached = getMemCache(key)
+  if (cached) return cached
+  const pending = pendingRequests.get(key)
+  if (pending) return pending
+  const promise = (async () => {
+    try {
+      const result = await fetcher()
+      setMemCache(key, result, ttl)
+      return result
+    } finally {
+      pendingRequests.delete(key)
+    }
+  })()
+  pendingRequests.set(key, promise)
+  return promise
+}
+
 async function request(url, options = {}) {
   const token = localStorage.getItem('token')
   const headers = {
@@ -202,6 +239,7 @@ export async function createAsset(data) {
 }
 
 export async function fetchState() {
+  return withMemCache('state', async () => {
   try {
     const response = await request('/state')
     if (response.error && response.error.includes('未授权')) {
@@ -240,6 +278,33 @@ export async function fetchState() {
     const defaultState = getDefaultState()
     return defaultState
   }
+  }, 10 * 1000)
+}
+
+// 同步获取缓存的 state（用于 SWR：组件先立即渲染旧内容，再后台静默更新）
+export function peekCachedState() {
+  const mem = getMemCache('state')
+  if (mem) return mem
+  const storage = getCache('state')
+  if (storage) return storage
+  // localStorage 备份
+  try {
+    const accounts = localStorage.getItem('wealth_os_accounts')
+    const assets = localStorage.getItem('wealth_os_independent_assets')
+    if (accounts || assets) {
+      return {
+        accounts: accounts ? JSON.parse(accounts) : [],
+        independentAssets: assets ? JSON.parse(assets) : {},
+      }
+    }
+  } catch {}
+  return null
+}
+
+// 主动失效 state 缓存（保存数据后调用）
+export function invalidateStateCache() {
+  memCache.delete('state')
+  pendingRequests.delete('state')
 }
 
 function getDefaultState() {
@@ -281,6 +346,8 @@ export async function saveState(state) {
     if (response && (response.ok || response.success)) {
       setCache('state', state)
       clearPendingSync('state')
+      invalidateStateCache()
+      setMemCache('state', state, 10 * 1000)
       return response
     }
     throw new Error(response?.error || '保存状态失败')
@@ -288,6 +355,8 @@ export async function saveState(state) {
     console.warn('Save state to server failed, saving to local cache:', err.message)
     setCache('state', state)
     markPendingSync('state', state)
+    invalidateStateCache()
+    setMemCache('state', state, 10 * 1000)
     return { success: true, data: state, cached: true }
   }
 }
