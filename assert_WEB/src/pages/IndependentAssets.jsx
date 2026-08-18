@@ -26,6 +26,7 @@ import {
   Calculator,
   FileText,
   Download,
+  PiggyBank,
 } from 'lucide-react';
 import { VEHICLE_TYPES, VEHICLE_BRANDS, VEHICLE_MODELS } from '../data/vehicle-data';
 
@@ -146,6 +147,7 @@ const ASSET_TABS = [
   { id: 'realestate', label: '房产', icon: Building2 },
   { id: 'vehicle', label: '车辆', icon: Car },
   { id: 'fixedinvestment', label: '固定投资', icon: Landmark },
+  { id: 'survivalfund', label: '生存资金', icon: PiggyBank },
   { id: 'equity', label: '股权', icon: DollarSign },
   { id: 'fixeddeposit', label: '定期资产', icon: Clock },
 ];
@@ -823,6 +825,13 @@ export default function IndependentAssets() {
         startYear: '',
         endYear: '',
         currency: 'CNY',
+        accountId: '',
+        accountName: '',
+      },
+      survivalfund: {
+        name: '',
+        currency: 'CNY',
+        amount: '',
         accountId: '',
         accountName: '',
       },
@@ -2952,6 +2961,65 @@ export default function IndependentAssets() {
     );
   };
 
+  const renderSurvivalFundTable = () => {
+    const items = getAssets('survivalfund');
+    const totalAmount = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+          <h3 className="font-semibold text-gray-900 dark:text-white">生存资金</h3>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              合计: <span className="font-semibold text-blue-600">{formatCurrency(totalAmount, 'CNY')}</span>
+            </span>
+            <button onClick={handleAdd} className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors">
+              <Plus className="w-4 h-4" />
+              <span>新增</span>
+            </button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 dark:bg-slate-700">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">名称</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">币种</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">金额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">账户本</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+              {items.map(item => (
+                <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.name || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.currency || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.amount ? formatCurrency(item.amount, item.currency) : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.accountName || accounts.find(a => (a.id || a.name) === item.accountId)?.name || '—'}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleEdit(item)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="编辑">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDelete(item)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="删除">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无生存资金数据</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   const renderModal = () => {
     if (!showModal) return null;
 
@@ -4333,6 +4401,52 @@ export default function IndependentAssets() {
       );
     };
 
+    const renderSurvivalFundForm = () => (
+      <>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              名称 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={formData.name || ''}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="请输入生存资金名称"
+              className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              币种 <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={formData.currency || 'CNY'}
+              onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {CURRENCY_OPTIONS.map(c => (
+                <option key={c.code} value={c.code}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              金额 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="number"
+              value={formData.amount || ''}
+              onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+              placeholder="请输入金额"
+              className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          {renderAccountSelect()}
+        </div>
+      </>
+    );
+
     const getFormContent = () => {
       switch (activeTab) {
         case 'insurance':
@@ -4343,6 +4457,8 @@ export default function IndependentAssets() {
           return renderVehicleForm();
         case 'fixedinvestment':
           return renderFixedInvestmentForm();
+        case 'survivalfund':
+          return renderSurvivalFundForm();
         case 'equity':
           return renderEquityForm();
         case 'fixeddeposit':
@@ -6914,6 +7030,8 @@ export default function IndependentAssets() {
         return renderVehicleTable();
       case 'fixedinvestment':
         return renderFixedInvestmentTable();
+      case 'survivalfund':
+        return renderSurvivalFundTable();
       case 'equity':
         return renderEquityTable();
       case 'fixeddeposit':
