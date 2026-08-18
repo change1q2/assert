@@ -166,7 +166,7 @@ async function loadUserState(userId) {
       id: numericIfPossible(row.id), category: row.category, type: row.type, debtCategory: row.debt_category, name: row.name,
       creditor: row.creditor_name, debtor: row.debtor_name, creditorName: row.creditor_name, debtorName: row.debtor_name,
       principal: row.principal,
-      annualRate: row.annual_rate, amount: row.amount, paidAmount: row.paid_amount,
+      annualRate: row.annual_rate, amount: row.amount, currency: row.currency || 'CNY', paidAmount: row.paid_amount,
       note: row.note, attachment: row.attachment, startDate: row.start_date, dueDate: row.due_date,
       repaymentMethod: row.repayment_method, payments,
       penaltyInterest: row.penalty_interest || 0,
@@ -532,10 +532,11 @@ async function saveUserState(conn, userId, state) {
     const debtor = row.debtor || row.debtorName || '';
     const name = row.name || creditor || '';
     await sqlRun(conn, `INSERT INTO debts
-      (user_id, id, category, type, debt_category, name, creditor_name, debtor_name, principal, annual_rate, amount, paid_amount, note, attachment, start_date, due_date, repayment_method, penalty_interest, status, investment_days, period_penalties_json, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, id, category, type, debt_category, name, creditor_name, debtor_name, principal, annual_rate, amount, currency, paid_amount, note, attachment, start_date, due_date, repayment_method, penalty_interest, status, investment_days, period_penalties_json, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, debtId, text(row.category), text(row.type), text(row.debtCategory || ''), text(name), text(creditor),
        text(debtor), number(row.principal), number(row.annualRate), number(row.amount),
+       text(row.currency || 'CNY'),
        number(row.paidAmount), text(row.note), text(row.attachment), text(row.startDate),
        text(row.dueDate), text(row.repaymentMethod), number(row.penaltyInterest || 0),
        text(row.status || 'normal'), number(row.investmentDays || 365), JSON.stringify(row.periodPenalties || {}),

@@ -18,12 +18,12 @@ import {
   Trash2,
   HelpCircle,
 } from 'lucide-react';
-import { truncateNum } from '../utils/currency';
+import { truncateNum, CURRENCIES, DEFAULT_EXCHANGE_RATES, getCurrencySymbol } from '../utils/currency';
 
-function formatCurrency(value) {
+function formatCurrency(value, currencyCode = 'CNY') {
   return new Intl.NumberFormat('zh-CN', {
     style: 'currency',
-    currency: 'CNY',
+    currency: currencyCode,
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
   }).format(truncateNum(value || 0, 3));
@@ -33,15 +33,22 @@ function formatNumber(value, digits = 2) {
   return (value || 0).toFixed(digits);
 }
 
-function formatCurrencyShort(value) {
+function formatCurrencyShort(value, currencyCode = 'CNY') {
   const num = parseFloat(value) || 0;
-  if (num >= 100000000) {
-    return `¥${truncateNum(num / 100000000, 3)}亿`;
+  const symbol = getCurrencySymbol(currencyCode);
+  if (Math.abs(num) >= 100000000) {
+    return `${symbol}${truncateNum(num / 100000000, 3)}亿`;
   }
-  if (num >= 10000) {
-    return `¥${truncateNum(num / 10000, 3)}万`;
+  if (Math.abs(num) >= 10000) {
+    return `${symbol}${truncateNum(num / 10000, 3)}万`;
   }
-  return formatCurrency(num);
+  return formatCurrency(num, currencyCode);
+}
+
+function convertToBase(amount, fromCurrency, exchangeRates = DEFAULT_EXCHANGE_RATES) {
+  if (!fromCurrency || fromCurrency === 'CNY') return amount;
+  const rate = exchangeRates[fromCurrency] ?? 1;
+  return amount * rate;
 }
 
 export default function Debts() {
@@ -147,7 +154,7 @@ export default function Debts() {
               </div>
             </div>
             <div className="text-right">
-              <div className={`text-2xl font-bold tabular-nums ${cls.text}`}>{formatCurrency(debt.amount || 0)}</div>
+              <div className={`text-2xl font-bold tabular-nums ${cls.text}`}>{formatCurrency(debt.amount || 0, debt.currency || 'CNY')}</div>
               <div className="text-xs text-gray-500 dark:text-gray-400">总金额</div>
             </div>
           </div>
@@ -155,7 +162,7 @@ export default function Debts() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
             <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">本金</div>
-              <div className="font-semibold text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.principal || debt.amount || 0)}</div>
+              <div className="font-semibold text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.principal || debt.amount || 0, debt.currency || 'CNY')}</div>
             </div>
             <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">利率</div>
@@ -163,16 +170,16 @@ export default function Debts() {
             </div>
             <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">利息</div>
-              <div className="font-semibold text-gray-900 dark:text-white tabular-nums">{formatCurrency(plan?.totalInterest || 0)}</div>
+              <div className="font-semibold text-gray-900 dark:text-white tabular-nums">{formatCurrency(plan?.totalInterest || 0, debt.currency || 'CNY')}</div>
             </div>
             <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">已还</div>
-              <div className="font-semibold text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.paidAmount || 0)}</div>
+              <div className="font-semibold text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.paidAmount || 0, debt.currency || 'CNY')}</div>
             </div>
             <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3">
               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">剩余</div>
               <div className={`font-semibold tabular-nums ${(debt.amount - (debt.paidAmount || 0) > 0) ? cls.text : 'text-emerald-600'}`}>
-                {formatCurrency((debt.amount || 0) - (debt.paidAmount || 0))}
+                {formatCurrency((debt.amount || 0) - (debt.paidAmount || 0), debt.currency || 'CNY')}
               </div>
             </div>
           </div>
@@ -198,7 +205,7 @@ export default function Debts() {
             </div>
             <div>
               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">罚息</div>
-              <div className="text-sm text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.penaltyInterest || 0)}</div>
+              <div className="text-sm text-gray-900 dark:text-white tabular-nums">{formatCurrency(debt.penaltyInterest || 0, debt.currency || 'CNY')}</div>
             </div>
             <div>
               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">借入日期</div>
@@ -274,9 +281,9 @@ export default function Debts() {
                                 <tr key={originalIdx} className={`border-b border-gray-100 dark:border-slate-700/50 ${isPaid ? 'bg-green-50/50 dark:bg-green-900/20' : isOverdue ? 'bg-red-50/30 dark:bg-red-900/10' : ''}`}>
                                   <td className="py-2 px-3 text-gray-900 dark:text-white font-medium">第 {item.period} 期</td>
                                   <td className="py-2 px-3 text-gray-600 dark:text-gray-300">{formatDate(item.date)}</td>
-                                  <td className="py-2 px-3 text-left text-gray-900 dark:text-white tabular-nums">{formatCurrency(item.principal)}</td>
-                                  <td className="py-2 px-3 text-left text-gray-900 dark:text-white tabular-nums">{formatCurrency(item.interest)}</td>
-                                  <td className="py-2 px-3 text-left font-medium tabular-nums">{formatCurrency(item.total)}</td>
+                                  <td className="py-2 px-3 text-left text-gray-900 dark:text-white tabular-nums">{formatCurrency(item.principal, debt.currency || 'CNY')}</td>
+                                  <td className="py-2 px-3 text-left text-gray-900 dark:text-white tabular-nums">{formatCurrency(item.interest, debt.currency || 'CNY')}</td>
+                                  <td className="py-2 px-3 text-left font-medium tabular-nums">{formatCurrency(item.total, debt.currency || 'CNY')}</td>
                                   <td className="py-2 px-3 text-center">
                                     <button
                                       onClick={() => handlePaymentToggle(debt, item.period)}
@@ -446,6 +453,7 @@ export default function Debts() {
     account: '',
     creditor: '',
     debtor: '',
+    currency: 'CNY',
     principal: '',
     annualRate: '',
     amount: '',
@@ -525,6 +533,7 @@ export default function Debts() {
         account: debt.account || '',
         creditor: debt.creditor || debt.name || '',
         debtor: debt.debtor || '',
+        currency: debt.currency || 'CNY',
         principal: debt.principal !== undefined ? String(debt.principal) : '',
         annualRate: debt.annualRate !== undefined ? String(debt.annualRate) : (debt.interestRate !== undefined ? String(debt.interestRate) : ''),
         amount: debt.amount !== undefined ? String(debt.amount) : '',
@@ -547,6 +556,7 @@ export default function Debts() {
         account: '',
         creditor: '',
         debtor: '',
+        currency: 'CNY',
         principal: '',
         annualRate: '',
         amount: '',
@@ -921,6 +931,7 @@ export default function Debts() {
         annualRate: parseFloat(form.annualRate) || 0,
         amount: parseFloat(form.amount) || 0,
         penaltyInterest: parseFloat(form.penaltyInterest) || 0,
+        currency: form.currency || mergedBase.currency || 'CNY',
         id: editingDebt ? editingDebt.id : Date.now(),
         name: form.creditor || '',
         creditorName: form.creditor || '',
@@ -1147,8 +1158,8 @@ export default function Debts() {
       return d.category === 'receivable' || type === '借出' || type === '应收';
     });
 
-    const pTotal = payables.reduce((s, d) => s + (d.amount || 0), 0);
-    const pPrincipal = payables.reduce((s, d) => s + (d.principal || d.amount || 0), 0);
+    const pTotal = payables.reduce((s, d) => s + convertToBase(d.amount || 0, d.currency), 0);
+    const pPrincipal = payables.reduce((s, d) => s + convertToBase(d.principal || d.amount || 0, d.currency), 0);
     const pInterest = pTotal - pPrincipal;
     
     const pAvgInvestmentDays = payables.length > 0 
@@ -1162,8 +1173,8 @@ export default function Debts() {
     const pDailyRate = pRate / 365;
     const pMonthlyRate = pRate / 12;
 
-    const rTotal = receivables.reduce((s, d) => s + (d.amount || 0), 0);
-    const rPrincipal = receivables.reduce((s, d) => s + (d.principal || d.amount || 0), 0);
+    const rTotal = receivables.reduce((s, d) => s + convertToBase(d.amount || 0, d.currency), 0);
+    const rPrincipal = receivables.reduce((s, d) => s + convertToBase(d.principal || d.amount || 0, d.currency), 0);
     const rInterest = rTotal - rPrincipal;
 
     const netTotal = rTotal - pTotal;
@@ -1180,8 +1191,8 @@ export default function Debts() {
     const yearEnd = new Date(currentYear, 11, 31);
 
     // 总欠款（所有应付债务的本金和利息）
-    const totalDebtPrincipal = payables.reduce((s, d) => s + (d.principal || d.amount || 0), 0);
-    const totalDebtInterest = payables.reduce((s, d) => s + Math.max(0, (d.amount || 0) - (d.principal || d.amount || 0)), 0);
+    const totalDebtPrincipal = payables.reduce((s, d) => s + convertToBase(d.principal || d.amount || 0, d.currency), 0);
+    const totalDebtInterest = payables.reduce((s, d) => s + convertToBase(Math.max(0, (d.amount || 0) - (d.principal || d.amount || 0)), d.currency), 0);
 
     // 本年待还和本月待还（根据还款计划计算）
     let yearDuePrincipal = 0;
@@ -1193,18 +1204,19 @@ export default function Debts() {
       const plan = calculateRepayment(debt.principal, debt.annualRate, debt.repaymentMethod, debt.startDate, debt.dueDate, debt.paidAmount, isConsumerLoan(debt.debtCategory), debt.investmentDays);
       if (plan?.schedule) {
         const payments = debt.payments || {};
+        const rate = DEFAULT_EXCHANGE_RATES[debt.currency] ?? 1;
         plan.schedule.forEach((period) => {
           const periodDate = new Date(period.date);
           const isPaid = payments[period.period] === true;
           
           if (!isPaid) {
             if (periodDate >= yearStart && periodDate <= yearEnd) {
-              yearDuePrincipal += period.principal || 0;
-              yearDueInterest += period.interest || 0;
+              yearDuePrincipal += (period.principal || 0) * rate;
+              yearDueInterest += (period.interest || 0) * rate;
             }
             if (periodDate >= currentMonthStart && periodDate <= currentMonthEnd) {
-              monthDuePrincipal += period.principal || 0;
-              monthDueInterest += period.interest || 0;
+              monthDuePrincipal += (period.principal || 0) * rate;
+              monthDueInterest += (period.interest || 0) * rate;
             }
           }
         });
@@ -1217,20 +1229,33 @@ export default function Debts() {
     payables.forEach((d) => {
       const plan = calculateRepayment(d.principal, d.annualRate, d.repaymentMethod, d.startDate, d.dueDate, d.paidAmount, isConsumerLoan(d.debtCategory), d.investmentDays);
       const payments = d.payments || {};
+      const rate = DEFAULT_EXCHANGE_RATES[d.currency] ?? 1;
       if (plan?.schedule) {
         const hasOverdue = plan.schedule.some(item => payments[item.period] !== true && new Date(item.date) < new Date());
         if (hasOverdue) {
           overdueDebtCount++;
           plan.schedule.forEach(item => {
             if (payments[item.period] !== true && new Date(item.date) < new Date()) {
-              overdueAmount += item.total;
+              overdueAmount += item.total * rate;
             }
           });
         }
       }
     });
-    const totalPenaltyInterest = payables.reduce((s, d) => s + (d.penaltyInterest || 0), 0);
+    const totalPenaltyInterest = payables.reduce((s, d) => s + convertToBase(d.penaltyInterest || 0, d.currency), 0);
     const totalDebtInterestWithPenalty = totalDebtInterest + totalPenaltyInterest;
+
+    // 按币种分组统计外币欠款
+    const currencyGroups = {};
+    payables.forEach((d) => {
+      const cur = d.currency || 'CNY';
+      if (!currencyGroups[cur]) currencyGroups[cur] = { currency: cur, principal: 0, interest: 0, total: 0, count: 0 };
+      currencyGroups[cur].principal += d.principal || d.amount || 0;
+      currencyGroups[cur].interest += Math.max(0, (d.amount || 0) - (d.principal || d.amount || 0)) + (d.penaltyInterest || 0);
+      currencyGroups[cur].total += d.amount || 0;
+      currencyGroups[cur].count += 1;
+    });
+    const foreignCurrencyList = Object.values(currencyGroups).filter(g => g.currency !== 'CNY');
 
     return {
       payables, receivables, filtered,
@@ -1245,6 +1270,8 @@ export default function Debts() {
       overdueAmount,
       overdueDebtCount,
       totalPenaltyInterest,
+      // 外币分组
+      foreignCurrencyList,
     };
   };
 
@@ -1314,10 +1341,10 @@ export default function Debts() {
                         {debt.creditor || debt.name || '未知'}
                       </td>
                       <td className={`py-2.5 px-3 text-right font-medium tabular-nums whitespace-nowrap ${color === 'red' ? 'text-red-600' : 'text-emerald-600'}`}>
-                        {formatCurrency(debt.amount || 0)}
+                        {formatCurrency(debt.amount || 0, debt.currency || 'CNY')}
                       </td>
                       <td className="py-2.5 px-3 text-right text-gray-900 dark:text-white tabular-nums whitespace-nowrap">
-                        {formatCurrency(debt.principal || debt.amount || 0)}
+                        {formatCurrency(debt.principal || debt.amount || 0, debt.currency || 'CNY')}
                       </td>
                       <td className="py-2.5 px-3 text-right text-gray-900 dark:text-white tabular-nums whitespace-nowrap">
                         {debt.annualRate !== undefined ? `${debt.annualRate}%` : debt.interestRate !== undefined ? `${debt.interestRate}%` : '-'}
@@ -1454,6 +1481,17 @@ export default function Debts() {
               <div>欠款本金：{formatCurrency(stats.totalDebtPrincipal)}</div>
               <div>欠款利息：{formatCurrency(stats.totalDebtInterest)}</div>
             </div>
+            {stats.foreignCurrencyList && stats.foreignCurrencyList.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-white/20 text-xs opacity-90 space-y-0.5">
+                <div className="font-medium opacity-80 mb-0.5">外币欠款明细</div>
+                {stats.foreignCurrencyList.map((g) => (
+                  <div key={g.currency} className="flex items-center justify-between">
+                    <span>{getCurrencySymbol(g.currency)} {g.currency} · {g.count}笔</span>
+                    <span className="tabular-nums">{formatCurrency(g.total, g.currency)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-5 text-white shadow-lg">
             <div className="text-sm opacity-80 mb-1">本年待还</div>
@@ -1527,7 +1565,7 @@ export default function Debts() {
                 {debtCategories.map((cat) => {
                   const catDebts = stats.payables.filter((d) => d.debtCategory === cat.id);
                   if (catDebts.length === 0) return null;
-                  const totalAmount = catDebts.reduce((s, d) => s + (d.amount || 0), 0);
+                  const totalAmount = catDebts.reduce((s, d) => s + convertToBase(d.amount || 0, d.currency), 0);
                   const cardKey = `payable_${cat.id}`;
                   const isExpanded = expandedCards[cardKey] !== false;
                   
@@ -1537,7 +1575,7 @@ export default function Debts() {
                 {(() => {
                   const uncategorized = stats.payables.filter((d) => !d.debtCategory || d.debtCategory === '');
                   if (uncategorized.length === 0) return null;
-                  const totalAmount = uncategorized.reduce((s, d) => s + (d.amount || 0), 0);
+                  const totalAmount = uncategorized.reduce((s, d) => s + convertToBase(d.amount || 0, d.currency), 0);
                   const cardKey = 'payable_uncategorized';
                   const isExpanded = expandedCards[cardKey] !== false;
                   return renderCategoryCard({ id: 'uncategorized', name: '未分类' }, uncategorized, totalAmount, cardKey, isExpanded, 'red');
@@ -1561,7 +1599,7 @@ export default function Debts() {
                 {debtCategories.map((cat) => {
                   const catDebts = stats.receivables.filter((d) => d.debtCategory === cat.id);
                   if (catDebts.length === 0) return null;
-                  const totalAmount = catDebts.reduce((s, d) => s + (d.amount || 0), 0);
+                  const totalAmount = catDebts.reduce((s, d) => s + convertToBase(d.amount || 0, d.currency), 0);
                   const cardKey = `receivable_${cat.id}`;
                   const isExpanded = expandedCards[cardKey] !== false;
                   
@@ -1571,7 +1609,7 @@ export default function Debts() {
                 {(() => {
                   const uncategorized = stats.receivables.filter((d) => !d.debtCategory || d.debtCategory === '' || !debtCategories.find(c => c.id === d.debtCategory));
                   if (uncategorized.length === 0) return null;
-                  const totalAmount = uncategorized.reduce((s, d) => s + (d.amount || 0), 0);
+                  const totalAmount = uncategorized.reduce((s, d) => s + convertToBase(d.amount || 0, d.currency), 0);
                   const cardKey = 'receivable_uncategorized';
                   const isExpanded = expandedCards[cardKey] !== false;
                   return renderCategoryCard({ id: 'uncategorized', name: '未分类' }, uncategorized, totalAmount, cardKey, isExpanded, 'emerald');
@@ -1647,6 +1685,14 @@ export default function Debts() {
                     <input type="text" value={form.debtor} onChange={(e) => setForm({ ...form, debtor: e.target.value })} placeholder="请输入债务人或付款人" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
                   </div>
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">货币单位</label>
+                    <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white">
+                      {CURRENCIES.map((c) => (
+                        <option key={c.code} value={c.code}>{c.symbol} {c.name}（{c.code}）</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"><span className="text-red-500">*</span> 本金</label>
                     <input type="number" value={form.principal} onChange={(e) => handleFormChange('principal', e.target.value)} placeholder="0.00" className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white" />
                   </div>
@@ -1674,7 +1720,7 @@ export default function Debts() {
                       className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white"
                     />
                     {!totalAmountOverridden && getRepaymentPlan() && (
-                      <p className="text-xs text-gray-400 mt-1">自动计算：{formatCurrency(getRepaymentPlan().totalAmount)}（本金 {formatCurrency(parseFloat(form.principal) || 0)} + 利息 {formatCurrency(getRepaymentPlan().totalInterest)}）</p>
+                      <p className="text-xs text-gray-400 mt-1">自动计算：{formatCurrency(getRepaymentPlan().totalAmount, form.currency)}（本金 {formatCurrency(parseFloat(form.principal) || 0, form.currency)} + 利息 {formatCurrency(getRepaymentPlan().totalInterest, form.currency)}）</p>
                     )}
                     {totalAmountOverridden && (
                       <button onClick={() => {
@@ -1725,7 +1771,7 @@ export default function Debts() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">剩余金额</label>
-                    <input type="text" readOnly value={formatCurrency(getRepaymentPlan()?.remainingAmount || 0)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700/50 text-gray-600 dark:text-gray-300" />
+                    <input type="text" readOnly value={formatCurrency(getRepaymentPlan()?.remainingAmount || 0, form.currency)} className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700/50 text-gray-600 dark:text-gray-300" />
                   </div>
                 </div>
 
@@ -1770,19 +1816,19 @@ export default function Debts() {
                       </div>
                       <div>
                         <div className="text-gray-500 dark:text-gray-400 text-xs">总金额</div>
-                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().totalAmount)}</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().totalAmount, form.currency)}</div>
                       </div>
                       <div>
                         <div className="text-gray-500 dark:text-gray-400 text-xs">总利息</div>
-                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().totalInterest)}</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().totalInterest, form.currency)}</div>
                       </div>
                       <div>
                         <div className="text-gray-500 dark:text-gray-400 text-xs">每期金额</div>
-                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().eachAmount)}</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().eachAmount, form.currency)}</div>
                       </div>
                       <div>
                         <div className="text-gray-500 dark:text-gray-400 text-xs">剩余金额</div>
-                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().remainingAmount)}</div>
+                        <div className="font-medium text-gray-900 dark:text-white">{formatCurrency(getRepaymentPlan().remainingAmount, form.currency)}</div>
                       </div>
                     </div>
                   </div>
