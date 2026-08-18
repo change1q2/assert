@@ -2885,6 +2885,7 @@ export default function Finance({ onAssetPenetration }) {
     categoryL1: '',
     categoryL2: '',
     categoryL3: '',
+    categoryL4: '',
     positionGroup: '',
     positionType: '',
     name: '',
@@ -2928,6 +2929,120 @@ export default function Finance({ onAssetPenetration }) {
   const [saving, setSaving] = useState(false);
   const [uploadedImage, setUploadedImage] = useState(null);
   const [ocrResult, setOcrResult] = useState(null);
+
+  // 模板功能：分类选择模板保存/加载
+  const TEMPLATE_STORAGE_KEY = 'finance_add_asset_templates';
+  const [templateList, setTemplateList] = useState(() => {
+    try {
+      const saved = localStorage.getItem(TEMPLATE_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [templateNameInput, setTemplateNameInput] = useState('');
+
+  const saveTemplatesToStorage = (list) => {
+    try { localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(list)); } catch {}
+  };
+
+  const applyTemplate = (template) => {
+    if (!template) return;
+    const t = template;
+    const market = t.market || '国内市场';
+    const cascade = getCascadeFor(market, t.categoryL1, t.assetType);
+    setNewAccount(prev => ({
+      ...prev,
+      market: t.market || '国内市场',
+      currency: t.currency || 'CNY',
+      assetKind: t.assetKind || '',
+      assetType: t.assetType || '',
+      account: t.account || '',
+      categoryL1: t.categoryL1 || '',
+      categoryL2: t.categoryL2 || cascade?.l2Default || '',
+      categoryL3: t.categoryL3 || (cascade?.l3Default && cascade.l3Default[t.categoryL2]) || '',
+      categoryL4: t.categoryL4 || '',
+      positionGroup: t.positionGroup || '',
+      positionType: t.positionType || '',
+    }));
+  };
+
+  const handleSelectTemplate = (templateId) => {
+    setSelectedTemplateId(templateId);
+    if (!templateId) return;
+    const tpl = templateList.find(t => t.id === templateId);
+    if (tpl) applyTemplate(tpl);
+  };
+
+  const handleSaveTemplate = () => {
+    const tplName = templateNameInput.trim();
+    if (!tplName) {
+      alert('请输入模板名称');
+      return;
+    }
+    if (!newAccount.market || !newAccount.categoryL1 || !newAccount.assetType) {
+      alert('请先完成分类选择后再保存模板');
+      return;
+    }
+    const newTpl = {
+      id: Date.now().toString(),
+      name: tplName,
+      market: newAccount.market,
+      currency: newAccount.currency,
+      assetKind: newAccount.assetKind,
+      assetType: newAccount.assetType,
+      account: newAccount.account,
+      categoryL1: newAccount.categoryL1,
+      categoryL2: newAccount.categoryL2,
+      categoryL3: newAccount.categoryL3,
+      categoryL4: newAccount.categoryL4,
+      positionGroup: newAccount.positionGroup,
+      positionType: newAccount.positionType,
+      createdAt: new Date().toISOString(),
+    };
+    const newList = [...templateList, newTpl];
+    setTemplateList(newList);
+    saveTemplatesToStorage(newList);
+    setTemplateNameInput('');
+    setSelectedTemplateId(newTpl.id);
+  };
+
+  const handleDeleteTemplate = (templateId) => {
+    const newList = templateList.filter(t => t.id !== templateId);
+    setTemplateList(newList);
+    saveTemplatesToStorage(newList);
+    if (selectedTemplateId === templateId) setSelectedTemplateId('');
+  };
+
+  const handleUpdateTemplate = () => {
+    if (!selectedTemplateId) return;
+    const tplName = templateNameInput.trim();
+    if (!tplName) {
+      alert('请输入模板名称');
+      return;
+    }
+    const idx = templateList.findIndex(t => t.id === selectedTemplateId);
+    if (idx === -1) return;
+    const updatedList = [...templateList];
+    updatedList[idx] = {
+      ...updatedList[idx],
+      name: tplName,
+      market: newAccount.market,
+      currency: newAccount.currency,
+      assetKind: newAccount.assetKind,
+      assetType: newAccount.assetType,
+      account: newAccount.account,
+      categoryL1: newAccount.categoryL1,
+      categoryL2: newAccount.categoryL2,
+      categoryL3: newAccount.categoryL3,
+      categoryL4: newAccount.categoryL4,
+      positionGroup: newAccount.positionGroup,
+      positionType: newAccount.positionType,
+      updatedAt: new Date().toISOString(),
+    };
+    setTemplateList(updatedList);
+    saveTemplatesToStorage(updatedList);
+    setTemplateNameInput('');
+  };
 
   const [lookupResults, setLookupResults] = useState([]);
   const [showLookupDropdown, setShowLookupDropdown] = useState(false);
@@ -4099,11 +4214,13 @@ export default function Finance({ onAssetPenetration }) {
     setNewAccount({
       market: '国内市场',
       currency: 'CNY',
+      assetKind: '',
       assetType: '股票',
       account: '',
       categoryL1: '',
       categoryL2: '',
       categoryL3: '',
+      categoryL4: '',
       positionGroup: '',
       positionType: '',
       name: '',
@@ -4133,6 +4250,8 @@ export default function Finance({ onAssetPenetration }) {
     setOcrResult(null);
     setEditMode(false);
     setEditingId(null);
+    setSelectedTemplateId('');
+    setTemplateNameInput('');
   };
 
   // ─ 账本管理 ──
@@ -6350,6 +6469,74 @@ export default function Finance({ onAssetPenetration }) {
                   <div className="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs flex items-center justify-center font-bold">1</div>
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-300">分类选择</span>
                 </div>
+
+                {/* 模板选择栏 */}
+                <div className="flex flex-wrap items-center gap-2 mb-4 p-3 bg-gray-50 dark:bg-slate-700/50 rounded-lg border border-gray-200 dark:border-slate-600">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">模板：</span>
+                  <select
+                    value={selectedTemplateId}
+                    onChange={e => handleSelectTemplate(e.target.value)}
+                    className={`${FORM_SELECT} flex-1 min-w-[120px] max-w-[200px] text-xs py-1.5`}
+                  >
+                    <option value="">选择已保存模板</option>
+                    {templateList.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={templateNameInput}
+                    onChange={e => setTemplateNameInput(e.target.value)}
+                    placeholder="输入模板名称"
+                    className={`${FORM_INPUT} text-xs py-1.5 w-32`}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        if (selectedTemplateId) handleUpdateTemplate();
+                        else handleSaveTemplate();
+                      }
+                    }}
+                  />
+                  {selectedTemplateId ? (
+                    <button
+                      onClick={handleUpdateTemplate}
+                      className="px-2 py-1.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                      title="更新当前模板"
+                    >
+                      更新
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleSaveTemplate}
+                      className="px-2 py-1.5 text-xs bg-indigo-500 text-white rounded hover:bg-indigo-600 transition-colors"
+                      title="保存为新模板"
+                    >
+                      保存
+                    </button>
+                  )}
+                  {selectedTemplateId && (
+                    <button
+                      onClick={() => {
+                        if (confirm(`确定删除模板"${templateList.find(t => t.id === selectedTemplateId)?.name}"吗？`)) {
+                          handleDeleteTemplate(selectedTemplateId);
+                        }
+                      }}
+                      className="px-2 py-1.5 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                      title="删除模板"
+                    >
+                      删除
+                    </button>
+                  )}
+                  {templateList.length > 0 && !selectedTemplateId && (
+                    <button
+                      onClick={() => setSelectedTemplateId('')}
+                      className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                      title="清除选择"
+                    >
+                      清除
+                    </button>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
                   {/* Row 1: 市场 | 货币单位 */}
                   <FormField label="市场" required>
