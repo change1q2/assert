@@ -447,6 +447,56 @@ async function lookupSecurities(q, market) {
       } catch (_) { }
     }
 
+    // 美股专项搜索：字母代码搜不到精确匹配时，用腾讯美股API直接查
+    if (/^[a-zA-Z]+$/.test(trimmedQ) && (isUSMarket || !isHKMarket)) {
+      const hasExact = items.some(i => i.code.toUpperCase() === trimmedQ.toUpperCase());
+      if (items.length === 0 || !hasExact) {
+        try {
+          const tencentUrl = `https://qt.gtimg.cn/q=us${trimmedQ.toUpperCase()}`;
+          const tcRes = await fetch(tencentUrl, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            signal: AbortSignal.timeout(6000),
+          });
+          if (tcRes.ok) {
+            const tcBuf = Buffer.from(await tcRes.arrayBuffer());
+            const tcText = await safeDecode(tcBuf);
+            const match = tcText.match(/v_us\w+="(.*)"/);
+            if (match && match[1]) {
+              const parts = match[1].split("~");
+              if (parts.length > 45 && parts[1]) {
+                const name = cleanName(parts[1]);
+                const fullCode = parts[2] || trimmedQ.toUpperCase();
+                const exchange = fullCode.includes('.OQ') ? 'NASDAQ' : (fullCode.includes('.N') ? 'NYSE' : 'NASDAQ');
+                const price = parseFloat(parts[3]) || null;
+                const changeAmt = parseFloat(parts[31]) || null;
+                const changePct = parseFloat(parts[32]) || null;
+                // 替换或添加精确匹配项
+                const existingIdx = items.findIndex(i => i.code.toUpperCase() === trimmedQ.toUpperCase());
+                const newItem = {
+                  code: trimmedQ.toUpperCase(),
+                  name,
+                  classify: 'UsStock',
+                  typeName: '美股',
+                  marketType: 'us',
+                  mktNum: '105',
+                  jys: exchange,
+                  price,
+                  changePct,
+                  changeAmt,
+                  source: 'tencent-us-direct',
+                };
+                if (existingIdx >= 0) {
+                  items[existingIdx] = newItem;
+                } else {
+                  items.unshift(newItem);
+                }
+              }
+            }
+          }
+        } catch (_) { }
+      }
+    }
+
     // ── 最终兜底：直接上网页搜索获取 ──
     // 当以上所有 API 数据源都搜不到时，直接抓取网页内容解析资产信息
     if (items.length === 0 && trimmedQ) {
@@ -621,46 +671,89 @@ async function webSearchFallback(q, isHKMarket, isUSMarket) {
     } catch (_) { }
   }
 
-  // 3. 字母代码且美股市场 → 查美股网页
-  if (/^[a-zA-Z]+$/.test(q) && (isUSMarket || !isHKMarket)) {
+  // 3. 字母代码 → 查美股（腾讯API + 东方财富 + 新浪）
+  if (/^[a-zA-Z]+$/.test(q)) {
+    const upperCode = q.toUpperCase();
+
+    // 3a. 腾讯美股API（最可靠，同时返回名称和价格）
     try {
-      const usUrl = `https://quote.eastmoney.com/us${q.toUpperCase()}.html`;
-      const usRes = await fetch(usUrl, {
-        headers: ua,
-        signal: AbortSignal.timeout(8000),
-        redirect: 'follow',
+      const tencentUrl = `https://qt.gtimg.cn/q=us${upperCode}`;
+      const tcRes = await fetch(tencentUrl, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(6000),
       });
-      if (usRes.ok) {
-        const html = await usRes.text();
-        const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
-        if (titleMatch) {
-          const titleText = titleMatch[1].trim();
-          const parenIdx = titleText.indexOf('(');
-          const usName = parenIdx > 0 ? titleText.substring(0, parenIdx).trim() : titleText;
-          if (usName && !usName.includes('404') && !usName.includes('Not Found')) {
-            let price = null;
-            const priceMatch = html.match(/最新价[：:\s]*\$?([\d.]+)/i);
-            if (priceMatch) price = parseFloat(priceMatch[1]);
+      if (tcRes.ok) {
+        const tcBuf = Buffer.from(await tcRes.arrayBuffer());
+        const tcText = await safeDecode(tcBuf);
+        const match = tcText.match(/v_us\w+="(.*)"/);
+        if (match && match[1]) {
+          const parts = match[1].split("~");
+          if (parts.length > 45 && parts[1]) {
+            const name = cleanName(parts[1]);
+            const fullCode = parts[2] || upperCode;
+            const exchange = fullCode.includes('.OQ') ? 'NASDAQ' : (fullCode.includes('.N') ? 'NYSE' : 'NASDAQ');
+            const price = parseFloat(parts[3]) || null;
+            const changeAmt = parseFloat(parts[31]) || null;
+            const changePct = parseFloat(parts[32]) || null;
             results.push({
-              code: q.toUpperCase(),
-              name: usName,
+              code: upperCode,
+              name,
               classify: 'UsStock',
               typeName: '美股',
               marketType: 'us',
               mktNum: '105',
-              jys: 'NASDAQ',
+              jys: exchange,
               price,
-              source: 'web-eastmoney-us',
+              changePct,
+              changeAmt,
+              source: 'tencent-us',
             });
           }
         }
       }
     } catch (_) { }
 
-    // 美股还可以试新浪美股
+    // 3b. 东方财富美股网页
     if (results.length === 0) {
       try {
-        const sinaUrl = `https://finance.sina.com.cn/usstock/quotes/${q.toUpperCase()}.html`;
+        const usUrl = `https://quote.eastmoney.com/us${upperCode}.html`;
+        const usRes = await fetch(usUrl, {
+          headers: ua,
+          signal: AbortSignal.timeout(8000),
+          redirect: 'follow',
+        });
+        if (usRes.ok) {
+          const html = await usRes.text();
+          const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+          if (titleMatch) {
+            const titleText = titleMatch[1].trim();
+            const parenIdx = titleText.indexOf('(');
+            const usName = parenIdx > 0 ? titleText.substring(0, parenIdx).trim() : titleText;
+            if (usName && !usName.includes('404') && !usName.includes('Not Found')) {
+              let price = null;
+              const priceMatch = html.match(/最新价[：:\s]*\$?([\d.]+)/i);
+              if (priceMatch) price = parseFloat(priceMatch[1]);
+              results.push({
+                code: upperCode,
+                name: usName,
+                classify: 'UsStock',
+                typeName: '美股',
+                marketType: 'us',
+                mktNum: '105',
+                jys: 'NASDAQ',
+                price,
+                source: 'web-eastmoney-us',
+              });
+            }
+          }
+        }
+      } catch (_) { }
+    }
+
+    // 3c. 新浪美股
+    if (results.length === 0) {
+      try {
+        const sinaUrl = `https://finance.sina.com.cn/usstock/quotes/${upperCode}.html`;
         const sinaRes = await fetch(sinaUrl, {
           headers: { ...ua, "Referer": "https://finance.sina.com.cn" },
           signal: AbortSignal.timeout(8000),
@@ -671,12 +764,11 @@ async function webSearchFallback(q, isHKMarket, isUSMarket) {
           const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
           if (titleMatch) {
             const titleText = titleMatch[1].trim();
-            // 如 "AAPL 苹果公司..."
             const parts = titleText.split(/[\s_\-|]/);
             const usName = parts.length > 1 ? parts.slice(1).join(' ').trim() : titleText;
             if (usName && !usName.includes('404') && !usName.includes('Not Found')) {
               results.push({
-                code: q.toUpperCase(),
+                code: upperCode,
                 name: usName,
                 classify: 'UsStock',
                 typeName: '美股',
