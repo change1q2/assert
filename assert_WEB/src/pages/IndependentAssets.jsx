@@ -1909,14 +1909,18 @@ export default function IndependentAssets() {
         if (item.accountId) {
           usedAccountIds.add(item.accountId);
         }
+        if (item.accountName) {
+          usedAccountIds.add(item.accountName);
+        }
       });
     });
 
     const filteredAccounts = accounts.filter(account => {
-      if (usedAccountIds.size > 0 && !usedAccountIds.has(account.id)) return false;
+      const accKey = account.id || account.name;
+      if (usedAccountIds.size > 0 && !usedAccountIds.has(accKey) && !usedAccountIds.has(account.id) && !usedAccountIds.has(account.name)) return false;
       if (filters.accountName && !account.name.includes(filters.accountName)) return false;
       if (filters.accountCategory && account.category !== filters.accountCategory) return false;
-      return usedAccountIds.size === 0 || usedAccountIds.has(account.id);
+      return true;
     });
 
     const totalBalance = filteredAccounts.reduce((s, a) => s + (a.balance || 0), 0);
@@ -1947,6 +1951,7 @@ export default function IndependentAssets() {
         {filteredAccounts.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filteredAccounts.map(account => {
+              const accKey = account.id || account.name;
               let marketValue = 0;
               let purchaseCost = 0;
               let profitLoss = 0;
@@ -1956,7 +1961,8 @@ export default function IndependentAssets() {
 
               Object.entries(independentAssets).forEach(([assetType, items]) => {
                 items.forEach(item => {
-                  if (item.accountId === account.id) {
+                  const itemKey = item.accountId || item.accountName;
+                  if (item.accountId === account.id || item.accountId === accKey || item.accountName === account.name || itemKey === accKey) {
                     const cur = item.currency || 'CNY';
                     if (assetType === 'realestate') {
                       if (item.usage === '出租') {
@@ -2023,6 +2029,11 @@ export default function IndependentAssets() {
                       purchaseCost += toCNY(amount, cur);
                       profitLoss += toCNY(actualReturn, cur);
                       actualValue += toCNY(amount + actualReturn, cur);
+                    } else if (assetType === 'survivalfund') {
+                      const amount = parseFloat(item.amount || 0);
+                      marketValue += toCNY(amount, cur);
+                      purchaseCost += toCNY(amount, cur);
+                      actualValue += toCNY(amount, cur);
                     }
                   }
                 });
