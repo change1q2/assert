@@ -294,6 +294,53 @@ async function lookupSecurities(q, market) {
       } catch (_) { }
     }
 
+    // 场外基金(OTCFUND)净值补充：东方财富搜索返回的场外基金无 price，通过 lsjz 净值接口获取最新净值作为价格
+    const otcFundIndices = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].classify === "OTCFUND" && items[i].price == null) {
+        otcFundIndices.push({ code: items[i].code, index: i });
+      }
+    }
+    if (otcFundIndices.length) {
+      const fundResults = await Promise.all(
+        otcFundIndices.map(async ({ code, index }) => {
+          try {
+            const navUrl = `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=2&startDate=&endDate=`;
+            const navRes = await fetch(navUrl, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://fund.eastmoney.com/",
+              },
+              signal: AbortSignal.timeout(6000),
+            });
+            if (!navRes.ok) return null;
+            const navData = await navRes.json();
+            const list = navData?.Data?.LSJZList || [];
+            if (!list.length) return null;
+            const latest = list[0];
+            const dwjz = parseFloat(latest.DWJZ);
+            const jzzzl = parseFloat(latest.JZZZL);
+            if (!Number.isFinite(dwjz) || dwjz <= 0) return null;
+            return {
+              index,
+              price: dwjz,
+              changePct: Number.isFinite(jzzzl) ? jzzzl : null,
+              navDate: latest.FSRQ || null,
+              source: "fund_lsjz",
+            };
+          } catch (_) { return null; }
+        })
+      );
+      for (const fr of fundResults) {
+        if (fr) {
+          items[fr.index].price = fr.price;
+          if (fr.changePct != null) items[fr.index].changePct = fr.changePct;
+          items[fr.index].navDate = fr.navDate;
+          items[fr.index].source = fr.source;
+        }
+      }
+    }
+
     // 同花顺(10jqka) fallback：当东方财富搜索结果不足且为纯6位代码时，用同花顺接口补充名称和价格
     if (items.length < 3 && /^\d{6}$/.test(trimmedQ) && !isHKMarket && !isUSMarket) {
       try {
@@ -400,10 +447,284 @@ async function lookupSecurities(q, market) {
       } catch (_) { }
     }
 
+    // ── 最终兜底：直接上网页搜索获取 ──
+    // 当以上所有 API 数据源都搜不到时，直接抓取网页内容解析资产信息
+    if (items.length === 0 && trimmedQ) {
+      const webResults = await webSearchFallback(trimmedQ, isHKMarket, isUSMarket);
+      for (const wr of webResults) {
+        if (!items.some((e) => e.code === wr.code)) items.push(wr);
+      }
+    }
+
     return { items: items.slice(0, 10) };
   } catch (err) {
     return { items: localItems, error: err.message };
   }
+}
+
+/**
+ * 网页搜索兜底：当所有 API 都搜不到时，直接抓取网页内容解析资产信息
+ * - 6位数字代码：先查天天基金网页（可能是基金），再查 A 股网页
+ * - 5位纯数字：查港股网页
+ * - 字母代码：查美股网页
+ * - 中文名称：查东方财富搜索网页
+ */
+async function webSearchFallback(q, isHKMarket, isUSMarket) {
+  const results = [];
+  const ua = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" };
+
+  // 1. 6位数字代码 → 可能是基金（场外/场内），先查天天基金网页
+  if (/^\d{6}$/.test(q) && !isHKMarket) {
+    try {
+      const fundUrl = `http://fund.eastmoney.com/${q}.html`;
+      const fundRes = await fetch(fundUrl, {
+        headers: ua,
+        signal: AbortSignal.timeout(8000),
+        redirect: 'follow',
+      });
+      if (fundRes.ok) {
+        const html = await fundRes.text();
+        // 从 <title> 提取基金名称，如 "广发钱袋子货币A(000509)基金净值..."
+        const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+        let fundName = '';
+        if (titleMatch) {
+          // 提取括号前的名称部分
+          const titleText = titleMatch[1].trim();
+          const parenIdx = titleText.indexOf('(');
+          fundName = parenIdx > 0 ? titleText.substring(0, parenIdx).trim() : titleText;
+          // 清理常见后缀
+          fundName = fundName.replace(/基金净值.*$/i, '').replace(/_东方财富网$/i, '').trim();
+        }
+        // 从页面提取净值
+        let nav = null;
+        const navMatch = html.match(/净值[：:\s]*([\d.]+)/i);
+        if (navMatch) nav = parseFloat(navMatch[1]);
+        // 从页面提取万份收益（货币基金）
+        let navPer10k = null;
+        const nav10kMatch = html.match(/每万份(?:基金份额)?收益[：:\s]*([\d.]+)/i);
+        if (nav10kMatch) navPer10k = parseFloat(nav10kMatch[1]);
+        // 从页面提取七日年化
+        let annualized7d = null;
+        const annMatch = html.match(/7日年化[：:\s]*([\d.]+)%?/i);
+        if (annMatch) annualized7d = parseFloat(annMatch[1]);
+
+        // 判断是否是货币基金
+        const isMoneyFund = fundName.includes('货币') || (navPer10k != null);
+        // 判断基金类型
+        let typeName = '基金';
+        let classify = 'OTCFUND';
+        if (fundName.includes('货币')) { typeName = '货币基金'; classify = 'OTCFUND'; }
+        else if (fundName.includes('ETF') || fundName.includes('etf')) { typeName = 'ETF'; classify = 'ETF'; }
+        else if (fundName.includes('LOF') || fundName.includes('lof')) { typeName = 'LOF'; classify = 'ETF'; }
+
+        if (fundName) {
+          results.push({
+            code: q,
+            name: fundName,
+            classify,
+            typeName,
+            marketType: 'fund',
+            mktNum: '',
+            jys: '',
+            price: nav || (isMoneyFund ? 1 : null),
+            navPer10k: navPer10k,
+            annualized7d: annualized7d,
+            source: 'web-eastmoney-fund',
+          });
+        }
+      }
+    } catch (_) { }
+
+    // 如果基金网页没找到，尝试东方财富 A 股网页
+    if (results.length === 0) {
+      // 先试 sh 再试 sz
+      for (const prefix of ['sh', 'sz']) {
+        if (results.length > 0) break;
+        try {
+          const stockUrl = `https://quote.eastmoney.com/${prefix}${q}.html`;
+          const stockRes = await fetch(stockUrl, {
+            headers: ua,
+            signal: AbortSignal.timeout(8000),
+            redirect: 'follow',
+          });
+          if (stockRes.ok) {
+            const html = await stockRes.text();
+            const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+            if (titleMatch) {
+              const titleText = titleMatch[1].trim();
+              // 如 "平安银行(000001)股票..."
+              const parenIdx = titleText.indexOf('(');
+              const stockName = parenIdx > 0 ? titleText.substring(0, parenIdx).trim() : titleText;
+              if (stockName && !stockName.includes('404') && !stockName.includes('Not Found')) {
+                // 从页面提取价格
+                let price = null;
+                const priceMatch = html.match(/"price"[：:\s]*"?([\d.]+)/i)
+                  || html.match(/data-key="price"[^>]*>([\d.]+)/i)
+                  || html.match(/最新价[：:\s]*([\d.]+)/i);
+                if (priceMatch) price = parseFloat(priceMatch[1]);
+
+                results.push({
+                  code: q,
+                  name: stockName,
+                  classify: 'AStock',
+                  typeName: 'A股',
+                  marketType: prefix === 'sh' ? '1' : '2',
+                  mktNum: '',
+                  jys: prefix === 'sh' ? 'SH' : 'SZ',
+                  price,
+                  source: 'web-eastmoney-stock',
+                });
+                break;
+              }
+            }
+          }
+        } catch (_) { }
+      }
+    }
+  }
+
+  // 2. 5位纯数字且港股市场 → 查港股网页
+  if (/^\d{5}$/.test(q) || (isHKMarket && /^\d+$/.test(q))) {
+    try {
+      const hkCode = q.padStart(5, '0');
+      const hkUrl = `https://quote.eastmoney.com/hk${hkCode}.html`;
+      const hkRes = await fetch(hkUrl, {
+        headers: ua,
+        signal: AbortSignal.timeout(8000),
+        redirect: 'follow',
+      });
+      if (hkRes.ok) {
+        const html = await hkRes.text();
+        const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+        if (titleMatch) {
+          const titleText = titleMatch[1].trim();
+          const parenIdx = titleText.indexOf('(');
+          const hkName = parenIdx > 0 ? titleText.substring(0, parenIdx).trim() : titleText;
+          if (hkName && !hkName.includes('404') && !hkName.includes('Not Found')) {
+            let price = null;
+            const priceMatch = html.match(/最新价[：:\s]*([\d.]+)/i);
+            if (priceMatch) price = parseFloat(priceMatch[1]);
+            results.push({
+              code: q,
+              name: hkName,
+              classify: 'HK',
+              typeName: '港股',
+              marketType: 'hk',
+              mktNum: '116',
+              jys: 'HKEX',
+              price,
+              source: 'web-eastmoney-hk',
+            });
+          }
+        }
+      }
+    } catch (_) { }
+  }
+
+  // 3. 字母代码且美股市场 → 查美股网页
+  if (/^[a-zA-Z]+$/.test(q) && (isUSMarket || !isHKMarket)) {
+    try {
+      const usUrl = `https://quote.eastmoney.com/us${q.toUpperCase()}.html`;
+      const usRes = await fetch(usUrl, {
+        headers: ua,
+        signal: AbortSignal.timeout(8000),
+        redirect: 'follow',
+      });
+      if (usRes.ok) {
+        const html = await usRes.text();
+        const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+        if (titleMatch) {
+          const titleText = titleMatch[1].trim();
+          const parenIdx = titleText.indexOf('(');
+          const usName = parenIdx > 0 ? titleText.substring(0, parenIdx).trim() : titleText;
+          if (usName && !usName.includes('404') && !usName.includes('Not Found')) {
+            let price = null;
+            const priceMatch = html.match(/最新价[：:\s]*\$?([\d.]+)/i);
+            if (priceMatch) price = parseFloat(priceMatch[1]);
+            results.push({
+              code: q.toUpperCase(),
+              name: usName,
+              classify: 'UsStock',
+              typeName: '美股',
+              marketType: 'us',
+              mktNum: '105',
+              jys: 'NASDAQ',
+              price,
+              source: 'web-eastmoney-us',
+            });
+          }
+        }
+      }
+    } catch (_) { }
+
+    // 美股还可以试新浪美股
+    if (results.length === 0) {
+      try {
+        const sinaUrl = `https://finance.sina.com.cn/usstock/quotes/${q.toUpperCase()}.html`;
+        const sinaRes = await fetch(sinaUrl, {
+          headers: { ...ua, "Referer": "https://finance.sina.com.cn" },
+          signal: AbortSignal.timeout(8000),
+          redirect: 'follow',
+        });
+        if (sinaRes.ok) {
+          const html = await sinaRes.text();
+          const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+          if (titleMatch) {
+            const titleText = titleMatch[1].trim();
+            // 如 "AAPL 苹果公司..."
+            const parts = titleText.split(/[\s_\-|]/);
+            const usName = parts.length > 1 ? parts.slice(1).join(' ').trim() : titleText;
+            if (usName && !usName.includes('404') && !usName.includes('Not Found')) {
+              results.push({
+                code: q.toUpperCase(),
+                name: usName,
+                classify: 'UsStock',
+                typeName: '美股',
+                marketType: 'us',
+                mktNum: '105',
+                jys: 'NASDAQ',
+                source: 'web-sina-us',
+              });
+            }
+          }
+        }
+      } catch (_) { }
+    }
+  }
+
+  // 4. 中文名称搜索 → 抓取东方财富搜索网页（作为最终兜底）
+  if (results.length === 0 && !/^\d+$/.test(q) && !/^[a-zA-Z]{1,6}$/.test(q)) {
+    try {
+      const searchPageUrl = `https://so.eastmoney.com/web/s?keyword=${encodeURIComponent(q)}`;
+      const searchPageRes = await fetch(searchPageUrl, {
+        headers: ua,
+        signal: AbortSignal.timeout(8000),
+        redirect: 'follow',
+      });
+      if (searchPageRes.ok) {
+        const html = await searchPageRes.text();
+        // 从搜索结果页面提取可能的资产名称
+        const titleMatches = [...html.matchAll(/<a[^>]*title="([^"]{2,20})"[^>]*>/g)];
+        for (const tm of titleMatches.slice(0, 5)) {
+          const name = tm[1].trim();
+          if (name && !name.includes('404') && !results.some((r) => r.name === name)) {
+            results.push({
+              code: q,
+              name,
+              classify: 'Index',
+              typeName: '指数/其他',
+              marketType: '',
+              mktNum: '',
+              jys: '',
+              source: 'web-search-eastmoney',
+            });
+          }
+        }
+      }
+    } catch (_) { }
+  }
+
+  return results;
 }
 
 async function getQuotes(codes) {
