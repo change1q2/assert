@@ -2945,6 +2945,10 @@ export default function Finance({ onAssetPenetration }) {
     try { localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(list)); } catch {}
   };
 
+  useEffect(() => {
+    saveTemplatesToStorage(templateList);
+  }, [templateList]);
+
   const applyTemplate = (template) => {
     if (!template) return;
     const t = template;
@@ -2999,17 +3003,12 @@ export default function Finance({ onAssetPenetration }) {
       positionType: newAccount.positionType,
       createdAt: new Date().toISOString(),
     };
-    const newList = [...templateList, newTpl];
-    setTemplateList(newList);
-    saveTemplatesToStorage(newList);
+    setTemplateList(prev => [...prev, newTpl]);
     setTemplateNameInput('');
-    setSelectedTemplateId(newTpl.id);
   };
 
   const handleDeleteTemplate = (templateId) => {
-    const newList = templateList.filter(t => t.id !== templateId);
-    setTemplateList(newList);
-    saveTemplatesToStorage(newList);
+    setTemplateList(prev => prev.filter(t => t.id !== templateId));
     if (selectedTemplateId === templateId) setSelectedTemplateId('');
   };
 
@@ -3020,27 +3019,28 @@ export default function Finance({ onAssetPenetration }) {
       alert('请输入模板名称');
       return;
     }
-    const idx = templateList.findIndex(t => t.id === selectedTemplateId);
-    if (idx === -1) return;
-    const updatedList = [...templateList];
-    updatedList[idx] = {
-      ...updatedList[idx],
-      name: tplName,
-      market: newAccount.market,
-      currency: newAccount.currency,
-      assetKind: newAccount.assetKind,
-      assetType: newAccount.assetType,
-      account: newAccount.account,
-      categoryL1: newAccount.categoryL1,
-      categoryL2: newAccount.categoryL2,
-      categoryL3: newAccount.categoryL3,
-      categoryL4: newAccount.categoryL4,
-      positionGroup: newAccount.positionGroup,
-      positionType: newAccount.positionType,
-      updatedAt: new Date().toISOString(),
-    };
-    setTemplateList(updatedList);
-    saveTemplatesToStorage(updatedList);
+    setTemplateList(prev => {
+      const idx = prev.findIndex(t => t.id === selectedTemplateId);
+      if (idx === -1) return prev;
+      const updatedList = [...prev];
+      updatedList[idx] = {
+        ...updatedList[idx],
+        name: tplName,
+        market: newAccount.market,
+        currency: newAccount.currency,
+        assetKind: newAccount.assetKind,
+        assetType: newAccount.assetType,
+        account: newAccount.account,
+        categoryL1: newAccount.categoryL1,
+        categoryL2: newAccount.categoryL2,
+        categoryL3: newAccount.categoryL3,
+        categoryL4: newAccount.categoryL4,
+        positionGroup: newAccount.positionGroup,
+        positionType: newAccount.positionType,
+        updatedAt: new Date().toISOString(),
+      };
+      return updatedList;
+    });
     setTemplateNameInput('');
   };
 
@@ -6497,13 +6497,22 @@ export default function Finance({ onAssetPenetration }) {
                     }}
                   />
                   {selectedTemplateId ? (
-                    <button
-                      onClick={handleUpdateTemplate}
-                      className="px-2 py-1.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-                      title="更新当前模板"
-                    >
-                      更新
-                    </button>
+                    <>
+                      <button
+                        onClick={handleUpdateTemplate}
+                        className="px-2 py-1.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                        title="更新当前模板"
+                      >
+                        更新
+                      </button>
+                      <button
+                        onClick={() => { setSelectedTemplateId(''); setTemplateNameInput(''); }}
+                        className="px-2 py-1.5 text-xs bg-indigo-500 text-white rounded hover:bg-indigo-600 transition-colors"
+                        title="另存为新模板"
+                      >
+                        另存为
+                      </button>
+                    </>
                   ) : (
                     <button
                       onClick={handleSaveTemplate}
