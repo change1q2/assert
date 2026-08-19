@@ -3055,13 +3055,22 @@ export default function Accounts() {
                                     </button>
                                   )}
                                   {editingOwner.oldName === name ? (
-                                    <button
-                                      type="button"
-                                      onClick={handleRenameOwnerInForm}
-                                      className="p-1 text-green-500 hover:text-green-600"
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={handleRenameOwnerInForm}
+                                        className="p-1 text-green-500 hover:text-green-600"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingOwner({ oldName: '', newName: '' })}
+                                        className="p-1 text-gray-400 hover:text-gray-500"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
                                   ) : (
                                     <div className="flex items-center gap-1">
                                       <button
@@ -3203,33 +3212,17 @@ export default function Accounts() {
                                 className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 shrink-0"
                               />
                               {editingOwner.oldName === name ? (
-                                <div className="flex items-center gap-1 flex-1 min-w-[140px]">
-                                  <input
-                                    type="text"
-                                    value={editingOwner.newName}
-                                    onChange={(e) => setEditingOwner({ ...editingOwner, newName: e.target.value })}
-                                    autoFocus
-                                    className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') handleRenameOwnerInForm();
-                                      if (e.key === 'Escape') setEditingOwner({ oldName: '', newName: '' });
-                                    }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={handleRenameOwnerInForm}
-                                    className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600 shrink-0"
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingOwner({ oldName: '', newName: '' })}
-                                    className="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-300 shrink-0"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
+                                <input
+                                  type="text"
+                                  value={editingOwner.newName}
+                                  onChange={(e) => setEditingOwner({ ...editingOwner, newName: e.target.value })}
+                                  autoFocus
+                                  className="flex-1 min-w-[140px] px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleRenameOwnerInForm();
+                                    if (e.key === 'Escape') setEditingOwner({ oldName: '', newName: '' });
+                                  }}
+                                />
                               ) : (
                                 <span className="text-sm text-gray-700 dark:text-gray-300 flex-1 truncate">{name}</span>
                               )}
@@ -3268,20 +3261,36 @@ export default function Accounts() {
                                 />
                                 <span className="text-xs text-gray-500 dark:text-gray-400">%</span>
                               </div>
-                              {isChecked && (
+                              {/* 操作区：编辑模式显示保存/取消，正常模式显示编辑/删除 */}
+                              {editingOwner.oldName === name ? (
                                 <div className="flex items-center gap-1 shrink-0">
-                                  {editingOwner.oldName !== name && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setEditingOwner({ oldName: name, newName: name });
-                                      }}
-                                      className="p-1 text-gray-400 hover:text-primary-500"
-                                    >
-                                      <Edit2 className="w-4 h-4" />
-                                    </button>
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={handleRenameOwnerInForm}
+                                    className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600 shrink-0"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingOwner({ oldName: '', newName: '' })}
+                                    className="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-300 shrink-0"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : isChecked ? (
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingOwner({ oldName: name, newName: name });
+                                    }}
+                                    className="p-1 text-gray-400 hover:text-primary-500"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -3293,7 +3302,7 @@ export default function Accounts() {
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 </div>
-                              )}
+                              ) : null}
                             </div>
                           );
                         })}
