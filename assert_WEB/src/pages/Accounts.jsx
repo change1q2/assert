@@ -1616,143 +1616,72 @@ export default function Accounts() {
     }
   };
 
-  const handleRenameOwnerGlobal = async () => {
+  const handleRenameOwnerInForm = () => {
     const { oldName, newName } = editingOwner;
     const trimmedNew = (newName || '').trim();
     if (!trimmedNew || !oldName || trimmedNew === oldName) {
       setEditingOwner({ oldName: '', newName: '' });
       return;
     }
-    const existingNames = new Set(allOwnerNames);
-    if (existingNames.has(trimmedNew)) {
-      if (!confirm(`所有者「${trimmedNew}」已存在，将合并「${oldName}」到「${trimmedNew}」，是否继续？`)) {
-        return;
-      }
-    }
-    // Update all accounts: rename oldName -> trimmedNew; merge if both exist in same account (sum shares, keep isDefault true if either was)
-    const newAccounts = (stateData.accounts || []).map(acc => {
-      if (!Array.isArray(acc.owners)) return acc;
-      const map = {};
-      const merged = [];
-      acc.owners.forEach(o => {
+    // 仅修改当前编辑账户的 formData，不影响其他账户
+    if (Array.isArray(formData.owners) && formData.owners.some(o => o.name === oldName)) {
+      const map2 = {};
+      const merged2 = [];
+      formData.owners.forEach(o => {
         const targetName = o.name === oldName ? trimmedNew : o.name;
-        if (map[targetName] !== undefined) {
-          const idx = map[targetName];
-          const ex = merged[idx];
+        if (map2[targetName] !== undefined) {
+          const idx = map2[targetName];
+          const ex = merged2[idx];
           const wasDefault = ex.isDefault === true || o.isDefault === true;
-          merged[idx] = { ...ex, share: (parseFloat(ex.share) || 0) + (parseFloat(o.share) || 0), isDefault: wasDefault };
+          merged2[idx] = { ...ex, share: (parseFloat(ex.share) || 0) + (parseFloat(o.share) || 0), isDefault: wasDefault };
         } else {
-          map[targetName] = merged.length;
-          merged.push({ ...o, name: targetName });
+          map2[targetName] = merged2.length;
+          merged2.push({ ...o, name: targetName });
         }
       });
-      const normalized = normalizeOwnersDefault(merged);
-      const newType = normalized.length > 1 ? 'multi' : 'personal';
-      return { ...acc, owners: normalized, ownershipType: newType };
-    });
-    const newState = { ...stateData, accounts: newAccounts };
-    const result = await saveState(newState);
-    if (result.success !== false) {
-      setStateData(newState);
-      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
-      // update formData.owners if it referenced oldName (apply same merge)
-      if (Array.isArray(formData.owners) && formData.owners.some(o => o.name === oldName)) {
-        const map2 = {};
-        const merged2 = [];
-        formData.owners.forEach(o => {
-          const targetName = o.name === oldName ? trimmedNew : o.name;
-          if (map2[targetName] !== undefined) {
-            const idx = map2[targetName];
-            const ex = merged2[idx];
-            const wasDefault = ex.isDefault === true || o.isDefault === true;
-            merged2[idx] = { ...ex, share: (parseFloat(ex.share) || 0) + (parseFloat(o.share) || 0), isDefault: wasDefault };
-          } else {
-            map2[targetName] = merged2.length;
-            merged2.push({ ...o, name: targetName });
-          }
-        });
-        const normalizedFd = normalizeOwnersDefault(merged2);
-        setFormData({ ...formData, owners: normalizedFd, ownershipType: normalizedFd.length > 1 ? 'multi' : 'personal' });
-      }
-      // update extraOwnerNames
-      const newExtra = Array.from(new Set([...(extraOwnerNames || [])].map(n => n === oldName ? trimmedNew : n).filter(n => n && String(n).trim())));
-      setExtraOwnerNames(newExtra);
-      // update tempMultiCheckedNames
-      if (tempMultiCheckedNames.has(oldName)) {
-        const newChecked = new Set(tempMultiCheckedNames);
-        newChecked.delete(oldName);
-        newChecked.add(trimmedNew);
-        setTempMultiCheckedNames(newChecked);
-      }
-    } else {
-      alert('后端保存失败，但数据已写入本地缓存');
+      const normalizedFd = normalizeOwnersDefault(merged2);
+      setFormData({ ...formData, owners: normalizedFd, ownershipType: normalizedFd.length > 1 ? 'multi' : 'personal' });
+    }
+    // 更新所有者候选列表
+    const newExtra = Array.from(new Set([...(extraOwnerNames || [])].map(n => n === oldName ? trimmedNew : n).filter(n => n && String(n).trim())));
+    setExtraOwnerNames(newExtra);
+    // 更新勾选集合
+    if (tempMultiCheckedNames.has(oldName)) {
+      const newChecked = new Set(tempMultiCheckedNames);
+      newChecked.delete(oldName);
+      newChecked.add(trimmedNew);
+      setTempMultiCheckedNames(newChecked);
     }
     setEditingOwner({ oldName: '', newName: '' });
   };
 
-  const handleDeleteOwnerGlobal = async (ownerName) => {
+  const handleDeleteOwnerInForm = (ownerName) => {
     if (!ownerName) return;
-    if (!confirm(`确定要删除所有者「${ownerName}」吗？此操作将影响所有包含该所有者的账户，剩余所有者占比将按比例补齐到 100%。`)) return;
-    const newAccounts = (stateData.accounts || []).map(acc => {
-      if (!Array.isArray(acc.owners)) return acc;
-      const wasDefault = acc.owners.some(o => o.name === ownerName && o.isDefault === true);
-      let remaining = acc.owners.filter(o => o.name !== ownerName).map(o => ({ ...o }));
-      if (remaining.length === 0) {
-        return { ...acc, ownershipType: 'personal', owners: [{ name: '自己', share: 100, isDefault: true }] };
-      }
-      // rescale shares to sum 100
-      const sum = remaining.reduce((s, o) => s + (parseFloat(o.share) || 0), 0);
-      if (sum > 0) {
-        remaining = remaining.map(o => ({ ...o, share: Math.round(((parseFloat(o.share) || 0) / sum) * 100 * 100) / 100 }));
+    // 仅修改当前编辑账户的 formData，不影响其他账户
+    if (Array.isArray(formData.owners) && formData.owners.some(o => o.name === ownerName)) {
+      const wasDefaultFd = formData.owners.some(o => o.name === ownerName && o.isDefault === true);
+      let remainingFd = formData.owners.filter(o => o.name !== ownerName).map(o => ({ ...o }));
+      if (remainingFd.length === 0) {
+        remainingFd = [{ name: '自己', share: 100, isDefault: true }];
+        setFormData({ ...formData, owners: remainingFd, ownershipType: 'personal' });
       } else {
-        const eq = Math.round((100 / remaining.length) * 100) / 100;
-        remaining = remaining.map((o, i) => ({ ...o, share: i === 0 ? eq + (100 - eq * remaining.length) : eq }));
-      }
-      // set default: if removed was default, first remaining becomes default
-      if (wasDefault) {
-        remaining = remaining.map((o, i) => ({ ...o, isDefault: i === 0 }));
-      } else {
-        remaining = normalizeOwnersDefault(remaining);
-      }
-      const newType = remaining.length > 1 ? 'multi' : 'personal';
-      return { ...acc, owners: remaining, ownershipType: newType };
-    });
-    const newState = { ...stateData, accounts: newAccounts };
-    const result = await saveState(newState);
-    if (result.success !== false) {
-      setStateData(newState);
-      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
-      // update formData.owners: remove the owner, rescale, fix default
-      if (Array.isArray(formData.owners) && formData.owners.some(o => o.name === ownerName)) {
-        const wasDefaultFd = formData.owners.some(o => o.name === ownerName && o.isDefault === true);
-        let remainingFd = formData.owners.filter(o => o.name !== ownerName).map(o => ({ ...o }));
-        if (remainingFd.length === 0) {
-          remainingFd = [{ name: '自己', share: 100, isDefault: true }];
-          setFormData({ ...formData, owners: remainingFd, ownershipType: 'personal' });
+        const sumFd = remainingFd.reduce((s, o) => s + (parseFloat(o.share) || 0), 0);
+        if (sumFd > 0) {
+          remainingFd = remainingFd.map(o => ({ ...o, share: Math.round(((parseFloat(o.share) || 0) / sumFd) * 100 * 100) / 100 }));
         } else {
-          const sumFd = remainingFd.reduce((s, o) => s + (parseFloat(o.share) || 0), 0);
-          if (sumFd > 0) {
-            remainingFd = remainingFd.map(o => ({ ...o, share: Math.round(((parseFloat(o.share) || 0) / sumFd) * 100 * 100) / 100 }));
-          } else {
-            const eq = Math.round((100 / remainingFd.length) * 100) / 100;
-            remainingFd = remainingFd.map((o, i) => ({ ...o, share: i === 0 ? eq + (100 - eq * remainingFd.length) : eq }));
-          }
-          if (wasDefaultFd) remainingFd = remainingFd.map((o, i) => ({ ...o, isDefault: i === 0 }));
-          else remainingFd = normalizeOwnersDefault(remainingFd);
-          setFormData({ ...formData, owners: remainingFd, ownershipType: remainingFd.length > 1 ? 'multi' : 'personal' });
+          const eq = Math.round((100 / remainingFd.length) * 100) / 100;
+          remainingFd = remainingFd.map((o, i) => ({ ...o, share: i === 0 ? eq + (100 - eq * remainingFd.length) : eq }));
         }
+        if (wasDefaultFd) remainingFd = remainingFd.map((o, i) => ({ ...o, isDefault: i === 0 }));
+        else remainingFd = normalizeOwnersDefault(remainingFd);
+        setFormData({ ...formData, owners: remainingFd, ownershipType: remainingFd.length > 1 ? 'multi' : 'personal' });
       }
-      // update extraOwnerNames
-      const newExtra = Array.from(new Set([...(extraOwnerNames || [])].filter(n => n !== ownerName)));
-      setExtraOwnerNames(newExtra);
-      // update tempMultiCheckedNames
+      // 更新勾选集合
       if (tempMultiCheckedNames.has(ownerName)) {
         const newChecked = new Set(tempMultiCheckedNames);
         newChecked.delete(ownerName);
         setTempMultiCheckedNames(newChecked);
       }
-    } else {
-      alert('后端保存失败，但数据已写入本地缓存');
     }
   };
 
@@ -3105,7 +3034,7 @@ export default function Accounts() {
                                       autoFocus
                                       className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                                       onKeyDown={(e) => {
-                                        if (e.key === 'Enter') handleRenameOwnerGlobal();
+                                        if (e.key === 'Enter') handleRenameOwnerInForm();
                                         if (e.key === 'Escape') setEditingOwner({ oldName: '', newName: '' });
                                       }}
                                     />
@@ -3128,7 +3057,7 @@ export default function Accounts() {
                                   {editingOwner.oldName === name ? (
                                     <button
                                       type="button"
-                                      onClick={handleRenameOwnerGlobal}
+                                      onClick={handleRenameOwnerInForm}
                                       className="p-1 text-green-500 hover:text-green-600"
                                     >
                                       <Edit2 className="w-3.5 h-3.5" />
@@ -3149,7 +3078,7 @@ export default function Accounts() {
                                         type="button"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          handleDeleteOwnerGlobal(name);
+                                          handleDeleteOwnerInForm(name);
                                         }}
                                         className="p-1 text-gray-400 hover:text-red-500"
                                       >
@@ -3282,13 +3211,13 @@ export default function Accounts() {
                                     autoFocus
                                     className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                                     onKeyDown={(e) => {
-                                      if (e.key === 'Enter') handleRenameOwnerGlobal();
+                                      if (e.key === 'Enter') handleRenameOwnerInForm();
                                       if (e.key === 'Escape') setEditingOwner({ oldName: '', newName: '' });
                                     }}
                                   />
                                   <button
                                     type="button"
-                                    onClick={handleRenameOwnerGlobal}
+                                    onClick={handleRenameOwnerInForm}
                                     className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600 shrink-0"
                                   >
                                     ✓
@@ -3357,7 +3286,7 @@ export default function Accounts() {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleDeleteOwnerGlobal(name);
+                                      handleDeleteOwnerInForm(name);
                                     }}
                                     className="p-1 text-gray-400 hover:text-red-500"
                                   >
