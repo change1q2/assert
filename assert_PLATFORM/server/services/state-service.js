@@ -33,9 +33,12 @@ async function loadUserState(userId) {
     (await safeSqlAll(pool, "SELECT currency, rate FROM exchange_rates WHERE user_id = ?", [userId]))
       .map((row) => [row.currency, row.rate])
   );
-  const accounts = (await safeSqlAll(pool, "SELECT id, name, owner, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category FROM accounts WHERE user_id = ? ORDER BY sort_order", [userId]))
+  const accounts = (await safeSqlAll(pool, "SELECT id, name, owner, owners_json, ownership_type, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category FROM accounts WHERE user_id = ? ORDER BY sort_order", [userId]))
     .map((row) => ({
-      id: row.id, name: row.name, owner: row.owner, currency: row.currency, type: row.type,
+      id: row.id, name: row.name, owner: row.owner,
+      owners: maybeParseJson(row.owners_json, null),
+      ownershipType: row.ownership_type || 'personal',
+      currency: row.currency, type: row.type,
       balance: row.balance, liability: row.liability, enabled: Boolean(row.enabled), default: Boolean(row.is_default),
       category: row.category || '', subCategory: row.sub_category || '',
     }));
@@ -397,9 +400,12 @@ async function saveUserState(conn, userId, state) {
   }
 
   for (const row of (state.accounts || [])) {
-    await sqlRun(conn, `INSERT INTO accounts (user_id, id, name, owner, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, text(row.id), text(row.name), text(row.owner), text(row.currency), text(row.type),
+    await sqlRun(conn, `INSERT INTO accounts (user_id, id, name, owner, owners_json, ownership_type, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId, text(row.id), text(row.name), text(row.owner),
+       row.owners ? JSON.stringify(row.owners) : null,
+       text(row.ownershipType || 'personal'),
+       text(row.currency), text(row.type),
        number(row.balance), number(row.liability), row.enabled === false ? 0 : 1, row.default ? 1 : 0,
        (state.accounts || []).indexOf(row), text(row.category), text(row.subCategory)]);
   }

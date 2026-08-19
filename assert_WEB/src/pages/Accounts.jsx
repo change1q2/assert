@@ -1175,8 +1175,9 @@ export default function Accounts() {
     try {
       let newAccounts = stateData.accounts || [];
 
+      // 深拷贝 owners，防止引用共享导致跨账户数据污染
       const ownersToSave = Array.isArray(formData.owners) && formData.owners.length > 0
-        ? formData.owners
+        ? formData.owners.map(o => ({ ...o }))
         : [{ name: '自己', share: 100, isDefault: true }];
       const ownershipTypeToSave = formData.ownershipType || (ownersToSave.length > 1 ? 'multi' : 'personal');
 
@@ -3043,7 +3044,8 @@ export default function Accounts() {
                           }
                           let multiOwners;
                           if (formData.ownershipType === 'multi' && Array.isArray(formData.owners) && formData.owners.length > 0) {
-                            multiOwners = formData.owners;
+                            // 深拷贝，防止修改 formData.owners 中的对象
+                            multiOwners = formData.owners.map(o => ({ ...o }));
                           } else {
                             const defaultOwnerName = Array.from(initialChecked)[0] || '自己';
                             multiOwners = [{ name: defaultOwnerName, share: 100, isDefault: true }];
