@@ -204,6 +204,8 @@ export default function Accounts() {
     try {
       localStorage.removeItem('wealth_os_extra_owners');
       localStorage.removeItem('wealth_os_all_owners');
+      // 清除过大的 full_state 缓存（可能导致配额超限）
+      localStorage.removeItem('wealth_os_full_state');
     } catch { /* ignore */ }
   }, []);
   const [ownershipDropdownOpen, setOwnershipDropdownOpen] = useState(false);
@@ -1248,8 +1250,10 @@ export default function Accounts() {
 
       const newState = { ...stateData, accounts: newAccounts };
 
-      localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
-      localStorage.setItem('wealth_os_full_state', JSON.stringify(newState));
+      // localStorage 仅缓存账户列表（轻量），full_state 太大容易超配额
+      try {
+        localStorage.setItem('wealth_os_accounts', JSON.stringify(newAccounts));
+      } catch (_) { /* localStorage 满了不影响主流程 */ }
 
       const result = await saveState(newState);
       if (result.success !== false) {
