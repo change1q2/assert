@@ -3251,7 +3251,7 @@ export default function Accounts() {
                           const ownerItem = Array.isArray(formData.owners) ? formData.owners.find(o => o.name === name) : null;
                           const shareValue = ownerItem ? ownerItem.share : 0;
                           return (
-                            <div key={name} className="flex items-center gap-2 flex-wrap bg-white dark:bg-slate-800 rounded-lg p-2 border border-gray-200 dark:border-slate-600">
+                            <div key={name} className="flex items-center gap-2 bg-white dark:bg-slate-800 rounded-lg p-2 border border-gray-200 dark:border-slate-600">
                               <input
                                 type="checkbox"
                                 checked={isChecked}
@@ -3274,7 +3274,7 @@ export default function Accounts() {
                                 className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 shrink-0"
                               />
                               {editingOwner.oldName === name ? (
-                                <div className="flex items-center gap-1 flex-1 min-w-[120px]">
+                                <div className="flex items-center gap-1 flex-1 min-w-[140px]">
                                   <input
                                     type="text"
                                     value={editingOwner.newName}
@@ -3289,9 +3289,16 @@ export default function Accounts() {
                                   <button
                                     type="button"
                                     onClick={handleRenameOwnerGlobal}
-                                    className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600"
+                                    className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600 shrink-0"
                                   >
-                                    保存
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingOwner({ oldName: '', newName: '' })}
+                                    className="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-300 shrink-0"
+                                  >
+                                    ✕
                                   </button>
                                 </div>
                               ) : (
@@ -3375,14 +3382,14 @@ export default function Accounts() {
                               新增所有者
                             </button>
                           ) : (
-                            <div className="flex-1 flex items-center gap-2">
+                            <div className="flex items-center gap-2 w-full">
                               <input
                                 type="text"
                                 value={multiNewName}
                                 onChange={(e) => setMultiNewName(e.target.value)}
                                 placeholder="输入姓名"
                                 autoFocus
-                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                                className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-slate-500 rounded bg-white dark:bg-slate-800 text-gray-900 dark:text-white min-w-0"
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
                                     const trimmed = multiNewName.trim();
@@ -3422,7 +3429,17 @@ export default function Accounts() {
                                 }}
                                 className="px-2 py-1 text-xs rounded bg-primary-500 text-white hover:bg-primary-600 transition-colors shrink-0"
                               >
-                                保存
+                                ✓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowMultiAdd(false);
+                                  setMultiNewName('');
+                                }}
+                                className="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-300 transition-colors shrink-0"
+                              >
+                                ✕
                               </button>
                             </div>
                           )}
