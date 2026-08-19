@@ -4788,9 +4788,21 @@ export default function Finance({ onAssetPenetration }) {
     // 记录已验证的代码-名称对，避免重复校验
     verifiedPairRef.current = { code: item.code || '', name: item.name || '' };
     setNewAccount(prev => {
+      // 先判断是否货币基金（基于选择后的名称/代码再检查一次）
+      const _newName = item.name || prev.name || '';
+      const _newCode = item.code || prev.code || '';
+      const _catL2 = prev.categoryL2 || '';
+      const _catL4 = prev.categoryL4 || '';
+      const _positionType = prev.positionType || '';
+      const _kind = prev.kind || prev.assetType || '';
+      const _isMF = _catL2 === '货币型' || _catL4 === '货币基金' || _positionType === '货币基金' ||
+                   _newName.includes('货币') || _kind === '货基' || _kind === '货币基金' || _newCode === '000509';
+
       const qty = parseFloat(prev.quantity) || 0;
       const cost = parseFloat(prev.cost) || 0;
-      const price = item.price ? parseFloat(item.price) : parseFloat(prev.currentPrice) || 0;
+      // 货基：现价恒为 1；API 返回的 price 实际是万份收益，写入 navPer10k
+      const _rawPrice = item.price ? parseFloat(item.price) : parseFloat(prev.currentPrice) || 0;
+      const price = _isMF ? 1 : _rawPrice;
       const currentValue = qty * price;
       const unitPnl = price - cost;
       const holdingPnl = unitPnl * qty;
@@ -4799,7 +4811,9 @@ export default function Finance({ onAssetPenetration }) {
         ...prev,
         code: item.code || prev.code,
         name: item.name || prev.name,
-        currentPrice: item.price ? String(item.price) : prev.currentPrice,
+        currentPrice: String(price),
+        // 货基：搜索到的 price 作为万份收益写入
+        ...(_isMF && item.price ? { navPer10k: String(item.price) } : {}),
         currentValue: (qty && price) ? currentValue.toFixed(2) : prev.currentValue,
         holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : prev.holdingPnl,
         holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
@@ -4814,14 +4828,23 @@ export default function Finance({ onAssetPenetration }) {
           setNewAccount(prev => {
             const qty = parseFloat(prev.quantity) || 0;
             const cost = parseFloat(prev.cost) || 0;
-            const price = parseFloat(quotes[0].price) || 0;
+            // 货基判断（基于当前表单状态）
+            const _isMF = (prev.categoryL2 === '货币型') || (prev.categoryL4 === '货币基金') ||
+                         (prev.positionType === '货币基金') || (prev.name || '').includes('货币') ||
+                         (prev.kind === '货基') || (prev.kind === '货币基金') ||
+                         (prev.assetType === '货基') || (prev.assetType === '货币基金') ||
+                         String(prev.code || '') === '000509';
+            const _rawPrice = parseFloat(quotes[0].price) || 0;
+            const price = _isMF ? 1 : _rawPrice;
             const currentValue = qty * price;
             const unitPnl = price - cost;
             const holdingPnl = unitPnl * qty;
             const holdingPnlRate = cost !== 0 ? (unitPnl / cost) * 100 : 0;
             return {
               ...prev,
-              currentPrice: String(quotes[0].price),
+              currentPrice: String(price),
+              // 货基：行情 API 价格 → 万份收益
+              ...(_isMF ? { navPer10k: String(_rawPrice) } : {}),
               currentValue: (qty && price) ? currentValue.toFixed(2) : prev.currentValue,
               holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : prev.holdingPnl,
               holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
@@ -4835,7 +4858,14 @@ export default function Finance({ onAssetPenetration }) {
             setNewAccount(prev => {
               const qty = parseFloat(prev.quantity) || 0;
               const cost = parseFloat(prev.cost) || 0;
-              const price = Number(navData.nav);
+              const _isMF = (prev.categoryL2 === '货币型') || (prev.categoryL4 === '货币基金') ||
+                           (prev.positionType === '货币基金') || (prev.name || '').includes('货币') ||
+                           (prev.kind === '货基') || (prev.kind === '货币基金') ||
+                           (prev.assetType === '货基') || (prev.assetType === '货币基金') ||
+                           String(prev.code || '') === '000509';
+              // 货基：navPer10k 从 fetchMoneyFund 获取，此处 nav 字段实际对应万份收益；现价固定为 1
+              const _rawPrice = Number(navData.nav);
+              const price = _isMF ? 1 : _rawPrice;
               const currentValue = qty * price;
               const unitPnl = price - cost;
               const holdingPnl = unitPnl * qty;
@@ -4843,6 +4873,7 @@ export default function Finance({ onAssetPenetration }) {
               return {
                 ...prev,
                 currentPrice: String(price),
+                ...(_isMF ? { navPer10k: String(_rawPrice) } : {}),
                 currentValue: (qty && price) ? currentValue.toFixed(2) : prev.currentValue,
                 holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : prev.holdingPnl,
                 holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
@@ -4942,7 +4973,14 @@ export default function Finance({ onAssetPenetration }) {
           const qty = parseFloat(prev.quantity) || 0;
           const cost = parseFloat(prev.cost) || 0;
           const prevPrice = parseFloat(prev.currentPrice) || 0;
-          const newPrice = matchItem.price ? parseFloat(matchItem.price) : prevPrice;
+          // 货基判断（基于当前表单状态）
+          const _isMF = (prev.categoryL2 === '货币型') || (prev.categoryL4 === '货币基金') ||
+                       (prev.positionType === '货币基金') || (prev.name || '').includes('货币') ||
+                       (prev.kind === '货基') || (prev.kind === '货币基金') ||
+                       (prev.assetType === '货基') || (prev.assetType === '货币基金') ||
+                       String(prev.code || '') === '000509';
+          const _rawPrice = matchItem.price ? parseFloat(matchItem.price) : prevPrice;
+          const newPrice = _isMF ? 1 : _rawPrice;
           const currentValue = qty * newPrice;
           const unitPnl = newPrice - cost;
           const holdingPnl = unitPnl * qty;
@@ -4959,6 +4997,8 @@ export default function Finance({ onAssetPenetration }) {
             code: finalCode,
             name: finalName,
             currentPrice: newPrice ? String(newPrice) : prev.currentPrice,
+            // 货基：搜索到的 price 作为万份收益写入
+            ...(_isMF && matchItem.price ? { navPer10k: String(matchItem.price) } : {}),
             currentValue: (qty && newPrice) ? currentValue.toFixed(2) : prev.currentValue,
             holdingPnl: (cost || qty || newPrice) ? holdingPnl.toFixed(2) : prev.holdingPnl,
             holdingPnlRate: (cost || qty || newPrice) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
@@ -4974,7 +5014,13 @@ export default function Finance({ onAssetPenetration }) {
               setNewAccount(prev => {
                 const qty = parseFloat(prev.quantity) || 0;
                 const cost = parseFloat(prev.cost) || 0;
-                const price = parseFloat(quotes[0].price) || 0;
+                const _isMF = (prev.categoryL2 === '货币型') || (prev.categoryL4 === '货币基金') ||
+                             (prev.positionType === '货币基金') || (prev.name || '').includes('货币') ||
+                             (prev.kind === '货基') || (prev.kind === '货币基金') ||
+                             (prev.assetType === '货基') || (prev.assetType === '货币基金') ||
+                             String(prev.code || '') === '000509';
+                const _rawPrice = parseFloat(quotes[0].price) || 0;
+                const price = _isMF ? 1 : _rawPrice;
                 const currentValue = qty * price;
                 const unitPnl = price - cost;
                 const holdingPnl = unitPnl * qty;
@@ -4982,6 +5028,8 @@ export default function Finance({ onAssetPenetration }) {
                 return {
                   ...prev,
                   currentPrice: String(price),
+                  // 货基：行情 API 价格 → 万份收益
+                  ...(_isMF ? { navPer10k: String(_rawPrice) } : {}),
                   currentValue: (qty && price) ? currentValue.toFixed(2) : prev.currentValue,
                   holdingPnl: (cost || qty || price) ? holdingPnl.toFixed(2) : prev.holdingPnl,
                   holdingPnlRate: (cost || qty || price) ? holdingPnlRate.toFixed(2) : prev.holdingPnlRate,
