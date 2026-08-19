@@ -2022,8 +2022,12 @@ export default function IndependentAssets() {
                       actualValue += toCNY(cost, cur);
                     } else if (assetType === 'equity') {
                       const mv = parseFloat(item.marketValue || 0);
+                      const qty = parseFloat(item.quantity || 0);
+                      const unitCost = parseFloat(item.cost || 0);
+                      // 持仓成本 = 数量 × 单价（与列表 holdingCost 计算一致）
+                      const totalCost = qty * unitCost;
                       marketValue += toCNY(mv, cur);
-                      purchaseCost += toCNY(item.cost || item.marketValue || 0, cur);
+                      purchaseCost += toCNY(totalCost, cur);
                       profitLoss += toCNY(item.pnl || 0, cur);
                       actualValue += toCNY(mv, cur);
                     } else if (assetType === 'fixeddeposit') {
