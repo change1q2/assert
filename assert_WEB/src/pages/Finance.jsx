@@ -3565,6 +3565,12 @@ export default function Finance({ onAssetPenetration }) {
         // 排除场外基金（由 loadFundNav 单独处理）
         const catL3 = a.categoryL3 || a.tertiaryCategory;
         if (catL3 === '场外' || (!catL3 && a.market === '场外基金')) return false;
+        // 排除资产类型为非股票的持仓（债券/基金/货基等），防止同代码股票行情干扰
+        // 这些持仓由 loadFundNav 或其他专用接口处理
+        const at = a.assetType || '';
+        const kind = a.kind || '';
+        const nonStockTypes = ['债券', '基金', '货基', '货币基金', '银行理财'];
+        if (nonStockTypes.includes(at) || nonStockTypes.includes(kind)) return false;
         return true;
       })
       .map(a => {
@@ -3626,7 +3632,13 @@ export default function Finance({ onAssetPenetration }) {
       if (!a.code || !/^\d{6}$/.test(String(a.code).trim())) return false;
       // 场外基金（包含 债权类/场外、商品类/场外 等任意一级分类下三级为场外的基金）
       const catL3 = a.categoryL3 || a.tertiaryCategory;
-      return catL3 === '场外' || (!catL3 && a.market === '场外基金');
+      if (catL3 === '场外' || (!catL3 && a.market === '场外基金')) return true;
+      // 资产类型为非股票的持仓（债券/基金/货基等），用基金净值接口获取价格，防止同代码股票行情干扰
+      const at = a.assetType || '';
+      const kind = a.kind || '';
+      const nonStockTypes = ['债券', '基金', '货基', '货币基金', '银行理财'];
+      if (nonStockTypes.includes(at) || nonStockTypes.includes(kind)) return true;
+      return false;
     });
     if (fundItems.length === 0) return;
     try {
@@ -4721,10 +4733,11 @@ export default function Finance({ onAssetPenetration }) {
             /基金|货币/.test(r.typeName || '') || /基金|货币/.test(r.name || '')
           );
         }
-        // 三级分类为"场外" 且 资产类型为非股票（基金/债券等）时：过滤掉股票类资产
+        // 资产类型已选为非股票时（债券/基金/货基等）：过滤掉股票类搜索结果，防止同代码的股票干扰
         const categoryL3 = cur.categoryL3 || cur.tertiaryCategory || '';
         const curAssetType = cur.assetType || '';
-        if (categoryL3 === '场外' && curAssetType !== '股票') {
+        const isNonStockAsset = curAssetType && curAssetType !== '股票';
+        if (isNonStockAsset || (categoryL3 === '场外' && curAssetType !== '股票')) {
           results = results.filter(r => {
             const classify = r.classify || '';
             // 排除股票类
@@ -4911,10 +4924,11 @@ export default function Finance({ onAssetPenetration }) {
         return;
       }
 
-      // 过滤：根据当前三级分类（与 handleCodeSearch 保持一致）
+      // 过滤：根据当前资产类型和三级分类（与 handleCodeSearch 保持一致）
       const categoryL3 = cur.categoryL3 || cur.tertiaryCategory || '';
       const curAssetType = cur.assetType || '';
-      if (categoryL3 === '场外' && curAssetType !== '股票') {
+      const isNonStockAsset = curAssetType && curAssetType !== '股票';
+      if (isNonStockAsset || (categoryL3 === '场外' && curAssetType !== '股票')) {
         results = results.filter(r => {
           const classify = r.classify || '';
           // 排除股票类
