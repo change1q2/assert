@@ -1181,11 +1181,8 @@ export default function Accounts() {
         : [{ name: '自己', share: 100, isDefault: true }];
       const ownershipTypeToSave = formData.ownershipType || (ownersToSave.length > 1 ? 'multi' : 'personal');
 
-      const allOwnerNamesFromForm = ownersToSave.map(o => o.name).filter(n => n && String(n).trim());
-      const mergedExtraOwnerNames = Array.from(new Set([...(extraOwnerNames || []), ...allOwnerNamesFromForm]));
-      if (JSON.stringify(mergedExtraOwnerNames) !== JSON.stringify(extraOwnerNames || [])) {
-        setExtraOwnerNames(mergedExtraOwnerNames);
-      }
+      // 注意：不再更新全局 extraOwnerNames，避免跨账户污染
+      // 每个账户的所有者数据独立保存在自身的 owners 字段中
 
       if (editingAccount) {
         const saveData = { ...formData };
@@ -1641,16 +1638,6 @@ export default function Accounts() {
       });
       const normalizedFd = normalizeOwnersDefault(merged2);
       setFormData({ ...formData, owners: normalizedFd, ownershipType: normalizedFd.length > 1 ? 'multi' : 'personal' });
-    }
-    // 更新所有者候选列表
-    const newExtra = Array.from(new Set([...(extraOwnerNames || [])].map(n => n === oldName ? trimmedNew : n).filter(n => n && String(n).trim())));
-    setExtraOwnerNames(newExtra);
-    // 更新勾选集合
-    if (tempMultiCheckedNames.has(oldName)) {
-      const newChecked = new Set(tempMultiCheckedNames);
-      newChecked.delete(oldName);
-      newChecked.add(trimmedNew);
-      setTempMultiCheckedNames(newChecked);
     }
     setEditingOwner({ oldName: '', newName: '' });
   };
@@ -3018,10 +3005,26 @@ export default function Accounts() {
                         {ownerDropdownOpen && (
                           <div className="absolute z-20 w-full mt-1 bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg max-h-60 overflow-y-auto"
                             onClick={(e) => e.stopPropagation()}>
-                            {allOwnerNames.length === 0 ? (
-                              <div className="px-3 py-2 text-sm text-gray-400">暂无所有者，点击右侧 + 新增</div>
-                            ) : (
-                              allOwnerNames.map(name => (
+                            {/* 仅显示当前账户相关的所有者，不显示其他账户的所有者 */}
+                            {(() => {
+                              const currentOwnerName = formData.owners?.[0]?.name;
+                              const scopedNames = new Set();
+                              if (currentOwnerName) scopedNames.add(currentOwnerName);
+                              // 编辑模式：包含原账户的所有者
+                              if (editingAccount && Array.isArray(editingAccount.owners)) {
+                                editingAccount.owners.forEach(o => { if (o?.name) scopedNames.add(o.name); });
+                              }
+                              // 新增模式：包含最近个人所有者
+                              if (lastPersonalOwner) scopedNames.add(lastPersonalOwner);
+                              // 包含本次编辑新增的所有者
+                              if (Array.isArray(formData.owners)) {
+                                formData.owners.forEach(o => { if (o?.name) scopedNames.add(o.name); });
+                              }
+                              const names = Array.from(scopedNames);
+                              if (names.length === 0) {
+                                return <div className="px-3 py-2 text-sm text-gray-400">暂无所有者，点击右侧 + 新增</div>;
+                              }
+                              return names.map(name => (
                                 <div
                                   key={name}
                                   className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 dark:hover:bg-slate-600"
@@ -3096,8 +3099,8 @@ export default function Accounts() {
                                     </div>
                                   )}
                                 </div>
-                              ))
-                            )}
+                              ));
+                            })()}
                           </div>
                         )}
                       </div>
@@ -3125,8 +3128,6 @@ export default function Accounts() {
                             if (e.key === 'Enter') {
                               const trimmed = personalNewName.trim();
                               if (trimmed) {
-                                const newExtra = Array.from(new Set([...(extraOwnerNames || []), trimmed]));
-                                setExtraOwnerNames(newExtra);
                                 setFormData({
                                   ...formData,
                                   owners: [{ name: trimmed, share: 100, isDefault: true }],
@@ -3147,8 +3148,6 @@ export default function Accounts() {
                           onClick={() => {
                             const trimmed = personalNewName.trim();
                             if (trimmed) {
-                              const newExtra = Array.from(new Set([...(extraOwnerNames || []), trimmed]));
-                              setExtraOwnerNames(newExtra);
                               setFormData({
                                 ...formData,
                                 owners: [{ name: trimmed, share: 100, isDefault: true }],
@@ -3184,31 +3183,17 @@ export default function Accounts() {
                     </div>
                     {multiOwnerPanelOpen && (
                       <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {allOwnerNames.map(name => {
-                          const isChecked = tempMultiCheckedNames.has(name);
-                          const ownerItem = Array.isArray(formData.owners) ? formData.owners.find(o => o.name === name) : null;
-                          const shareValue = ownerItem ? ownerItem.share : 0;
+                        {/* 仅显示当前账户的所有者，不显示其他账户的所有者 */}
+                        {(Array.isArray(formData.owners) ? formData.owners : []).map((owner) => {
+                          const name = owner.name;
+                          const shareValue = owner.share;
                           return (
                             <div key={name} className="flex items-center gap-2 bg-white dark:bg-slate-800 rounded-lg p-2 border border-gray-200 dark:border-slate-600">
+                              {/* 勾选框始终选中：这些是当前账户的所有者 */}
                               <input
                                 type="checkbox"
-                                checked={isChecked}
-                                onChange={(e) => {
-                                  const checked = e.target.checked;
-                                  const newChecked = new Set(tempMultiCheckedNames);
-                                  let newOwners = Array.isArray(formData.owners) ? formData.owners.map(o => ({ ...o })) : [];
-                                  if (checked) {
-                                    newChecked.add(name);
-                                    if (!newOwners.find(o => o.name === name)) {
-                                      newOwners.push({ name, share: 0 });
-                                    }
-                                  } else {
-                                    newChecked.delete(name);
-                                    newOwners = newOwners.filter(o => o.name !== name);
-                                  }
-                                  setTempMultiCheckedNames(newChecked);
-                                  setFormData({ ...formData, owners: newOwners });
-                                }}
+                                checked={true}
+                                readOnly
                                 className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 shrink-0"
                               />
                               {editingOwner.oldName === name ? (
@@ -3226,38 +3211,32 @@ export default function Accounts() {
                               ) : (
                                 <span className="text-sm text-gray-700 dark:text-gray-300 flex-1 truncate">{name}</span>
                               )}
-                              {isChecked && (
-                                <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 shrink-0">
-                                  <input
-                                    type="radio"
-                                    name="default-owner"
-                                    checked={!!ownerItem?.isDefault}
-                                    onChange={() => handleSetDefaultOwner(name)}
-                                    className="w-3.5 h-3.5"
-                                  />
-                                  默认
-                                </label>
-                              )}
+                              <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                                <input
+                                  type="radio"
+                                  name="default-owner"
+                                  checked={!!owner.isDefault}
+                                  onChange={() => handleSetDefaultOwner(name)}
+                                  className="w-3.5 h-3.5"
+                                />
+                                默认
+                              </label>
                               <div className="flex items-center gap-1 shrink-0">
                                 <input
                                   type="number"
                                   min={0}
                                   max={100}
                                   step={0.01}
-                                  value={isChecked ? shareValue : ''}
-                                  disabled={!isChecked}
+                                  value={shareValue}
                                   onChange={(e) => {
                                     const val = parseFloat(e.target.value);
                                     const shareNum = isNaN(val) ? 0 : Math.max(0, Math.min(100, val));
                                     const newOwners = (Array.isArray(formData.owners) ? formData.owners.map(o => ({ ...o })) : []).map(o =>
                                       o.name === name ? { ...o, share: shareNum } : o
                                     );
-                                    if (!newOwners.find(o => o.name === name) && tempMultiCheckedNames.has(name)) {
-                                      newOwners.push({ name, share: shareNum });
-                                    }
                                     setFormData({ ...formData, owners: newOwners });
                                   }}
-                                  className={`w-20 px-2 py-1 text-sm border rounded text-right tabular-nums ${isChecked ? 'border-gray-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white' : 'border-gray-200 dark:border-slate-600 bg-gray-100 dark:bg-slate-700/30 text-gray-400'}`}
+                                  className="w-20 px-2 py-1 text-sm border rounded text-right tabular-nums border-gray-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
                                 />
                                 <span className="text-xs text-gray-500 dark:text-gray-400">%</span>
                               </div>
@@ -3279,7 +3258,7 @@ export default function Accounts() {
                                     ✕
                                   </button>
                                 </div>
-                              ) : isChecked ? (
+                              ) : (
                                 <div className="flex items-center gap-1 shrink-0">
                                   <button
                                     type="button"
@@ -3302,10 +3281,14 @@ export default function Accounts() {
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 </div>
-                              ) : null}
+                              )}
                             </div>
                           );
                         })}
+                        {/* 空状态提示 */}
+                        {(!Array.isArray(formData.owners) || formData.owners.length === 0) && (
+                          <div className="text-center text-sm text-gray-400 py-2">暂无所有者，点击下方新增</div>
+                        )}
                         <div className="flex items-center gap-2 pt-1">
                           {!showMultiAdd ? (
                             <button
@@ -3332,12 +3315,7 @@ export default function Accounts() {
                                   if (e.key === 'Enter') {
                                     const trimmed = multiNewName.trim();
                                     if (trimmed) {
-                                      const newExtra = Array.from(new Set([...(extraOwnerNames || []), trimmed]));
-                                      setExtraOwnerNames(newExtra);
-                                      const newChecked = new Set(tempMultiCheckedNames);
-                                      newChecked.add(trimmed);
                                       const newOwners = (Array.isArray(formData.owners) ? formData.owners.map(o => ({ ...o })) : []).concat([{ name: trimmed, share: 0 }]);
-                                      setTempMultiCheckedNames(newChecked);
                                       setFormData({ ...formData, owners: newOwners });
                                     }
                                     setShowMultiAdd(false);
@@ -3354,12 +3332,7 @@ export default function Accounts() {
                                 onClick={() => {
                                   const trimmed = multiNewName.trim();
                                   if (trimmed) {
-                                    const newExtra = Array.from(new Set([...(extraOwnerNames || []), trimmed]));
-                                    setExtraOwnerNames(newExtra);
-                                    const newChecked = new Set(tempMultiCheckedNames);
-                                    newChecked.add(trimmed);
                                     const newOwners = (Array.isArray(formData.owners) ? formData.owners.map(o => ({ ...o })) : []).concat([{ name: trimmed, share: 0 }]);
-                                    setTempMultiCheckedNames(newChecked);
                                     setFormData({ ...formData, owners: newOwners });
                                   }
                                   setShowMultiAdd(false);
