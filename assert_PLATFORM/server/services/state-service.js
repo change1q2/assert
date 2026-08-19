@@ -93,7 +93,7 @@ async function loadUserState(userId) {
     accountLookup.set(String(acc.name), acc.name);
   }
 
-  const financeAssets = (await safeSqlAll(pool, "SELECT id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, quantity, available_shares, current_price, pnl, pnl_percent, cumulative_return, holding_pnl, holding_pnl_rate, cumulative_return_rate, price_manual_edit, mf_historical_base, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order FROM finance_assets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+  const financeAssets = (await safeSqlAll(pool, "SELECT id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, quantity, available_shares, current_price, pnl, pnl_percent, cumulative_return, holding_pnl, holding_pnl_rate, cumulative_return_rate, price_manual_edit, force_binding, mf_historical_base, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order FROM finance_assets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
     id: numericIfPossible(row.id), kind: row.kind, assetKind: row.asset_kind || '', accountId: row.account_id,
     account: accountLookup.get(String(row.account_id)) || row.account_id || '',
     category: row.category,
@@ -110,6 +110,7 @@ async function loadUserState(userId) {
     holdingPnlRate: row.holding_pnl_rate != null ? row.holding_pnl_rate : null,
     cumulativeReturnRate: row.cumulative_return_rate != null ? row.cumulative_return_rate : null,
     priceManualEdit: row.price_manual_edit === 1 || row.price_manual_edit === true,
+    forceBinding: row.force_binding === 1 || row.force_binding === true,
     _mfHistoricalBase: row.mf_historical_base != null ? row.mf_historical_base : null,
     tags: row.tags || '', status: row.status || 'active', archiveDate: row.archive_date || '',
     transactions: transactionsByAsset.get(String(row.id)) || [],
@@ -430,8 +431,8 @@ async function saveUserState(conn, userId, state) {
 
   for (const [index, row] of (state.financeAssets || []).entries()) {
     await sqlRun(conn, `INSERT INTO finance_assets
-      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, quantity, available_shares, current_price, pnl, pnl_percent, cumulative_return, holding_pnl, holding_pnl_rate, cumulative_return_rate, price_manual_edit, mf_historical_base, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, quantity, available_shares, current_price, pnl, pnl_percent, cumulative_return, holding_pnl, holding_pnl_rate, cumulative_return_rate, price_manual_edit, force_binding, mf_historical_base, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, text(row.id), text(row.kind), text(row.assetKind), text(row.accountId), text(row.category),
        text(row.subcategory), text(row.tertiaryCategory), text(row.market), text(row.currency),
        text(row.name), text(row.code), text(row.positionGroup), text(row.positionType || row.positionCategory),
@@ -442,6 +443,7 @@ async function saveUserState(conn, userId, state) {
        row.holdingPnlRate != null ? number(row.holdingPnlRate) : null,
        row.cumulativeReturnRate != null ? number(row.cumulativeReturnRate) : null,
        (row.priceManualEdit === true || row.priceManualEdit === 'true') ? 1 : 0,
+       (row.forceBinding === true || row.forceBinding === 'true') ? 1 : 0,
        row._mfHistoricalBase != null ? number(row._mfHistoricalBase) : null,
        number(row.avgBuyPrice), number(row.holdingDays),
        number(row.positionWeight), number(row.totalFees), number(row.todayPnl), number(row.todayPnlPercent),
