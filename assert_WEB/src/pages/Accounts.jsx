@@ -1256,13 +1256,18 @@ export default function Accounts() {
       } catch (_) { /* localStorage 满了不影响主流程 */ }
 
       const result = await saveState(newState);
-      if (result.success !== false) {
+      if (result.ok && result.server) {
+        // 服务端保存成功
+        setStateData(newState);
+        setShowModal(false);
+      } else if (result.ok && result.cached) {
+        // 仅本地缓存，服务端保存失败
+        alert('⚠️ 服务端保存失败，数据仅存入本地缓存。\n原因：' + (result.error || '网络错误') + '\n\n请检查网络连接，稍后自动同步。');
         setStateData(newState);
         setShowModal(false);
       } else {
-        alert('后端保存失败，但数据已写入本地缓存');
-        setStateData(newState);
-        setShowModal(false);
+        // 完全失败
+        alert('❌ 保存失败：' + (result.error || '未知错误'));
       }
     } catch (err) {
       console.error('Failed to save account:', err);

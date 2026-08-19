@@ -344,20 +344,36 @@ export async function saveState(state) {
       body: JSON.stringify({ state }),
     })
     if (response && (response.ok || response.success)) {
-      setCache('state', state)
+      // 只缓存轻量索引，避免 full_state 超过 localStorage 配额
+      try {
+        const accountsSnap = state.accounts ? state.accounts.map(a => ({
+          id: a.id, name: a.name, type: a.type, balance: a.balance,
+          owners: a.owners, ownershipType: a.ownershipType,
+          category: a.category, subCategory: a.subCategory,
+        })) : [];
+        localStorage.setItem('wealth_os_accounts', JSON.stringify(accountsSnap));
+      } catch (_) { /* ignore */ }
       clearPendingSync('state')
       invalidateStateCache()
-      setMemCache('state', state, 10 * 1000)
-      return response
+      return { ok: true, server: true }
     }
-    throw new Error(response?.error || '保存状态失败')
+    // 服务端返回非成功状态
+    throw new Error(response?.error || response?.message || '保存状态失败')
   } catch (err) {
-    console.warn('Save state to server failed, saving to local cache:', err.message)
-    setCache('state', state)
-    markPendingSync('state', state)
-    invalidateStateCache()
-    setMemCache('state', state, 10 * 1000)
-    return { success: true, data: state, cached: true }
+    console.error('[saveState] 服务端保存失败:', err.message)
+    // 缓存到 localStorage 作为临时回退
+    try {
+      const accountsSnap = state.accounts ? state.accounts.map(a => ({
+        id: a.id, name: a.name, type: a.type, balance: a.balance,
+        owners: a.owners, ownershipType: a.ownershipType,
+        category: a.category, subCategory: a.subCategory,
+      })) : [];
+      localStorage.setItem('wealth_os_accounts', JSON.stringify(accountsSnap));
+      markPendingSync('state', state)
+      return { ok: true, server: false, cached: true, error: err.message }
+    } catch {
+      return { ok: false, server: false, error: err.message }
+    }
   }
 }
 
