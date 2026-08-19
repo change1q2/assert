@@ -3951,6 +3951,7 @@ export default function Finance({ onAssetPenetration }) {
         dataSource: newAccount.dataSource || '',
         dataSources: newAccount.dataSources || [],
         priceManualEdit: newAccount.priceManualEdit || false,
+        forceBinding: newAccount.forceBinding || false,
       };
 
       // 获取当前的 financeAssets 数组
@@ -4170,10 +4171,14 @@ export default function Finance({ onAssetPenetration }) {
       dataSource: holding.dataSource || '',
       dataSources: holding.dataSources || [],
       priceManualEdit: holding.priceManualEdit || false,
-      forceBinding: false,
+      forceBinding: holding.forceBinding || false,
     });
-    // 编辑时重置绑定对（避免残留上次绑定）
-    boundPairRef.current = { name: '', code: '' };
+    // 编辑时恢复绑定对（forceBinding 为 true 时自动点亮图标）
+    if (holding.forceBinding) {
+      boundPairRef.current = { name: holding.name || '', code: holding.code || '' };
+    } else {
+      boundPairRef.current = { name: '', code: '' };
+    }
     setEditMode(true);
     setEditingId(holding.id);
     setShowAddModal(true);
@@ -5852,6 +5857,7 @@ export default function Finance({ onAssetPenetration }) {
         archiveDate: a.archiveDate || '',
         isArchived: a.status === 'archived',
         priceManualEdit: a.priceManualEdit === true || a.priceManualEdit === 'true',
+        forceBinding: a.forceBinding === true || a.forceBinding === 'true',
         // 货基专用字段（海外货基也需要透传，用于列表渲染和 detail 弹窗）
         navPer10k: a.navPer10k != null ? a.navPer10k : '',
         annualized7d: a.annualized7d != null ? a.annualized7d : '',
