@@ -888,7 +888,7 @@ export default function Accounts() {
     const balanceMap = {};
     accounts.forEach(account => {
       // 与详情页 holdingsSummary 保持完全一致：
-      //   只统计 categoryL1 === '现金类' 的持仓的 currentValue（含 quotesMap 实时行情）
+      //   只统计 categoryL1 === '现金类' 的持仓的 currentValue（含 quotesMap 实时行情，转换为 CNY）
       if (Array.isArray(financeAssets)) {
         let cashMv = 0;
         financeAssets.forEach(a => {
@@ -897,12 +897,13 @@ export default function Accounts() {
           if (!(accId === account.id || accId === account.name)) return;
           // 使用与 accountHoldings 相同的映射逻辑
           const h = mapFinanceAssetToHolding(a, account, quotesMap, exchangeRates);
-          if (h.isCash) {
+          // 与 holdingsSummary 一致：使用 categoryL1 === '现金类' 判断
+          if (h.categoryL1 === '现金类') {
             const currency = h.currency || 'CNY';
             cashMv += convertCurrency(parseFloat(h.currentValue) || 0, currency, 'CNY', exchangeRates);
           }
         });
-        balanceMap[account.id] = cashMv > 0 ? cashMv : (parseFloat(account.balance) || 0);
+        balanceMap[account.id] = cashMv;
       } else {
         balanceMap[account.id] = parseFloat(account.balance) || 0;
       }
