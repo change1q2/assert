@@ -641,8 +641,8 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
             ? (_storedHP && !isNaN(_storedHP) ? _storedHP : _computedHoldingPnl)
             : _computedHoldingPnl;
           const holdingPnlRate = _isMF
-            ? (parseFloat(item.holdingPnlRate) || (cost > 0 ? Math.round((holdingPnl / cost) * 100 * 100) / 100 : 0))
-            : (cost > 0 ? Math.round(((currentValue - cost) / cost) * 100 * 100) / 100 : 0);
+            ? (parseFloat(item.holdingPnlRate) || (cost !== 0 ? Math.round((holdingPnl / cost) * 100 * 100) / 100 : 0))
+            : (cost !== 0 ? Math.round(((currentValue - cost) / cost) * 100 * 100) / 100 : 0);
           return {
             ...item,
             transactions: records,
@@ -4789,7 +4789,7 @@ export default function Finance({ onAssetPenetration }) {
       const currentValue = qty * price;
       const unitPnl = price - cost;
       const holdingPnl = unitPnl * qty;
-      const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+      const holdingPnlRate = cost !== 0 ? (unitPnl / cost) * 100 : 0;
       return {
         ...prev,
         code: item.code || prev.code,
@@ -4813,7 +4813,7 @@ export default function Finance({ onAssetPenetration }) {
             const currentValue = qty * price;
             const unitPnl = price - cost;
             const holdingPnl = unitPnl * qty;
-            const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+            const holdingPnlRate = cost !== 0 ? (unitPnl / cost) * 100 : 0;
             return {
               ...prev,
               currentPrice: String(quotes[0].price),
@@ -4834,7 +4834,7 @@ export default function Finance({ onAssetPenetration }) {
               const currentValue = qty * price;
               const unitPnl = price - cost;
               const holdingPnl = unitPnl * qty;
-              const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+              const holdingPnlRate = cost !== 0 ? (unitPnl / cost) * 100 : 0;
               return {
                 ...prev,
                 currentPrice: String(price),
@@ -4941,7 +4941,7 @@ export default function Finance({ onAssetPenetration }) {
           const currentValue = qty * newPrice;
           const unitPnl = newPrice - cost;
           const holdingPnl = unitPnl * qty;
-          const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+          const holdingPnlRate = cost !== 0 ? (unitPnl / cost) * 100 : 0;
 
           // 保留用户未提交的输入（以用户最后输入为准）
           const finalCode = code || matchItem.code || prev.code;
@@ -4973,7 +4973,7 @@ export default function Finance({ onAssetPenetration }) {
                 const currentValue = qty * price;
                 const unitPnl = price - cost;
                 const holdingPnl = unitPnl * qty;
-                const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+                const holdingPnlRate = cost !== 0 ? (unitPnl / cost) * 100 : 0;
                 return {
                   ...prev,
                   currentPrice: String(price),
@@ -5769,7 +5769,7 @@ export default function Finance({ onAssetPenetration }) {
 
       const _holdingPnlCalc = Math.round((_currentValue - _costTotal) * 100) / 100;
       const _holdingPnl = _isMF ? _mfHoldingPnl : _holdingPnlCalc;
-      const _holdingPnlRateCalc = _costTotal > 0 ? Math.round((_holdingPnlCalc / _costTotal) * 100 * 100) / 100 : 0;
+      const _holdingPnlRateCalc = _costTotal !== 0 ? Math.round((_holdingPnlCalc / _costTotal) * 100 * 100) / 100 : 0;
       const _holdingPnlRate = _isMF ? _mfHoldingPnlRate : _holdingPnlRateCalc;
 
       // 累计收益 = 已实现卖出收益 + 持有收益(浮动) + 分红
@@ -6996,7 +6996,7 @@ export default function Finance({ onAssetPenetration }) {
                             const currentValue = qty * price;
                             const unitPnl = price - cost;
                             const holdingPnl = unitPnl * qty;
-                            const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+                            const holdingPnlRate = cost !== 0 ? (unitPnl / cost) * 100 : 0;
                             return {
                               ...p,
                               quantity: val,

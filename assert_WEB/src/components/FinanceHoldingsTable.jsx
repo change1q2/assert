@@ -338,12 +338,12 @@ export default function FinanceHoldingsTable({
       case 'avgCost': {
         // 优先使用 costPrice（与明细弹窗 avgBuyCost 计算公式一致，避免 cost/qty 四舍五入差异）
         const costPrice = parseFloat(h.costPrice) || 0;
-        if (costPrice > 0) {
+        if (costPrice !== 0) {
           return formatCurrencyWithRate(costPrice, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
         }
         const costVal = parseFloat(h.cost) || 0;
         const qtyVal = parseFloat(h.quantity) || 0;
-        if (costVal > 0 && qtyVal > 0) {
+        if (costVal !== 0 && qtyVal !== 0) {
           const avg = costVal / qtyVal;
           return formatCurrencyWithRate(avg, h.currency || 'CNY', h.currency || 'CNY', exchangeRates);
         }
@@ -397,7 +397,7 @@ export default function FinanceHoldingsTable({
         const _cv = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
         const _c = parseFloat(h.cost) || 0;
         const _qty = parseFloat(h.quantity) || parseFloat(h.shares) || 0;
-        const _cp = parseFloat(h.costPrice) || (_qty > 0 ? _c / _qty : 1);
+        const _cp = parseFloat(h.costPrice) || (_qty !== 0 ? _c / _qty : 1);
         const _costTotal = _cp * _qty;
         if (isMoneyFundHold(h)) {
           const stored = parseFloat(h.cumulativeReturn);
@@ -433,7 +433,7 @@ export default function FinanceHoldingsTable({
         const _cv = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
         const _c = parseFloat(h.cost) || 0;
         const _qty = parseFloat(h.quantity) || parseFloat(h.shares) || 0;
-        const _cp = parseFloat(h.costPrice) || (_qty > 0 ? _c / _qty : 1);
+        const _cp = parseFloat(h.costPrice) || (_qty !== 0 ? _c / _qty : 1);
         // 货币基金：优先使用存储值；缺失则回退为实时重算
         if (isMoneyFundHold(h) && col.key === 'holdingPnl') {
           const stored = parseFloat(h.holdingPnl);
@@ -449,12 +449,12 @@ export default function FinanceHoldingsTable({
         const _cv = parseFloat(h.currentValue) || parseFloat(h.balance) || 0;
         const _c = parseFloat(h.cost) || 0;
         const _qty = parseFloat(h.quantity) || parseFloat(h.shares) || 0;
-        const _cp = parseFloat(h.costPrice) || (_qty > 0 ? _c / _qty : 1);
+        const _cp = parseFloat(h.costPrice) || (_qty !== 0 ? _c / _qty : 1);
         const _costTotal = _cp * _qty;
         // 货币基金：优先使用存储值；缺失则回退为实时重算
         if (isMoneyFundHold(h) && col.key === 'holdingPnlRate') {
           const stored = parseFloat(h.holdingPnlRate);
-          const _r = isNaN(stored) ? (_costTotal > 0 ? Math.round(((_cv - _costTotal) / _costTotal) * 100 * 100) / 100 : 0) : stored;
+          const _r = isNaN(stored) ? (_costTotal !== 0 ? Math.round(((_cv - _costTotal) / _costTotal) * 100 * 100) / 100 : 0) : stored;
           return <span className={pnlClass(_r)}>{formatPercentage(_r)}</span>;
         }
         let _r = parseFloat(val);
