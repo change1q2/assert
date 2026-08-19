@@ -196,7 +196,16 @@ export default function Accounts() {
     ownershipType: 'personal',
     owners: [{ name: '自己', share: 100, isDefault: true }],
   });
+  // extraOwnerNames 已弃用，保持空数组，防止跨账户污染
   const [extraOwnerNames, setExtraOwnerNames] = useState([]);
+
+  // 初始化时清除已污染的全局所有者数据
+  useEffect(() => {
+    try {
+      localStorage.removeItem('wealth_os_extra_owners');
+      localStorage.removeItem('wealth_os_all_owners');
+    } catch { /* ignore */ }
+  }, []);
   const [ownershipDropdownOpen, setOwnershipDropdownOpen] = useState(false);
   const [ownerDropdownOpen, setOwnerDropdownOpen] = useState(false);
   const [multiOwnerPanelOpen, setMultiOwnerPanelOpen] = useState(true);
@@ -584,26 +593,8 @@ export default function Accounts() {
     });
   }, [accounts, accountStats]);
 
-  const allOwnerNames = useMemo(() => {
-    const nameSet = new Set();
-    if (Array.isArray(extraOwnerNames)) {
-      extraOwnerNames.forEach(n => {
-        if (n && String(n).trim()) nameSet.add(String(n).trim());
-      });
-    }
-    if (Array.isArray(accounts)) {
-      accounts.forEach(acc => {
-        if (Array.isArray(acc.owners)) {
-          acc.owners.forEach(o => {
-            if (o && o.name && String(o.name).trim()) {
-              nameSet.add(String(o.name).trim());
-            }
-          });
-        }
-      });
-    }
-    return [...nameSet];
-  }, [extraOwnerNames, accounts]);
+  // 注意：不再使用全局 allOwnerNames，避免跨账户所有者污染
+  // 每个账户的所有者列表完全独立
 
   useEffect(() => {
     loadData();
@@ -1059,7 +1050,7 @@ export default function Accounts() {
     setEditingAccount(null);
     const firstCategory = categoryList[0]?.value || '银行';
     const defaultSub = (accountCatConfig[firstCategory] || [])[0] || '';
-    const defaultOwner = allOwnerNames[0] || '自己';
+    const defaultOwner = lastPersonalOwner || '自己';
     setFormData({
       name: '',
       category: firstCategory,
@@ -2935,7 +2926,7 @@ export default function Accounts() {
                       <div
                         className={`px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-600 ${formData.ownershipType !== 'multi' ? 'text-primary-600 font-medium' : 'text-gray-700 dark:text-gray-300'}`}
                         onClick={() => {
-                          const ownerName = lastPersonalOwner || allOwnerNames[0] || '自己';
+                          const ownerName = lastPersonalOwner || '自己';
                           setFormData({
                             ...formData,
                             ownershipType: 'personal',
@@ -2955,7 +2946,7 @@ export default function Accounts() {
                             initialChecked = new Set(formData.owners.map(o => o.name));
                           } else {
                             // 从个人所有切换到多人所有时，默认包含"自己"作为所有者并占 100%
-                            const defaultOwnerName = lastPersonalOwner || allOwnerNames[0] || '自己';
+                            const defaultOwnerName = lastPersonalOwner || '自己';
                             initialChecked = new Set([defaultOwnerName]);
                           }
                           let multiOwners;
