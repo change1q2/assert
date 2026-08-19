@@ -17,7 +17,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
           script_stop: true
-          command_timeout: 15m
+          command_timeout: 30m
           script: |
             set -e
             export PATH=/usr/local/lighthouse/softwares/nodejs/node/bin:$PATH
@@ -33,8 +33,14 @@ jobs:
             git reset --hard origin/main
             AFTER=$(git rev-parse --short HEAD)
             echo "BEFORE=$BEFORE AFTER=$AFTER"
-            echo "=== install deps ==="
+            echo "=== install backend deps ==="
             npm install --omit=dev
+            echo "=== build frontend ==="
+            cd assert_WEB
+            npm install
+            npm run build
+            echo "=== frontend build done ==="
+            cd ..
             echo "=== restart service ==="
             systemctl restart asset-platform
             sleep 3
