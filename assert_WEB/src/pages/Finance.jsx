@@ -1643,7 +1643,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
 
                       {/* 第2行：持仓成本单价 | 值 | 累计净值/每万份收益 | 值 */}
                       <span className="text-base text-gray-600 dark:text-gray-300">持仓成本单价</span>
-                      <span className="text-xl font-semibold text-gray-900 dark:text-white">{costPrice > 0 ? costPrice.toFixed(4) : '—'}</span>
+                      <span className="text-xl font-semibold text-gray-900 dark:text-white">{isFinite(costPrice) && costPrice !== 0 ? costPrice.toFixed(4) : '—'}</span>
                       <span className="text-base text-gray-600 dark:text-gray-300">{_isDetailMoneyFund ? '每万份收益' : '累计净值'}</span>
                       {_isDetailMoneyFund ? (
                         (() => {
@@ -3872,7 +3872,7 @@ export default function Finance({ onAssetPenetration }) {
       // 货币基金：现价默认1，平均买入成本默认1
       const _isMoneyFundForm = isNewMoneyFund;
       const _avgBuyPrice = parseFloat(newAccount.avgBuyPrice) || 0;
-      const _costPrice = _avgBuyPrice > 0 ? _avgBuyPrice : (parseFloat(newAccount.cost) || (_isMoneyFundForm ? 1 : 0));
+      const _costPrice = _avgBuyPrice !== 0 ? _avgBuyPrice : (parseFloat(newAccount.cost) || (_isMoneyFundForm ? 1 : 0));
       const _quantity = parseFloat(newAccount.quantity) || 0;
       const _currentPrice = parseFloat(newAccount.currentPrice) || (_isMoneyFundForm ? 1 : 0);
       const _prevPrice = parseFloat(newAccount.prevPrice) || 0;
@@ -6965,7 +6965,7 @@ export default function Finance({ onAssetPenetration }) {
                               const currentValue = qty * price;
                               const unitPnl = price - cost;
                               const holdingPnl = unitPnl * qty;
-                              const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+                              const holdingPnlRate = cost !== 0 ? (unitPnl / cost) * 100 : 0;
                               return {
                                 ...p,
                                 cost: val,
@@ -7028,7 +7028,7 @@ export default function Finance({ onAssetPenetration }) {
                               const currentValue = qty * price;
                               const unitPnl = price - cost;
                               const holdingPnl = unitPnl * qty;
-                              const holdingPnlRate = cost > 0 ? (unitPnl / cost) * 100 : 0;
+                              const holdingPnlRate = cost !== 0 ? (unitPnl / cost) * 100 : 0;
                               return {
                                 ...p,
                                 currentPrice: val,
