@@ -3258,7 +3258,7 @@ export default function Accounts() {
                                 onChange={(e) => {
                                   const checked = e.target.checked;
                                   const newChecked = new Set(tempMultiCheckedNames);
-                                  let newOwners = Array.isArray(formData.owners) ? [...formData.owners] : [];
+                                  let newOwners = Array.isArray(formData.owners) ? formData.owners.map(o => ({ ...o })) : [];
                                   if (checked) {
                                     newChecked.add(name);
                                     if (!newOwners.find(o => o.name === name)) {
@@ -3320,7 +3320,7 @@ export default function Accounts() {
                                   onChange={(e) => {
                                     const val = parseFloat(e.target.value);
                                     const shareNum = isNaN(val) ? 0 : Math.max(0, Math.min(100, val));
-                                    const newOwners = (Array.isArray(formData.owners) ? [...formData.owners] : []).map(o =>
+                                    const newOwners = (Array.isArray(formData.owners) ? formData.owners.map(o => ({ ...o })) : []).map(o =>
                                       o.name === name ? { ...o, share: shareNum } : o
                                     );
                                     if (!newOwners.find(o => o.name === name) && tempMultiCheckedNames.has(name)) {
@@ -3391,7 +3391,7 @@ export default function Accounts() {
                                       setExtraOwnerNames(newExtra);
                                       const newChecked = new Set(tempMultiCheckedNames);
                                       newChecked.add(trimmed);
-                                      const newOwners = [...(Array.isArray(formData.owners) ? formData.owners : []), { name: trimmed, share: 0 }];
+                                      const newOwners = (Array.isArray(formData.owners) ? formData.owners.map(o => ({ ...o })) : []).concat([{ name: trimmed, share: 0 }]);
                                       setTempMultiCheckedNames(newChecked);
                                       setFormData({ ...formData, owners: newOwners });
                                     }
@@ -3413,7 +3413,7 @@ export default function Accounts() {
                                     setExtraOwnerNames(newExtra);
                                     const newChecked = new Set(tempMultiCheckedNames);
                                     newChecked.add(trimmed);
-                                    const newOwners = [...(Array.isArray(formData.owners) ? formData.owners : []), { name: trimmed, share: 0 }];
+                                    const newOwners = (Array.isArray(formData.owners) ? formData.owners.map(o => ({ ...o })) : []).concat([{ name: trimmed, share: 0 }]);
                                     setTempMultiCheckedNames(newChecked);
                                     setFormData({ ...formData, owners: newOwners });
                                   }
