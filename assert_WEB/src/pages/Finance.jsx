@@ -5581,7 +5581,7 @@ export default function Finance({ onAssetPenetration }) {
         const costPrice = parseFloat(a.costPrice || a.cost) || 1;
         const qty = parseFloat(a.shares || a.quantity) || 0;
         const costTotal = costPrice * qty;
-        if (costTotal > 0) {
+        if (costTotal !== 0) {
           return Math.round((dailyPnl / costTotal) * 100 * 100) / 100;
         }
         return 0;
@@ -5609,7 +5609,7 @@ export default function Finance({ onAssetPenetration }) {
       }
       const dailyPnl = getDailyPnl(a);
       const cost = parseFloat(a.costPrice || a.cost) || 0;
-      if (cost > 0) {
+      if (cost !== 0) {
         return (dailyPnl / cost) * 100;
       }
       return parseFloat(a.todayPnlPercent) || parseFloat(a.dailyPnlRate) || 0;
@@ -5704,7 +5704,7 @@ export default function Finance({ onAssetPenetration }) {
       const _storedShares = parseFloat(a.shares || a.quantity) || 0;
       const _storedCostPriceRaw = parseFloat(a.costPrice || a.cost) || (_isMF ? 1 : 0);
       // 港股通非手动编辑：成本价按买入结算汇率折算
-      const _storedCostPrice = (isHKConnect && !_isManualPrice && _storedCostPriceRaw > 0)
+      const _storedCostPrice = (isHKConnect && !_isManualPrice && _storedCostPriceRaw !== 0)
         ? (_storedCostPriceRaw * _hkConnectCostFactor)
         : _storedCostPriceRaw;
       const _effectiveBuyQty = buyTotalQty > 0 ? buyTotalQty : _storedShares;
@@ -5713,12 +5713,12 @@ export default function Finance({ onAssetPenetration }) {
       const _buyTotalAmountHK = (isHKConnect && !_isManualPrice) ? buyTotalAmount * _hkConnectCostFactor : buyTotalAmount;
       const _buyFeesHK = (isHKConnect && !_isManualPrice) ? buyFees * _hkConnectCostFactor : buyFees;
       const _storedBuyAmount = _storedShares * _storedCostPrice;
-      const _effectiveBuyAmount = buyTotalQty > 0 ? _buyTotalAmountHK : _storedBuyAmount;
-      const _computedQty = Math.max(0, _effectiveBuyQty - sellTotalQty);
+      const _effectiveBuyAmount = buyTotalQty !== 0 ? _buyTotalAmountHK : _storedBuyAmount;
+      const _computedQty = _effectiveBuyQty - sellTotalQty;
       const _qty = _computedQty;
       // 摊薄成本法（券商口径）：平均成本 = (累计买入总金额 + 买入手续费 - 累计卖出总金额) / 当前数量
       const _netAmount = _effectiveBuyAmount + _buyFeesHK - _sellTotalAmountHK;
-      const _computedCostPrice = _computedQty > 0 ? Math.max(0, _netAmount) / _computedQty : _storedCostPrice;
+      const _computedCostPrice = _computedQty !== 0 ? _netAmount / _computedQty : _storedCostPrice;
       const _cost = _isMF
         ? _computedCostPrice
         : _computedCostPrice;
@@ -5749,7 +5749,7 @@ export default function Finance({ onAssetPenetration }) {
       const _mfHoldingPnlCalc = _isMF ? Math.round((_mfCurrentValue - _mfCostTotal) * 100) / 100 : 0;
       const _mfHoldingPnlStored = _isMF && a.holdingPnl != null ? parseFloat(a.holdingPnl) : NaN;
       const _mfHoldingPnl = _isMF ? (isNaN(_mfHoldingPnlStored) ? _mfHoldingPnlCalc : _mfHoldingPnlStored) : 0;
-      const _mfHoldingPnlRate = _isMF ? (_mfCostTotal > 0 ? Math.round((_mfHoldingPnl / _mfCostTotal) * 100 * 100) / 100 : 0) : 0;
+      const _mfHoldingPnlRate = _isMF ? (_mfCostTotal !== 0 ? Math.round((_mfHoldingPnl / _mfCostTotal) * 100 * 100) / 100 : 0) : 0;
       const _currentValue = isCash
         ? (_effectiveQty * _effectivePrice)
         : (_isMF ? _mfCurrentValue : (parseFloat(a.currentValue) || (_price * _effectiveQty)));
@@ -5777,7 +5777,7 @@ export default function Finance({ onAssetPenetration }) {
       // 货币基金：优先使用存储的 cumulativeReturn（支持内嵌编辑），缺失时按公式计算
       const _currentQtyForAvg = _effectiveBuyQty - sellTotalQty;
       const _netAmountForAvg = _effectiveBuyAmount + buyFees - sellTotalAmount;
-      const _avgBuyCost = _currentQtyForAvg > 0 ? Math.max(0, _netAmountForAvg) / _currentQtyForAvg : 0;
+      const _avgBuyCost = _currentQtyForAvg !== 0 ? _netAmountForAvg / _currentQtyForAvg : 0;
       const _originalBuyCost = _effectiveBuyQty > 0 ? _effectiveBuyAmount / _effectiveBuyQty : 0;
       const _buyRatio = _effectiveBuyQty > 0 ? sellTotalQty / _effectiveBuyQty : 0;
       const _realizedPnl = sellTotalAmount - _originalBuyCost * sellTotalQty - buyFees * _buyRatio;
@@ -5787,8 +5787,8 @@ export default function Finance({ onAssetPenetration }) {
         : (_useStoredMF && !isNaN(_storedCumulativeReturn) && !_isLegacyCum ? _storedCumulativeReturn : _cumulativeReturnBase);
       const _cumDenom = _isMF ? _mfCostTotal : _costTotal;
       const _cumulativeReturnRate = _isMF
-        ? (_mfCostTotal > 0 ? Math.round((_cumulativeReturn / _mfCostTotal) * 100 * 100) / 100 : 0)
-        : (_useStoredMF && !isNaN(_storedCumulativeReturnRate) && !_isLegacyCum ? _storedCumulativeReturnRate : (_cumDenom > 0 ? Math.round((_cumulativeReturn / _cumDenom) * 100 * 100) / 100 : 0));
+        ? (_mfCostTotal !== 0 ? Math.round((_cumulativeReturn / _mfCostTotal) * 100 * 100) / 100 : 0)
+        : (_useStoredMF && !isNaN(_storedCumulativeReturnRate) && !_isLegacyCum ? _storedCumulativeReturnRate : (_cumDenom !== 0 ? Math.round((_cumulativeReturn / _cumDenom) * 100 * 100) / 100 : 0));
 
       // —— 港股处理逻辑
       // 国内市场·港股通：用户输入价格已是CNY，无需转换；仅实时获取的行情价格（上方quotePrice处）按参考汇率折算
@@ -5807,7 +5807,7 @@ export default function Finance({ onAssetPenetration }) {
       const _rawDailyPnl = isCash ? 0 : getDailyPnl(a);
       // 港股通：每日盈亏中基于行情的部分已在上方转换为CNY；若存储值为港币也按市值汇率折算
       const _finalDailyPnl = (isHKConnect && !isCash) ? (_rawDailyPnl * _hkConnectValueFactor) : _rawDailyPnl;
-      const _finalDailyPnlRate = _finalCurrentValue > 0 ? Math.round((_finalDailyPnl / _finalCurrentValue) * 100 * 100) / 100 : 0;
+      const _finalDailyPnlRate = _finalCurrentValue !== 0 ? Math.round((_finalDailyPnl / _finalCurrentValue) * 100 * 100) / 100 : 0;
 
       return {
         id: a.id,
@@ -5864,9 +5864,9 @@ export default function Finance({ onAssetPenetration }) {
     const totalValue = financeAccounts.reduce((sum, a) => sum + (parseFloat(a.currentValue) || parseFloat(a.balance) || 0), 0);
     const totalCost = financeAccounts.reduce((sum, a) => sum + (parseFloat(a.cost) || 0), 0);
     const totalPnl = financeAccounts.reduce((sum, a) => sum + (parseFloat(a.holdingPnl) || 0), 0);
-    const totalPnlRate = totalCost > 0 ? (totalValue - totalCost) / totalCost * 100 : 0;
+    const totalPnlRate = totalCost !== 0 ? (totalValue - totalCost) / totalCost * 100 : 0;
     const totalDailyPnl = financeAccounts.reduce((sum, a) => sum + getDailyPnl(a), 0);
-    const totalDailyPnlRate = totalValue > 0 ? (totalDailyPnl / totalValue) * 100 : 0;
+    const totalDailyPnlRate = totalValue !== 0 ? (totalDailyPnl / totalValue) * 100 : 0;
 
     // 持仓明细汇总（基于筛选后的数据）
     const holdingsSummary = {
@@ -5875,8 +5875,8 @@ export default function Finance({ onAssetPenetration }) {
       totalPnl: financeAccounts.reduce((sum, a) => sum + (parseFloat(a.holdingPnl) || 0), 0),
       totalDailyPnl: financeAccounts.reduce((sum, a) => sum + getDailyPnl(a), 0),
     };
-    holdingsSummary.totalPnlRate = holdingsSummary.totalCost > 0 ? (holdingsSummary.totalMarketValue - holdingsSummary.totalCost) / holdingsSummary.totalCost * 100 : 0;
-    holdingsSummary.totalDailyPnlRate = holdingsSummary.totalMarketValue > 0 ? (holdingsSummary.totalDailyPnl / holdingsSummary.totalMarketValue) * 100 : 0;
+    holdingsSummary.totalPnlRate = holdingsSummary.totalCost !== 0 ? (holdingsSummary.totalMarketValue - holdingsSummary.totalCost) / holdingsSummary.totalCost * 100 : 0;
+    holdingsSummary.totalDailyPnlRate = holdingsSummary.totalMarketValue !== 0 ? (holdingsSummary.totalDailyPnl / holdingsSummary.totalMarketValue) * 100 : 0;
 
     // 分类统计
     const categoryMap = {};
