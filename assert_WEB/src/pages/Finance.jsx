@@ -3578,7 +3578,9 @@ export default function Finance({ onAssetPenetration }) {
         const rawMarket = a.market || '国内市场';
         const catL2 = a.categoryL2 || a.subcategory || '';
         const isHKConnect = rawMarket === '国内市场' && catL2 === '港股通';
-        const effectiveMarket = isHKConnect ? '港股市场' : rawMarket;
+        // 港股持仓：无论 market 写的是什么，只要 L2=港股 就按港股市场获取
+        const isHKStock = catL2 === '港股';
+        const effectiveMarket = isHKStock ? '港股市场' : (isHKConnect ? '港股市场' : rawMarket);
         return { code: a.code, market: effectiveMarket };
       });
     if (codes.length === 0) return;
@@ -4724,7 +4726,11 @@ export default function Finance({ onAssetPenetration }) {
       try {
         // 使用 ref 获取最新的 newAccount，避免闭包陈旧值
         const cur = newAccountRef.current;
-        let results = await lookupFinance(q.trim(), cur.market);
+        // 港股/美股上下文：即使 market 标为国内市场，也用对应市场搜索
+        const effectiveSearchMarket = (cur.categoryL2 === '港股') ? '港股市场'
+          : (cur.categoryL2 === '美股') ? '美股市场'
+          : cur.market;
+        let results = await lookupFinance(q.trim(), effectiveSearchMarket);
         // 货基/货币基金选中时：过滤掉股票数据，只保留基金类
         const isMoneyFundType = cur.assetType === '货基' || cur.positionType === '货币基金';
         if (isMoneyFundType) {
@@ -4915,11 +4921,15 @@ export default function Finance({ onAssetPenetration }) {
     if (pairKey === lastVerified) return;
 
     try {
+      // 港股/美股上下文：传对应市场以获取正确结果
+      const effectiveVerifyMarket = (cur.categoryL2 === '港股') ? '港股市场'
+        : (cur.categoryL2 === '美股') ? '美股市场'
+        : cur.market;
       let results = [];
       if (type === 'code' && code) {
-        results = await lookupFinance(code);
+        results = await lookupFinance(code, effectiveVerifyMarket);
       } else if (type === 'name' && name) {
-        results = await lookupFinance(name);
+        results = await lookupFinance(name, effectiveVerifyMarket);
       } else {
         return;
       }

@@ -193,6 +193,56 @@ async function lookupSecurities(q, market) {
       } catch (_) { }
     }
 
+    // 补充：若东方财富搜索无结果，尝试港股兜底（5位数字代码或名称含港股特征）
+    // 港股代码格式：5位数字（如 02259），腾讯接口前缀 hk
+    if (items.length < 3) {
+      const isHKCode = /^\d{5}$/.test(trimmedQ);
+      // 名称查询时：若市场或已有结果暗示港股，也触发港股兜底
+      const shouldTryHK = isHKCode || (items.length === 0 && (isHKMarket || normalizedMarket === ""));
+      if (shouldTryHK) {
+        try {
+          const hkSearchCode = `hk${trimmedQ.padStart(5, "0")}`;
+          const hkUrl = `http://qt.gtimg.cn/q=${hkSearchCode}`;
+          const hkRes = await fetch(hkUrl, {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+            signal: AbortSignal.timeout(6000),
+          });
+          const hkBuf = Buffer.from(await hkRes.arrayBuffer());
+          const hkText = await safeDecode(hkBuf);
+          const hkSegments = hkText.split(/[;\n]/).map((s) => s.trim()).filter(Boolean);
+          for (const segment of hkSegments) {
+            const match = segment.match(/v_(\w+)="(.*)"/);
+            if (!match || !match[2]) continue;
+            const fullCode = match[1];
+            const parts = match[2].split("~");
+            // 港股 Tencent 返回字段：名称在 [1]，现价在 [3]，涨跌幅在 [32]
+            // parts[0] 通常是代码，parts[1] 是名称
+            if (parts.length > 32 && parts[1] && parts[1].trim()) {
+              const code = fullCode.replace(/^hk/i, "").padStart(5, "0");
+              const name = cleanName(parts[1]);
+              const price = parseFloat(parts[3]) || null;
+              // 跳过无效记录（价格为0且名称为空）
+              if (!name && price == null) continue;
+              if (!items.some((entry) => entry.code === code)) {
+                items.push({
+                  code,
+                  name,
+                  classify: "HK",
+                  typeName: "港股",
+                  marketType: "hk",
+                  mktNum: "116",
+                  jys: "HKEX",
+                  price,
+                  changePct: parseFloat(parts[32]) || null,
+                  changeAmt: parseFloat(parts[31]) || null,
+                });
+              }
+            }
+          }
+        } catch (_) { }
+      }
+    }
+
     const tencentQueries = [];
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
