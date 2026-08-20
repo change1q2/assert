@@ -145,7 +145,7 @@ export default function SurvivalFunds() {
 
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-5 text-white shadow-lg shadow-blue-500/20">
+      <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-5 text-white shadow-lg shadow-blue-500/20">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-blue-100 text-sm">总价值</p>
@@ -156,7 +156,7 @@ export default function SurvivalFunds() {
           </div>
         </div>
       </div>
-      <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-5 text-white shadow-lg shadow-orange-500/20">
+      <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-5 text-white shadow-lg shadow-orange-500/20">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-orange-100 text-sm">总成本</p>
@@ -167,7 +167,7 @@ export default function SurvivalFunds() {
           </div>
         </div>
       </div>
-      <div className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl p-5 text-white shadow-lg shadow-purple-500/20">
+      <div className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-2xl p-5 text-white shadow-lg shadow-purple-500/20">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-purple-100 text-sm">总收益</p>
@@ -180,7 +180,7 @@ export default function SurvivalFunds() {
           </div>
         </div>
       </div>
-      <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-xl p-5 text-white shadow-lg shadow-emerald-500/20">
+      <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-2xl p-5 text-white shadow-lg shadow-emerald-500/20">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-emerald-100 text-sm">总收益率</p>
@@ -226,7 +226,7 @@ export default function SurvivalFunds() {
     }, { budget: 0, actual: 0 });
 
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-5 mb-6">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 p-5 mb-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <PiggyBank className="w-5 h-5 text-emerald-500" />
@@ -239,7 +239,7 @@ export default function SurvivalFunds() {
           {Object.entries(periodLabelMap).map(([periodKey, label]) => {
             const info = freedomSummary[periodKey] || { budgetAmount: 0, actualAmount: 0, degree: 0 };
             return (
-              <div key={periodKey} className="bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-700 dark:to-slate-700/50 rounded-xl p-4 border border-gray-100 dark:border-slate-600">
+              <div key={periodKey} className="bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-700 dark:to-slate-700/50 rounded-2xl p-4 border border-gray-100 dark:border-slate-600">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">{label}</span>
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-full bg-white/60 dark:bg-slate-600/60 ${getFreedomColor(info.degree)}`}>
@@ -272,7 +272,7 @@ export default function SurvivalFunds() {
             <span>新增</span>
           </button>
         </div>
-        <div className="overflow-x-auto border border-gray-100 dark:border-slate-700 rounded-xl">
+        <div className="overflow-x-auto border border-gray-100 dark:border-slate-700 rounded-2xl">
           <table className="w-full">
             <thead className="bg-gray-50 dark:bg-slate-700">
               <tr>
@@ -344,7 +344,7 @@ export default function SurvivalFunds() {
     let totalBalance = 0;
 
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 p-5 mb-6">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 p-5 mb-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Wallet className="w-5 h-5 text-indigo-500" />
@@ -383,7 +383,7 @@ export default function SurvivalFunds() {
                 const profitRate = accountCost > 0 ? (profit / accountCost) * 100 : 0;
 
                 return (
-                  <div key={account.id || account.name} className="bg-white dark:bg-slate-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-slate-700 hover:shadow-md transition-shadow">
+                  <div key={account.id || account.name} className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 hover:shadow-md transition-shadow">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
                         <div className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-full p-1.5">
@@ -431,7 +431,7 @@ export default function SurvivalFunds() {
     }, { amount: 0 });
 
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
           <h3 className="font-semibold text-gray-900 dark:text-white">生存资金</h3>
           <div className="flex items-center gap-4">
@@ -712,7 +712,7 @@ export default function SurvivalFunds() {
     const hasAccounts = accounts.length > 0;
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{editingFund ? '编辑' : '新增'}生存资金</h2>
             <button onClick={() => setShowFundModal(false)} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded">
@@ -829,7 +829,7 @@ export default function SurvivalFunds() {
     if (!showBudgetModal) return null;
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{editingBudget ? '编辑' : '新增'}自由现金流</h2>
             <button onClick={() => setShowBudgetModal(false)} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded">
@@ -927,7 +927,7 @@ export default function SurvivalFunds() {
   return (
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center gap-3 mb-2">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-500 to-rose-600 flex items-center justify-center text-white shadow-lg shadow-rose-500/20">
+        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-600 flex items-center justify-center text-white shadow-lg shadow-rose-500/20">
           <PiggyBank className="w-5 h-5" />
         </div>
         <div>
