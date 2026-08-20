@@ -746,13 +746,31 @@ export default function FinanceHoldingsTable({
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(dailyPnl, currency, target, exchangeRates);
       }, 0);
-      // 当前总现金 = 一级分类为现金类的资产总和
+      // 当前总现金 = 一级分类现金类 + 货币基金（货基属于现金等价物）
+      const _isMoneyFund = (a) => {
+        const catL1 = a.categoryL1 || a.category || '';
+        const catL2 = a.categoryL2 || a.subcategory || '';
+        const catL4 = a.categoryL4 || '';
+        const positionType = a.positionType || a.positionCategory || '';
+        const assetType = a.assetType || a.assetKind || a.kind || '';
+        const name = String(a.name || '');
+        const code = String(a.code || '');
+        return catL2 === '货币型' || catL4 === '货币基金' || positionType === '货币基金'
+          || assetType === '货基' || assetType === '货币基金' || name.includes('货币')
+          || code === '000509';
+      };
       const totalCash = paged.reduce((sum, a) => {
         const catL1 = a.categoryL1 || a.category || '';
-        if (catL1 === '现金类') {
-          const value = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
+        const isCash = catL1 === '现金类';
+        const isMoneyFund = _isMoneyFund(a);
+        if (isCash || isMoneyFund) {
+          // 优先 currentValue（当前市值），兼容货基和独立现金
+          const v1 = parseFloat(a.currentValue);
+          const v2 = parseFloat(a.balance);
+          const v3 = parseFloat(a.quantity) * (parseFloat(a.currentPrice) || 1);
+          const value = (Number.isFinite(v1) && v1 > 0) ? v1 : (Number.isFinite(v2) && v2 > 0 ? v2 : v3);
           const currency = a.currency || 'CNY';
-          return sum + convertCurrency(value, currency, target, exchangeRates);
+          return sum + convertCurrency(Number.isFinite(value) ? value : 0, currency, target, exchangeRates);
         }
         return sum;
       }, 0);
