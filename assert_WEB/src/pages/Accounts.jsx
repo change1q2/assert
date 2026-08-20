@@ -574,6 +574,7 @@ export default function Accounts() {
     });
 
     // 债务记录（仅对负债类型账户）：debt.account 等于账户 id 或 name 才计入
+    // 市值 = 剩余未还金额（debt.amount - debt.paidAmount），成本 = 本金，多币种折算
     debts.forEach(debt => {
       if (!debt.account) return;
       const account = accounts.find(acct =>
@@ -581,8 +582,14 @@ export default function Accounts() {
       );
       if (!account) return;
       if (getEffectiveType(account) !== '负债') return;
-      stats[account.id].marketValue += parseFloat(debt.amount) || 0;
-      stats[account.id].holdingCost += parseFloat(debt.principal) || 0;
+      const dCur = debt.currency || 'CNY';
+      const conv = (v) => convertCurrency(parseFloat(v) || 0, dCur, 'CNY', exchangeRates);
+      const totalAmount = parseFloat(debt.amount) || 0;
+      const paidAmount = parseFloat(debt.paidAmount) || 0;
+      const remaining = Math.max(totalAmount - paidAmount, 0);
+      const principal = parseFloat(debt.principal) || totalAmount;
+      stats[account.id].marketValue += conv(remaining);
+      stats[account.id].holdingCost += conv(principal);
     });
 
     return stats;
@@ -2260,6 +2267,127 @@ export default function Accounts() {
             </div>
           )}
         </div>
+
+        {/* 负债账户专属：债务明细区域 */}
+        {isLiability && (() => {
+          const linkedDebts = (debts || []).filter(d =>
+            d.account && (d.account === account.id || d.account === account.name)
+          );
+          if (linkedDebts.length === 0) return null;
+          const fmt = (v, c) => formatCurrencyWithRate(
+            scaleAmountByOwner(parseFloat(v || 0), s), c || 'CNY', selectedCurrency, exchangeRates
+          );
+          return (
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 overflow-hidden">
+              <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900 dark:text-white">
+                  📋 债务明细
+                </h3>
+                <span className="text-sm text-gray-500 dark:text-gray-400">共 {linkedDebts.length} 笔</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-red-50/60 dark:bg-red-900/10">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">债务名称</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">债权方</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">还款方式</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">期限</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">本金</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">利率</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">已还</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">剩余未还</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">状态</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+                    {linkedDebts.map((debt) => {
+                      const cur = debt.currency || 'CNY';
+                      const totalAmt = parseFloat(debt.amount) || 0;
+                      const paidAmt = parseFloat(debt.paidAmount) || 0;
+                      const principal = parseFloat(debt.principal) || totalAmt;
+                      const remaining = Math.max(totalAmt - paidAmt, 0);
+                      return (
+                        <tr key={debt.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/30">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">
+                            {debt.name || debt.debtCategory || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{debt.creditor || '—'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                            {({
+                              equal_principal: '等额本金', equal_installment: '等额本息',
+                              interest_only: '先息后本', bullet: '到期一次还本付息',
+                              custom: '自定义',
+                            })[debt.repaymentMethod] || debt.repaymentMethod || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                            {(debt.startDate || '—') + ' 至 ' + (debt.dueDate || '—')}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right tabular-nums text-gray-900 dark:text-white">{fmt(principal, cur)}</td>
+                          <td className="px-4 py-3 text-sm text-right tabular-nums text-gray-700 dark:text-gray-300">
+                            {debt.annualRate !== undefined && debt.annualRate !== null ? `${(Number(debt.annualRate) * 100).toFixed(2)}%` : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmt(paidAmt, cur)}</td>
+                          <td className="px-4 py-3 text-sm text-right tabular-nums font-semibold text-red-500 dark:text-red-400">{fmt(remaining, cur)}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${
+                              debt.status === 'overdue' || debt.status === '已逾期'
+                                ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+                                : remaining === 0
+                                  ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                  : 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
+                            }`}>
+                              {debt.status === 'overdue' || debt.status === '已逾期' ? '逾期' : remaining === 0 ? '已结清' : '还款中'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-red-50/80 dark:bg-red-900/20 font-semibold">
+                      <td className="px-4 py-3 text-sm text-red-700 dark:text-red-300">合计</td>
+                      <td colSpan={4} className="px-4 py-3"></td>
+                      <td className="px-4 py-3 text-sm text-right tabular-nums text-gray-900 dark:text-white">
+                        {linkedDebts.reduce((a, d) => {
+                          const totalAmt = parseFloat(d.amount) || 0;
+                          const principal = parseFloat(d.principal) || totalAmt;
+                          return a + convertCurrency(principal, d.currency || 'CNY', 'CNY', exchangeRates);
+                        }, 0) !== 0 && formatCurrencyWithRate(
+                          linkedDebts.reduce((a, d) => {
+                            const totalAmt = parseFloat(d.amount) || 0;
+                            const principal = parseFloat(d.principal) || totalAmt;
+                            return a + convertCurrency(principal * s, d.currency || 'CNY', selectedCurrency, exchangeRates);
+                          }, 0), selectedCurrency, selectedCurrency, exchangeRates
+                        )}
+                      </td>
+                      <td className="px-4 py-3"></td>
+                      <td className="px-4 py-3 text-sm text-right tabular-nums text-emerald-700 dark:text-emerald-300">
+                        {formatCurrencyWithRate(
+                          linkedDebts.reduce((a, d) => {
+                            const paid = parseFloat(d.paidAmount) || 0;
+                            return a + convertCurrency(paid * s, d.currency || 'CNY', selectedCurrency, exchangeRates);
+                          }, 0), selectedCurrency, selectedCurrency, exchangeRates
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right tabular-nums text-red-600 dark:text-red-400">
+                        {formatCurrencyWithRate(
+                          linkedDebts.reduce((a, d) => {
+                            const totalAmt = parseFloat(d.amount) || 0;
+                            const paid = parseFloat(d.paidAmount) || 0;
+                            const remaining = Math.max(totalAmt - paid, 0);
+                            return a + convertCurrency(remaining * s, d.currency || 'CNY', selectedCurrency, exchangeRates);
+                          }, 0), selectedCurrency, selectedCurrency, exchangeRates
+                        )}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
 
         <FinanceHoldingsTable
           categoryName="account_detail"

@@ -147,7 +147,6 @@ const ASSET_TABS = [
   { id: 'realestate', label: '房产', icon: Building2 },
   { id: 'vehicle', label: '车辆', icon: Car },
   { id: 'fixedinvestment', label: '固定投资', icon: Landmark },
-  { id: 'survivalfund', label: '生存资金', icon: PiggyBank },
   { id: 'equity', label: '股权', icon: DollarSign },
   { id: 'fixeddeposit', label: '定期资产', icon: Clock },
 ];
@@ -4697,8 +4696,6 @@ export default function IndependentAssets() {
           return renderVehicleForm();
         case 'fixedinvestment':
           return renderFixedInvestmentForm();
-        case 'survivalfund':
-          return renderSurvivalFundForm();
         case 'equity':
           return renderEquityForm();
         case 'fixeddeposit':
@@ -7270,8 +7267,6 @@ export default function IndependentAssets() {
         return renderVehicleTable();
       case 'fixedinvestment':
         return renderFixedInvestmentTable();
-      case 'survivalfund':
-        return renderSurvivalFundTable();
       case 'equity':
         return renderEquityTable();
       case 'fixeddeposit':

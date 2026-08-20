@@ -169,6 +169,7 @@ async function loadUserState(userId) {
     return {
       id: numericIfPossible(row.id), category: row.category, type: row.type, debtCategory: row.debt_category, name: row.name,
       creditor: row.creditor_name, debtor: row.debtor_name, creditorName: row.creditor_name, debtorName: row.debtor_name,
+      account: row.account || '',
       principal: row.principal,
       annualRate: row.annual_rate, amount: row.amount, currency: row.currency || 'CNY', paidAmount: row.paid_amount,
       note: row.note, attachment: row.attachment, startDate: row.start_date, dueDate: row.due_date,
@@ -220,6 +221,25 @@ async function loadUserState(userId) {
     targetProfit: row.target_profit,
     actualProfit: row.actual_profit,
   }));
+  const survivalFunds = (await safeSqlAll(pool, "SELECT id, name, type, currency, amount, account_id, cost_basis, sort_order, metadata_json FROM survival_funds WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+    id: numericIfPossible(row.id),
+    name: row.name,
+    type: row.type,
+    currency: row.currency || 'CNY',
+    amount: Number(row.amount) || 0,
+    accountId: row.account_id || null,
+    costBasis: Number(row.cost_basis) || 0,
+    metadata: maybeParseJson(row.metadata_json) || null,
+  }));
+  const freedomBudgets = (await safeSqlAll(pool, "SELECT id, name, category, period_type, budget_amount, actual_amount, sort_order, metadata_json FROM freedom_budgets WHERE user_id = ? ORDER BY sort_order", [userId])).map((row) => ({
+    id: numericIfPossible(row.id),
+    name: row.name,
+    category: row.category,
+    periodType: row.period_type || 'monthly',
+    budgetAmount: Number(row.budget_amount) || 0,
+    actualAmount: Number(row.actual_amount) || 0,
+    metadata: maybeParseJson(row.metadata_json) || null,
+  }));
   const result = {
     user: profile,
     rates,
@@ -246,6 +266,8 @@ async function loadUserState(userId) {
     independentAssets: settings ? maybeParseJson(settings.independent_assets_json) || {} : {},
     yearlyRecords,
     accountCategories: settings ? maybeParseJson(settings.account_categories_json) || {} : {},
+    survivalFunds,
+    freedomBudgets,
   };
 
   // 过滤乱码字段 - 增强版：检测 Unicode 特殊字符和编码异常
@@ -352,6 +374,7 @@ async function saveUserState(conn, userId, state) {
     "exchange_rates", "accounts", "asset_classes", "records", "budgets", "finance_asset_transactions", "finance_asset_indoor_transactions", "finance_asset_outdoor_transactions", "finance_assets", "finance_asset_archives",
     "custom_record_categories", "finance_tertiary_categories", "record_tags", "recorders",
     "reminders", "debt_payments", "debts", "debt_categories", "strategies", "user_settings", "books", "tags", "yearly_records",
+    "survival_funds", "freedom_budgets",
   ];
 
   // Map tables to their corresponding state keys
@@ -379,6 +402,8 @@ async function saveUserState(conn, userId, state) {
     "books": "books",
     "tags": "tags",
     "yearly_records": "yearlyRecords",
+    "survival_funds": "survivalFunds",
+    "freedom_budgets": "freedomBudgets",
   };
 
   // Force delete transaction tables and child tables that are embedded in parent records
@@ -540,10 +565,11 @@ async function saveUserState(conn, userId, state) {
     const debtor = row.debtor || row.debtorName || '';
     const name = row.name || creditor || '';
     await sqlRun(conn, `INSERT INTO debts
-      (user_id, id, category, type, debt_category, name, creditor_name, debtor_name, principal, annual_rate, amount, currency, paid_amount, note, attachment, start_date, due_date, repayment_method, penalty_interest, status, investment_days, period_penalties_json, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (user_id, id, category, type, debt_category, name, creditor_name, debtor_name, account, principal, annual_rate, amount, currency, paid_amount, note, attachment, start_date, due_date, repayment_method, penalty_interest, status, investment_days, period_penalties_json, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [userId, debtId, text(row.category), text(row.type), text(row.debtCategory || ''), text(name), text(creditor),
-       text(debtor), number(row.principal), number(row.annualRate), number(row.amount),
+       text(debtor), text(row.account || ''),
+       number(row.principal), number(row.annualRate), number(row.amount),
        text(row.currency || 'CNY'),
        number(row.paidAmount), text(row.note), text(row.attachment), text(row.startDate),
        text(row.dueDate), text(row.repaymentMethod), number(row.penaltyInterest || 0),
@@ -558,6 +584,30 @@ async function saveUserState(conn, userId, state) {
   for (const [index, cat] of ((state.debtCategories || [])).entries()) {
     await sqlRun(conn, "INSERT INTO debt_categories (user_id, id, name, sort_order) VALUES (?, ?, ?, ?)",
       [userId, text(cat.id), text(cat.name), index]);
+  }
+
+  // survival_funds
+  let sfOrder = 0;
+  for (const row of (state.survivalFunds || [])) {
+    await sqlRun(conn, `INSERT INTO survival_funds
+      (user_id, id, name, type, currency, amount, account_id, cost_basis, sort_order, metadata_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId, Number(row.id) || (sfOrder + 1), text(row.name), text(row.type || ''),
+       text(row.currency || 'CNY'), number(row.amount),
+       text(row.accountId || null), number(row.costBasis || 0),
+       sfOrder++, JSON.stringify(row.metadata || null)]);
+  }
+
+  // freedom_budgets
+  let fbOrder = 0;
+  for (const row of (state.freedomBudgets || [])) {
+    await sqlRun(conn, `INSERT INTO freedom_budgets
+      (user_id, id, name, category, period_type, budget_amount, actual_amount, sort_order, metadata_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId, Number(row.id) || (fbOrder + 1), text(row.name), text(row.category || ''),
+       text(row.periodType || 'monthly'),
+       number(row.budgetAmount), number(row.actualAmount),
+       fbOrder++, JSON.stringify(row.metadata || null)]);
   }
 
   // strategies 改为保存到 user_settings 的 strategies_json 字段

@@ -13,6 +13,7 @@ import {
   LogOut,
   User,
   Briefcase,
+  PiggyBank,
 } from 'lucide-react';
 import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
@@ -39,11 +40,13 @@ import ValueInvestingTool from './pages/ValueInvestingTool.jsx';
 import BudgetManagement from './pages/BudgetManagement.jsx';
 import AssetPenetration from './pages/AssetPenetration.jsx';
 import IndependentAssets from './pages/IndependentAssets.jsx';
+import SurvivalFunds from './pages/SurvivalFunds.jsx';
 import { checkAndSync, getPendingSyncs } from './api/index.js';
 
 const menuItems = [
   { id: 'overview', label: '资产总览', icon: LayoutDashboard },
   { id: 'records', label: '收支分析', icon: FileText },
+  { id: 'survival-funds', label: '生存资金', icon: PiggyBank },
   { id: 'finance', label: '理财模块', icon: Layers },
   { id: 'independent-assets', label: '独立资产', icon: Briefcase },
   { id: 'debts', label: '债务模块', icon: Wallet },
@@ -203,6 +206,8 @@ export default function App() {
         return <Overview />;
       case 'records':
         return <Records onNavigate={handleSetActiveMenu} />;
+      case 'survival-funds':
+        return <SurvivalFunds />;
       case 'finance':
         return <Finance onAssetPenetration={() => setShowAssetPenetration(true)} />;
       case 'independent-assets':
