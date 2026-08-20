@@ -576,10 +576,19 @@ export default function Accounts() {
     // 债务记录（仅对负债类型账户）：debt.account 等于账户 id 或 name 才计入
     // 市值 = 剩余未还金额（debt.amount - debt.paidAmount），成本 = 本金，多币种折算
     debts.forEach(debt => {
-      if (!debt.account) return;
-      const account = accounts.find(acct =>
-        (debt.account === acct.id) || (debt.account === acct.name)
-      );
+      let account = null;
+      if (debt.account) {
+        account = accounts.find(acct =>
+          (debt.account === acct.id) || (debt.account === acct.name)
+        );
+      }
+      // 若 debt.account 为空或未匹配，尝试按债务名称匹配负债账户
+      if (!account && debt.name) {
+        account = accounts.find(acct =>
+          getEffectiveType(acct) === '负债' &&
+          (debt.name === acct.name || debt.creditor === acct.name || debt.name === acct.id)
+        );
+      }
       if (!account) return;
       if (getEffectiveType(account) !== '负债') return;
       const dCur = debt.currency || 'CNY';

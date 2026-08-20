@@ -1323,9 +1323,22 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     }
 
     if (isLiquidation) {
-      await handleLiquidateArchive(latestData, newRecords, updatedAccounts, updatedFinanceAssets);
+      try {
+        await handleLiquidateArchive(latestData, newRecords, updatedAccounts, updatedFinanceAssets);
+      } catch (liqErr) {
+        console.error('[handleAddRecord] liquidation failed:', liqErr);
+        alert('清仓操作失败：' + (liqErr.message || '未知错误'));
+        // 回退为普通保存
+        await saveTradeRecords(newRecords, updatedAccounts, updatedFinanceAssets);
+      }
     } else {
-      await saveTradeRecords(newRecords, updatedAccounts, updatedFinanceAssets);
+      try {
+        await saveTradeRecords(newRecords, updatedAccounts, updatedFinanceAssets);
+      } catch (saveErr) {
+        console.error('[handleAddRecord] save failed:', saveErr);
+        alert('保存交易记录失败：' + (saveErr.message || '未知错误'));
+        return;
+      }
     }
 
     setNewRecord({

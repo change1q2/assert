@@ -929,6 +929,127 @@ async function getQuotes(codes) {
       }
     } catch (_) { }
   }
+
+  // 夜盘补充：美股夜盘时段 (北京时间 08:00-16:00)
+  // 如果腾讯显示价格未变动 (price === prevClose)，尝试东方财富获取夜盘价
+  const utcMinutes = new Date().getUTCHours() * 60 + new Date().getUTCMinutes();
+  const beijingMinutes = (utcMinutes + 8 * 60) % (24 * 60);
+  const isNightSession = beijingMinutes >= 8 * 60 && beijingMinutes < 16 * 60;
+
+  if (isNightSession) {
+    const nightSessionItems = queryItems.filter(({ tencentCode, index }) => {
+      const prefix = tencentCode.slice(0, 2);
+      if (prefix !== 'us') return false;
+      const r = results[index];
+      // 仅在价格未变动 (无夜盘交易信号) 时尝试补充
+      return r.price != null && r.prevClose != null && r.price === r.prevClose;
+    });
+
+    await Promise.all(nightSessionItems.map(async ({ tencentCode, index }) => {
+      const suffixCode = tencentCode.slice(2);
+      // 尝试东方财富 (NASDAQ -> NYSE 备用)
+      let secid = `105.${suffixCode.toUpperCase()}`;
+      let emPrice = null;
+      let emPrevClose = null;
+      let emChgPct = null;
+      let emChgAmt = null;
+      let emHigh = null;
+      let emLow = null;
+      let emName = null;
+
+      for (const trySecid of [secid, `106.${suffixCode.toUpperCase()}`]) {
+        try {
+          const quoteRes = await fetch(`https://push2.eastmoney.com/api/qt/stock/get?secid=${trySecid}&fields=f43,f44,f45,f47,f57,f58,f60,f169,f170`, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            signal: AbortSignal.timeout(6000),
+          });
+          const data = (await quoteRes.json())?.data;
+          if (data && Number.isFinite(Number(data.f43))) {
+            emPrice = Number(data.f43);
+            emPrevClose = Number(data.f60);
+            emChgAmt = Number(data.f169);
+            emChgPct = Number(data.f170);
+            emHigh = Number(data.f44);
+            emLow = Number(data.f45);
+            emName = data.f58 || null;
+            break;
+          }
+        } catch (_) { }
+      }
+
+      if (emPrice !== null && emPrice !== emPrevClose) {
+        // 东方财富显示夜盘有交易，使用东方财富数据
+        results[index] = {
+          ...results[index],
+          name: emName || results[index].name,
+          price: emPrice,
+          prevClose: emPrevClose,
+          changeAmt: emChgAmt,
+          changePct: emChgPct,
+          high: emHigh,
+          low: emLow,
+          source: 'eastmoney_night',
+          session: 'night',
+        };
+      } else {
+        // 东方财富无夜盘交易 → 尝试 Yahoo Finance (盘前/盘后数据源)
+        let yahooPrice = null;
+        let yahooPrevClose = null;
+        let yahooChgPct = null;
+        let yahooName = null;
+        try {
+          const yahooRes = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${suffixCode.toUpperCase()}?interval=1d&range=5d`, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            signal: AbortSignal.timeout(6000),
+          });
+          const yahooData = (await yahooRes.json())?.chart?.result?.[0]?.meta;
+          if (yahooData) {
+            const regPrice = Number(yahooData.regularMarketPrice);
+            const prevCl = Number(yahooData.chartPreviousClose ?? yahooData.previousClose);
+            const preMkt = yahooData.preMarketPrice != null ? Number(yahooData.preMarketPrice) : null;
+            const postMkt = yahooData.postMarketPrice != null ? Number(yahooData.postMarketPrice) : null;
+
+            // 夜盘时段优先级
+            let usePrice = regPrice;
+            let sessionTag = 'regular';
+            const bMin = beijingMinutes;
+            if (bMin >= 8 * 60 && bMin < 12 * 60 && postMkt !== null && postMkt !== regPrice) {
+              usePrice = postMkt;
+              sessionTag = 'night';
+            } else if (bMin >= 12 * 60 && bMin < 16 * 60 && preMkt !== null && preMkt !== regPrice) {
+              usePrice = preMkt;
+              sessionTag = 'night';
+            } else if (regPrice !== prevCl) {
+              sessionTag = 'night';
+            } else {
+              sessionTag = 'night_inactive';
+            }
+
+            yahooPrice = usePrice;
+            yahooPrevClose = prevCl;
+            yahooChgPct = prevCl > 0 ? Math.round(((usePrice - prevCl) / prevCl) * 10000) / 100 : 0;
+            yahooName = yahooData.longName || yahooData.shortName || null;
+
+            results[index] = {
+              ...results[index],
+              name: yahooName || results[index].name,
+              price: yahooPrice,
+              prevClose: yahooPrevClose,
+              changePct: yahooChgPct,
+              changeAmt: Math.round((yahooPrice - yahooPrevClose) * 100) / 100,
+              source: sessionTag === 'night' ? 'yahoo_night' : results[index].source,
+              session: sessionTag,
+            };
+          }
+        } catch (_) {
+          // Yahoo 失败回退
+          if (results[index].price != null) {
+            results[index] = { ...results[index], session: 'night_inactive' };
+          }
+        }
+      }
+    }));
+  }
   const fallbackItems = queryItems.filter(({ index }) => results[index].price == null);
   await Promise.all(fallbackItems.map(async ({ tencentCode, index }) => {
     const prefix = tencentCode.slice(0, 2);
@@ -1449,6 +1570,13 @@ async function getQuotes(codes) {
           source: (r.source ? r.source + '+' : '') + 'cache',
         };
       }
+    }
+  }
+
+  // 规范化：确保每条结果有 session 字段
+  for (const r of results) {
+    if (r.price != null && !r.session) {
+      r.session = 'regular';
     }
   }
 

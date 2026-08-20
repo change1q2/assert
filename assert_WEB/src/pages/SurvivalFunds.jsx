@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Plus, Edit2, Trash2, X, Wallet, DollarSign, TrendingUp, Percent, PiggyBank, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Plus, Edit2, Trash2, X, Wallet, DollarSign, TrendingUp, Percent, PiggyBank, ChevronDown, ChevronUp, Settings, Bookmark } from 'lucide-react';
 import { fetchState, saveState, invalidateStateCache } from '../api/index.js';
 import { convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency.js';
 
@@ -15,12 +15,16 @@ const CURRENCY_SYMBOLS = {
 
 const SURVIVAL_FUND_TYPES = ['应急储备', '日常开支', '长期储备', '投资本金'];
 
-const FREEDOM_CATEGORIES = [
-  '必要消费-住房',
-  '必要消费-基础生活',
-  '非必要消费-旅行',
-  '非必要消费-娱乐',
-  '自定义',
+const DEFAULT_FREEDOM_CATEGORIES = {
+  necessary: ['住房', '基础生活', '水电燃气', '交通', '医疗', '教育'],
+  unnecessary: ['旅行', '娱乐', '购物', '餐饮', '运动健身', '其他'],
+  extra: ['保险', '投资', '人情', '维修', '其他'],
+};
+
+const CATEGORY_TYPES = [
+  { value: 'necessary', label: '必要消费' },
+  { value: 'unnecessary', label: '非必要消费' },
+  { value: 'extra', label: '额外消费' },
 ];
 
 const PERIOD_OPTIONS = [
@@ -56,6 +60,23 @@ function formatNumber(value) {
   }).format(parseFloat(value) || 0);
 }
 
+function formatCategoryDisplay(category, categoryType) {
+  if (!category) return '—';
+  // 支持新旧格式
+  if (categoryType) {
+    const typeLabel = CATEGORY_TYPES.find(t => t.value === categoryType)?.label || '';
+    return typeLabel ? `${typeLabel} · ${category}` : category;
+  }
+  // 旧格式: "必要消费-住房" 或 "necessary-住房"
+  if (category.startsWith('必要消费-')) return category.replace('必要消费-', '必要消费 · ');
+  if (category.startsWith('非必要消费-')) return category.replace('非必要消费-', '非必要消费 · ');
+  if (category.startsWith('额外消费-')) return category.replace('额外消费-', '额外消费 · ');
+  if (category.startsWith('necessary-')) return '必要消费 · ' + category.replace('necessary-', '');
+  if (category.startsWith('unnecessary-')) return '非必要消费 · ' + category.replace('unnecessary-', '');
+  if (category.startsWith('extra-')) return '额外消费 · ' + category.replace('extra-', '');
+  return category;
+}
+
 function formatPercentage(value) {
   if (value === null || value === undefined || isNaN(value)) return '—';
   const n = parseFloat(value);
@@ -63,6 +84,93 @@ function formatPercentage(value) {
 }
 
 const DEFAULT_RATES = { ...DEFAULT_EXCHANGE_RATES };
+
+// ========== 多选下拉组件 ==========
+function MultiSelectDropdown({ label, options, values, onChange, placeholder = '全部' }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    if (open) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  const toggle = (val) => {
+    if (values.includes(val)) {
+      onChange(values.filter(v => v !== val));
+    } else {
+      onChange([...values, val]);
+    }
+  };
+
+  const selectedLabels = options
+    .filter(o => values.includes(o.value))
+    .map(o => o.label);
+
+  return (
+    <div className="flex flex-col gap-1" ref={ref}>
+      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">{label}</span>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className={`flex items-center gap-1 px-2 py-1 text-xs border rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white min-w-[140px] text-left ${
+            open ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200 dark:border-slate-600'
+          }`}
+        >
+          <span className="flex-1 truncate">
+            {values.length === 0
+              ? <span className="text-gray-400">{placeholder}</span>
+              : selectedLabels.length <= 2
+                ? selectedLabels.join(', ')
+                : `${selectedLabels.slice(0, 2).join(', ')} +${selectedLabels.length - 2}`
+            }
+          </span>
+          <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {open && (
+          <div className="absolute z-50 mt-1 w-56 max-h-60 overflow-auto bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg">
+            {options.length === 0 && (
+              <div className="px-3 py-2 text-xs text-gray-400">无选项</div>
+            )}
+            {options.map(opt => {
+              const checked = values.includes(opt.value);
+              return (
+                <label
+                  key={opt.value}
+                  className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-600 ${
+                    checked ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(opt.value)}
+                    className="w-3 h-3 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-gray-700 dark:text-gray-200">{opt.label}</span>
+                </label>
+              );
+            })}
+            {values.length > 0 && (
+              <div className="border-t border-gray-200 dark:border-slate-600 px-3 py-1">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onChange([]); }}
+                  className="text-xs text-red-500 hover:text-red-600"
+                >
+                  清空选择
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function SurvivalFunds() {
   const [loading, setLoading] = useState(true);
@@ -92,11 +200,27 @@ export default function SurvivalFunds() {
   const [editingBudget, setEditingBudget] = useState(null);
   const [budgetForm, setBudgetForm] = useState({
     name: '',
-    category: '必要消费-住房',
+    category: '住房',
+    categoryType: 'necessary',
     periodType: 'monthly',
     budgetAmount: '',
-    actualAmount: '',
   });
+
+  // 动态分类 (两级: necessary/unnecessary)
+  const [freedomCategories, setFreedomCategories] = useState(DEFAULT_FREEDOM_CATEGORIES);
+  const [categoryType, setCategoryType] = useState('necessary'); // 当前选择的一级分类
+  const [showCategorySettings, setShowCategorySettings] = useState(false);
+  const [categoryForm, setCategoryForm] = useState({ name: '', type: 'necessary' });
+
+  // 自由度显示周期
+  const [freedomDisplayPeriod, setFreedomDisplayPeriod] = useState('yearly');
+
+  // 筛选状态 (多选)
+  const [filterCategoryTypes, setFilterCategoryTypes] = useState([]); // ['necessary', 'extra']
+  const [filterCategories, setFilterCategories] = useState([]); // ['住房', '旅行']
+  const [filterPeriod, setFilterPeriod] = useState(''); // '', 'daily', ...
+  const [filterTemplates, setFilterTemplates] = useState([]); // [{id, name, categoryTypes:[], categories:[], period}]
+  const [showFilterManager, setShowFilterManager] = useState(false);
 
   const userId = localStorage.getItem('wealth_os_user_id');
 
@@ -107,6 +231,24 @@ export default function SurvivalFunds() {
       setStateData(data);
       setSurvivalFunds(data?.survivalFunds || []);
       setFreedomBudgets(data?.freedomBudgets || []);
+      // 兼容旧版扁平数组格式
+      let cats = data?.freedomCategories;
+      if (Array.isArray(cats)) {
+        const migrated = { necessary: [], unnecessary: [], extra: [] };
+        cats.forEach(c => {
+          if (typeof c === 'string') {
+            if (c.startsWith('必要消费-')) migrated.necessary.push(c.replace('必要消费-', ''));
+            else if (c.startsWith('非必要消费-')) migrated.unnecessary.push(c.replace('非必要消费-', ''));
+            else if (c.startsWith('额外消费-')) migrated.extra.push(c.replace('额外消费-', ''));
+            else migrated.unnecessary.push(c);
+          }
+        });
+        cats = migrated;
+      } else if (!cats || typeof cats !== 'object') {
+        cats = DEFAULT_FREEDOM_CATEGORIES;
+      }
+      setFreedomCategories(cats);
+      setFilterTemplates(data?.filterTemplates || []);
       setAccounts(data?.accounts || []);
       const rates = data?.exchangeRates && Object.keys(data.exchangeRates).length > 0
         ? data.exchangeRates
@@ -196,14 +338,14 @@ export default function SurvivalFunds() {
     </div>
   );
 
-  // ========== 第二行：自由度卡片 + 自由现金流列表 ==========
+  // ========== 第二行：自由度进度 + 自由现金流列表 ==========
   const freedomSummary = useMemo(() => {
     const periods = ['daily', 'weekly', 'monthly', 'yearly'];
     const result = {};
     periods.forEach(p => {
       const items = freedomBudgets.filter(b => b.periodType === p);
       const budgetAmount = items.reduce((s, b) => s + (parseFloat(b.budgetAmount) || 0), 0);
-      const actualAmount = items.reduce((s, b) => s + (parseFloat(b.actualAmount) || 0), 0);
+      const actualAmount = 0; // 实际金额字段已移除
       const degree = budgetAmount > 0 ? (actualAmount / budgetAmount) * 100 : 0;
       result[p] = { budgetAmount, actualAmount, degree };
     });
@@ -216,52 +358,290 @@ export default function SurvivalFunds() {
     return 'text-orange-600 dark:text-orange-400';
   };
 
-  const periodLabelMap = { daily: '日自由', weekly: '周自由', monthly: '月自由', yearly: '年自由' };
+  // 周期换算工具 (提取到顶层，供 useMemo 使用)
+  const convertToPeriod = (amount, fromPeriod, toPeriod) => {
+    const ratios = { daily: 1, weekly: 7, monthly: 30, yearly: 365 };
+    const days = amount * (ratios[fromPeriod] || 30);
+    return days / (ratios[toPeriod] || 365);
+  };
+
+  // 周期倍率：每种周期对应一年的数量
+  const PERIODS_PER_YEAR = { daily: 365, weekly: 52, monthly: 12, yearly: 1 };
+  // 年度天数（闰年自动处理）
+  const DAYS_THIS_YEAR = (() => {
+    const y = new Date().getFullYear();
+    const isLeap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+    return isLeap ? 366 : 365;
+  })();
+  // 当前到年末的剩余天数（不含今天）
+  const REMAINING_DAYS_THIS_YEAR = (() => {
+    const now = new Date();
+    const end = new Date(now.getFullYear(), 11, 31);
+    const diff = Math.floor((end - now) / (1000 * 60 * 60 * 24));
+    return Math.max(diff, 0);
+  })();
+
+  // 生存资金总金额 (CNY 折算)
+  const survivalTotalCNY = useMemo(() => {
+    return survivalFunds.reduce((s, f) => {
+      const cur = f.currency || 'CNY';
+      const amt = parseFloat(f.amount) || 0;
+      return s + convertCurrency(amt, cur, 'CNY', exchangeRates);
+    }, 0);
+  }, [survivalFunds, exchangeRates]);
+
+  // 筛选后的自由现金流
+  const filteredBudgets = useMemo(() => {
+    return freedomBudgets.filter(b => {
+      // 一级分类筛选 (多选，匹配任一)
+      if (filterCategoryTypes.length > 0) {
+        let matched = filterCategoryTypes.includes(b.categoryType);
+        if (!matched) {
+          // 兼容旧数据
+          matched = filterCategoryTypes.some(t => {
+            if (t === 'necessary' && (b.category?.startsWith('必要消费-') || b.category?.startsWith('necessary-'))) return true;
+            if (t === 'unnecessary' && (b.category?.startsWith('非必要消费-') || b.category?.startsWith('unnecessary-'))) return true;
+            if (t === 'extra' && (b.category?.startsWith('额外消费-') || b.category?.startsWith('extra-'))) return true;
+            return false;
+          });
+        }
+        if (!matched) return false;
+      }
+      // 二级分类筛选 (多选，匹配任一)
+      if (filterCategories.length > 0) {
+        // 提取二级分类名
+        const catName = b.categoryType ? b.category : (b.category?.includes('-') ? b.category.split('-')[1] : b.category);
+        if (!filterCategories.includes(catName)) return false;
+      }
+      // 周期筛选
+      if (filterPeriod && b.periodType !== filterPeriod) return false;
+      return true;
+    });
+  }, [freedomBudgets, filterCategoryTypes, filterCategories, filterPeriod]);
+
+  // 自由度年度进度数据 (基于筛选后的数据)
+  const yearProgressData = useMemo(() => {
+    const byYear = {};
+    filteredBudgets.forEach(b => {
+      const year = new Date().getFullYear();
+      if (!byYear[year]) byYear[year] = { currentBudget: 0, annualBudget: 0 };
+      const period = b.periodType || 'monthly';
+      const annualAmt = (parseFloat(b.budgetAmount) || 0) * (PERIODS_PER_YEAR[period] || 12);
+      byYear[year].annualBudget += annualAmt;
+      // 当前所需预算 = 年度预算 / 当年天数 × 剩余天数
+      const dailyAmt = annualAmt / DAYS_THIS_YEAR;
+      byYear[year].currentBudget += dailyAmt * REMAINING_DAYS_THIS_YEAR;
+    });
+    if (Object.keys(byYear).length === 0) {
+      const y = new Date().getFullYear();
+      byYear[y] = { currentBudget: 0, annualBudget: 0 };
+    }
+    return Object.entries(byYear).map(([year, data]) => ({
+      year,
+      currentBudget: Math.round(data.currentBudget * 100) / 100,
+      annualBudget: Math.round(data.annualBudget * 100) / 100,
+      actual: Math.round(survivalTotalCNY * 100) / 100,
+      freedom: data.currentBudget > 0 ? Math.round((survivalTotalCNY / data.currentBudget) * 10000) / 100 : 0,
+    }));
+  }, [filteredBudgets, survivalTotalCNY]);
+
+  // 4 个周期卡片数据
+  const periodCardsData = useMemo(() => {
+    const cards = {};
+    const totalAnnual = yearProgressData.reduce((s, y) => s + y.annualBudget, 0) || 0;
+    const totalActual = survivalTotalCNY;
+
+    Object.keys(PERIODS_PER_YEAR).forEach(period => {
+      const divisor = PERIODS_PER_YEAR[period];
+      const budgetPerPeriod = totalAnnual / divisor;
+      const actualPerPeriod = totalActual / divisor;
+      // 自由时间 = 实际现金 / 预算该周期自由资金
+      const freeTime = budgetPerPeriod > 0 ? Math.round((totalActual / budgetPerPeriod) * 10) / 10 : 0;
+
+      cards[period] = {
+        budget: Math.round(budgetPerPeriod * 100) / 100,
+        actual: Math.round(actualPerPeriod * 100) / 100,
+        freeTime,
+      };
+    });
+    return cards;
+  }, [yearProgressData, survivalTotalCNY]);
 
   const renderFreedomSection = () => {
-    const budgetTotals = freedomBudgets.reduce((acc, b) => {
+    const periodUnitMap = { daily: '日', weekly: '周', monthly: '月', yearly: '年' };
+
+    // 明细表带年度预算额 (基于筛选后的数据)
+    const budgetRows = filteredBudgets.map(b => {
+      const period = b.periodType || 'monthly';
+      const annual = (parseFloat(b.budgetAmount) || 0) * (PERIODS_PER_YEAR[period] || 12);
+      return { ...b, annualBudget: annual };
+    });
+    const budgetTotals = budgetRows.reduce((acc, b) => {
       acc.budget += parseFloat(b.budgetAmount) || 0;
-      acc.actual += parseFloat(b.actualAmount) || 0;
+      acc.annual += b.annualBudget || 0;
       return acc;
-    }, { budget: 0, actual: 0 });
+    }, { budget: 0, annual: 0 });
+
+    const cardColors = {
+      daily: 'from-blue-500 to-blue-600',
+      weekly: 'from-purple-500 to-purple-600',
+      monthly: 'from-emerald-500 to-emerald-600',
+      yearly: 'from-orange-500 to-orange-600',
+    };
 
     return (
       <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft border border-gray-100 dark:border-slate-700 p-5 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <PiggyBank className="w-5 h-5 text-emerald-500" />
-            <h2 className="text-base font-bold text-gray-900 dark:text-white">自由度与自由现金流</h2>
-          </div>
+        <div className="flex items-center gap-2 mb-4">
+          <PiggyBank className="w-5 h-5 text-emerald-500" />
+          <h2 className="text-base font-bold text-gray-900 dark:text-white">自由度进度</h2>
         </div>
 
-        {/* 4 张自由度卡片 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-          {Object.entries(periodLabelMap).map(([periodKey, label]) => {
-            const info = freedomSummary[periodKey] || { budgetAmount: 0, actualAmount: 0, degree: 0 };
+        {/* 4 个周期卡片 */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          {PERIOD_OPTIONS.map(p => {
+            const card = periodCardsData[p.value];
             return (
-              <div key={periodKey} className="bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-700 dark:to-slate-700/50 rounded-2xl p-4 border border-gray-100 dark:border-slate-600">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">{label}</span>
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full bg-white/60 dark:bg-slate-600/60 ${getFreedomColor(info.degree)}`}>
-                    {info.degree.toFixed(1)}%
-                  </span>
+              <div key={p.value} className={`rounded-2xl p-4 bg-gradient-to-br ${cardColors[p.value]} text-white shadow-lg`}>
+                <div className="text-xs opacity-90 mb-1">{p.label}自由</div>
+                <div className="text-lg font-bold mb-1">
+                  自由时间：{card.freeTime}{p.label}
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <p className="text-gray-400 mb-0.5">预算</p>
-                    <p className="font-bold text-gray-900 dark:text-white tabular-nums">{formatNumber(info.budgetAmount)}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 mb-0.5">实际</p>
-                    <p className="font-bold text-gray-900 dark:text-white tabular-nums">{formatNumber(info.actualAmount)}</p>
-                  </div>
+                <div className="text-xs opacity-80 leading-relaxed">
+                  <div>预算{p.label}自由资金 = {formatNumber(card.budget)}</div>
+                  <div>实际{p.label}现金 = {formatNumber(card.actual)}</div>
                 </div>
               </div>
             );
           })}
         </div>
 
-        {/* 自由现金流列表表格 */}
+        {/* 年度预算汇总表 */}
+        <div className="overflow-x-auto border border-gray-100 dark:border-slate-700 rounded-2xl mb-5">
+          <table className="w-full">
+            <thead className="bg-gray-50 dark:bg-slate-700">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年份</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">当前所需预算</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年度预算额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">实际现金</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">自由度</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+              {yearProgressData.map(y => (
+                <tr key={y.year} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{y.year}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(y.currentBudget)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(y.annualBudget)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(y.actual)}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-2 bg-gray-200 dark:bg-slate-600 rounded-full overflow-hidden max-w-[120px]">
+                        <div
+                          className={`h-full rounded-full ${y.freedom >= 100 ? 'bg-emerald-500' : y.freedom < 80 ? 'bg-red-500' : 'bg-orange-500'}`}
+                          style={{ width: `${Math.min(y.freedom, 100)}%` }}
+                        />
+                      </div>
+                      <span className={`text-xs font-bold ${getFreedomColor(y.freedom)}`}>
+                        {y.freedom.toFixed(1)}%
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 筛选器 (下拉多选) */}
+        <div className="border border-gray-100 dark:border-slate-700 rounded-2xl p-3 mb-4 bg-gray-50 dark:bg-slate-900/50">
+          <div className="flex flex-wrap items-start gap-4 mb-3">
+            {/* 一级分类多选下拉 */}
+            <MultiSelectDropdown
+              label="分类"
+              options={CATEGORY_TYPES.map(t => ({ value: t.value, label: t.label }))}
+              values={filterCategoryTypes}
+              onChange={(vals) => {
+                setFilterCategoryTypes(vals);
+                // 清理不属于选中类型的子项
+                if (vals.length > 0) {
+                  setFilterCategories(prev => prev.filter(c =>
+                    vals.some(t => (freedomCategories[t] || []).includes(c))
+                  ));
+                } else {
+                  setFilterCategories([]);
+                }
+              }}
+              placeholder="全部分类"
+            />
+            {/* 二级分类多选下拉 */}
+            {filterCategoryTypes.length > 0 && (
+              <MultiSelectDropdown
+                label="子项"
+                options={filterCategoryTypes.flatMap(t => (freedomCategories[t] || []).map(c => ({ value: c, label: c })))
+                  .filter((v, i, arr) => arr.findIndex(x => x.value === v.value) === i)}
+                values={filterCategories}
+                onChange={setFilterCategories}
+                placeholder="全部子项"
+              />
+            )}
+            {/* 周期单选下拉 */}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">周期</span>
+              <select
+                value={filterPeriod}
+                onChange={(e) => setFilterPeriod(e.target.value)}
+                className="px-2 py-1 text-xs border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white min-w-[80px]"
+              >
+                <option value="">全部</option>
+                {PERIOD_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+            </div>
+            {/* 操作按钮 */}
+            <div className="flex items-center gap-2 ml-auto">
+              {(filterCategoryTypes.length > 0 || filterCategories.length > 0 || filterPeriod) && (
+                <button
+                  onClick={clearFilters}
+                  className="px-2 py-1 text-xs text-gray-500 hover:text-red-500 transition-colors"
+                >
+                  ✕ 清除
+                </button>
+              )}
+              <button
+                onClick={saveFilterTemplate}
+                className="px-2 py-1 text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+              >
+                <Bookmark className="w-3 h-3" /> 保存为模板
+              </button>
+            </div>
+          </div>
+          {/* 模板列表 */}
+          {filterTemplates.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-200 dark:border-slate-700">
+              <span className="text-xs text-gray-500 dark:text-gray-400">模板：</span>
+              {filterTemplates.map(tpl => (
+                <div key={tpl.id} className="flex items-center gap-1">
+                  <button
+                    onClick={() => applyFilterTemplate(tpl)}
+                    className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                    title={`${(tpl.categoryTypes || []).map(t => CATEGORY_TYPES.find(x => x.value === t)?.label || t).join(',') || '全部'} / ${(tpl.categories || []).join(',') || '全部'} / ${tpl.period || '全部'}`}
+                  >
+                    {tpl.name}
+                  </button>
+                  <button
+                    onClick={() => deleteFilterTemplate(tpl.id)}
+                    className="p-0.5 text-gray-400 hover:text-red-500"
+                    title="删除模板"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 自由现金流明细 */}
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">自由现金流明细</h3>
           <button
@@ -280,20 +660,20 @@ export default function SurvivalFunds() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">分类</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">周期</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">预算金额</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">实际金额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年度预算额</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-              {freedomBudgets.map(b => (
+              {budgetRows.map(b => (
                 <tr key={b.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{b.name || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{b.category || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCategoryDisplay(b.category, b.categoryType)}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                     {PERIOD_OPTIONS.find(p => p.value === b.periodType)?.label || b.periodType || '—'}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(b.budgetAmount)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(b.actualAmount)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(b.annualBudget)}</td>
                   <td className="px-4 py-3 text-sm">
                     <div className="flex items-center gap-2">
                       <button onClick={() => handleEditBudget(b)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="编辑">
@@ -306,16 +686,16 @@ export default function SurvivalFunds() {
                   </td>
                 </tr>
               ))}
-              {freedomBudgets.length === 0 && (
+              {budgetRows.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无自由现金流数据</td>
                 </tr>
               )}
-              {freedomBudgets.length > 0 && (
+              {budgetRows.length > 0 && (
                 <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
                   <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={3}>合计</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.budget)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.actual)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.annual)}</td>
                   <td></td>
                 </tr>
               )}
@@ -335,7 +715,7 @@ export default function SurvivalFunds() {
     });
 
     const filteredAccounts = accounts.filter(a => {
-      if (usedAccountIds.size === 0) return true;
+      if (usedAccountIds.size === 0) return false;
       const key = a.id || a.name;
       return usedAccountIds.has(a.id) || usedAccountIds.has(key) || usedAccountIds.has(a.name);
     });
@@ -620,24 +1000,41 @@ export default function SurvivalFunds() {
   // ========== 操作函数：自由现金流 ==========
   const handleAddBudget = () => {
     setEditingBudget(null);
+    const type = 'necessary';
+    const list = freedomCategories[type] || [];
+    setCategoryType(type);
     setBudgetForm({
       name: '',
-      category: '必要消费-住房',
+      category: list[0] || '',
+      categoryType: type,
       periodType: 'monthly',
       budgetAmount: '',
-      actualAmount: '',
     });
     setShowBudgetModal(true);
   };
 
   const handleEditBudget = (budget) => {
     setEditingBudget(budget);
+    // 从已有的 category 字符串解析类型
+    let bType = budget.categoryType || 'necessary';
+    let bCategory = budget.category || '';
+    if (!budget.categoryType && budget.category) {
+      // 兼容旧数据
+      if (budget.category.startsWith('必要消费-')) {
+        bType = 'necessary';
+        bCategory = budget.category.replace('必要消费-', '');
+      } else if (budget.category.startsWith('非必要消费-')) {
+        bType = 'unnecessary';
+        bCategory = budget.category.replace('非必要消费-', '');
+      }
+    }
+    setCategoryType(bType);
     setBudgetForm({
       name: budget.name || '',
-      category: budget.category || '必要消费-住房',
+      category: bCategory,
+      categoryType: bType,
       periodType: budget.periodType || 'monthly',
       budgetAmount: budget.budgetAmount != null ? budget.budgetAmount : '',
-      actualAmount: budget.actualAmount != null ? budget.actualAmount : '',
     });
     setShowBudgetModal(true);
   };
@@ -664,18 +1061,17 @@ export default function SurvivalFunds() {
       alert('请输入预算金额');
       return;
     }
+    const fullCategory = budgetForm.category ? `${budgetForm.categoryType || 'necessary'}-${budgetForm.category}` : '';
     let newArr;
     if (editingBudget) {
       newArr = freedomBudgets.map(b => b.id === editingBudget.id
         ? {
             ...b,
             name: budgetForm.name.trim(),
-            category: budgetForm.category,
+            category: fullCategory,
+            categoryType: budgetForm.categoryType || 'necessary',
             periodType: budgetForm.periodType,
             budgetAmount: parseFloat(budgetForm.budgetAmount),
-            actualAmount: budgetForm.actualAmount != null && budgetForm.actualAmount !== ''
-              ? parseFloat(budgetForm.actualAmount)
-              : 0,
           }
         : b
       );
@@ -685,12 +1081,10 @@ export default function SurvivalFunds() {
         {
           id: `fb_${Date.now()}`,
           name: budgetForm.name.trim(),
-          category: budgetForm.category,
+          category: fullCategory,
+          categoryType: budgetForm.categoryType || 'necessary',
           periodType: budgetForm.periodType,
           budgetAmount: parseFloat(budgetForm.budgetAmount),
-          actualAmount: budgetForm.actualAmount != null && budgetForm.actualAmount !== ''
-            ? parseFloat(budgetForm.actualAmount)
-            : 0,
         },
       ];
     }
@@ -704,6 +1098,83 @@ export default function SurvivalFunds() {
     if (result?.cached === false) {
       await loadData();
     }
+  };
+
+  // ========== 操作函数：分类管理 ==========
+  const handleAddCategory = async () => {
+    const name = categoryForm.name.trim();
+    const type = categoryForm.type || 'necessary';
+    if (!name) return;
+    if (freedomCategories[type]?.includes(name)) {
+      alert('该分类已存在');
+      return;
+    }
+    const newCats = {
+      ...freedomCategories,
+      [type]: [...(freedomCategories[type] || []), name],
+    };
+    setFreedomCategories(newCats);
+    const newState = { ...stateData, freedomCategories: newCats };
+    const result = await saveState(newState);
+    setStateData(newState);
+    if (result?.cached === false) {
+      await loadData();
+    }
+    setCategoryForm({ name: '', type: 'necessary' });
+  };
+
+  const handleDeleteCategory = async (catName, catType) => {
+    if (!confirm(`确定删除分类 "${catName}" 吗？`)) return;
+    const newCats = {
+      ...freedomCategories,
+      [catType]: (freedomCategories[catType] || []).filter(c => c !== catName),
+    };
+    setFreedomCategories(newCats);
+    const newState = { ...stateData, freedomCategories: newCats };
+    const result = await saveState(newState);
+    setStateData(newState);
+    if (result?.cached === false) {
+      await loadData();
+    }
+  };
+
+  // ========== 筛选模板管理 ==========
+  const saveFilterTemplate = async () => {
+    const name = prompt('请输入模板名称');
+    if (!name) return;
+    const template = {
+      id: `tpl_${Date.now()}`,
+      name,
+      categoryTypes: [...filterCategoryTypes],
+      categories: [...filterCategories],
+      period: filterPeriod,
+    };
+    const newTemplates = [...filterTemplates, template];
+    setFilterTemplates(newTemplates);
+    const newState = { ...stateData, filterTemplates: newTemplates };
+    await saveState(newState);
+    setStateData(newState);
+  };
+
+  const applyFilterTemplate = (tpl) => {
+    setFilterCategoryTypes(tpl.categoryTypes || []);
+    setFilterCategories(tpl.categories || []);
+    setFilterPeriod(tpl.period || '');
+  };
+
+  const deleteFilterTemplate = async (id) => {
+    if (!confirm('确定删除该筛选模板吗？')) return;
+    const newTemplates = filterTemplates.filter(t => t.id !== id);
+    setFilterTemplates(newTemplates);
+    const newState = { ...stateData, filterTemplates: newTemplates };
+    await saveState(newState);
+    setStateData(newState);
+  };
+
+  const clearFilters = () => {
+    setFilterCategoryTypes([]);
+    setFilterCategories([]);
+    setFilterPeriod('');
   };
 
   // ========== 弹窗：生存资金 ==========
@@ -850,13 +1321,52 @@ export default function SurvivalFunds() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">分类</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">分类</label>
+                <button 
+                  onClick={() => setShowCategorySettings(true)}
+                  className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                >
+                  <Settings className="w-3 h-3" /> 设置
+                </button>
+              </div>
+              {/* 一级分类：Radio */}
+              <div className="flex gap-4 mb-2">
+                {CATEGORY_TYPES.map(t => (
+                  <label key={t.value} className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="categoryType"
+                      value={t.value}
+                      checked={budgetForm.categoryType === t.value}
+                      onChange={(e) => {
+                        const newType = e.target.value;
+                        setCategoryType(newType);
+                        const list = freedomCategories[newType] || [];
+                        setBudgetForm({
+                          ...budgetForm,
+                          categoryType: newType,
+                          category: list[0] || '',
+                        });
+                      }}
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{t.label}</span>
+                  </label>
+                ))}
+              </div>
+              {/* 二级分类：Select */}
               <select
                 value={budgetForm.category}
                 onChange={(e) => setBudgetForm({ ...budgetForm, category: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {FREEDOM_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {(freedomCategories[budgetForm.categoryType] || []).map(c =>
+                  <option key={c} value={c}>{c}</option>
+                )}
+                {(!freedomCategories[budgetForm.categoryType] || []).length === 0 && (
+                  <option value="">(请先添加分类)</option>
+                )}
               </select>
             </div>
             <div>
@@ -869,29 +1379,17 @@ export default function SurvivalFunds() {
                 {PERIOD_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
               </select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  预算金额 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  value={budgetForm.budgetAmount}
-                  onChange={(e) => setBudgetForm({ ...budgetForm, budgetAmount: e.target.value })}
-                  placeholder="请输入预算金额"
-                  className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实际金额</label>
-                <input
-                  type="number"
-                  value={budgetForm.actualAmount}
-                  onChange={(e) => setBudgetForm({ ...budgetForm, actualAmount: e.target.value })}
-                  placeholder="请输入实际金额"
-                  className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                预算金额 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                value={budgetForm.budgetAmount}
+                onChange={(e) => setBudgetForm({ ...budgetForm, budgetAmount: e.target.value })}
+                placeholder="请输入预算金额"
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
           </div>
           <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end gap-3">
@@ -907,6 +1405,76 @@ export default function SurvivalFunds() {
             >
               保存
             </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ========== 弹窗：分类管理 ==========
+  const renderCategorySettingsModal = () => {
+    if (!showCategorySettings) return null;
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto">
+          <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">分类管理</h2>
+            <button onClick={() => setShowCategorySettings(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-5 space-y-4">
+            {/* 添加新分类：先选类型，再输入名称 */}
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <select
+                  value={categoryForm.type}
+                  onChange={(e) => setCategoryForm({ ...categoryForm, type: e.target.value })}
+                  className="px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {CATEGORY_TYPES.map(t => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  value={categoryForm.name}
+                  onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
+                  placeholder="输入新分类名称"
+                  className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={handleAddCategory}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                >
+                  添加
+                </button>
+              </div>
+            </div>
+            {/* 分类列表：按类型分组 */}
+            {CATEGORY_TYPES.map(t => (
+              <div key={t.value}>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{t.label}</h3>
+                <div className="space-y-2">
+                  {(freedomCategories[t.value] || []).map(cat => (
+                    <div key={cat} className="flex items-center justify-between p-2 rounded-lg bg-gray-50 dark:bg-slate-700">
+                      <span className="text-sm text-gray-900 dark:text-white">{cat}</span>
+                      <button
+                        onClick={() => handleDeleteCategory(cat, t.value)}
+                        className="p-1 text-gray-400 hover:text-red-500 rounded"
+                        title="删除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {(freedomCategories[t.value] || []).length === 0 && (
+                    <p className="text-xs text-gray-500 text-center py-2">暂无分类</p>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -943,6 +1511,7 @@ export default function SurvivalFunds() {
 
       {renderFundModal()}
       {renderBudgetModal()}
+      {renderCategorySettingsModal()}
     </div>
   );
 }

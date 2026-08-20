@@ -62,6 +62,8 @@ export async function fetchRealtimeQuotes(financeAssets, applyRealtimeQuotesFn, 
           changeAmt: q.changeAmt,
           prevClose: q.prevClose,
           name: q.name,
+          session: q.session || 'regular',
+          source: q.source,
         };
       }
     }

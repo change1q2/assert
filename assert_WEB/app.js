@@ -348,7 +348,7 @@ let analysisPeriodMode = "year";
 let analysisPeriod = String(new Date().getFullYear());
 let analysisShowTotalDebt = false;
 // ── 实时行情 ──
-let realtimeQuoteMap = {}; // code -> { price, changePct, changeAmt, prevClose, name }
+let realtimeQuoteMap = {}; // code -> { price, changePct, changeAmt, prevClose, name, session, source }
 let premiumRows = [];
 let premiumLoading = false;
 let premiumError = "";
@@ -2872,6 +2872,8 @@ async function fetchRealtimeQuotes() {
           changeAmt: q.changeAmt,
           prevClose: q.prevClose,
           name: q.name,
+          session: q.session || 'regular',
+          source: q.source,
         };
       }
     }
@@ -3311,7 +3313,10 @@ function stockCellContent(item, colKey) {
       return `<div class="stock-cell-main">${nameLink}</div><div class="stock-cell-sub">${financeLocalMoney(cp * shares || financeAssetValue(item), item.currency)}</div>`;
     }
     case "shares": return `<div class="stock-cell-main">${shares}</div><div class="stock-cell-sub">${shares}</div>`;
-    case "price": return `<div class="stock-cell-main">${cp > 0 ? cp.toFixed(3) : "--"}${quoteData.price ? ' <span class="holding-live-dot"></span>' : ''}</div><div class="stock-cell-sub">${cost > 0 ? cost.toFixed(3) : "--"}</div>`;
+    case "price": {
+      const nightBadge = quoteData.session === 'night' ? ' <span class="holding-night-badge" title="夜盘价格">🌙夜</span>' : '';
+      return `<div class="stock-cell-main">${cp > 0 ? cp.toFixed(3) : "--"}${quoteData.price ? ' <span class="holding-live-dot"></span>' : ''}${nightBadge}</div><div class="stock-cell-sub">${cost > 0 ? cost.toFixed(3) : "--"}</div>`;
+    }
     case "pnl": return `<div class="stock-cell-main ${pnlCls}">${pnl >= 0 ? "+" : ""}${financeLocalMoney(pnl, item.currency)}</div><div class="stock-cell-sub ${pnlCls}">${pnl >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%</div>`;
     case "todayPnl": return `<div class="stock-cell-main ${todayCls}">${todayPnl !== 0 ? (todayPnl >= 0 ? "+" : "") + financeLocalMoney(todayPnl, item.currency) : "--"}</div><div class="stock-cell-sub ${todayCls}">${todayPnlPct ? (todayPnlPct >= 0 ? "+" : "") + todayPnlPct.toFixed(2) + "%" : "--"}</div>`;
     case "positionWeight": return `<div class="stock-cell-main">${(Number(item.positionWeight) || 0).toFixed(2)}%</div>`;
@@ -8519,7 +8524,7 @@ function renderHoldingTab(asset) {
     <div class="holding-summary">
       <div class="holding-summary-grid">
         <div class="holding-summary-item">
-          <span class="holding-summary-label">现价 ${realTimePrice ? '<span class="holding-live-dot"></span>' : ''}</span>
+          <span class="holding-summary-label">现价 ${realTimePrice ? '<span class="holding-live-dot"></span>' : ''}${quoteData.session === 'night' ? '<span class="holding-night-badge" title="夜盘价格">🌙夜</span>' : ''}</span>
           <strong>${financeLocalMoney(marketPrice, asset.currency)}</strong>
         </div>
         <div class="holding-summary-item">

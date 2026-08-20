@@ -5430,6 +5430,21 @@ em.loss  { color: var(--danger); }
   50% { opacity: .3; }
 }
 
+/* 夜盘徽章 */
+.holding-night-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border-radius: 10px;
+  vertical-align: middle;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 /* ============================================================
    Button Spinner (rotating icon)
    ============================================================ */
