@@ -709,7 +709,7 @@ export default function FinanceHoldingsTable({
   const filteredSummary = useMemo(() => {
     const target = totalCurrency || selectedCurrency || 'CNY';
     if (categoryName === 'archived') {
-      const totalFinalPnl = paged.reduce((sum, a) => {
+      const totalFinalPnl = filteredWithRatio.reduce((sum, a) => {
         const pnl = parseFloat(a.finalPnl) || 0;
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(pnl, currency, target, exchangeRates);
@@ -726,45 +726,34 @@ export default function FinanceHoldingsTable({
         totalFinalPnlRate: totalCostAll > 0 ? (totalFinalPnl / totalCostAll) * 100 : 0,
       };
     } else {
-      const totalCost = paged.reduce((sum, a) => {
+      const all = filteredWithRatio;
+      const totalCost = all.reduce((sum, a) => {
         const cost = parseFloat(a.cost) || 0;
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(cost, currency, target, exchangeRates);
       }, 0);
-      const totalMarketValue = paged.reduce((sum, a) => {
+      const totalMarketValue = all.reduce((sum, a) => {
         const value = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(value, currency, target, exchangeRates);
       }, 0);
-      const totalPnl = paged.reduce((sum, a) => {
+      const totalPnl = all.reduce((sum, a) => {
         const pnl = parseFloat(a.holdingPnl) || 0;
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(pnl, currency, target, exchangeRates);
       }, 0);
-      const totalDailyPnl = paged.reduce((sum, a) => {
+      const totalDailyPnl = all.reduce((sum, a) => {
         const dailyPnl = parseFloat(a.dailyPnl) || 0;
         const currency = a.currency || 'CNY';
         return sum + convertCurrency(dailyPnl, currency, target, exchangeRates);
       }, 0);
-      // 当前总现金 = 一级分类现金类 + 货币基金（货基属于现金等价物）
-      const _isMoneyFund = (a) => {
-        const catL1 = a.categoryL1 || a.category || '';
-        const catL2 = a.categoryL2 || a.subcategory || '';
-        const catL4 = a.categoryL4 || '';
-        const positionType = a.positionType || a.positionCategory || '';
-        const assetType = a.assetType || a.assetKind || a.kind || '';
-        const name = String(a.name || '');
-        const code = String(a.code || '');
-        return catL2 === '货币型' || catL4 === '货币基金' || positionType === '货币基金'
-          || assetType === '货基' || assetType === '货币基金' || name.includes('货币')
-          || code === '000509';
-      };
-      const totalCash = paged.reduce((sum, a) => {
+      // 当前总现金 = 一级分类现金类 + 货币基金（复用 isMoneyFundHold 保持一致）
+      const totalCash = all.reduce((sum, a) => {
         const catL1 = a.categoryL1 || a.category || '';
         const isCash = catL1 === '现金类';
-        const isMoneyFund = _isMoneyFund(a);
+        const isMoneyFund = isMoneyFundHold(a);
         if (isCash || isMoneyFund) {
-          // 优先 currentValue（当前市值），兼容货基和独立现金
+          // 取值优先级：currentValue > balance > quantity×currentPrice
           const v1 = parseFloat(a.currentValue);
           const v2 = parseFloat(a.balance);
           const v3 = parseFloat(a.quantity) * (parseFloat(a.currentPrice) || 1);
@@ -784,7 +773,7 @@ export default function FinanceHoldingsTable({
         totalDailyPnlRate: totalMarketValue > 0 ? (totalDailyPnl / totalMarketValue) * 100 : 0,
       };
     }
-  }, [paged, exchangeRates, categoryName, financeAccounts, totalCurrency, selectedCurrency]);
+  }, [filteredWithRatio, exchangeRates, categoryName, financeAccounts, totalCurrency, selectedCurrency]);
 
   const showCheckboxCol = !readOnly && showBatchEdit;
   const showOpsCol = !readOnly;
