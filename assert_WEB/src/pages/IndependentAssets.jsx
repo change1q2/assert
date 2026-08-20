@@ -485,6 +485,11 @@ export default function IndependentAssets() {
   const [exchangeRates, setExchangeRates] = useState(DEFAULT_EXCHANGE_RATES);
   // 保险资产合计行的统计币种（可切换，默认人民币）
   const [insuranceTotalCurrency, setInsuranceTotalCurrency] = useState('CNY');
+  const [vehicleTotalCurrency, setVehicleTotalCurrency] = useState('CNY');
+  const [realEstateTotalCurrency, setRealEstateTotalCurrency] = useState('CNY');
+  const [fixedInvestmentTotalCurrency, setFixedInvestmentTotalCurrency] = useState('CNY');
+  const [fixedDepositTotalCurrency, setFixedDepositTotalCurrency] = useState('CNY');
+  const [survivalFundTotalCurrency, setSurvivalFundTotalCurrency] = useState('CNY');
 
   const { accounts = [], independentAssets = {} } = stateData || {};
 
@@ -2340,6 +2345,27 @@ export default function IndependentAssets() {
     const selfUseItems = items.filter(i => i.usage !== '出租');
     const rentalItems = items.filter(i => i.usage === '出租');
 
+    // 自用房合计
+    const selfUseTotals = selfUseItems.reduce((acc, item) => {
+      const cur = item.currency || 'CNY';
+      const targetCur = realEstateTotalCurrency;
+      acc.purchasePrice += convertAmount(parseFloat(item.purchasePrice || 0), cur, targetCur, exchangeRates);
+      acc.marketValue += convertAmount(parseFloat(item.marketValue || 0), cur, targetCur, exchangeRates);
+      acc.profitLoss += convertAmount(parseFloat(item.profitLossAmount || 0), cur, targetCur, exchangeRates);
+      return acc;
+    }, { purchasePrice: 0, marketValue: 0, profitLoss: 0 });
+
+    // 出租房合计
+    const rentalTotals = rentalItems.reduce((acc, item) => {
+      const cur = item.currency || 'CNY';
+      const targetCur = realEstateTotalCurrency;
+      acc.rentAmount += convertAmount(parseFloat(item.rentAmount || 0), cur, targetCur, exchangeRates);
+      acc.depositAmount += convertAmount(parseFloat(item.depositAmount || 0), cur, targetCur, exchangeRates);
+      const rentalStats = calculateRentalStats(item);
+      acc.cumulativeIncome += convertAmount(parseFloat(rentalStats.cumulativeIncome || 0), cur, targetCur, exchangeRates);
+      return acc;
+    }, { rentAmount: 0, depositAmount: 0, cumulativeIncome: 0 });
+
     return (
       <div className="space-y-6">
         {selfUseItems.length > 0 && (
@@ -2415,6 +2441,30 @@ export default function IndependentAssets() {
                       </tr>
                     );
                   })}
+                  {selfUseItems.length > 0 && (
+                    <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
+                      <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={8}>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>合计</span>
+                          <select
+                            value={realEstateTotalCurrency}
+                            onChange={(e) => setRealEstateTotalCurrency(e.target.value)}
+                            className="text-xs border border-indigo-200 dark:border-indigo-700 rounded px-1.5 py-0.5 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                          >
+                            {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                          </select>
+                          <span className="text-xs text-gray-400 font-normal">（按汇率折算）</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(selfUseTotals.purchasePrice, realEstateTotalCurrency)}</td>
+                      <td colSpan={2}></td>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(selfUseTotals.marketValue, realEstateTotalCurrency)}</td>
+                      <td className={`px-4 py-3 text-sm ${selfUseTotals.profitLoss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{formatCurrency(selfUseTotals.profitLoss, realEstateTotalCurrency)}</td>
+                      <td></td>
+                      <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">{realEstateTotalCurrency}</td>
+                      <td></td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -2486,6 +2536,30 @@ export default function IndependentAssets() {
                     </tr>
                     );
                   })}
+                  {rentalItems.length > 0 && (
+                    <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
+                      <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={6}>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>合计</span>
+                          <select
+                            value={realEstateTotalCurrency}
+                            onChange={(e) => setRealEstateTotalCurrency(e.target.value)}
+                            className="text-xs border border-indigo-200 dark:border-indigo-700 rounded px-1.5 py-0.5 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                          >
+                            {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                          </select>
+                          <span className="text-xs text-gray-400 font-normal">（按汇率折算）</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(rentalTotals.rentAmount, realEstateTotalCurrency)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(rentalTotals.depositAmount, realEstateTotalCurrency)}</td>
+                      <td colSpan={3}></td>
+                      <td className="px-4 py-3 text-sm text-orange-600 dark:text-orange-400 font-medium">{formatCurrency(rentalTotals.cumulativeIncome, realEstateTotalCurrency)}</td>
+                      <td colSpan={2}></td>
+                      <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">{realEstateTotalCurrency}</td>
+                      <td></td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -2516,6 +2590,17 @@ export default function IndependentAssets() {
 
   const renderVehicleTable = () => {
     const items = getAssets('vehicle');
+
+    // 车辆合计
+    const vehicleTotals = items.reduce((acc, item) => {
+      const cur = item.currency || 'CNY';
+      const targetCur = vehicleTotalCurrency;
+      const { residualValue } = calculateVehicleResidualValue(item);
+      acc.purchasePrice += convertAmount(parseFloat(item.purchasePrice || 0), cur, targetCur, exchangeRates);
+      acc.residualValue += convertAmount(parseFloat(residualValue || 0), cur, targetCur, exchangeRates);
+      return acc;
+    }, { purchasePrice: 0, residualValue: 0 });
+
     return (
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
@@ -2572,6 +2657,28 @@ export default function IndependentAssets() {
               {items.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无车辆资产数据</td>
+                </tr>
+              )}
+              {items.length > 0 && (
+                <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={3}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>合计</span>
+                      <select
+                        value={vehicleTotalCurrency}
+                        onChange={(e) => setVehicleTotalCurrency(e.target.value)}
+                        className="text-xs border border-indigo-200 dark:border-indigo-700 rounded px-1.5 py-0.5 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      >
+                        {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                      </select>
+                      <span className="text-xs text-gray-400 font-normal">（按汇率折算）</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(vehicleTotals.purchasePrice, vehicleTotalCurrency)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(vehicleTotals.residualValue, vehicleTotalCurrency)}</td>
+                  <td></td>
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">{vehicleTotalCurrency}</td>
+                  <td></td>
                 </tr>
               )}
             </tbody>
@@ -2744,6 +2851,19 @@ export default function IndependentAssets() {
 
   const renderFixedInvestmentTable = () => {
     const items = getAssets('fixedinvestment');
+
+    // 固定投资合计
+    const fixedInvTotals = items.reduce((acc, item) => {
+      const cur = item.currency || 'CNY';
+      const targetCur = fixedInvestmentTotalCurrency;
+      const listStats = calculateFixedInvestmentStats(item);
+      acc.investmentCost += convertAmount(parseFloat(item.investmentCost || 0), cur, targetCur, exchangeRates);
+      acc.totalInvested += convertAmount(parseFloat(listStats.totalInvested || 0), cur, targetCur, exchangeRates);
+      acc.totalDividend += convertAmount(parseFloat(listStats.totalDividend || 0), cur, targetCur, exchangeRates);
+      acc.currentYearDividend += convertAmount(parseFloat(listStats.currentYearDividend || 0), cur, targetCur, exchangeRates);
+      return acc;
+    }, { investmentCost: 0, totalInvested: 0, totalDividend: 0, currentYearDividend: 0 });
+
     return (
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
@@ -2806,6 +2926,31 @@ export default function IndependentAssets() {
               {items.length === 0 && (
                 <tr>
                   <td colSpan={12} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无固定投资数据</td>
+                </tr>
+              )}
+              {items.length > 0 && (
+                <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={4}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>合计</span>
+                      <select
+                        value={fixedInvestmentTotalCurrency}
+                        onChange={(e) => setFixedInvestmentTotalCurrency(e.target.value)}
+                        className="text-xs border border-indigo-200 dark:border-indigo-700 rounded px-1.5 py-0.5 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      >
+                        {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                      </select>
+                      <span className="text-xs text-gray-400 font-normal">（按汇率折算）</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(fixedInvTotals.investmentCost, fixedInvestmentTotalCurrency)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(fixedInvTotals.totalInvested, fixedInvestmentTotalCurrency)}</td>
+                  <td></td>
+                  <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400">{formatCurrency(fixedInvTotals.totalDividend, fixedInvestmentTotalCurrency)}</td>
+                  <td className="px-4 py-3 text-sm text-green-600 dark:text-green-400">{formatCurrency(fixedInvTotals.currentYearDividend, fixedInvestmentTotalCurrency)}</td>
+                  <td></td>
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">{fixedInvestmentTotalCurrency}</td>
+                  <td></td>
                 </tr>
               )}
             </tbody>
@@ -2892,6 +3037,28 @@ export default function IndependentAssets() {
 
   const renderFixedDepositTable = () => {
     const items = getAssets('fixeddeposit');
+
+    // 定期资产合计
+    const fdTotals = items.reduce((acc, item) => {
+      const cur = item.currency || 'CNY';
+      const targetCur = fixedDepositTotalCurrency;
+      const calcAmount = parseFloat(item.amount || 0);
+      const calcRate = parseFloat(item.interestRate !== undefined && item.interestRate !== '' ? item.interestRate : (item.interest || 0));
+      const calcYears = (() => {
+        if (!item.startDate || !item.endDate) return 0;
+        const s = new Date(item.startDate);
+        const e = new Date(item.endDate);
+        if (e <= s) return 0;
+        return (e - s) / (1000 * 60 * 60 * 24) / 365;
+      })();
+      const listTotalReturn = calcAmount > 0 && calcRate > 0 && calcYears > 0 ? calcAmount * (calcRate / 100) * calcYears : 0;
+      const listTotalAmount = calcAmount > 0 ? calcAmount + listTotalReturn : 0;
+      acc.amount += convertAmount(calcAmount, cur, targetCur, exchangeRates);
+      acc.interest += convertAmount(listTotalReturn, cur, targetCur, exchangeRates);
+      acc.totalAmount += convertAmount(listTotalAmount, cur, targetCur, exchangeRates);
+      return acc;
+    }, { amount: 0, interest: 0, totalAmount: 0 });
+
     return (
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
@@ -2973,6 +3140,31 @@ export default function IndependentAssets() {
                   <td colSpan={15} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无定期资产数据</td>
                 </tr>
               )}
+              {items.length > 0 && (
+                <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={6}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>合计</span>
+                      <select
+                        value={fixedDepositTotalCurrency}
+                        onChange={(e) => setFixedDepositTotalCurrency(e.target.value)}
+                        className="text-xs border border-indigo-200 dark:border-indigo-700 rounded px-1.5 py-0.5 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      >
+                        {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                      </select>
+                      <span className="text-xs text-gray-400 font-normal">（按汇率折算）</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">{fixedDepositTotalCurrency}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(fdTotals.amount, fixedDepositTotalCurrency)}</td>
+                  <td></td>
+                  <td colSpan={2}></td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(fdTotals.interest, fixedDepositTotalCurrency)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(fdTotals.totalAmount, fixedDepositTotalCurrency)}</td>
+                  <td></td>
+                  <td></td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -2982,14 +3174,22 @@ export default function IndependentAssets() {
 
   const renderSurvivalFundTable = () => {
     const items = getAssets('survivalfund');
-    const totalAmount = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+
+    // 生存资金合计（多币种折算）
+    const survivalTotals = items.reduce((acc, item) => {
+      const cur = item.currency || 'CNY';
+      const targetCur = survivalFundTotalCurrency;
+      acc.amount += convertAmount(parseFloat(item.amount || 0), cur, targetCur, exchangeRates);
+      return acc;
+    }, { amount: 0 });
+
     return (
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
           <h3 className="font-semibold text-gray-900 dark:text-white">生存资金</h3>
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-500 dark:text-gray-400">
-              合计: <span className="font-semibold text-blue-600">{formatCurrency(totalAmount, 'CNY')}</span>
+              合计: <span className="font-semibold text-blue-600">{formatCurrency(survivalTotals.amount, survivalFundTotalCurrency)}</span>
             </span>
             <button onClick={handleAdd} className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors">
               <Plus className="w-4 h-4" />
@@ -3030,6 +3230,27 @@ export default function IndependentAssets() {
               {items.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无生存资金数据</td>
+                </tr>
+              )}
+              {items.length > 0 && (
+                <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>合计</span>
+                      <select
+                        value={survivalFundTotalCurrency}
+                        onChange={(e) => setSurvivalFundTotalCurrency(e.target.value)}
+                        className="text-xs border border-indigo-200 dark:border-indigo-700 rounded px-1.5 py-0.5 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      >
+                        {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                      </select>
+                      <span className="text-xs text-gray-400 font-normal">（按汇率折算）</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">{survivalFundTotalCurrency}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(survivalTotals.amount, survivalFundTotalCurrency)}</td>
+                  <td></td>
+                  <td></td>
                 </tr>
               )}
             </tbody>
