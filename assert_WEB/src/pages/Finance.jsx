@@ -3050,6 +3050,75 @@ export default function Finance({ onAssetPenetration }) {
     setTemplateNameInput('');
   };
 
+  const handleSaveAsTemplate = () => {
+    // 另存为：保留当前表单的分类配置，生成新模板
+    // 如果输入框为空，自动基于当前模板名添加"_副本"后缀
+    let tplName = templateNameInput.trim();
+    if (!tplName && selectedTemplateId) {
+      const currentTpl = templateList.find(t => t.id === selectedTemplateId);
+      if (currentTpl) {
+        tplName = currentTpl.name + '_副本';
+        setTemplateNameInput(tplName);
+        // 延迟保存以等待 state 更新
+        setTimeout(() => handleSaveAsTemplate(), 0);
+        return;
+      }
+    }
+    if (!tplName) {
+      alert('请输入新模板名称');
+      return;
+    }
+    if (!newAccount.market || !newAccount.categoryL1 || !newAccount.assetType) {
+      alert('请先完成分类选择后再保存模板');
+      return;
+    }
+    // 检查名称是否重复
+    if (templateList.some(t => t.name === tplName)) {
+      if (!confirm(`模板"${tplName}"已存在，是否覆盖？`)) return;
+      // 覆盖现有模板
+      setTemplateList(prev => prev.map(t => t.name === tplName ? {
+        ...t,
+        market: newAccount.market,
+        currency: newAccount.currency,
+        assetKind: newAccount.assetKind,
+        assetType: newAccount.assetType,
+        account: newAccount.account,
+        categoryL1: newAccount.categoryL1,
+        categoryL2: newAccount.categoryL2,
+        categoryL3: newAccount.categoryL3,
+        categoryL4: newAccount.categoryL4,
+        positionGroup: newAccount.positionGroup,
+        positionType: newAccount.positionType,
+        updatedAt: new Date().toISOString(),
+      } : t));
+      // 选中已更新的模板
+      const updatedId = templateList.find(t => t.name === tplName)?.id;
+      if (updatedId) setSelectedTemplateId(updatedId);
+      setTemplateNameInput('');
+      return;
+    }
+    // 创建新模板
+    const newTpl = {
+      id: Date.now().toString(),
+      name: tplName,
+      market: newAccount.market,
+      currency: newAccount.currency,
+      assetKind: newAccount.assetKind,
+      assetType: newAccount.assetType,
+      account: newAccount.account,
+      categoryL1: newAccount.categoryL1,
+      categoryL2: newAccount.categoryL2,
+      categoryL3: newAccount.categoryL3,
+      categoryL4: newAccount.categoryL4,
+      positionGroup: newAccount.positionGroup,
+      positionType: newAccount.positionType,
+      createdAt: new Date().toISOString(),
+    };
+    setTemplateList(prev => [...prev, newTpl]);
+    setSelectedTemplateId(newTpl.id);
+    setTemplateNameInput('');
+  };
+
   const [lookupResults, setLookupResults] = useState([]);
   const [showLookupDropdown, setShowLookupDropdown] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -6590,9 +6659,9 @@ export default function Finance({ onAssetPenetration }) {
                         更新
                       </button>
                       <button
-                        onClick={() => { setSelectedTemplateId(''); setTemplateNameInput(''); }}
+                        onClick={handleSaveAsTemplate}
                         className="px-2 py-1.5 text-xs bg-indigo-500 text-white rounded hover:bg-indigo-600 transition-colors"
-                        title="另存为新模板"
+                        title="另存为新模板（以输入框中的名称保存）"
                       >
                         另存为
                       </button>
