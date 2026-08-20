@@ -1744,7 +1744,7 @@ export default function Accounts() {
   }, [selectedAccountId, accounts, financeAssets, quotesMap, exchangeRates]);
 
   // 账户详情汇总：基于 accountHoldings（与持仓表合计行一致）
-  // 总市值 = Σ currentValue（按币种转换为 CNY）；总成本 = Σ cost（按币种转换为 CNY）；余额 = Σ currentValue(一级分类为现金类)
+  // 总市值 = Σ currentValue（按币种转换为 CNY）；总成本 = Σ cost（按币种转换为 CNY）；余额 = Σ currentValue(现金类资产)
   const holdingsSummary = useMemo(() => {
     let totalMv = 0;
     let totalCost = 0;
@@ -1757,7 +1757,13 @@ export default function Accounts() {
       const cost = convertCurrency(parseFloat(h.cost) || 0, currency, 'CNY', exchangeRates);
       totalMv += mv;
       totalCost += cost;
-      if (h.categoryL1 === '现金类') {
+      // 现金类资产判定：同时匹配 categoryL1 + assetType + assetKind，确保所有现金类资产被正确统计
+      const at = (h.assetType || '').trim();
+      const ak = (h.assetKind || '').trim();
+      const isCash = h.categoryL1 === '现金类'
+        || at === '现金' || at === '现金余额' || at === '货币基金'
+        || ak === '现金' || ak === '货币基金';
+      if (isCash) {
         balance += mv;
         balanceCount += 1;
         const typeKey = h.assetType || h.assetKind || '其他';

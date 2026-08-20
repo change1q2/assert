@@ -1280,7 +1280,47 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
     let updatedAccounts = updateCashAccount(latestData, record);
     const syncResult = updateAccountBalance(latestData, record, updatedAccounts, undefined, stateData.financeAssets || []);
     updatedAccounts = syncResult.accounts;
-    const updatedFinanceAssets = syncResult.financeAssets;
+    let updatedFinanceAssets = syncResult.financeAssets;
+
+    // 卖出交易：释放资金自动累加现金余额资产
+    const txType = record.type || record.direction || '';
+    const isSell = txType === '卖出' || txType === '清仓';
+    if (isSell) {
+      const sellAmount = Math.abs(parseFloat(record.amount) || 0);
+      const sellFee = parseFloat(record.fee) || parseFloat(record.commission) || 0;
+      const releasedFunds = sellAmount - sellFee;
+      const accId = record.accountId || record.account || latestData.accountId || latestData.account;
+
+      // 查找对应账户下的现金余额资产
+      const cashBalanceAsset = updatedFinanceAssets.find(a =>
+        (a.accountId === accId || a.account === accId) &&
+        (a.categoryL1 === '现金类' || a.category === '现金类') &&
+        (a.assetType === '现金余额' || a.assetType === '现金')
+      );
+
+      if (cashBalanceAsset) {
+        // 货币一致时直接累加
+        const tradeCurrency = record.currency || latestData.currency || 'CNY';
+        const assetCurrency = cashBalanceAsset.currency || 'CNY';
+        if (tradeCurrency === assetCurrency) {
+          updatedFinanceAssets = updatedFinanceAssets.map(a => {
+            if (String(a.id) !== String(cashBalanceAsset.id)) return a;
+            const curShares = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
+            const newShares = curShares + releasedFunds;
+            return {
+              ...a,
+              shares: newShares,
+              quantity: newShares,
+              currentValue: newShares,
+              currentPrice: 1,
+            };
+          });
+        }
+      } else {
+        // 无现金余额资产时提醒用户
+        alert('该账户下不存在现金余额资产，释放资金无法自动累加。请先在资产列表中创建一个现金余额类型的资产（一级分类：现金类，资产类型：现金余额）。');
+      }
+    }
 
     if (isLiquidation) {
       await handleLiquidateArchive(latestData, newRecords, updatedAccounts, updatedFinanceAssets);
@@ -2119,7 +2159,7 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                     </div>
                   )}
                   {isDomesticOutdoor || _isDetailMoneyFund ? (
-                    <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div className="grid grid-cols-5 gap-2 text-xs">
                       <div>
                         <span className="text-gray-500 dark:text-gray-400">净值</span>
                         <p className="text-gray-900 dark:text-white">{record.price}</p>
@@ -2189,9 +2229,25 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           )}
                         </div>
                       </div>
+                      {(() => {
+                        const txType = record.type || record.direction || '';
+                        const isSellType = txType === '卖出' || txType === '清仓';
+                        if (!isSellType) return <div></div>;
+                        const amount = Math.abs(parseFloat(record.amount) || 0);
+                        const fee = parseFloat(record.fee) || parseFloat(record.commission) || 0;
+                        const releasedFunds = amount - fee;
+                        return (
+                          <div>
+                            <span className="text-gray-500 dark:text-gray-400">释放资金</span>
+                            <p className={`font-semibold ${releasedFunds >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                              {releasedFunds.toFixed(2)}
+                            </p>
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div className="grid grid-cols-5 gap-2 text-xs">
                       <div>
                         <span className="text-gray-500 dark:text-gray-400">价格</span>
                         <p className="text-gray-900 dark:text-white">{record.price}</p>
@@ -2261,6 +2317,22 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
                           )}
                         </div>
                       </div>
+                      {(() => {
+                        const txType = record.type || record.direction || '';
+                        const isSellType = txType === '卖出' || txType === '清仓';
+                        if (!isSellType) return <div></div>;
+                        const amount = Math.abs(parseFloat(record.amount) || 0);
+                        const fee = parseFloat(record.fee) || parseFloat(record.commission) || 0;
+                        const releasedFunds = amount - fee;
+                        return (
+                          <div>
+                            <span className="text-gray-500 dark:text-gray-400">释放资金</span>
+                            <p className={`font-semibold ${releasedFunds >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                              {releasedFunds.toFixed(2)}
+                            </p>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>

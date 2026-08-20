@@ -1586,6 +1586,36 @@ export default function FinanceHoldingsTable({
                       </td>
                     );
                   }
+                  if (col.key === 'finalPnl') {
+                    const totalFinalPnl = otherItems.reduce((s, h) => {
+                      const pnl = parseFloat(h.finalPnl) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(pnl, currency, target, exchangeRates);
+                    }, 0);
+                    return (
+                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums font-semibold ${pnlClass(totalFinalPnl)}`}>
+                        {pnlSign(totalFinalPnl)}{formatCurrencyWithRate(totalFinalPnl, target, target, exchangeRates).replace(getCurrencySymbol(target), '')}
+                      </td>
+                    );
+                  }
+                  if (col.key === 'finalPnlPercent') {
+                    const totalFinalPnl = otherItems.reduce((s, h) => {
+                      const pnl = parseFloat(h.finalPnl) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(pnl, currency, target, exchangeRates);
+                    }, 0);
+                    const totalCost = otherItems.reduce((s, h) => {
+                      const cost = parseFloat(h.cost) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(cost, currency, target, exchangeRates);
+                    }, 0);
+                    const rate = totalCost > 0 ? (totalFinalPnl / totalCost) * 100 : 0;
+                    return (
+                      <td key={col.key} className={`py-2 px-1.5 text-right tabular-nums ${pnlClass(rate)}`}>
+                        {totalCost > 0 ? formatPercentage(rate) : '—'}
+                      </td>
+                    );
+                  }
                   return <td key={col.key} className="py-2 px-1.5"></td>;
                 })}
                 {showOpsCol && <td className="py-2 px-1.5"></td>}
