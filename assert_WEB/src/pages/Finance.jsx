@@ -4809,10 +4809,12 @@ export default function Finance({ onAssetPenetration }) {
           );
         }
         // 资产类型已选为非股票时（债券/基金/货基等）：过滤掉股票类搜索结果，防止同代码的股票干扰
+        // 但当 L3=场内 时，保留股票/ETF 结果（场内=可交易市场，股票/ETF 是合法资产）
         const categoryL3 = cur.categoryL3 || cur.tertiaryCategory || '';
         const curAssetType = cur.assetType || '';
         const isNonStockAsset = curAssetType && curAssetType !== '股票';
-        if (isNonStockAsset || (categoryL3 === '场外' && curAssetType !== '股票')) {
+        const allowStockInResults = categoryL3 === '场内'; // 场内允许股票
+        if (!allowStockInResults && (isNonStockAsset || (categoryL3 === '场外' && curAssetType !== '股票'))) {
           results = results.filter(r => {
             const classify = r.classify || '';
             // 排除股票类
@@ -5007,7 +5009,8 @@ export default function Finance({ onAssetPenetration }) {
       const categoryL3 = cur.categoryL3 || cur.tertiaryCategory || '';
       const curAssetType = cur.assetType || '';
       const isNonStockAsset = curAssetType && curAssetType !== '股票';
-      if (isNonStockAsset || (categoryL3 === '场外' && curAssetType !== '股票')) {
+      const allowStockInResults = categoryL3 === '场内'; // 场内允许股票
+      if (!allowStockInResults && (isNonStockAsset || (categoryL3 === '场外' && curAssetType !== '股票'))) {
         results = results.filter(r => {
           const classify = r.classify || '';
           // 排除股票类
