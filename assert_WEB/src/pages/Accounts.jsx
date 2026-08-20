@@ -877,26 +877,47 @@ export default function Accounts() {
     return updatedState;
   };
 
+  // 判断是否为货币基金持仓（与 FinanceHoldingsTable.isMoneyFundHold 保持一致）
+  const _isMoneyFundHolding = (h) => {
+    if (!h) return false;
+    const at = h.assetType || '';
+    const ak = h.assetKind || '';
+    const catL1 = h.categoryL1 || '';
+    const catL2 = h.categoryL2 || '';
+    const catL4 = h.categoryL4 || '';
+    const pType = h.positionType || '';
+    const name = h.name || '';
+    if (at === '货基' || ak === '货基' || at === '货币基金' || ak === '货币基金') return true;
+    if (catL1 === '货币基金') return true;
+    return catL2 === '货币型' || catL4 === '货币基金' || pType === '货币基金' || name.includes('货币');
+  };
+
   const calculateAccountBalance = useMemo(() => {
     const balanceMap = {};
     accounts.forEach(account => {
-      // 与详情页 holdingsSummary 保持完全一致：
-      //   只统计 categoryL1 === '现金类' 的持仓的 currentValue（含 quotesMap 实时行情，转换为 CNY）
+      const effectiveType = getEffectiveType(account);
+      const isFinanceType = effectiveType === '理财资产';
+
       if (Array.isArray(financeAssets)) {
+        let totalMv = 0;
         let cashMv = 0;
         financeAssets.forEach(a => {
           if (a.status === 'archived' || a.isArchived) return;
           const accId = a.accountId || a.account || '';
           if (!(accId === account.id || accId === account.name)) return;
-          // 使用与 accountHoldings 相同的映射逻辑
           const h = mapFinanceAssetToHolding(a, account, quotesMap, exchangeRates);
-          // 与 holdingsSummary 一致：使用 categoryL1 === '现金类' 判断
-          if (h.categoryL1 === '现金类') {
-            const currency = h.currency || 'CNY';
-            cashMv += convertCurrency(parseFloat(h.currentValue) || 0, currency, 'CNY', exchangeRates);
+          const currency = h.currency || 'CNY';
+          const mv = convertCurrency(parseFloat(h.currentValue) || 0, currency, 'CNY', exchangeRates);
+          // 全部持仓市值（理财资产账户用此作为余额）
+          totalMv += mv;
+          // 仅现金类 + 货基（独立资产账户用此作为余额）
+          if (h.categoryL1 === '现金类' || _isMoneyFundHolding(h)) {
+            cashMv += mv;
           }
         });
-        balanceMap[account.id] = cashMv;
+        // 理财资产账户：余额 = 所有持仓总市值
+        // 独立资产/其他账户：余额 = 现金类 + 货基
+        balanceMap[account.id] = isFinanceType ? totalMv : (cashMv > 0 ? cashMv : (parseFloat(account.balance) || 0));
       } else {
         balanceMap[account.id] = parseFloat(account.balance) || 0;
       }
