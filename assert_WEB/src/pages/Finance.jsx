@@ -5992,6 +5992,7 @@ export default function Finance({ onAssetPenetration }) {
         : _computedCostPrice;
 
       // 现金类资产：始终从关联账户的 balance 获取余额（余额自动关联）
+      // 方案B：数量 = 余额金额(按汇率转换为资产本币)，现价 = 1，当前市值 = 数量 × 1 = 余额
       // 注意：货币基金虽归入"现金类"分类，但具有收益（持有收益/累计收益），不应视为纯现金
       const isCash = (a.category === '现金类' || a.categoryL1 === '现金类') && !_isMF;
       let _cashValue = 0;
@@ -5999,13 +6000,18 @@ export default function Finance({ onAssetPenetration }) {
         const accId = a.accountId || a.account || '';
         const linkedAccount = (stateData?.accounts || []).find(acc => acc.id === accId || acc.name === accId);
         if (linkedAccount) {
-          _cashValue = parseFloat(linkedAccount.balance) || 0;
+          const rawBalance = parseFloat(linkedAccount.balance) || 0;
+          const accCurrency = linkedAccount.currency || 'CNY';
+          const assetCurrency = a.currency || 'CNY';
+          _cashValue = (accCurrency === assetCurrency)
+            ? rawBalance
+            : convertCurrency(rawBalance, accCurrency, assetCurrency, exchangeRates);
         } else {
-          _cashValue = parseFloat(a.currentValue) || 0;
+          _cashValue = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
         }
       }
-      const _effectiveQty = isCash ? (parseFloat(a.shares || a.quantity) || _cashValue) : _qty;
-      const _effectivePrice = isCash ? (parseFloat(a.currentPrice) || 0) : _price;
+      const _effectiveQty = isCash ? _cashValue : _qty;
+      const _effectivePrice = isCash ? 1 : _price;
       const _costTotal = isCash ? (_cost * _effectiveQty) : (_cost * _effectiveQty);
       // 货币基金：使用扣减手续费后的成本单价（与明细弹窗 DetailModal L737-L766 一致）
       const _mfAdjCostPrice = _isMF ? (buyTotalQty > 0 ? (buyTotalAmount - buyFees) / buyTotalQty : (_storedCostPrice || 1)) : 0;
@@ -6019,7 +6025,7 @@ export default function Finance({ onAssetPenetration }) {
       const _mfHoldingPnl = _isMF ? (isNaN(_mfHoldingPnlStored) ? _mfHoldingPnlCalc : _mfHoldingPnlStored) : 0;
       const _mfHoldingPnlRate = _isMF ? (_mfCostTotal !== 0 ? Math.round((_mfHoldingPnl / _mfCostTotal) * 100 * 100) / 100 : 0) : 0;
       const _currentValue = isCash
-        ? (_effectiveQty * _effectivePrice)
+        ? _cashValue
         : (_isMF ? _mfCurrentValue : (parseFloat(a.currentValue) || (_price * _effectiveQty)));
 
       // 持仓盈亏 = (现价 * 份额) - (平均买入成本 * 份额)

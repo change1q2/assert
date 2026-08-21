@@ -457,8 +457,33 @@ export default function Accounts() {
     const _costPrice = buyTotalQty > 0 ? _computedCostPrice : _storedCost;
 
     const isCashCategory = (a) => a.category === '现金类' || a.categoryL1 === '现金类';
-    const isCash = isCashCategory(a);
-    const _effectiveQty = _qty;
+    // 货币基金检测（与 Finance.jsx _isMoneyFund 一致）
+    const _isMF = (() => {
+      const catL2 = a.categoryL2 || a.subcategory || '';
+      const catL4 = a.categoryL4 || '';
+      const positionType = a.positionCategory || a.positionType || '';
+      const name = a.name || '';
+      const kind = a.kind || a.assetType || '';
+      const catL1 = a.category || a.categoryL1 || '';
+      return catL2 === '货币型' || catL4 === '货币基金' || positionType === '货币基金' || name.includes('货币') || kind === '货基' || kind === '货币基金' || catL1 === '货币基金' || a.code === '000509';
+    })();
+    const isCash = isCashCategory(a) && !_isMF;
+
+    // 现金类资产：从关联账户 balance 获取余额（按汇率转换为资产本币）
+    // 方案B：数量 = 余额，现价 = 1，当前市值 = 余额
+    let _cashValue = 0;
+    if (isCash && account) {
+      const rawBalance = parseFloat(account.balance) || 0;
+      const accCurrency = account.currency || 'CNY';
+      const assetCurrency = a.currency || 'CNY';
+      _cashValue = (accCurrency === assetCurrency)
+        ? rawBalance
+        : convertCurrency(rawBalance, accCurrency, assetCurrency, _exchangeRates);
+    } else if (isCash) {
+      _cashValue = parseFloat(a.currentValue) || parseFloat(a.balance) || 0;
+    }
+    const _effectiveQty = isCash ? _cashValue : _qty;
+
     const _quoteRawPrice = parseFloat(_quotesMap[a.code]?.price) || 0;
     const _quoteRawPrevClose = parseFloat(_quotesMap[a.code]?.prevClose) || 0;
     const _quotePriceConv = (isHKConnect && _quoteRawPrice > 0) ? (_quoteRawPrice * _hkValueFactor) : _quoteRawPrice;
@@ -467,11 +492,11 @@ export default function Accounts() {
     const _storedPrevRaw = parseFloat(a.prevPrice) || 0;
     const _storedPriceConv = (isHKConnect && !_isManualPrice && _storedPriceRaw > 0) ? (_storedPriceRaw * _hkValueFactor) : _storedPriceRaw;
     const _storedPrevConv = (isHKConnect && !_isManualPrice && _storedPrevRaw > 0) ? (_storedPrevRaw * _hkValueFactor) : _storedPrevRaw;
-    const _effectivePrice = _isManualPrice ? _storedPriceRaw : (_quotePriceConv || _storedPriceConv || 0);
+    const _effectivePrice = isCash ? 1 : (_isManualPrice ? _storedPriceRaw : (_quotePriceConv || _storedPriceConv || 0));
 
     const _unitCost = _costPrice;
     const _totalCost = _unitCost * _effectiveQty;
-    const _currentValue = _effectivePrice * _effectiveQty;
+    const _currentValue = isCash ? _cashValue : (_effectivePrice * _effectiveQty);
     const _holdingPnl = _currentValue - _totalCost;
     const _holdingPnlRate = _totalCost > 0 ? (_holdingPnl / _totalCost) * 100 : 0;
 
