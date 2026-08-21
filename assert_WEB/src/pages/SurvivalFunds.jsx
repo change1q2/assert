@@ -471,27 +471,34 @@ export default function SurvivalFunds() {
     const byYear = {};
     filteredBudgets.forEach(b => {
       const year = new Date().getFullYear();
-      if (!byYear[year]) byYear[year] = { currentBudget: 0, annualBudget: 0 };
+      if (!byYear[year]) byYear[year] = { currentBudget: 0, annualBudget: 0, annualUsed: 0 };
       const period = b.periodType || 'monthly';
       const cur = b.currency || 'CNY';
       const annualAmt = convertCurrency((parseFloat(b.budgetAmount) || 0) * (PERIODS_PER_YEAR[period] || 12), cur, 'CNY', exchangeRates);
       byYear[year].annualBudget += annualAmt;
+      // 年度已使用 = 生存资金 usedAmount 按周期折算 (CNY)
+      const matchedFund = survivalFunds.find(f => f.name === b.name);
+      if (matchedFund) {
+        const usedAmt = convertCurrency((parseFloat(matchedFund.usedAmount) || 0) * (PERIODS_PER_YEAR[period] || 12), cur, 'CNY', exchangeRates);
+        byYear[year].annualUsed += usedAmt;
+      }
       // 当前所需预算 = 年度预算 / 当年天数 × 剩余天数
       const dailyAmt = annualAmt / DAYS_THIS_YEAR;
       byYear[year].currentBudget += dailyAmt * REMAINING_DAYS_THIS_YEAR;
     });
     if (Object.keys(byYear).length === 0) {
       const y = new Date().getFullYear();
-      byYear[y] = { currentBudget: 0, annualBudget: 0 };
+      byYear[y] = { currentBudget: 0, annualBudget: 0, annualUsed: 0 };
     }
     return Object.entries(byYear).map(([year, data]) => ({
       year,
       currentBudget: Math.round(data.currentBudget * 100) / 100,
       annualBudget: Math.round(data.annualBudget * 100) / 100,
+      annualUsed: Math.round(data.annualUsed * 100) / 100,
       actual: Math.round(survivalTotalCNY * 100) / 100,
       freedom: data.currentBudget > 0 ? Math.round((survivalTotalCNY / data.currentBudget) * 10000) / 100 : 0,
     }));
-  }, [filteredBudgets, survivalTotalCNY]);
+  }, [filteredBudgets, survivalTotalCNY, survivalFunds, exchangeRates]);
 
   // 4 个周期卡片数据
   const periodCardsData = useMemo(() => {
@@ -584,6 +591,7 @@ export default function SurvivalFunds() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年份</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">当前所需预算</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年度预算额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年度已使用</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">实际现金</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">自由度</th>
               </tr>
@@ -594,6 +602,7 @@ export default function SurvivalFunds() {
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{y.year}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(y.currentBudget)}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(y.annualBudget)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(y.annualUsed)}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(y.actual)}</td>
                   <td className="px-4 py-3 text-sm">
                     <div className="flex items-center gap-2">
@@ -723,7 +732,6 @@ export default function SurvivalFunds() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">周期</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">预算金额</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年度预算额</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年度已使用</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
@@ -753,12 +761,6 @@ export default function SurvivalFunds() {
                       {b.currency && b.currency !== budgetTotalCurrency
                         ? <span className="text-indigo-600 dark:text-indigo-400" title={`原 ${formatNumber(b.originalAnnual)} ${b.currency}`}>{formatNumber(b.annualBudget)} {budgetTotalCurrency}</span>
                         : <>{formatNumber(b.annualBudget)} <span className="text-xs text-gray-500">{b.currency || 'CNY'}</span></>
-                      }
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">
-                      {b.currency && b.currency !== budgetTotalCurrency
-                        ? <span className="text-orange-600 dark:text-orange-400">{formatNumber(b.annualUsed)} {budgetTotalCurrency}</span>
-                        : <>{formatNumber(b.annualUsed)} <span className="text-xs text-gray-500">{b.currency || 'CNY'}</span></>
                       }
                     </td>
                     <td className="px-4 py-3 text-sm">
@@ -800,7 +802,6 @@ export default function SurvivalFunds() {
                   <td></td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.budget)} <span className="text-xs text-gray-500">{budgetTotalCurrency}</span></td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.annual)} <span className="text-xs text-gray-500">{budgetTotalCurrency}</span></td>
-                  <td className="px-4 py-3 text-sm text-orange-600 dark:text-orange-400 tabular-nums">{formatNumber(budgetTotals.annualUsed)} <span className="text-xs text-gray-500">{budgetTotalCurrency}</span></td>
                   <td></td>
                 </tr>
               )}
