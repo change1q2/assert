@@ -156,8 +156,8 @@ function computeHoldingDays(account) {
 function formatNum(value) {
   if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
   }).format(value);
 }
 

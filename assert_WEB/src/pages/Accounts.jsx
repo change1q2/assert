@@ -1855,23 +1855,26 @@ export default function Accounts() {
         const txs = a.transactions || [];
         let buyTotal = 0;
         let sellTotal = 0;
-        let totalFees = 0;
         let firstBuyDate = a.buildDate || a.purchaseDate || '';
         let lastSellDate = a.archiveDate || a.sellDate || '';
         txs.forEach(t => {
           const amount = parseFloat(t.amount) || 0;
-          const fee = parseFloat(t.commission || t.fee) || 0;
           const txDate = t.date || t.createdAt || '';
-          if (!isNaN(fee)) totalFees += fee;
-          if (t.type === '建仓' || t.type === '买入') {
-            buyTotal += amount;
+          // 兼容多种交易类型标记
+          const txType = (t.type || t.action || '').toString().trim();
+          const isBuy = ['建仓', '买入', '加仓', '申购', 'buy', 'open'].includes(txType);
+          const isSell = ['卖出', '清仓', '减仓', '赎回', 'sell', 'close', 'liquidate'].includes(txType);
+          if (isBuy) {
+            buyTotal += Math.abs(amount);
             if (txDate && (!firstBuyDate || txDate < firstBuyDate)) firstBuyDate = txDate;
-          } else if (t.type === '卖出' || t.type === '清仓') {
+          } else if (isSell) {
             sellTotal += Math.abs(amount);
             if (txDate && (!lastSellDate || txDate > lastSellDate)) lastSellDate = txDate;
           }
         });
-        const computedFinalPnl = txs.length > 0 ? (sellTotal - buyTotal - totalFees) : (parseFloat(a.finalPnl) || 0);
+        // 最终盈亏 = 卖出总额 - 买入总额（纯交易记录金额口径）
+        const hasTx = txs.length > 0 && (buyTotal > 0 || sellTotal > 0);
+        const computedFinalPnl = hasTx ? (sellTotal - buyTotal) : (parseFloat(a.finalPnl) || 0);
         const computedFinalPnlPercent = buyTotal > 0 ? Math.round((computedFinalPnl / buyTotal) * 100 * 100) / 100 : (parseFloat(a.finalPnlPercent) || 0);
         let holdingDays = 0;
         if (firstBuyDate && lastSellDate) {

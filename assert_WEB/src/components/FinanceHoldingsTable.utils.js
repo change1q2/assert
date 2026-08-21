@@ -62,12 +62,13 @@ export function computeHoldingDays(account) {
   return base + days;
 }
 
-export function formatNum(value) {
+export function formatNum(value, maxDecimals = 4) {
   if (value === null || value === undefined) return '—';
+  const truncated = truncateNum(value, maxDecimals);
   return new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
-  }).format(truncateNum(value, 4));
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxDecimals,
+  }).format(truncated);
 }
 
 export const POS_CLASS = 'text-green-600 dark:text-green-400';
