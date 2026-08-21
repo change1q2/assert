@@ -232,7 +232,6 @@ export default function SurvivalFunds() {
     currency: 'CNY',
     amount: '',
     usedAmount: '',
-    costBasis: '',
     accountId: '',
   });
 
@@ -289,7 +288,19 @@ export default function SurvivalFunds() {
       setLoading(true);
       const data = await fetchState(userId);
       setStateData(data);
-      setSurvivalFunds(data?.survivalFunds || []);
+      // 从 metadata 恢复生存资金的扩展字段 (initialAmount, transactions, usedAmount, accountName)
+      const rawFunds = data?.survivalFunds || [];
+      const restoredFunds = rawFunds.map(fund => {
+        const meta = fund.metadata || {};
+        return {
+          ...fund,
+          initialAmount: meta.initialAmount ?? fund.initialAmount ?? fund.amount ?? 0,
+          usedAmount: meta.usedAmount ?? fund.usedAmount ?? 0,
+          transactions: meta.transactions ?? fund.transactions ?? [],
+          accountName: meta.accountName ?? fund.accountName ?? '',
+        };
+      });
+      setSurvivalFunds(restoredFunds);
       setFreedomBudgets(data?.freedomBudgets || []);
       // 兼容旧版扁平数组格式
       let cats = data?.freedomCategories;
@@ -348,6 +359,20 @@ export default function SurvivalFunds() {
       amount: initialAmount + inflowSum - outflowSum,
       usedAmount: outflowSum,
     };
+  }, []);
+
+  // 将扩展字段 (initialAmount, transactions, usedAmount, accountName) 注入到 metadata 中持久化
+  const enrichFundsForSave = useCallback((funds) => {
+    return funds.map(f => ({
+      ...f,
+      metadata: {
+        ...(f.metadata || {}),
+        initialAmount: f.initialAmount ?? 0,
+        usedAmount: f.usedAmount ?? 0,
+        transactions: f.transactions ?? [],
+        accountName: f.accountName ?? '',
+      },
+    }));
   }, []);
 
   const survivalFundsDerived = useMemo(() => {
@@ -521,28 +546,35 @@ export default function SurvivalFunds() {
   const renderFreedomSection = () => {
     const periodUnitMap = { daily: '日', weekly: '周', monthly: '月', yearly: '年' };
 
-    // 明细表带年度预算额 (基于筛选后的数据, 按显示货币折算)
+    // 明细表: 列表显示原货币, 合计按所选货币折算
     const budgetRows = filteredBudgets.map(b => {
       const period = b.periodType || 'monthly';
       const cur = b.currency || 'CNY';
       const rawAmount = parseFloat(b.budgetAmount) || 0;
+      // 年度预算: 年周期直接显示, 其他周期按年数量折算
       const annual = rawAmount * (PERIODS_PER_YEAR[period] || 12);
+      // 月度预算: 所有周期统一折算为月度 (年/12, 月不变, 周*52/12, 日*365/12)
+      const monthly = annual / 12;
       // 年度已使用 = 生存资金列表中已使用金额的年度折算 (取同名/同分类的生存资金)
       const matchedFund = survivalFunds.find(f =>
         f.name === b.name && f.type === (b.categoryType === 'necessary' ? '日常开支' : '日常开支')
       );
       const usedAmount = matchedFund ? (parseFloat(matchedFund.usedAmount) || 0) : 0;
       const annualUsed = usedAmount * (PERIODS_PER_YEAR[period] || 12);
-      // 折算到显示货币
-      const displayAmount = convertCurrency(rawAmount, cur, budgetTotalCurrency, exchangeRates);
+      // 合计用: 折算到显示货币
+      const displayAmount = convertCurrency(monthly, cur, budgetTotalCurrency, exchangeRates);
       const displayAnnual = convertCurrency(annual, cur, budgetTotalCurrency, exchangeRates);
       const displayAnnualUsed = convertCurrency(annualUsed, cur, budgetTotalCurrency, exchangeRates);
-      return { ...b, annualBudget: displayAnnual, originalAnnual: annual, displayAmount, annualUsed: displayAnnualUsed };
+      return {
+        ...b,
+        monthly, annual, // 原货币值用于列表显示
+        displayAmount, displayAnnual, displayAnnualUsed, // 折算值用于合计
+      };
     });
     const budgetTotals = budgetRows.reduce((acc, b) => {
       acc.budget += b.displayAmount || 0;
-      acc.annual += b.annualBudget || 0;
-      acc.annualUsed += b.annualUsed || 0;
+      acc.annual += b.displayAnnual || 0;
+      acc.annualUsed += b.displayAnnualUsed || 0;
       return acc;
     }, { budget: 0, annual: 0, annualUsed: 0 });
 
@@ -726,7 +758,7 @@ export default function SurvivalFunds() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">一级分类</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">二级分类</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">周期</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">预算金额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">月度预算</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年度预算额</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
@@ -751,13 +783,10 @@ export default function SurvivalFunds() {
                       {PERIOD_OPTIONS.find(p => p.value === b.periodType)?.label || b.periodType || '—'}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">
-                      {formatNumber(b.budgetAmount)} <span className="text-xs text-gray-500">{b.currency || 'CNY'}</span>
+                      {formatNumber(b.monthly)} <span className="text-xs text-gray-500">{b.currency || 'CNY'}</span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">
-                      {b.currency && b.currency !== budgetTotalCurrency
-                        ? <span className="text-indigo-600 dark:text-indigo-400" title={`原 ${formatNumber(b.originalAnnual)} ${b.currency}`}>{formatNumber(b.annualBudget)} {budgetTotalCurrency}</span>
-                        : <>{formatNumber(b.annualBudget)} <span className="text-xs text-gray-500">{b.currency || 'CNY'}</span></>
-                      }
+                      {formatNumber(b.annual)} <span className="text-xs text-gray-500">{b.currency || 'CNY'}</span>
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
@@ -1042,7 +1071,6 @@ export default function SurvivalFunds() {
       currency: 'CNY',
       amount: '',
       usedAmount: '',
-      costBasis: '',
       accountId: defaultAccountId,
     });
     setShowFundModal(true);
@@ -1056,7 +1084,6 @@ export default function SurvivalFunds() {
       currency: fund.currency || 'CNY',
       amount: fund.amount || '',
       usedAmount: fund.usedAmount != null ? fund.usedAmount : '',
-      costBasis: fund.costBasis != null ? fund.costBasis : '',
       accountId: fund.accountId || '',
     });
     setShowFundModal(true);
@@ -1065,7 +1092,7 @@ export default function SurvivalFunds() {
   const handleDeleteFund = async (fund) => {
     if (!confirm('确定删除该生存资金吗？')) return;
     const newArr = survivalFunds.filter(f => f.id !== fund.id);
-    const newState = { ...stateData, survivalFunds: newArr };
+    const newState = { ...stateData, survivalFunds: enrichFundsForSave(newArr) };
     const result = await saveState(newState);
     setStateData(newState);
     setSurvivalFunds(newArr);
@@ -1089,9 +1116,6 @@ export default function SurvivalFunds() {
       return;
     }
     const account = accounts.find(a => (a.id || a.name) === fundForm.accountId);
-    const costBasis = fundForm.costBasis != null && fundForm.costBasis !== ''
-      ? parseFloat(fundForm.costBasis)
-      : parseFloat(fundForm.amount);
     const usedAmount = editingFund
       ? (parseFloat(editingFund.usedAmount) || 0)
       : 0; // 新建时默认为0, 后期由资金记录自动计算
@@ -1145,7 +1169,6 @@ export default function SurvivalFunds() {
               currency: fundForm.currency,
               amount: initAmt + inflowSum - outflowSum, // 现有资金 (公式推导)
               usedAmount: outflowSum, // 已使用资金 (公式推导)
-              costBasis,
               accountId: fundForm.accountId,
               accountName: account?.name || '',
               transactions,
@@ -1165,7 +1188,6 @@ export default function SurvivalFunds() {
           currency: fundForm.currency,
           amount: initialAmount,
           usedAmount,
-          costBasis,
           accountId: fundForm.accountId,
           accountName: account?.name || '',
           initialAmount, // 原始资金: 创建时填入, 后期不可变
@@ -1173,7 +1195,7 @@ export default function SurvivalFunds() {
         },
       ];
     }
-    const newState = { ...stateData, survivalFunds: newArr };
+    const newState = { ...stateData, survivalFunds: enrichFundsForSave(newArr) };
     const result = await saveState(newState);
     setStateData(newState);
     setSurvivalFunds(newArr);
@@ -1411,7 +1433,7 @@ export default function SurvivalFunds() {
       }
       const newState = {
         ...stateData,
-        survivalFunds: newFunds,
+        survivalFunds: enrichFundsForSave(newFunds),
         financeAssets: newFinanceAssets,
         accounts: newAccounts,
       };
@@ -1493,7 +1515,7 @@ export default function SurvivalFunds() {
     }
     const newState = {
       ...stateData,
-      survivalFunds: newFunds,
+      survivalFunds: enrichFundsForSave(newFunds),
       financeAssets: newFinanceAssets,
       accounts: newAccounts,
     };
@@ -1938,18 +1960,6 @@ export default function SurvivalFunds() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                成本单价 <span className="text-xs text-gray-400">(默认 = 金额)</span>
-              </label>
-              <input
-                type="number"
-                value={fundForm.costBasis}
-                onChange={(e) => setFundForm({ ...fundForm, costBasis: e.target.value })}
-                placeholder="留空则等于金额"
-                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 账户本 <span className="text-red-500">*</span>
               </label>
               {hasAccounts ? (
@@ -1963,7 +1973,7 @@ export default function SurvivalFunds() {
                 >
                   <option value="">请选择账户本</option>
                   {accounts
-                    .filter(acc => acc.type !== '理财资产' && acc.type !== '打新' && acc.type !== '负债' && !acc.liability)
+                    .filter(acc => (acc.type || '').includes('生活'))
                     .map(account => (
                       <option key={account.id || account.name} value={account.id || account.name}>
                         {account.name}

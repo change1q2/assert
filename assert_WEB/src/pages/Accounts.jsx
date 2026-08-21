@@ -161,6 +161,7 @@ const independentAssetTypeLabels = {
   fixedinvestment: '固定投资',
   equity: '股权',
   fixeddeposit: '定期存款',
+  survivalfund: '生存资金',
 };
 
 const marketOptions = ['国内市场', '港股市场', '美股市场', '其他'];
@@ -265,7 +266,7 @@ export default function Accounts() {
   const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.15, JPY: 0.046, HKD: 0.86, EUR: 7.85 });
   const [quotesMap, setQuotesMap] = useState({});
 
-  const { accounts = [], records = [], finance = {}, debts = [], accountCategories = {}, independentAssets = {}, accountTypes = [], financeAssets = [] } = stateData || {};
+  const { accounts = [], records = [], finance = {}, debts = [], accountCategories = {}, independentAssets = {}, accountTypes = [], financeAssets = [], survivalFunds: survivalFundsRaw = [] } = stateData || {};
 
   const accountCatConfig = useMemo(() => {
     if (Object.keys(accountCategories).length === 0) {
@@ -628,8 +629,30 @@ export default function Accounts() {
       stats[account.id].holdingCost += conv(principal);
     });
 
+    // 生存资金记录：仅对 "生活" 类型账户计入
+    // 市值 = 结余资金 (初始资金 + 入账 - 出账)；成本 = 初始资金
+    if (Array.isArray(survivalFundsRaw)) {
+      survivalFundsRaw.forEach(fund => {
+        const accId = fund.accountId || fund.accountName || '';
+        const account = accounts.find(acct =>
+          (accId && (accId === acct.id || accId === acct.name)) ||
+          (fund.accountName && (fund.accountName === acct.id || fund.accountName === acct.name))
+        );
+        if (!account) return;
+        if (getEffectiveType(account) !== '生活') return;
+        const initialAmount = parseFloat(fund.initialAmount || fund.amount) || 0;
+        const transactions = fund.transactions || [];
+        const inflowSum = transactions.filter(t => t.status === 'inflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+        const outflowSum = transactions.filter(t => t.status === 'outflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+        const balance = initialAmount + inflowSum - outflowSum; // 结余资金
+        const cur = fund.currency || 'CNY';
+        stats[account.id].marketValue += convertCurrency(balance, cur, 'CNY', exchangeRates);
+        stats[account.id].holdingCost += convertCurrency(initialAmount, cur, 'CNY', exchangeRates);
+      });
+    }
+
     return stats;
-  }, [accounts, independentAssets, finance, financeAssets, records, debts, exchangeRates]);
+  }, [accounts, independentAssets, finance, financeAssets, records, debts, exchangeRates, survivalFundsRaw]);
 
   const cooperationFunds = useMemo(() => {
     return calcCooperationFunds(accounts, acc => {
@@ -790,6 +813,19 @@ export default function Accounts() {
           saveState({ ...data }).catch(err => console.error('Failed to sanitize cash assets:', err));
         }
       }
+      // 从 metadata 恢复生存资金的扩展字段 (initialAmount, transactions, usedAmount, accountName)
+      if (Array.isArray(data?.survivalFunds)) {
+        data.survivalFunds = data.survivalFunds.map(fund => {
+          const meta = fund.metadata || {};
+          return {
+            ...fund,
+            initialAmount: meta.initialAmount ?? fund.initialAmount ?? fund.amount ?? 0,
+            usedAmount: meta.usedAmount ?? fund.usedAmount ?? 0,
+            transactions: meta.transactions ?? fund.transactions ?? [],
+            accountName: meta.accountName ?? fund.accountName ?? '',
+          };
+        });
+      }
       setStateData(data);
       // 不再自动创建现金资产
       // const migrated = await migrateFinanceCashAssets(data);
@@ -940,6 +976,29 @@ export default function Accounts() {
     accounts.forEach(account => {
       const effectiveType = getEffectiveType(account);
       const isFinanceType = effectiveType === '理财资产';
+      const isLifeType = effectiveType === '生活';
+
+      // 生活类型账户：余额 = 生存资金结余资金之和
+      if (isLifeType) {
+        if (Array.isArray(survivalFundsRaw)) {
+          let lifeBalance = 0;
+          survivalFundsRaw.forEach(fund => {
+            const accId = fund.accountId || fund.accountName || '';
+            if (!(accId === account.id || accId === account.name)) return;
+            const initialAmount = parseFloat(fund.initialAmount || fund.amount) || 0;
+            const transactions = fund.transactions || [];
+            const inflowSum = transactions.filter(t => t.status === 'inflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+            const outflowSum = transactions.filter(t => t.status === 'outflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+            const bal = initialAmount + inflowSum - outflowSum;
+            const cur = fund.currency || 'CNY';
+            lifeBalance += convertCurrency(bal, cur, 'CNY', exchangeRates);
+          });
+          balanceMap[account.id] = lifeBalance;
+        } else {
+          balanceMap[account.id] = parseFloat(account.balance) || 0;
+        }
+        return;
+      }
 
       if (Array.isArray(financeAssets)) {
         let totalMv = 0;
@@ -966,7 +1025,7 @@ export default function Accounts() {
       }
     });
     return balanceMap;
-  }, [accounts, financeAssets, quotesMap, exchangeRates]);
+  }, [accounts, financeAssets, quotesMap, exchangeRates, survivalFundsRaw]);
 
   const computeStats = () => {
     const accountList = accounts || [];
@@ -1094,8 +1153,28 @@ export default function Accounts() {
       }
     }
 
+    // 生活类型账户：余额 = 生存资金结余资金之和
+    if (getEffectiveType(account) === '生活' && Array.isArray(survivalFundsRaw)) {
+      let lifeTotal = 0;
+      survivalFundsRaw.forEach(fund => {
+        const accId = fund.accountId || fund.accountName || '';
+        if (!(accId === account.id || accId === account.name)) return;
+        const initialAmount = parseFloat(fund.initialAmount || fund.amount) || 0;
+        const transactions = fund.transactions || [];
+        const inflowSum = transactions.filter(t => t.status === 'inflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+        const outflowSum = transactions.filter(t => t.status === 'outflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+        const bal = initialAmount + inflowSum - outflowSum;
+        const cur = fund.currency || 'CNY';
+        lifeTotal += convertCurrency(bal, cur, 'CNY', exchangeRates);
+      });
+      if (lifeTotal > 0) {
+        totalBalance = lifeTotal;
+        balanceByType['生存资金'] = lifeTotal;
+      }
+    }
+
     return { totalBalance, balanceByType, includedCount: cashLikeAssets.length || (totalBalance !== 0 ? 1 : 0) };
-  }, [selectedAccountId, accounts, unifiedAssets, exchangeRates]);
+  }, [selectedAccountId, accounts, unifiedAssets, exchangeRates, survivalFundsRaw]);
 
   const toggleAssetBalance = (accountId, assetKey) => {
     const mappingKey = `${accountId}_${assetKey}`;
@@ -1930,6 +2009,44 @@ export default function Accounts() {
     return result;
   }, [selectedAccountId, accounts, independentAssets]);
 
+  // 账户详情页：归属当前账户的生存资金列表（仅 "生活" 类型账户使用）
+  const accountSurvivalFunds = useMemo(() => {
+    if (!selectedAccountId) return { items: [], totals: {} };
+    const account = accounts.find(a => a.id === selectedAccountId);
+    if (!account) return { items: [], totals: {} };
+    const accId = account.id || '';
+    const accName = account.name || '';
+    const items = (survivalFundsRaw || [])
+      .filter(f => f.accountId === accId || f.accountId === accName || f.accountName === accName || f.accountName === accId)
+      .map(f => {
+        const initialAmount = parseFloat(f.initialAmount) || 0;
+        const transactions = f.transactions || [];
+        const inflowSum = transactions.filter(t => t.status === 'inflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+        const outflowSum = transactions.filter(t => t.status === 'outflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+        return {
+          ...f,
+          derived: {
+            initialAmount,
+            inflowTotal: inflowSum,
+            outflowTotal: outflowSum,
+            amount: initialAmount + inflowSum - outflowSum,
+            usedAmount: outflowSum,
+          }
+        };
+      });
+    // 合计: 折算到所选货币
+    const totals = { initial: 0, inflow: 0, outflow: 0, balance: 0 };
+    items.forEach(f => {
+      const cur = f.currency || 'CNY';
+      const d = f.derived;
+      totals.initial += convertCurrency(d.initialAmount, cur, selectedCurrency, exchangeRates);
+      totals.inflow += convertCurrency(d.inflowTotal, cur, selectedCurrency, exchangeRates);
+      totals.outflow += convertCurrency(d.usedAmount, cur, selectedCurrency, exchangeRates);
+      totals.balance += convertCurrency(d.amount, cur, selectedCurrency, exchangeRates);
+    });
+    return { items, totals };
+  }, [selectedAccountId, accounts, survivalFundsRaw, selectedCurrency, exchangeRates]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -2550,43 +2667,80 @@ export default function Accounts() {
           );
         })()}
 
-        <FinanceHoldingsTable
-          categoryName="account_detail"
-          holdings={scaledAccountHoldings}
-          readOnly={true}
-          lockedAccountFilter={account?.name || ''}
-          colorIdx={0}
-          marketOptions={marketOptions}
-          currencyOptions={currencyOptions}
-          assetTypeOptions={assetTypeOptions}
-          assetClassOptions={assetClassOptions}
-          positionGroupOptions={positionGroupOptions}
-          positionTypeOptions={positionTypeOptions}
-          allCategoryL2Options={allCategoryL2Options}
-          marketGroups={marketGroups}
-          tags={tags}
-          categoryL3CustomOptions={categoryL3CustomOptions}
-          categoryL4Options={categoryL4Options}
-          selectedCurrency={selectedCurrency}
-          exchangeRates={exchangeRates}
-          assetKindOptions={assetKindOptions}
-        />
-
-        {/* 归档持仓 */}
-        {accountArchivedHoldings.length > 0 && (
-          <div className="mt-8">
+        {/* 生活类型账户：显示生存资金列表 */}
+        {effectiveType === '生活' ? (
+          <div className="space-y-4">
             <div className="flex items-center gap-2 mb-3">
-              <FileBox className="w-4.5 h-4.5 text-gray-500 dark:text-gray-400" />
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                归档持仓 <span className="ml-1 text-xs text-gray-400 font-normal">({accountArchivedHoldings.length} 条)</span>
-              </h3>
+              <div className="bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full p-1.5">
+                <Wallet className="w-4 h-4" />
+              </div>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">生存资金</h3>
+              <span className="text-xs text-gray-400 ml-2">共 {accountSurvivalFunds.items.length} 条</span>
+            </div>
+            {accountSurvivalFunds.items.length === 0 ? (
+              <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 shadow-soft border border-gray-100 dark:border-slate-700 text-center text-gray-500 dark:text-gray-400">
+                暂无生存资金数据
+              </div>
+            ) : (
+              <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-soft overflow-hidden border border-gray-100 dark:border-slate-700">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 dark:bg-slate-700">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">名称</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">类型</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">币种</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">初始金额</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">增量资金</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">使用资金</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">结余资金</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+                      {accountSurvivalFunds.items.map(f => {
+                        const d = f.derived;
+                        const cur = f.currency || 'CNY';
+                        return (
+                          <tr key={f.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{f.name || '—'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{f.type || '—'}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{cur}</td>
+                            <td className="px-4 py-3 text-sm text-right tabular-nums text-gray-900 dark:text-white">{formatCurrencyWithRate(d.initialAmount, cur, selectedCurrency, exchangeRates)}</td>
+                            <td className={`px-4 py-3 text-sm text-right tabular-nums ${d.inflowTotal >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{formatCurrencyWithRate(d.inflowTotal, cur, selectedCurrency, exchangeRates)}</td>
+                            <td className="px-4 py-3 text-sm text-right tabular-nums text-gray-900 dark:text-white">{formatCurrencyWithRate(d.usedAmount, cur, selectedCurrency, exchangeRates)}</td>
+                            <td className={`px-4 py-3 text-sm text-right tabular-nums font-medium ${d.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>{formatCurrencyWithRate(d.amount, cur, selectedCurrency, exchangeRates)}</td>
+                          </tr>
+                        );
+                      })}
+                      {/* 合计行 */}
+                      <tr className="bg-gray-50 dark:bg-slate-700 font-semibold">
+                        <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-200" colSpan={3}>合计（{selectedCurrency}）</td>
+                        <td className="px-4 py-3 text-sm text-right tabular-nums text-gray-900 dark:text-white">{formatCurrencyWithRate(accountSurvivalFunds.totals.initial, selectedCurrency, selectedCurrency, exchangeRates)}</td>
+                        <td className="px-4 py-3 text-sm text-right tabular-nums text-green-600 dark:text-green-400">{formatCurrencyWithRate(accountSurvivalFunds.totals.inflow, selectedCurrency, selectedCurrency, exchangeRates)}</td>
+                        <td className="px-4 py-3 text-sm text-right tabular-nums text-gray-900 dark:text-white">{formatCurrencyWithRate(accountSurvivalFunds.totals.outflow, selectedCurrency, selectedCurrency, exchangeRates)}</td>
+                        <td className="px-4 py-3 text-sm text-right tabular-nums text-green-600 dark:text-green-400">{formatCurrencyWithRate(accountSurvivalFunds.totals.balance, selectedCurrency, selectedCurrency, exchangeRates)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* 理财资产 */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full p-1.5">
+                <span className="text-xs font-bold">💰</span>
+              </div>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">理财资产</h3>
             </div>
             <FinanceHoldingsTable
-              categoryName="archived"
-              holdings={scaleAssetList(accountArchivedHoldings, s)}
+              categoryName="account_detail"
+              holdings={scaledAccountHoldings}
               readOnly={true}
               lockedAccountFilter={account?.name || ''}
-              colorIdx={1}
+              colorIdx={0}
               marketOptions={marketOptions}
               currencyOptions={currencyOptions}
               assetTypeOptions={assetTypeOptions}
@@ -2602,10 +2756,43 @@ export default function Accounts() {
               exchangeRates={exchangeRates}
               assetKindOptions={assetKindOptions}
             />
-          </div>
-        )}
 
-        {renderIndependentAssetSection(s)}
+            {/* 归档持仓 */}
+            {accountArchivedHoldings.length > 0 && (
+              <div className="mt-8">
+                <div className="flex items-center gap-2 mb-3">
+                  <FileBox className="w-4.5 h-4.5 text-gray-500 dark:text-gray-400" />
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                    归档持仓 <span className="ml-1 text-xs text-gray-400 font-normal">({accountArchivedHoldings.length} 条)</span>
+                  </h3>
+                </div>
+                <FinanceHoldingsTable
+                  categoryName="archived"
+                  holdings={scaleAssetList(accountArchivedHoldings, s)}
+                  readOnly={true}
+                  lockedAccountFilter={account?.name || ''}
+                  colorIdx={1}
+                  marketOptions={marketOptions}
+                  currencyOptions={currencyOptions}
+                  assetTypeOptions={assetTypeOptions}
+                  assetClassOptions={assetClassOptions}
+                  positionGroupOptions={positionGroupOptions}
+                  positionTypeOptions={positionTypeOptions}
+                  allCategoryL2Options={allCategoryL2Options}
+                  marketGroups={marketGroups}
+                  tags={tags}
+                  categoryL3CustomOptions={categoryL3CustomOptions}
+                  categoryL4Options={categoryL4Options}
+                  selectedCurrency={selectedCurrency}
+                  exchangeRates={exchangeRates}
+                  assetKindOptions={assetKindOptions}
+                />
+              </div>
+            )}
+
+            {renderIndependentAssetSection(s)}
+          </>
+        )}
       </>
     );
   };

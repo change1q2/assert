@@ -1854,6 +1854,10 @@ export default function IndependentAssets() {
           totalValue += toCNY(item.amount || 0, cur);
           totalCost += toCNY(item.amount || 0, cur);
           actualProfit += toCNY(item.actualReturn || 0, cur);
+        } else if (type === 'survivalfund') {
+          const amount = parseFloat(item.amount || 0);
+          totalValue += toCNY(amount, cur);
+          totalCost += toCNY(amount, cur);
         }
       });
     });
