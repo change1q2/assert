@@ -60,21 +60,56 @@ function formatNumber(value) {
   }).format(parseFloat(value) || 0);
 }
 
+// 拆分一级/二级分类，兼容新旧数据格式
+// 返回 { primaryLabel, secondaryName, primaryValue, primary, secondary }
+function splitCategory(category, categoryType) {
+  let primaryValue = categoryType || '';
+  let secondaryName = '';
+  if (categoryType && category && !category.includes('-')) {
+    secondaryName = category;
+  } else if (category && category.includes('-')) {
+    const [first, ...rest] = category.split('-');
+    const matchPrefix = (s) => {
+      if (s === 'necessary') return 'necessary';
+      if (s === 'unnecessary') return 'unnecessary';
+      if (s === 'extra') return 'extra';
+      if (s === '必要消费') return 'necessary';
+      if (s === '非必要消费') return 'unnecessary';
+      if (s === '额外消费') return 'extra';
+      return null;
+    };
+    let p = matchPrefix(first);
+    let idx = 0;
+    let lastP = p;
+    while (p && idx < rest.length) {
+      lastP = p;
+      const nextP = matchPrefix(rest[idx]);
+      if (nextP) { idx++; p = nextP; } else break;
+    }
+    if (lastP) {
+      primaryValue = lastP;
+      secondaryName = rest.slice(idx).join('-');
+    } else {
+      secondaryName = category;
+    }
+  } else {
+    secondaryName = category || '';
+  }
+  const label = CATEGORY_TYPES.find(t => t.value === primaryValue)?.label;
+  return {
+    primaryValue,
+    primaryLabel: label || '',
+    secondaryName,
+    primary: label || (primaryValue ? primaryValue : ''),
+    secondary: secondaryName,
+  };
+}
+
 function formatCategoryDisplay(category, categoryType) {
   if (!category) return '—';
-  // 支持新旧格式
-  if (categoryType) {
-    const typeLabel = CATEGORY_TYPES.find(t => t.value === categoryType)?.label || '';
-    return typeLabel ? `${typeLabel} · ${category}` : category;
-  }
-  // 旧格式: "必要消费-住房" 或 "necessary-住房"
-  if (category.startsWith('必要消费-')) return category.replace('必要消费-', '必要消费 · ');
-  if (category.startsWith('非必要消费-')) return category.replace('非必要消费-', '非必要消费 · ');
-  if (category.startsWith('额外消费-')) return category.replace('额外消费-', '额外消费 · ');
-  if (category.startsWith('necessary-')) return '必要消费 · ' + category.replace('necessary-', '');
-  if (category.startsWith('unnecessary-')) return '非必要消费 · ' + category.replace('unnecessary-', '');
-  if (category.startsWith('extra-')) return '额外消费 · ' + category.replace('extra-', '');
-  return category;
+  const { primary, secondary } = splitCategory(category, categoryType);
+  if (primary && secondary) return `${primary} · ${secondary}`;
+  return secondary || primary || category || '—';
 }
 
 function formatPercentage(value) {
@@ -393,25 +428,14 @@ export default function SurvivalFunds() {
   // 筛选后的自由现金流
   const filteredBudgets = useMemo(() => {
     return freedomBudgets.filter(b => {
+      const cat = splitCategory(b.category, b.categoryType);
       // 一级分类筛选 (多选，匹配任一)
-      if (filterCategoryTypes.length > 0) {
-        let matched = filterCategoryTypes.includes(b.categoryType);
-        if (!matched) {
-          // 兼容旧数据
-          matched = filterCategoryTypes.some(t => {
-            if (t === 'necessary' && (b.category?.startsWith('必要消费-') || b.category?.startsWith('necessary-'))) return true;
-            if (t === 'unnecessary' && (b.category?.startsWith('非必要消费-') || b.category?.startsWith('unnecessary-'))) return true;
-            if (t === 'extra' && (b.category?.startsWith('额外消费-') || b.category?.startsWith('extra-'))) return true;
-            return false;
-          });
-        }
-        if (!matched) return false;
+      if (filterCategoryTypes.length > 0 && !filterCategoryTypes.includes(cat.primaryValue)) {
+        return false;
       }
       // 二级分类筛选 (多选，匹配任一)
-      if (filterCategories.length > 0) {
-        // 提取二级分类名
-        const catName = b.categoryType ? b.category : (b.category?.includes('-') ? b.category.split('-')[1] : b.category);
-        if (!filterCategories.includes(catName)) return false;
+      if (filterCategories.length > 0 && !filterCategories.includes(cat.secondaryName)) {
+        return false;
       }
       // 周期筛选
       if (filterPeriod && b.periodType !== filterPeriod) return false;
@@ -657,7 +681,8 @@ export default function SurvivalFunds() {
             <thead className="bg-gray-50 dark:bg-slate-700">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">自由名称</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">分类</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">一级分类</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">二级分类</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">周期</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">预算金额</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年度预算额</th>
@@ -665,35 +690,47 @@ export default function SurvivalFunds() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-              {budgetRows.map(b => (
-                <tr key={b.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{b.name || '—'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCategoryDisplay(b.category, b.categoryType)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                    {PERIOD_OPTIONS.find(p => p.value === b.periodType)?.label || b.periodType || '—'}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(b.budgetAmount)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(b.annualBudget)}</td>
-                  <td className="px-4 py-3 text-sm">
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => handleEditBudget(b)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="编辑">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDeleteBudget(b)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="删除">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {budgetRows.map(b => {
+                const cat = splitCategory(b.category, b.categoryType);
+                return (
+                  <tr key={b.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{b.name || '—'}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {cat.primary
+                        ? <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                            cat.primaryValue === 'necessary' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                              : cat.primaryValue === 'unnecessary' ? 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                              : 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                          }`}>{cat.primary}</span>
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{cat.secondary || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                      {PERIOD_OPTIONS.find(p => p.value === b.periodType)?.label || b.periodType || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(b.budgetAmount)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(b.annualBudget)}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => handleEditBudget(b)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="编辑">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleDeleteBudget(b)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="删除">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
               {budgetRows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无自由现金流数据</td>
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无自由现金流数据</td>
                 </tr>
               )}
               {budgetRows.length > 0 && (
                 <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
-                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={3}>合计</td>
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={4}>合计</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.budget)}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.annual)}</td>
                   <td></td>
@@ -1015,24 +1052,12 @@ export default function SurvivalFunds() {
 
   const handleEditBudget = (budget) => {
     setEditingBudget(budget);
-    // 从已有的 category 字符串解析类型
-    let bType = budget.categoryType || 'necessary';
-    let bCategory = budget.category || '';
-    if (!budget.categoryType && budget.category) {
-      // 兼容旧数据
-      if (budget.category.startsWith('必要消费-')) {
-        bType = 'necessary';
-        bCategory = budget.category.replace('必要消费-', '');
-      } else if (budget.category.startsWith('非必要消费-')) {
-        bType = 'unnecessary';
-        bCategory = budget.category.replace('非必要消费-', '');
-      }
-    }
-    setCategoryType(bType);
+    const { primaryValue, secondaryName } = splitCategory(budget.category, budget.categoryType);
+    setCategoryType(primaryValue || 'necessary');
     setBudgetForm({
       name: budget.name || '',
-      category: bCategory,
-      categoryType: bType,
+      category: secondaryName || '',
+      categoryType: primaryValue || 'necessary',
       periodType: budget.periodType || 'monthly',
       budgetAmount: budget.budgetAmount != null ? budget.budgetAmount : '',
     });
