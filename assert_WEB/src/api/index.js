@@ -343,7 +343,16 @@ export async function saveState(state) {
       method: 'PUT',
       body: JSON.stringify({ state }),
     })
-    if (response && (response.ok || response.success)) {
+    // 服务端可能返回 { ok: true } / { success: true } / { state: ... } / { data: ... }
+    // 只要响应是 truthy 且没有 error, 都视为成功
+    const isOk = response && !response.error && (
+      response.ok === true ||
+      response.success === true ||
+      response.state ||
+      response.data ||
+      (typeof response === 'object' && Object.keys(response).length > 0)
+    )
+    if (isOk) {
       // 只缓存轻量索引，避免 full_state 超过 localStorage 配额
       try {
         const accountsSnap = state.accounts ? state.accounts.map(a => ({

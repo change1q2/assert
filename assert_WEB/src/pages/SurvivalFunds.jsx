@@ -1263,54 +1263,60 @@ export default function SurvivalFunds() {
   };
 
   const handleSaveFundRecord = async () => {
-    if (!selectedFund?.fund) {
-      alert('请先选择一个生存资金');
-      return;
-    }
-    if (fundRecordForm.amount === '' || fundRecordForm.amount == null) {
-      alert('请输入金额');
-      return;
-    }
-    const amt = parseFloat(fundRecordForm.amount);
-    const status = fundRecordForm.status;
-    // 创建资金记录
-    const record = {
-      id: `fr_${Date.now()}`,
-      type: fundRecordForm.type,
-      amount: amt,
-      status,
-      date: fundRecordForm.date,
-      note: fundRecordForm.note || '',
-      category: fundRecordForm.category || '',
-    };
-    // 更新 survivalFunds: transactions 数组 + 同步 amount/usedAmount
-    // amount = 现有资金 (inflow增加, outflow减少)
-    // usedAmount = 已使用资金 (outflow增加)
-    const fundId = selectedFund.fund.id;
-    const newFunds = survivalFunds.map(f => {
-      if (f.id !== fundId) return f;
-      const transactions = f.transactions ? [...f.transactions, record] : [record];
-      let updated = { ...f, transactions };
-      const curAmount = parseFloat(f.amount) || 0;
-      const curUsed = parseFloat(f.usedAmount) || 0;
-      if (status === 'inflow') {
-        updated.amount = curAmount + amt;
-      } else {
-        // outflow: 减少现有资金, 增加已使用
-        updated.amount = curAmount - amt;
-        updated.usedAmount = curUsed + amt;
+    try {
+      if (!selectedFund?.fund) {
+        alert('请先选择一个生存资金');
+        return;
       }
-      return updated;
-    });
-    const newState = { ...stateData, survivalFunds: newFunds };
-    const result = await saveState(newState);
-    setStateData(newState);
-    setSurvivalFunds(newFunds);
-    invalidateStateCache();
-    setShowFundRecordModal(false);
-    setSelectedFund({ ...selectedFund, fund: newFunds.find(f => f.id === fundId) });
-    if (result?.cached === false) {
-      await loadData();
+      if (fundRecordForm.amount === '' || fundRecordForm.amount == null) {
+        alert('请输入金额');
+        return;
+      }
+      const amt = parseFloat(fundRecordForm.amount);
+      if (isNaN(amt)) {
+        alert('金额格式错误');
+        return;
+      }
+      const status = fundRecordForm.status;
+      // 创建资金记录
+      const record = {
+        id: `fr_${Date.now()}`,
+        type: fundRecordForm.type,
+        amount: amt,
+        status,
+        date: fundRecordForm.date,
+        note: fundRecordForm.note || '',
+        category: fundRecordForm.category || '',
+      };
+      // 更新 survivalFunds: transactions 数组 + 同步 amount/usedAmount
+      const fundId = selectedFund.fund.id;
+      const newFunds = survivalFunds.map(f => {
+        if (f.id !== fundId) return f;
+        const transactions = f.transactions ? [...f.transactions, record] : [record];
+        let updated = { ...f, transactions };
+        const curAmount = parseFloat(f.amount) || 0;
+        const curUsed = parseFloat(f.usedAmount) || 0;
+        if (status === 'inflow') {
+          updated.amount = curAmount + amt;
+        } else {
+          updated.amount = curAmount - amt;
+          updated.usedAmount = curUsed + amt;
+        }
+        return updated;
+      });
+      const newState = { ...stateData, survivalFunds: newFunds };
+      const result = await saveState(newState);
+      setStateData(newState);
+      setSurvivalFunds(newFunds);
+      invalidateStateCache();
+      setShowFundRecordModal(false);
+      setSelectedFund({ ...selectedFund, fund: newFunds.find(f => f.id === fundId) });
+      if (!result?.ok) {
+        alert('保存失败：' + (result?.error || '未知错误'));
+      }
+    } catch (e) {
+      console.error('保存资金记录异常:', e);
+      alert('保存异常：' + e.message);
     }
   };
 
