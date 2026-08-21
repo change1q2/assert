@@ -240,7 +240,11 @@ export default function SurvivalFunds() {
     categoryType: 'necessary',
     periodType: 'monthly',
     budgetAmount: '',
+    currency: 'CNY',
   });
+
+  // 自由现金流合计显示货币
+  const [budgetTotalCurrency, setBudgetTotalCurrency] = useState('CNY');
 
   // 动态分类 (两级: necessary/unnecessary)
   const [freedomCategories, setFreedomCategories] = useState(DEFAULT_FREEDOM_CATEGORIES);
@@ -452,7 +456,8 @@ export default function SurvivalFunds() {
       const year = new Date().getFullYear();
       if (!byYear[year]) byYear[year] = { currentBudget: 0, annualBudget: 0 };
       const period = b.periodType || 'monthly';
-      const annualAmt = (parseFloat(b.budgetAmount) || 0) * (PERIODS_PER_YEAR[period] || 12);
+      const cur = b.currency || 'CNY';
+      const annualAmt = convertCurrency((parseFloat(b.budgetAmount) || 0) * (PERIODS_PER_YEAR[period] || 12), cur, 'CNY', exchangeRates);
       byYear[year].annualBudget += annualAmt;
       // 当前所需预算 = 年度预算 / 当年天数 × 剩余天数
       const dailyAmt = annualAmt / DAYS_THIS_YEAR;
@@ -496,14 +501,19 @@ export default function SurvivalFunds() {
   const renderFreedomSection = () => {
     const periodUnitMap = { daily: '日', weekly: '周', monthly: '月', yearly: '年' };
 
-    // 明细表带年度预算额 (基于筛选后的数据)
+    // 明细表带年度预算额 (基于筛选后的数据, 按显示货币折算)
     const budgetRows = filteredBudgets.map(b => {
       const period = b.periodType || 'monthly';
-      const annual = (parseFloat(b.budgetAmount) || 0) * (PERIODS_PER_YEAR[period] || 12);
-      return { ...b, annualBudget: annual };
+      const cur = b.currency || 'CNY';
+      const rawAmount = parseFloat(b.budgetAmount) || 0;
+      const annual = rawAmount * (PERIODS_PER_YEAR[period] || 12);
+      // 折算到显示货币
+      const displayAmount = convertCurrency(rawAmount, cur, budgetTotalCurrency, exchangeRates);
+      const displayAnnual = convertCurrency(annual, cur, budgetTotalCurrency, exchangeRates);
+      return { ...b, annualBudget: displayAnnual, originalAnnual: annual, displayAmount };
     });
     const budgetTotals = budgetRows.reduce((acc, b) => {
-      acc.budget += parseFloat(b.budgetAmount) || 0;
+      acc.budget += b.displayAmount || 0;
       acc.annual += b.annualBudget || 0;
       return acc;
     }, { budget: 0, annual: 0 });
@@ -710,8 +720,15 @@ export default function SurvivalFunds() {
                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                       {PERIOD_OPTIONS.find(p => p.value === b.periodType)?.label || b.periodType || '—'}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(b.budgetAmount)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(b.annualBudget)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">
+                      {formatNumber(b.budgetAmount)} <span className="text-xs text-gray-500">{b.currency || 'CNY'}</span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">
+                      {b.currency && b.currency !== budgetTotalCurrency
+                        ? <span className="text-indigo-600 dark:text-indigo-400" title={`原 ${formatNumber(b.originalAnnual)} ${b.currency}`}>{formatNumber(b.annualBudget)} {budgetTotalCurrency}</span>
+                        : <>{formatNumber(b.annualBudget)} <span className="text-xs text-gray-500">{b.currency || 'CNY'}</span></>
+                      }
+                    </td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
                         <button onClick={() => handleEditBudget(b)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="编辑">
@@ -732,9 +749,22 @@ export default function SurvivalFunds() {
               )}
               {budgetRows.length > 0 && (
                 <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
-                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={4}>合计</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.budget)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.annual)}</td>
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={3}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>合计</span>
+                      <select
+                        value={budgetTotalCurrency}
+                        onChange={(e) => setBudgetTotalCurrency(e.target.value)}
+                        className="text-xs border border-indigo-200 dark:border-indigo-700 rounded px-1.5 py-0.5 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      >
+                        {CURRENCY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <span className="text-xs text-gray-400 font-normal">（按汇率折算）</span>
+                    </div>
+                  </td>
+                  <td></td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.budget)} <span className="text-xs text-gray-500">{budgetTotalCurrency}</span></td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.annual)} <span className="text-xs text-gray-500">{budgetTotalCurrency}</span></td>
                   <td></td>
                 </tr>
               )}
@@ -1077,6 +1107,7 @@ export default function SurvivalFunds() {
       categoryType: type,
       periodType: 'monthly',
       budgetAmount: '',
+      currency: 'CNY',
     });
     setShowBudgetModal(true);
   };
@@ -1091,6 +1122,7 @@ export default function SurvivalFunds() {
       categoryType: primaryValue || 'necessary',
       periodType: budget.periodType || 'monthly',
       budgetAmount: budget.budgetAmount != null ? budget.budgetAmount : '',
+      currency: budget.currency || 'CNY',
     });
     setShowBudgetModal(true);
   };
@@ -1118,6 +1150,7 @@ export default function SurvivalFunds() {
       return;
     }
     const fullCategory = budgetForm.category ? `${budgetForm.categoryType || 'necessary'}-${budgetForm.category}` : '';
+    const currency = budgetForm.currency || 'CNY';
     let newArr;
     if (editingBudget) {
       newArr = freedomBudgets.map(b => b.id === editingBudget.id
@@ -1128,6 +1161,7 @@ export default function SurvivalFunds() {
             categoryType: budgetForm.categoryType || 'necessary',
             periodType: budgetForm.periodType,
             budgetAmount: parseFloat(budgetForm.budgetAmount),
+            currency,
           }
         : b
       );
@@ -1141,6 +1175,7 @@ export default function SurvivalFunds() {
           categoryType: budgetForm.categoryType || 'necessary',
           periodType: budgetForm.periodType,
           budgetAmount: parseFloat(budgetForm.budgetAmount),
+          currency,
         },
       ];
     }
@@ -1461,13 +1496,22 @@ export default function SurvivalFunds() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 预算金额 <span className="text-red-500">*</span>
               </label>
-              <input
-                type="number"
-                value={budgetForm.budgetAmount}
-                onChange={(e) => setBudgetForm({ ...budgetForm, budgetAmount: e.target.value })}
-                placeholder="请输入预算金额"
-                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={budgetForm.budgetAmount}
+                  onChange={(e) => setBudgetForm({ ...budgetForm, budgetAmount: e.target.value })}
+                  placeholder="请输入预算金额"
+                  className="flex-1 px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <select
+                  value={budgetForm.currency}
+                  onChange={(e) => setBudgetForm({ ...budgetForm, currency: e.target.value })}
+                  className="px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {CURRENCY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
             </div>
           </div>
           <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end gap-3">
