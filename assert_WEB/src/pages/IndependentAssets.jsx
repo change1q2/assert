@@ -300,6 +300,10 @@ export default function IndependentAssets() {
   const [showCalculationModal, setShowCalculationModal] = useState(false);
   const [calculationData, setCalculationData] = useState(null);
   const [showInsuranceTransactionModal, setShowInsuranceTransactionModal] = useState(false);
+  // 保险取用弹窗
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawRecordId, setWithdrawRecordId] = useState(null);
+  const [withdrawTargetAccountId, setWithdrawTargetAccountId] = useState('');
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [transactionFormData, setTransactionFormData] = useState({});
   const [ocrImage, setOcrImage] = useState(null);
@@ -4938,6 +4942,38 @@ export default function IndependentAssets() {
               </div>
             </div>
 
+            {/* 取用相关 3 卡片 */}
+            {(() => {
+              const sortedRecords = records.slice().sort((a, b) => {
+                const na = parseInt(a.year) || 0;
+                const nb = parseInt(b.year) || 0;
+                return nb - na;
+              });
+              const firstRow = sortedRecords[0] || null;
+              const totalFund = firstRow ? parseFloat(firstRow.totalAmount || 0) : 0;
+              const totalWithdrawn = records.reduce((s, r) => s + (parseFloat(r.cashFlowAmount || 0)), 0);
+              const currentYear = new Date().getFullYear();
+              const currentYearWithdrawn = records
+                .filter(r => (parseInt(r.year) || 0) === currentYear || (r.date && r.date.startsWith(String(currentYear))))
+                .reduce((s, r) => s + (parseFloat(r.cashFlowAmount || 0)), 0);
+              return (
+                <div className="grid grid-cols-3 gap-3 mb-6">
+                  <div className="bg-teal-50 dark:bg-teal-900/20 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">现有资金总额</div>
+                    <div className="text-lg font-bold text-teal-600 dark:text-teal-400">{formatCurrency(totalFund, item.currency)}</div>
+                  </div>
+                  <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">取用总额</div>
+                    <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{formatCurrency(totalWithdrawn, item.currency)}</div>
+                  </div>
+                  <div className="bg-pink-50 dark:bg-pink-900/20 rounded-lg p-3 text-center">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">当年取用额</div>
+                    <div className="text-lg font-bold text-pink-600 dark:text-pink-400">{formatCurrency(currentYearWithdrawn, item.currency)}</div>
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="border-t border-gray-200 dark:border-slate-700 pt-4 mb-6">
               <h3 className="font-semibold text-gray-900 dark:text-white mb-4">附件</h3>
               
@@ -5230,6 +5266,7 @@ export default function IndependentAssets() {
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">年龄</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">实际分红额</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">现金流量额</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">是否取用</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">XIPRR收益率</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">分红实现率</th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">是否达成</th>
@@ -5423,6 +5460,29 @@ export default function IndependentAssets() {
                                 handleUpdateTransactionField(newRecords);
                               }} className="w-24 px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
                             </td>
+                            <td className="px-4 py-3 text-sm">
+                              {record.withdrawn ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 cursor-pointer hover:opacity-80"
+                                  onClick={() => {
+                                    setWithdrawRecordId(record.id);
+                                    setWithdrawTargetAccountId(record.withdrawAccountId || '');
+                                    setShowWithdrawModal(true);
+                                  }}>
+                                  已取用 → {accounts.find(a => (a.id || a.name) === record.withdrawAccountId)?.name || record.withdrawAccountId || '未指定'}
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setWithdrawRecordId(record.id);
+                                    setWithdrawTargetAccountId('');
+                                    setShowWithdrawModal(true);
+                                  }}
+                                  className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 cursor-pointer transition-colors"
+                                >
+                                  点击取用
+                                </button>
+                              )}
+                            </td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{actualRate !== null ? actualRate.toFixed(2) + '%' : '—'}</td>
                             <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{dividendRealizationRate.toFixed(2)}%</td>
                             <td className="px-4 py-3 text-sm">
@@ -5569,6 +5629,125 @@ export default function IndependentAssets() {
           <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end">
             <button onClick={() => setShowCalculationModal(false)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
               关闭
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // 保险取用弹窗
+  const renderWithdrawModal = () => {
+    if (!showWithdrawModal) return null;
+    const record = selectedInsurance?.transactionRecords?.find(r => r.id === withdrawRecordId);
+    if (!record) return null;
+    const cashFlow = parseFloat(record.cashFlowAmount || 0);
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-md">
+          <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+              {record.withdrawn ? '修改取用账户' : '取用资金'}
+            </h3>
+            <button onClick={() => setShowWithdrawModal(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-5 space-y-4">
+            <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3 text-sm">
+              <div className="flex justify-between mb-1">
+                <span className="text-gray-500 dark:text-gray-400">保单年度</span>
+                <span className="font-medium text-gray-900 dark:text-white">{record.year || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">现金流量额</span>
+                <span className="font-medium text-orange-600 dark:text-orange-400">
+                  {formatCurrency(cashFlow, selectedInsurance.currency)}
+                </span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                取用录入账户 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                list="account-list"
+                value={withdrawTargetAccountId}
+                onChange={(e) => setWithdrawTargetAccountId(e.target.value)}
+                placeholder="输入或选择账户名"
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <datalist id="account-list">
+                {accounts.map(a => (
+                  <option key={a.id || a.name} value={a.name}>{a.category || ''}</option>
+                ))}
+              </datalist>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {accounts.map(a => (
+                  <button
+                    key={a.id || a.name}
+                    onClick={() => setWithdrawTargetAccountId(a.id || a.name)}
+                    className={`px-2 py-1 text-xs rounded border transition-colors ${
+                      withdrawTargetAccountId === (a.id || a.name)
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                        : 'border-gray-200 dark:border-slate-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {a.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end gap-2">
+            {record.withdrawn && (
+              <button
+                onClick={async () => {
+                  const newRecords = selectedInsurance.transactionRecords.map(r => {
+                    if (r.id === record.id) {
+                      const { withdrawn, withdrawAccountId, ...rest } = r;
+                      return rest;
+                    }
+                    return r;
+                  });
+                  await handleUpdateTransactionField(newRecords);
+                  setShowWithdrawModal(false);
+                }}
+                className="px-3 py-2 text-sm text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              >
+                取消取用
+              </button>
+            )}
+            <button
+              onClick={() => setShowWithdrawModal(false)}
+              className="px-3 py-2 text-sm text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              onClick={async () => {
+                if (!withdrawTargetAccountId) {
+                  alert('请选择取用账户');
+                  return;
+                }
+                const newRecords = selectedInsurance.transactionRecords.map(r => {
+                  if (r.id === record.id) {
+                    return {
+                      ...r,
+                      withdrawn: true,
+                      withdrawAccountId: withdrawTargetAccountId,
+                      withdrawTime: new Date().toISOString(),
+                    };
+                  }
+                  return r;
+                });
+                await handleUpdateTransactionField(newRecords);
+                setShowWithdrawModal(false);
+              }}
+              className="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+            >
+              确认取用
             </button>
           </div>
         </div>
@@ -7328,6 +7507,7 @@ export default function IndependentAssets() {
       {renderModal()}
       {renderVehicleDetailModal()}
       {renderInsuranceDetailModal()}
+      {renderWithdrawModal()}
       {renderInsuranceTransactionModal()}
       {renderCalculationModal()}
       {renderPropertyDetailModal()}
