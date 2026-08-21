@@ -327,28 +327,23 @@ export default function SurvivalFunds() {
 
   // ========== 第一行：总览卡片 ==========
   const summaryData = useMemo(() => {
-    let totalValue = 0;
-    let totalCost = 0;
+    let totalBalance = 0; // 生存资金 = 结余资金总和
+    let totalInitial = 0; // 初始资金总和
     survivalFunds.forEach(fund => {
       const cur = fund.currency || 'CNY';
-      totalValue += toCNY(fund.amount, cur);
-      const costBasis = fund.costBasis != null && fund.costBasis !== ''
-        ? fund.costBasis
-        : fund.amount;
-      totalCost += toCNY(costBasis, cur);
+      totalBalance += toCNY(parseFloat(fund.amount) || 0, cur);
+      totalInitial += toCNY(parseFloat(fund.initialAmount || fund.amount) || 0, cur);
     });
-    const totalProfit = totalValue - totalCost;
-    const totalProfitRate = totalCost > 0 ? (totalProfit / totalCost) * 100 : 0;
-    return { totalValue, totalCost, totalProfit, totalProfitRate };
+    return { totalBalance, totalInitial };
   }, [survivalFunds, exchangeRates]);
 
   const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
       <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-5 text-white shadow-lg shadow-blue-500/20">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-blue-100 text-sm">总价值</p>
-            <p className="text-2xl font-bold mt-1">{formatCurrency(summaryData.totalValue)}</p>
+            <p className="text-blue-100 text-sm">生存资金</p>
+            <p className="text-2xl font-bold mt-1">{formatCurrency(summaryData.totalBalance)}</p>
           </div>
           <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
             <Wallet className="w-6 h-6" />
@@ -358,37 +353,11 @@ export default function SurvivalFunds() {
       <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-5 text-white shadow-lg shadow-orange-500/20">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-orange-100 text-sm">总成本</p>
-            <p className="text-2xl font-bold mt-1">{formatCurrency(summaryData.totalCost)}</p>
+            <p className="text-orange-100 text-sm">初始资金</p>
+            <p className="text-2xl font-bold mt-1">{formatCurrency(summaryData.totalInitial)}</p>
           </div>
           <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
             <DollarSign className="w-6 h-6" />
-          </div>
-        </div>
-      </div>
-      <div className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-2xl p-5 text-white shadow-lg shadow-purple-500/20">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-purple-100 text-sm">总收益</p>
-            <p className={`text-2xl font-bold mt-1 ${summaryData.totalProfit >= 0 ? '' : 'text-red-200'}`}>
-              {formatCurrency(summaryData.totalProfit)}
-            </p>
-          </div>
-          <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
-            <TrendingUp className="w-6 h-6" />
-          </div>
-        </div>
-      </div>
-      <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-2xl p-5 text-white shadow-lg shadow-emerald-500/20">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-emerald-100 text-sm">总收益率</p>
-            <p className={`text-2xl font-bold mt-1 ${summaryData.totalProfitRate >= 0 ? '' : 'text-red-200'}`}>
-              {formatPercentage(summaryData.totalProfitRate)}
-            </p>
-          </div>
-          <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
-            <Percent className="w-6 h-6" />
           </div>
         </div>
       </div>
