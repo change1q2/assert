@@ -1308,12 +1308,37 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       const accId = record.accountId || record.account || latestData.accountId || latestData.account;
       const tradeCurrency = record.currency || latestData.currency || 'CNY';
 
-      // 查找对应账户下的任一现金余额资产 (现金类 / 现金余额 或 现金)
-      const cashBalanceAsset = updatedFinanceAssets.find(a =>
-        (a.accountId === accId || a.account === accId) &&
-        (a.categoryL1 === '现金类' || a.category === '现金类') &&
-        (a.assetType === '现金余额' || a.assetType === '现金')
-      );
+      // 查找对应账户下的任一现金余额资产 (现金类 / 现金余额 / 现金)
+      // 宽松匹配：accountId/account 任一字段匹配，资产类型字段多重匹配
+      // 降级：若找不到 assetType 匹配，取第一条 category=现金类 的资产
+      const findCashAssetForAccount = (assets, accountId) => {
+        const accIdStr = String(accountId || '').trim();
+        const accMatches = (a) => {
+          const aid = String(a.accountId || '').trim();
+          const acct = String(a.account || '').trim();
+          if (!accIdStr) return false;
+          return aid === accIdStr || acct === accIdStr;
+        };
+        const catCash = (a) => (a.category === '现金类' || a.categoryL1 === '现金类');
+        const isCashBalType = (a) => {
+          const at = (a.assetType || '').trim();
+          const ak = (a.assetKind || '').trim();
+          const kd = (a.kind || '').trim();
+          return at === '现金余额' || at === '现金' || at === '货币基金'
+            || ak === '现金余额' || ak === '现金' || ak === '货币基金'
+            || kd === '现金余额' || kd === '现金' || kd === '货币基金';
+        };
+        // 1. 精确：账户 + 现金类 + 现金余额类型
+        let found = assets.find(a => accMatches(a) && catCash(a) && isCashBalType(a));
+        if (found) return found;
+        // 2. 降级：账户 + 现金类
+        found = assets.find(a => accMatches(a) && catCash(a));
+        if (found) return found;
+        // 3. 再降级：账户 + 任何余额类（含货币基金）
+        found = assets.find(a => accMatches(a) && isCashBalType(a));
+        return found || null;
+      };
+      const cashBalanceAsset = findCashAssetForAccount(updatedFinanceAssets, accId);
 
       if (cashBalanceAsset) {
         const assetCurrency = cashBalanceAsset.currency || 'CNY';
