@@ -333,7 +333,7 @@ const updateAccountBalance = (asset, record, accounts, fallbackAccounts, finance
     const preferredCashAsset =
       matchingCashAssets.find(a => a.positionCategory === '现金管理') ||
       matchingCashAssets[0];
-    // 账户余额换算为现金资产本身的货币（现价 = 余额 金额，数量固定为 1）
+    // 方案B：数量 = 余额金额，现价 = 1（每单位面值1元），currentValue = 数量 × 1 = 数量
     const assetCurrency = preferredCashAsset.currency || accountCurrency;
     const accountBalance = parseFloat(targetAccount.balance) || 0;
     const newCashAssetValue = (assetCurrency === accountCurrency)
@@ -343,12 +343,12 @@ const updateAccountBalance = (asset, record, accounts, fallbackAccounts, finance
       String(a.id) === String(preferredCashAsset.id)
         ? {
             ...a,
+            quantity: newCashAssetValue,
+            shares: newCashAssetValue,
             currentValue: newCashAssetValue,
             balance: newCashAssetValue,
-            currentPrice: newCashAssetValue,
-            price: newCashAssetValue,
-            quantity: 1,
-            shares: 1,
+            currentPrice: 1,
+            price: 1,
           }
         : a
     );
@@ -1323,24 +1323,20 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           : convertCurrency(releasedFunds, tradeCurrency, assetCurrency, exchangeRates);
         updatedFinanceAssets = updatedFinanceAssets.map(a => {
           if (String(a.id) !== String(cashBalanceAsset.id)) return a;
-          // 现金余额资产：数量固定为 1，现价 = 原有现价 + 释放资金 = 余额金额，currentValue = 现价
-          const curPrice = parseFloat(a.currentPrice) || parseFloat(a.price) || 0;
-          const newPrice = curPrice + convertedReleased;
-          const curCost = parseFloat(a.cost) || parseFloat(a.costPrice) || 0;
-          const curAvg = parseFloat(a.avgCost) || parseFloat(a.averageCost) || 1;
+          // 方案B：数量 = 余额金额，现价 = 1（每单位面值1元），currentValue = 数量 × 1
+          const curQty = parseFloat(a.shares) || parseFloat(a.quantity) || 0;
+          const newQty = curQty + convertedReleased;
+          const curCost = parseFloat(a.cost) || 0;
           const newCost = curCost + convertedReleased;
           return {
             ...a,
-            shares: 1,
-            quantity: 1,
-            currentValue: newPrice,
-            balance: newPrice,
-            currentPrice: newPrice,
-            price: newPrice,
+            shares: newQty,
+            quantity: newQty,
+            currentValue: newQty,
+            balance: newQty,
+            currentPrice: 1,
+            price: 1,
             cost: newCost,
-            avgCost: (curAvg + 1) / 2,
-            holdingPnl: parseFloat(a.holdingPnl) || 0,
-            dailyPnl: parseFloat(a.dailyPnl) || 0,
           };
         });
       } else {
