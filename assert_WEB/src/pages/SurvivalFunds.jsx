@@ -15,6 +15,9 @@ const CURRENCY_SYMBOLS = {
 
 const SURVIVAL_FUND_TYPES = ['应急储备', '日常开支', '长期储备', '投资本金'];
 
+// 资金记录类型
+const FUND_RECORD_TYPES = ['工资', '理财', '兼职', '奖金', '投资收益', '转账', '其他收入', '支出', '其他支出'];
+
 const DEFAULT_FREEDOM_CATEGORIES = {
   necessary: ['住房', '基础生活', '水电燃气', '交通', '医疗', '教育'],
   unnecessary: ['旅行', '娱乐', '购物', '餐饮', '运动健身', '其他'],
@@ -245,6 +248,20 @@ export default function SurvivalFunds() {
 
   // 自由现金流合计显示货币
   const [budgetTotalCurrency, setBudgetTotalCurrency] = useState('CNY');
+
+  // 生存资金明细弹窗
+  const [showFundDetailModal, setShowFundDetailModal] = useState(false);
+  const [selectedFund, setSelectedFund] = useState(null);
+  // 资金记录弹窗
+  const [showFundRecordModal, setShowFundRecordModal] = useState(false);
+  const [fundRecordForm, setFundRecordForm] = useState({
+    type: '工资',
+    amount: '',
+    status: 'inflow', // inflow/outflow
+    category: '',
+    date: new Date().toISOString().slice(0, 10),
+    note: '',
+  });
 
   // 动态分类 (两级: necessary/unnecessary)
   const [freedomCategories, setFreedomCategories] = useState(DEFAULT_FREEDOM_CATEGORIES);
@@ -507,16 +524,24 @@ export default function SurvivalFunds() {
       const cur = b.currency || 'CNY';
       const rawAmount = parseFloat(b.budgetAmount) || 0;
       const annual = rawAmount * (PERIODS_PER_YEAR[period] || 12);
+      // 年度已使用 = 生存资金列表中已使用金额的年度折算 (取同名/同分类的生存资金)
+      const matchedFund = survivalFunds.find(f =>
+        f.name === b.name && f.type === (b.categoryType === 'necessary' ? '日常开支' : '日常开支')
+      );
+      const usedAmount = matchedFund ? (parseFloat(matchedFund.usedAmount) || 0) : 0;
+      const annualUsed = usedAmount * (PERIODS_PER_YEAR[period] || 12);
       // 折算到显示货币
       const displayAmount = convertCurrency(rawAmount, cur, budgetTotalCurrency, exchangeRates);
       const displayAnnual = convertCurrency(annual, cur, budgetTotalCurrency, exchangeRates);
-      return { ...b, annualBudget: displayAnnual, originalAnnual: annual, displayAmount };
+      const displayAnnualUsed = convertCurrency(annualUsed, cur, budgetTotalCurrency, exchangeRates);
+      return { ...b, annualBudget: displayAnnual, originalAnnual: annual, displayAmount, annualUsed: displayAnnualUsed };
     });
     const budgetTotals = budgetRows.reduce((acc, b) => {
       acc.budget += b.displayAmount || 0;
       acc.annual += b.annualBudget || 0;
+      acc.annualUsed += b.annualUsed || 0;
       return acc;
-    }, { budget: 0, annual: 0 });
+    }, { budget: 0, annual: 0, annualUsed: 0 });
 
     const cardColors = {
       daily: 'from-blue-500 to-blue-600',
@@ -698,6 +723,7 @@ export default function SurvivalFunds() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">周期</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">预算金额</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年度预算额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">年度已使用</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
@@ -729,8 +755,17 @@ export default function SurvivalFunds() {
                         : <>{formatNumber(b.annualBudget)} <span className="text-xs text-gray-500">{b.currency || 'CNY'}</span></>
                       }
                     </td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">
+                      {b.currency && b.currency !== budgetTotalCurrency
+                        ? <span className="text-orange-600 dark:text-orange-400">{formatNumber(b.annualUsed)} {budgetTotalCurrency}</span>
+                        : <>{formatNumber(b.annualUsed)} <span className="text-xs text-gray-500">{b.currency || 'CNY'}</span></>
+                      }
+                    </td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
+                        <button onClick={() => handleShowFundDetail(b)} className="px-2 py-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors" title="查看明细">
+                          明细
+                        </button>
                         <button onClick={() => handleEditBudget(b)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="编辑">
                           <Edit2 className="w-4 h-4" />
                         </button>
@@ -744,7 +779,7 @@ export default function SurvivalFunds() {
               })}
               {budgetRows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无自由现金流数据</td>
+                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无自由现金流数据</td>
                 </tr>
               )}
               {budgetRows.length > 0 && (
@@ -765,6 +800,7 @@ export default function SurvivalFunds() {
                   <td></td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.budget)} <span className="text-xs text-gray-500">{budgetTotalCurrency}</span></td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white tabular-nums">{formatNumber(budgetTotals.annual)} <span className="text-xs text-gray-500">{budgetTotalCurrency}</span></td>
+                  <td className="px-4 py-3 text-sm text-orange-600 dark:text-orange-400 tabular-nums">{formatNumber(budgetTotals.annualUsed)} <span className="text-xs text-gray-500">{budgetTotalCurrency}</span></td>
                   <td></td>
                 </tr>
               )}
@@ -1053,6 +1089,39 @@ export default function SurvivalFunds() {
 
     let newArr;
     if (editingFund) {
+      const oldAccountId = editingFund.accountId;
+      const accountChanged = fundForm.accountId !== oldAccountId;
+      const oldAccountName = accounts.find(a => (a.id || a.name) === oldAccountId)?.name || '';
+      const newAccountName = account?.name || '';
+      const existingTransactions = editingFund.transactions || [];
+      let updatedTransactions = existingTransactions;
+      // 账户间转账：A->B 自动生成出账/入账记录
+      if (accountChanged) {
+        const transferAmount = parseFloat(editingFund.amount) || 0;
+        const transferDate = new Date().toISOString().slice(0, 10);
+        // 出账记录（从旧账户）
+        updatedTransactions = [
+          ...updatedTransactions,
+          {
+            id: `fr_transfer_out_${Date.now()}`,
+            type: '转账',
+            amount: transferAmount,
+            status: 'outflow',
+            date: transferDate,
+            note: `转出到 ${newAccountName || '新账户'}`,
+            category: 'transfer',
+          },
+          {
+            id: `fr_transfer_in_${Date.now() + 1}`,
+            type: '转账',
+            amount: transferAmount,
+            status: 'inflow',
+            date: transferDate,
+            note: `从 ${oldAccountName || '旧账户'} 转入`,
+            category: 'transfer',
+          },
+        ];
+      }
       newArr = survivalFunds.map(f => f.id === editingFund.id
         ? {
             ...f,
@@ -1064,10 +1133,12 @@ export default function SurvivalFunds() {
             costBasis,
             accountId: fundForm.accountId,
             accountName: account?.name || '',
+            transactions: updatedTransactions,
           }
         : f
       );
     } else {
+      const initialAmount = parseFloat(fundForm.amount);
       newArr = [
         ...survivalFunds,
         {
@@ -1075,11 +1146,21 @@ export default function SurvivalFunds() {
           name: fundForm.name.trim(),
           type: fundForm.type,
           currency: fundForm.currency,
-          amount: parseFloat(fundForm.amount),
+          amount: initialAmount,
           usedAmount,
           costBasis,
           accountId: fundForm.accountId,
           accountName: account?.name || '',
+          initialAmount,
+          transactions: initialAmount > 0 ? [{
+            id: `fr_init_${Date.now()}`,
+            type: '初始资金',
+            amount: initialAmount,
+            status: 'inflow',
+            date: new Date().toISOString().slice(0, 10),
+            note: '初始创建',
+            category: 'init',
+          }] : [],
         },
       ];
     }
@@ -1191,6 +1272,106 @@ export default function SurvivalFunds() {
     }
   };
 
+  // ========== 操作函数：生存资金明细+资金记录 ==========
+  const handleShowFundDetail = async (budget) => {
+    // 找到对应的生存资金
+    const fund = survivalFunds.find(f => f.name === budget.name) || null;
+    setSelectedFund({ budget, fund });
+    setShowFundDetailModal(true);
+  };
+
+  const handleAddFundRecord = () => {
+    setFundRecordForm({
+      type: '工资',
+      amount: '',
+      status: 'inflow',
+      category: '',
+      date: new Date().toISOString().slice(0, 10),
+      note: '',
+    });
+    setShowFundRecordModal(true);
+  };
+
+  const handleSaveFundRecord = async () => {
+    if (!selectedFund?.fund) {
+      alert('请先选择一个生存资金');
+      return;
+    }
+    if (fundRecordForm.amount === '' || fundRecordForm.amount == null) {
+      alert('请输入金额');
+      return;
+    }
+    const amt = parseFloat(fundRecordForm.amount);
+    const status = fundRecordForm.status;
+    // 创建资金记录
+    const record = {
+      id: `fr_${Date.now()}`,
+      type: fundRecordForm.type,
+      amount: amt,
+      status,
+      date: fundRecordForm.date,
+      note: fundRecordForm.note || '',
+      category: fundRecordForm.category || '',
+    };
+    // 更新 survivalFunds: transactions 数组 + 同步 usedAmount 或 amount
+    const fundId = selectedFund.fund.id;
+    const newFunds = survivalFunds.map(f => {
+      if (f.id !== fundId) return f;
+      const transactions = f.transactions ? [...f.transactions, record] : [record];
+      // inflow: 增加 amount (如果是新增资金类型)
+      // outflow: 增加 usedAmount
+      let updated = { ...f, transactions };
+      if (status === 'inflow') {
+        const newAmount = (parseFloat(f.amount) || 0) + amt;
+        updated.amount = newAmount;
+      } else {
+        const newUsed = (parseFloat(f.usedAmount) || 0) + amt;
+        updated.usedAmount = newUsed;
+      }
+      return updated;
+    });
+    const newState = { ...stateData, survivalFunds: newFunds };
+    const result = await saveState(newState);
+    setStateData(newState);
+    setSurvivalFunds(newFunds);
+    invalidateStateCache();
+    setShowFundRecordModal(false);
+    setSelectedFund({ ...selectedFund, fund: newFunds.find(f => f.id === fundId) });
+    if (result?.cached === false) {
+      await loadData();
+    }
+  };
+
+  const handleDeleteFundRecord = async (recordId) => {
+    if (!confirm('确定删除该资金记录吗？')) return;
+    if (!selectedFund?.fund) return;
+    const fundId = selectedFund.fund.id;
+    const fund = selectedFund.fund;
+    const record = fund.transactions?.find(r => r.id === recordId);
+    if (!record) return;
+    const amt = parseFloat(record.amount) || 0;
+    const newFunds = survivalFunds.map(f => {
+      if (f.id !== fundId) return f;
+      const transactions = f.transactions.filter(r => r.id !== recordId);
+      let updated = { ...f, transactions };
+      if (record.status === 'inflow') {
+        updated.amount = Math.max(0, (parseFloat(f.amount) || 0) - amt);
+      } else {
+        updated.usedAmount = Math.max(0, (parseFloat(f.usedAmount) || 0) - amt);
+      }
+      return updated;
+    });
+    const newState = { ...stateData, survivalFunds: newFunds };
+    const result = await saveState(newState);
+    setStateData(newState);
+    setSurvivalFunds(newFunds);
+    invalidateStateCache();
+    setSelectedFund({ ...selectedFund, fund: newFunds.find(f => f.id === fundId) });
+    if (result?.cached === false) {
+      await loadData();
+    }
+  };
+
   // ========== 操作函数：分类管理 ==========
   const handleAddCategory = async () => {
     const name = categoryForm.name.trim();
@@ -1269,6 +1450,237 @@ export default function SurvivalFunds() {
   };
 
   // ========== 弹窗：生存资金 ==========
+  // ========== 弹窗：生存资金明细 ==========
+  const renderFundDetailModal = () => {
+    if (!showFundDetailModal || !selectedFund) return null;
+    const { budget, fund } = selectedFund;
+    if (!fund) return null;
+    const cur = fund.currency || 'CNY';
+    const initialAmount = parseFloat(fund.initialAmount || fund.amount) || 0;
+    const transactions = fund.transactions || [];
+    const inflowTotal = transactions.filter(t => t.status === 'inflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+    const outflowTotal = transactions.filter(t => t.status === 'outflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+    const currentAmount = parseFloat(fund.amount) || 0;
+    const usedAmount = parseFloat(fund.usedAmount) || 0;
+    const netInflow = currentAmount - initialAmount;
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+          <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              明细：{budget.name} <span className="text-sm text-gray-500 font-normal">({budget.currency || 'CNY'})</span>
+            </h2>
+            <button onClick={() => setShowFundDetailModal(false)} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-5 space-y-5">
+            {/* 资金概览 */}
+            <div className="grid grid-cols-4 gap-3">
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">现有资金</div>
+                <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatCurrency(currentAmount, cur)}</div>
+              </div>
+              <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">已使用资金</div>
+                <div className="text-lg font-bold text-orange-600 dark:text-orange-400">{formatCurrency(usedAmount, cur)}</div>
+              </div>
+              <div className="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-3 text-center">
+                <div className="text-xs text-gray-500 dark:text-gray-400">原始资金</div>
+                <div className="text-lg font-bold text-gray-800 dark:text-gray-200">{formatCurrency(initialAmount, cur)}</div>
+              </div>
+              <div className={`rounded-lg p-3 text-center ${netInflow >= 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+                <div className="text-xs text-gray-500 dark:text-gray-400">增量资金</div>
+                <div className={`text-lg font-bold ${netInflow >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {formatCurrency(netInflow, cur)}
+                </div>
+              </div>
+            </div>
+
+            {/* 资金记录表格 */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">资金记录</h3>
+                <button
+                  onClick={handleAddFundRecord}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                  新增记录
+                </button>
+              </div>
+              <div className="overflow-x-auto border border-gray-100 dark:border-slate-700 rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 dark:bg-slate-700">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">类型</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">金额</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">状态</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">日期</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">备注</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+                    {transactions.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-3 py-4 text-center text-xs text-gray-500">暂无资金记录</td>
+                      </tr>
+                    )}
+                    {transactions.map(t => (
+                      <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/30">
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{t.type || '—'}</td>
+                        <td className="px-3 py-2 tabular-nums text-gray-900 dark:text-white">{formatCurrency(t.amount, cur)}</td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                            t.status === 'inflow'
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                              : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                          }`}>
+                            {t.status === 'inflow' ? '入账' : '出账'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-gray-600 dark:text-gray-400 text-xs">{t.date || '—'}</td>
+                        <td className="px-3 py-2 text-gray-600 dark:text-gray-400 text-xs">{t.note || '—'}</td>
+                        <td className="px-3 py-2">
+                          <button onClick={() => handleDeleteFundRecord(t.id)} className="p-1 text-gray-400 hover:text-red-500 rounded">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {transactions.length > 0 && (
+                    <tfoot className="bg-gray-50 dark:bg-slate-700/50">
+                      <tr className="text-xs font-semibold">
+                        <td className="px-3 py-2 text-gray-700 dark:text-gray-300">合计</td>
+                        <td className="px-3 py-2 text-green-600 dark:text-green-400">
+                          入账 {formatCurrency(inflowTotal, cur)}
+                        </td>
+                        <td className="px-3 py-2 text-red-600 dark:text-red-400">
+                          出账 {formatCurrency(outflowTotal, cur)}
+                        </td>
+                        <td colSpan={3}></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ========== 弹窗：新增资金记录 ==========
+  const renderFundRecordModal = () => {
+    if (!showFundRecordModal) return null;
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md">
+          <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">新增资金记录</h3>
+            <button onClick={() => setShowFundRecordModal(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-5 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">类型</label>
+              <select
+                value={fundRecordForm.type}
+                onChange={(e) => setFundRecordForm({ ...fundRecordForm, type: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {FUND_RECORD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">金额</label>
+              <input
+                type="number"
+                value={fundRecordForm.amount}
+                onChange={(e) => setFundRecordForm({ ...fundRecordForm, amount: e.target.value })}
+                placeholder="请输入金额"
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">状态</label>
+              <div className="flex gap-3">
+                <label className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                  fundRecordForm.status === 'inflow'
+                    ? 'border-green-500 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
+                    : 'border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-400'
+                }`}>
+                  <input
+                    type="radio"
+                    name="fundStatus"
+                    value="inflow"
+                    checked={fundRecordForm.status === 'inflow'}
+                    onChange={(e) => setFundRecordForm({ ...fundRecordForm, status: 'inflow' })}
+                    className="w-4 h-4"
+                  />
+                  入账
+                </label>
+                <label className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                  fundRecordForm.status === 'outflow'
+                    ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
+                    : 'border-gray-200 dark:border-slate-600 text-gray-600 dark:text-gray-400'
+                }`}>
+                  <input
+                    type="radio"
+                    name="fundStatus"
+                    value="outflow"
+                    checked={fundRecordForm.status === 'outflow'}
+                    onChange={(e) => setFundRecordForm({ ...fundRecordForm, status: 'outflow' })}
+                    className="w-4 h-4"
+                  />
+                  出账
+                </label>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日期</label>
+              <input
+                type="date"
+                value={fundRecordForm.date}
+                onChange={(e) => setFundRecordForm({ ...fundRecordForm, date: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">备注</label>
+              <input
+                type="text"
+                value={fundRecordForm.note}
+                onChange={(e) => setFundRecordForm({ ...fundRecordForm, note: e.target.value })}
+                placeholder="可选备注"
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+          <div className="p-4 border-t border-gray-200 dark:border-slate-700 flex justify-end gap-2">
+            <button
+              onClick={() => setShowFundRecordModal(false)}
+              className="px-3 py-2 text-sm text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-slate-600 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSaveFundRecord}
+              className="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderFundModal = () => {
     if (!showFundModal) return null;
     const hasAccounts = accounts.length > 0;
@@ -1633,6 +2045,8 @@ export default function SurvivalFunds() {
 
       {renderFundModal()}
       {renderBudgetModal()}
+      {renderFundDetailModal()}
+      {renderFundRecordModal()}
       {renderCategorySettingsModal()}
     </div>
   );
