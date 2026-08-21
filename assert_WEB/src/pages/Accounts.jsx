@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import StickyScrollWrapper from '../components/StickyScrollWrapper';
 import { fetchState, saveState, fetchRealTimeExchangeRates, fetchFinanceQuotes } from '../api';
 import { getCurrencySymbol, truncateNum } from '../utils/currency';
 import { formatPercentage } from '../components/FinanceHoldingsTable.utils';
@@ -25,6 +26,7 @@ import {
   ArrowLeft,
   TrendingUp,
   TrendingDown,
+  FileBox,
 } from 'lucide-react';
 
 function convertCurrency(value, fromCurrency, toCurrency, rates) {
@@ -1039,26 +1041,36 @@ export default function Accounts() {
     const account = accounts.find(a => a.id === selectedAccountId);
     if (!account) return { totalBalance: 0, balanceByType: {}, includedCount: 0 };
 
-    // 只统计资产类型为现金或货币基金的当前市值作为余额
+    // 只统计资产类型为现金或货币基金的当前市值作为余额（包含 "现金余额" 类型）
     const cashLikeAssets = unifiedAssets.filter(asset => {
       const type = (asset.assetType || '').trim();
       const kind = (asset.assetKind || '').trim();
-      return type === '现金' || type === '货币基金' || kind === '现金' || kind === '货币基金';
+      const cat = (asset.categoryL1 || '').trim();
+      return cat === '现金类'
+        || type === '现金' || type === '现金余额' || type === '货币基金'
+        || kind === '现金' || kind === '货币基金';
     });
 
-    const totalBalance = cashLikeAssets.reduce((sum, a) => sum + (a.mv || 0), 0);
-
+    let totalBalance = cashLikeAssets.reduce((sum, a) => sum + (a.mv || 0), 0);
     const balanceByType = {};
     cashLikeAssets.forEach(asset => {
-      const type = asset.assetType || '其他';
-      if (!balanceByType[type]) {
-        balanceByType[type] = 0;
-      }
+      const type = asset.assetType || asset.assetKind || '其他';
+      if (!balanceByType[type]) balanceByType[type] = 0;
       balanceByType[type] += asset.mv || 0;
     });
 
-    return { totalBalance, balanceByType, includedCount: cashLikeAssets.length };
-  }, [selectedAccountId, accounts, unifiedAssets]);
+    // 兜底：若账户没有任何现金类资产映射，但 account.balance 有值，则使用它（转为 CNY）
+    if (cashLikeAssets.length === 0) {
+      const raw = parseFloat(account.balance) || 0;
+      if (raw !== 0) {
+        const currency = account.currency || 'CNY';
+        totalBalance = convertCurrency(raw, currency, 'CNY', exchangeRates);
+        balanceByType['账户余额'] = totalBalance;
+      }
+    }
+
+    return { totalBalance, balanceByType, includedCount: cashLikeAssets.length || (totalBalance !== 0 ? 1 : 0) };
+  }, [selectedAccountId, accounts, unifiedAssets, exchangeRates]);
 
   const toggleAssetBalance = (accountId, assetKey) => {
     const mappingKey = `${accountId}_${assetKey}`;
@@ -1782,6 +1794,75 @@ export default function Accounts() {
     return { totalMv, totalCost, balance, balanceByType, balanceCount };
   }, [accountHoldings, exchangeRates]);
 
+  // 账户详情页：归属当前账户的归档持仓（从 financeAssetArchives 过滤并映射）
+  const accountArchivedHoldings = useMemo(() => {
+    if (!selectedAccountId) return [];
+    const account = accounts.find(a => a.id === selectedAccountId);
+    if (!account) return [];
+    const archives = stateData?.financeAssetArchives || [];
+    return archives
+      .filter(a => {
+        const accId = a.accountId || a.account || '';
+        return accId === account.id || accId === account.name;
+      })
+      .map(a => {
+        const txs = a.transactions || [];
+        let buyTotal = 0;
+        let sellTotal = 0;
+        let totalFees = 0;
+        let firstBuyDate = a.buildDate || a.purchaseDate || '';
+        let lastSellDate = a.archiveDate || a.sellDate || '';
+        txs.forEach(t => {
+          const amount = parseFloat(t.amount) || 0;
+          const fee = parseFloat(t.commission || t.fee) || 0;
+          const txDate = t.date || t.createdAt || '';
+          if (!isNaN(fee)) totalFees += fee;
+          if (t.type === '建仓' || t.type === '买入') {
+            buyTotal += amount;
+            if (txDate && (!firstBuyDate || txDate < firstBuyDate)) firstBuyDate = txDate;
+          } else if (t.type === '卖出' || t.type === '清仓') {
+            sellTotal += Math.abs(amount);
+            if (txDate && (!lastSellDate || txDate > lastSellDate)) lastSellDate = txDate;
+          }
+        });
+        const computedFinalPnl = txs.length > 0 ? (sellTotal - buyTotal - totalFees) : (parseFloat(a.finalPnl) || 0);
+        const computedFinalPnlPercent = buyTotal > 0 ? Math.round((computedFinalPnl / buyTotal) * 100 * 100) / 100 : (parseFloat(a.finalPnlPercent) || 0);
+        let holdingDays = 0;
+        if (firstBuyDate && lastSellDate) {
+          const bd = new Date(firstBuyDate);
+          const sd = new Date(lastSellDate);
+          if (!isNaN(bd.getTime()) && !isNaN(sd.getTime())) {
+            holdingDays = Math.max(0, Math.round((sd - bd) / (24 * 60 * 60 * 1000)));
+          }
+        }
+        if (!holdingDays) holdingDays = Math.max(0, parseInt(a.holdingDays || 0, 10));
+        return {
+          id: a.originalAssetId || a.id,
+          market: a.market || '国内市场',
+          currency: a.currency || 'CNY',
+          name: a.name || '-',
+          code: a.code || '',
+          assetType: a.kind || a.assetType || '',
+          assetKind: a.kind || a.assetType || '',
+          categoryL1: a.category || a.categoryL1 || '',
+          categoryL2: a.subcategory || a.categoryL2 || '',
+          categoryL3: a.tertiaryCategory || a.categoryL3 || '',
+          account: account?.name || a.account || a.accountId || '',
+          accountId: account?.id || a.accountId,
+          cost: parseFloat(a.cost) || parseFloat(a.totalCost) || buyTotal || 0,
+          avgCost: parseFloat(a.costPrice) || parseFloat(a.avgBuyPrice) || (parseFloat(a.quantity) > 0 ? (buyTotal / (parseFloat(a.quantity) || 1)) : 0),
+          quantity: parseFloat(a.quantity) || parseFloat(a.shares) || 0,
+          holdingDays,
+          archiveDate: a.archiveDate || lastSellDate || '',
+          finalPnl: computedFinalPnl,
+          finalPnlPercent: computedFinalPnlPercent,
+          isArchived: true,
+          status: 'archived',
+          tags: Array.isArray(a.tags) ? a.tags : [],
+        };
+      });
+  }, [selectedAccountId, accounts, stateData?.financeAssetArchives]);
+
   // 账户详情页：归属当前账户的独立资产，按类型分组（复用 independentAssets 结构：{ insurance: [], realestate: [], ... }）
   const accountIndependentAssets = useMemo(() => {
     if (!selectedAccountId) return {};
@@ -2042,7 +2123,7 @@ export default function Accounts() {
               <div className="p-4 border-b border-gray-200 dark:border-slate-700">
                 <h4 className="font-semibold text-gray-900 dark:text-white">{independentAssetTypeLabels[type] || type}</h4>
               </div>
-              <div className="overflow-x-auto">
+              <StickyScrollWrapper className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-gray-50 dark:bg-slate-700">
                     {renderHeader(type)}
@@ -2051,7 +2132,7 @@ export default function Accounts() {
                     {renderRows(type, items)}
                   </tbody>
                 </table>
-              </div>
+              </StickyScrollWrapper>
             </div>
           );
         })}
@@ -2084,9 +2165,25 @@ export default function Accounts() {
     const useHoldings = accountHoldings.length > 0;
     const summaryMv = useHoldings ? holdingsSummary.totalMv : fallbackStats.marketValue;
     const summaryCost = useHoldings ? holdingsSummary.totalCost : fallbackStats.holdingCost;
-    const summaryBalance = useHoldings ? holdingsSummary.balance : (balanceData.totalBalance || 0);
-    const summaryBalanceByType = useHoldings ? holdingsSummary.balanceByType : balanceData.balanceByType;
-    const summaryBalanceCount = useHoldings ? holdingsSummary.balanceCount : balanceData.includedCount;
+
+    // 余额：账户本 account.balance 为权威来源（与理财详情"余额测算"一致）
+    // —— 若 account.balance 为空或 0 则回退到现金类资产求和
+    const accountRawBalance = parseFloat(account.balance) || 0;
+    const accountCurrency = account.currency || 'CNY';
+    const accountBalanceCny = convertCurrency(accountRawBalance, accountCurrency, 'CNY', exchangeRates);
+    let finalBalance, finalBalanceByType, finalBalanceCount;
+    if (accountRawBalance !== 0) {
+      finalBalance = accountBalanceCny;
+      finalBalanceByType = { [accountCurrency || '账户余额']: accountBalanceCny };
+      finalBalanceCount = 1;
+    } else {
+      finalBalance = useHoldings ? holdingsSummary.balance : (balanceData.totalBalance || 0);
+      finalBalanceByType = useHoldings ? holdingsSummary.balanceByType : balanceData.balanceByType;
+      finalBalanceCount = useHoldings ? holdingsSummary.balanceCount : balanceData.includedCount;
+    }
+    const summaryBalance = finalBalance;
+    const summaryBalanceByType = finalBalanceByType;
+    const summaryBalanceCount = finalBalanceCount;
 
     const effectiveType = getEffectiveType(account);
     const isLiability = effectiveType === '负债';
@@ -2300,7 +2397,7 @@ export default function Accounts() {
                 </h3>
                 <span className="text-sm text-gray-500 dark:text-gray-400">共 {linkedDebts.length} 笔</span>
               </div>
-              <div className="overflow-x-auto">
+              <StickyScrollWrapper className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-red-50/60 dark:bg-red-900/10">
                     <tr>
@@ -2399,7 +2496,7 @@ export default function Accounts() {
                     </tr>
                   </tfoot>
                 </table>
-              </div>
+              </StickyScrollWrapper>
             </div>
           );
         })()}
@@ -2425,6 +2522,40 @@ export default function Accounts() {
           exchangeRates={exchangeRates}
           assetKindOptions={assetKindOptions}
         />
+
+        {/* 归档持仓 */}
+        {accountArchivedHoldings.length > 0 && (
+          <div className="mt-8">
+            <div className="flex items-center gap-2 mb-3">
+              <FileBox className="w-4.5 h-4.5 text-gray-500 dark:text-gray-400" />
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                归档持仓 <span className="ml-1 text-xs text-gray-400 font-normal">({accountArchivedHoldings.length} 条)</span>
+              </h3>
+            </div>
+            <FinanceHoldingsTable
+              categoryName="archived"
+              holdings={scaleAssetList(accountArchivedHoldings, s)}
+              readOnly={true}
+              lockedAccountFilter={account?.name || ''}
+              colorIdx={1}
+              marketOptions={marketOptions}
+              currencyOptions={currencyOptions}
+              assetTypeOptions={assetTypeOptions}
+              assetClassOptions={assetClassOptions}
+              positionGroupOptions={positionGroupOptions}
+              positionTypeOptions={positionTypeOptions}
+              allCategoryL2Options={allCategoryL2Options}
+              marketGroups={marketGroups}
+              tags={tags}
+              categoryL3CustomOptions={categoryL3CustomOptions}
+              categoryL4Options={categoryL4Options}
+              selectedCurrency={selectedCurrency}
+              exchangeRates={exchangeRates}
+              assetKindOptions={assetKindOptions}
+            />
+          </div>
+        )}
+
         {renderIndependentAssetSection(s)}
       </>
     );
@@ -2609,8 +2740,9 @@ export default function Accounts() {
             )}
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div>
+            <StickyScrollWrapper className="overflow-x-auto">
+              <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-slate-700">
                   <th className="text-left py-2.5 px-3 text-gray-500 font-medium whitespace-nowrap">账户名称</th>
@@ -2750,6 +2882,7 @@ export default function Accounts() {
                 })()}
               </tbody>
             </table>
+            </StickyScrollWrapper>
             {filteredAccounts.length === 0 && (
               <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                 <p>暂无账户数据，点击右上角添加账户</p>

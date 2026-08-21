@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import StickyScrollWrapper from './StickyScrollWrapper';
 import {
-  Search, Settings, Edit2, Trash2, Plus, X,
+  Search, Settings, Edit2, Trash2, Plus, X, Hash,
   Filter, Save, ChevronUp, ChevronDown, Check, Download,
 } from 'lucide-react';
 import MultiSelect from './MultiSelect';
@@ -69,6 +70,7 @@ export default function FinanceHoldingsTable({
   })();
 
   const [filterText, setFilterText] = useState(persistedFilters.filterText || '');
+  const [filterCode, setFilterCode] = useState(persistedFilters.filterCode || '');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(() => {
     try {
@@ -248,6 +250,7 @@ export default function FinanceHoldingsTable({
     try {
       sessionStorage.setItem(filtersStorageKey, JSON.stringify({
         filterText,
+        filterCode,
         filterAccount: effectiveFilterAccount,
         filterMarket,
         filterCurrency,
@@ -264,7 +267,7 @@ export default function FinanceHoldingsTable({
     } catch (e) {
       console.error('Failed to save filters:', e);
     }
-  }, [filterText, effectiveFilterAccount, filterMarket, filterCurrency, filterAssetKind, filterAssetType, filterCategoryL1, filterCategoryL2, filterCategoryL3, filterCategoryL4, filterPositionGroup, filterPositionType, filterTag, filtersStorageKey]);
+  }, [filterText, filterCode, effectiveFilterAccount, filterMarket, filterCurrency, filterAssetKind, filterAssetType, filterCategoryL1, filterCategoryL2, filterCategoryL3, filterCategoryL4, filterPositionGroup, filterPositionType, filterTag, filtersStorageKey]);
 
   const handlePageSizeChange = (newSize) => {
     setPageSize(newSize);
@@ -522,6 +525,12 @@ export default function FinanceHoldingsTable({
           (h.positionGroup || '').toLowerCase().includes(q);
         if (!matchText) return false;
       }
+      // 代码精确匹配（不区分大小写，同时支持前后空格）
+      if (filterCode.trim()) {
+        const q = filterCode.trim().toLowerCase();
+        const code = String(h.code || '').toLowerCase();
+        if (code !== q) return false;
+      }
       if (effectiveFilterAccount.length > 0 && !inArr(effectiveFilterAccount, h.account)) return false;
       if (filterMarket.length > 0 && !inArr(filterMarket, h.market)) return false;
       if (filterCurrency.length > 0 && !inArr(filterCurrency, h.currency)) return false;
@@ -551,6 +560,7 @@ export default function FinanceHoldingsTable({
 
   const resetFilters = () => {
     setFilterText('');
+    setFilterCode('');
     setFilterAccount([]);
     setFilterMarket([]);
     setFilterCurrency([]);
@@ -1125,6 +1135,28 @@ export default function FinanceHoldingsTable({
             />
           </div>
 
+          {/* 代码精确筛选 */}
+          <div className="relative w-32 shrink-0">
+            <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              type="text"
+              value={filterCode}
+              onChange={e => { setFilterCode(e.target.value); setPage(1); }}
+              placeholder="代码精确匹配"
+              className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 dark:border-slate-600 rounded-lg dark:bg-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+            />
+            {filterCode && (
+              <button
+                type="button"
+                onClick={() => { setFilterCode(''); setPage(1); }}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-slate-600"
+                title="清除"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
           {showBatchEditBtn && (
             <button
               onClick={() => { setShowBatchEdit(!showBatchEdit); setSelectedIds(new Set()); }}
@@ -1167,7 +1199,7 @@ export default function FinanceHoldingsTable({
             <h3 className="text-sm font-bold text-emerald-700 dark:text-emerald-400">💰 货币基金 (货基专用明细)</h3>
             <span className="text-xs text-gray-400">共 {moneyFundItems.length} 只</span>
           </div>
-          <div className="overflow-x-auto border border-emerald-100 dark:border-emerald-900/40 rounded-xl bg-emerald-50/30 dark:bg-emerald-900/10">
+          <StickyScrollWrapper className="overflow-x-auto border border-emerald-100 dark:border-emerald-900/40 rounded-xl bg-emerald-50/30 dark:bg-emerald-900/10">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-emerald-200/70 dark:border-emerald-900/40 text-emerald-700/80 dark:text-emerald-400/80 bg-emerald-50/60 dark:bg-emerald-900/20">
@@ -1350,12 +1382,12 @@ export default function FinanceHoldingsTable({
                 </tr>
               </tfoot>
             </table>
-          </div>
+          </StickyScrollWrapper>
         </div>
       )}
 
       {/* ─────────────── 其他资产通用表 ─────────────── */}
-      <div className="overflow-x-auto px-4">
+      <StickyScrollWrapper className="overflow-x-auto px-4">
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-200 dark:border-slate-700 text-gray-500">
@@ -1616,6 +1648,43 @@ export default function FinanceHoldingsTable({
                       </td>
                     );
                   }
+                  // 平均买入成本：加权平均 = 总持仓成本 / 总数量
+                  // （按 cost / quantity 计算，避免平均值再平均的统计误差）
+                  if (col.key === 'avgCost') {
+                    const totalCostSum = otherItems.reduce((s, h) => {
+                      const cost = parseFloat(h.cost) || 0;
+                      const currency = h.currency || 'CNY';
+                      return s + convertCurrency(cost, currency, target, exchangeRates);
+                    }, 0);
+                    const totalQtySum = otherItems.reduce((s, h) => s + (parseFloat(h.quantity) || 0), 0);
+                    if (totalQtySum > 0 && totalCostSum !== 0) {
+                      const wAvg = totalCostSum / totalQtySum;
+                      return (
+                        <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
+                          {formatCurrencyWithRate(wAvg, target, target, exchangeRates)}
+                        </td>
+                      );
+                    }
+                    return <td key={col.key} className="py-2 px-1.5 text-right text-gray-400 tabular-nums">—</td>;
+                  }
+                  // 数量：直接求和（不做汇率转换，数量为份额/股数）
+                  if (col.key === 'quantity') {
+                    const totalQtySum = otherItems.reduce((s, h) => s + (parseFloat(h.quantity) || 0), 0);
+                    return (
+                      <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
+                        {formatNum(totalQtySum)}
+                      </td>
+                    );
+                  }
+                  // 仓位占比：直接求和
+                  if (col.key === 'positionRatio') {
+                    const sumRatio = otherItems.reduce((s, h) => s + (parseFloat(h.positionRatio) || 0), 0);
+                    return (
+                      <td key={col.key} className="py-2 px-1.5 text-right tabular-nums text-gray-900 dark:text-white">
+                        {formatNum(sumRatio, 2)}%
+                      </td>
+                    );
+                  }
                   return <td key={col.key} className="py-2 px-1.5"></td>;
                 })}
                 {showOpsCol && <td className="py-2 px-1.5"></td>}
@@ -1623,7 +1692,7 @@ export default function FinanceHoldingsTable({
             </tfoot>
           )}
         </table>
-      </div>
+      </StickyScrollWrapper>
 
       <Pagination
         page={safePage}
