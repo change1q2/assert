@@ -471,30 +471,30 @@ export default function SurvivalFunds() {
     const byYear = {};
     filteredBudgets.forEach(b => {
       const year = new Date().getFullYear();
-      if (!byYear[year]) byYear[year] = { currentBudget: 0, annualBudget: 0, annualUsed: 0 };
+      if (!byYear[year]) byYear[year] = { currentBudget: 0, annualBudget: 0 };
       const period = b.periodType || 'monthly';
       const cur = b.currency || 'CNY';
       const annualAmt = convertCurrency((parseFloat(b.budgetAmount) || 0) * (PERIODS_PER_YEAR[period] || 12), cur, 'CNY', exchangeRates);
       byYear[year].annualBudget += annualAmt;
-      // 年度已使用 = 生存资金 usedAmount 按周期折算 (CNY)
-      const matchedFund = survivalFunds.find(f => f.name === b.name);
-      if (matchedFund) {
-        const usedAmt = convertCurrency((parseFloat(matchedFund.usedAmount) || 0) * (PERIODS_PER_YEAR[period] || 12), cur, 'CNY', exchangeRates);
-        byYear[year].annualUsed += usedAmt;
-      }
       // 当前所需预算 = 年度预算 / 当年天数 × 剩余天数
       const dailyAmt = annualAmt / DAYS_THIS_YEAR;
       byYear[year].currentBudget += dailyAmt * REMAINING_DAYS_THIS_YEAR;
     });
     if (Object.keys(byYear).length === 0) {
       const y = new Date().getFullYear();
-      byYear[y] = { currentBudget: 0, annualBudget: 0, annualUsed: 0 };
+      byYear[y] = { currentBudget: 0, annualBudget: 0 };
     }
+    // 年度已使用 = 生存资金列表使用资金总和 (按汇率折算为 CNY)
+    const annualUsedTotal = survivalFunds.reduce((s, f) => {
+      const cur = f.currency || 'CNY';
+      const used = parseFloat(f.usedAmount) || 0;
+      return s + convertCurrency(used, cur, 'CNY', exchangeRates);
+    }, 0);
     return Object.entries(byYear).map(([year, data]) => ({
       year,
       currentBudget: Math.round(data.currentBudget * 100) / 100,
       annualBudget: Math.round(data.annualBudget * 100) / 100,
-      annualUsed: Math.round(data.annualUsed * 100) / 100,
+      annualUsed: Math.round(annualUsedTotal * 100) / 100,
       actual: Math.round(survivalTotalCNY * 100) / 100,
       freedom: data.currentBudget > 0 ? Math.round((survivalTotalCNY / data.currentBudget) * 10000) / 100 : 0,
     }));
@@ -765,9 +765,6 @@ export default function SurvivalFunds() {
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <button onClick={() => handleShowFundDetail(b)} className="px-2 py-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors" title="查看明细">
-                          明细
-                        </button>
                         <button onClick={() => handleEditBudget(b)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="编辑">
                           <Edit2 className="w-4 h-4" />
                         </button>
@@ -980,6 +977,9 @@ export default function SurvivalFunds() {
                   </td>
                   <td className="px-4 py-3 text-sm">
                     <div className="flex items-center gap-2">
+                      <button onClick={() => handleShowFundDetail(fund)} className="px-2 py-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors" title="查看明细">
+                        明细
+                      </button>
                       <button onClick={() => handleEditFund(fund)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="编辑">
                         <Edit2 className="w-4 h-4" />
                       </button>
@@ -1274,10 +1274,8 @@ export default function SurvivalFunds() {
   };
 
   // ========== 操作函数：生存资金明细+资金记录 ==========
-  const handleShowFundDetail = async (budget) => {
-    // 找到对应的生存资金
-    const fund = survivalFunds.find(f => f.name === budget.name) || null;
-    setSelectedFund({ budget, fund });
+  const handleShowFundDetail = async (fund) => {
+    setSelectedFund({ fund });
     setShowFundDetailModal(true);
   };
 
@@ -1454,13 +1452,11 @@ export default function SurvivalFunds() {
   // ========== 弹窗：生存资金明细 ==========
   const renderFundDetailModal = () => {
     if (!showFundDetailModal || !selectedFund) return null;
-    const { budget, fund } = selectedFund;
+    const { fund } = selectedFund;
     if (!fund) return null;
     const cur = fund.currency || 'CNY';
     const initialAmount = parseFloat(fund.initialAmount || fund.amount) || 0;
     const transactions = fund.transactions || [];
-    const inflowTotal = transactions.filter(t => t.status === 'inflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
-    const outflowTotal = transactions.filter(t => t.status === 'outflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
     const currentAmount = parseFloat(fund.amount) || 0;
     const usedAmount = parseFloat(fund.usedAmount) || 0;
     const netInflow = currentAmount - initialAmount;
@@ -1470,7 +1466,7 @@ export default function SurvivalFunds() {
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
           <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              明细：{budget.name} <span className="text-sm text-gray-500 font-normal">({budget.currency || 'CNY'})</span>
+              明细：{fund.name || '—'} <span className="text-sm text-gray-500 font-normal">({fund.currency || 'CNY'})</span>
             </h2>
             <button onClick={() => setShowFundDetailModal(false)} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded">
               <X className="w-5 h-5" />
