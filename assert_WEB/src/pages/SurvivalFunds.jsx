@@ -1460,6 +1460,8 @@ export default function SurvivalFunds() {
     const currentAmount = parseFloat(fund.amount) || 0;
     const usedAmount = parseFloat(fund.usedAmount) || 0;
     const netInflow = currentAmount - initialAmount;
+    const inflowTotal = transactions.filter(t => t.status === 'inflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+    const outflowTotal = transactions.filter(t => t.status === 'outflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
 
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
