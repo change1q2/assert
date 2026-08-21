@@ -1308,37 +1308,21 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
       const accId = record.accountId || record.account || latestData.accountId || latestData.account;
       const tradeCurrency = record.currency || latestData.currency || 'CNY';
 
-      // 查找对应账户下的任一现金余额资产 (现金类 / 现金余额 / 现金)
-      // 宽松匹配：accountId/account 任一字段匹配，资产类型字段多重匹配
-      // 降级：若找不到 assetType 匹配，取第一条 category=现金类 的资产
-      const findCashAssetForAccount = (assets, accountId) => {
-        const accIdStr = String(accountId || '').trim();
-        const accMatches = (a) => {
-          const aid = String(a.accountId || '').trim();
-          const acct = String(a.account || '').trim();
-          if (!accIdStr) return false;
-          return aid === accIdStr || acct === accIdStr;
-        };
-        const catCash = (a) => (a.category === '现金类' || a.categoryL1 === '现金类');
-        const isCashBalType = (a) => {
-          const at = (a.assetType || '').trim();
-          const ak = (a.assetKind || '').trim();
-          const kd = (a.kind || '').trim();
-          return at === '现金余额' || at === '现金' || at === '货币基金'
-            || ak === '现金余额' || ak === '现金' || ak === '货币基金'
-            || kd === '现金余额' || kd === '现金' || kd === '货币基金';
-        };
-        // 1. 精确：账户 + 现金类 + 现金余额类型
-        let found = assets.find(a => accMatches(a) && catCash(a) && isCashBalType(a));
-        if (found) return found;
-        // 2. 降级：账户 + 现金类
-        found = assets.find(a => accMatches(a) && catCash(a));
-        if (found) return found;
-        // 3. 再降级：账户 + 任何余额类（含货币基金）
-        found = assets.find(a => accMatches(a) && isCashBalType(a));
-        return found || null;
-      };
-      const cashBalanceAsset = findCashAssetForAccount(updatedFinanceAssets, accId);
+      // 精确匹配：账户 + 现金类 + 现金余额类型
+      const cashBalanceAsset = updatedFinanceAssets.find(a => {
+        const aid = String(a.accountId || '').trim();
+        const acct = String(a.account || '').trim();
+        const accIdStr = String(accId || '').trim();
+        const accMatches = aid === accIdStr || acct === accIdStr;
+        const catMatches = (a.category === '现金类' || a.categoryL1 === '现金类');
+        const at = (a.assetType || '').trim();
+        const ak = (a.assetKind || '').trim();
+        const kd = (a.kind || '').trim();
+        const typeMatches = at === '现金余额' || at === '现金'
+          || ak === '现金余额' || ak === '现金'
+          || kd === '现金余额' || kd === '现金';
+        return accMatches && catMatches && typeMatches;
+      });
 
       if (cashBalanceAsset) {
         const assetCurrency = cashBalanceAsset.currency || 'CNY';
@@ -1365,8 +1349,32 @@ function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, se
           };
         });
       } else {
-        // 账户下完全没有现金余额资产类型时提示
-        alert('该账户下不存在现金余额资产，释放资金无法自动累加。请先在资产列表中创建一个现金余额类型的资产（一级分类：现金类，资产类型：现金余额）。');
+        // 账户下完全没有现金余额资产类型时给出精确诊断提示
+        const accName = latestData.account || '';
+        const accIdStr = String(accId || '').trim();
+        const totalCashAssets = updatedFinanceAssets.filter(a =>
+          (a.category === '现金类' || a.categoryL1 === '现金类')
+        );
+        const matchableCashAsset = totalCashAssets.filter(a => {
+          const at = (a.assetType || '').trim();
+          const ak = (a.assetKind || '').trim();
+          const kd = (a.kind || '').trim();
+          return at === '现金余额' || at === '现金'
+            || ak === '现金余额' || ak === '现金'
+            || kd === '现金余额' || kd === '现金';
+        });
+        const diagnosticHint = [];
+        diagnosticHint.push(`当前卖出资产所属账户：${accName || accIdStr || '(未知)'}`);
+        if (matchableCashAsset.length === 0) {
+          diagnosticHint.push('系统内不存在「一级分类=现金类,资产类型=现金余额/现金」的资产，请先在理财模块「新增资产」中创建，注意一级分类选「现金类」，资产类型选「现金余额」。');
+        } else {
+          diagnosticHint.push(`系统中共有 ${matchableCashAsset.length} 个现金余额资产，但都不属于账户「${accName || accIdStr}」：`);
+          matchableCashAsset.forEach(a => {
+            diagnosticHint.push(`  - 资产「${a.name || '-'}」 所属账户：${a.account || a.accountId || '(空)'}`);
+          });
+          diagnosticHint.push('解决方法：在资产编辑页面将该现金余额资产的「所属账户」改为当前账户，或在对应账户下新建现金余额资产。');
+        }
+        alert('该账户下不存在现金余额资产，释放资金无法自动累加。\n\n' + diagnosticHint.join('\n'));
       }
     }
 

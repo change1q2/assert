@@ -1270,13 +1270,34 @@ export default function Accounts() {
         if (oldName !== newName) {
           const accId = editingAccount.id;
           const syncItem = (item) => {
-            if (item.accountId === accId || item.account === oldName) {
-              return { ...item, account: newName, accountId: accId };
+            let changed = false;
+            let updated = { ...item };
+            if (item.accountId === accId || item.account === oldName || item.accountId === oldName) {
+              updated.account = newName;
+              updated.accountId = accId;
+              changed = true;
             }
             if (item.accountName === oldName) {
-              return { ...item, accountName: newName };
+              updated.accountName = newName;
+              changed = true;
             }
-            return item;
+            if (Array.isArray(item.transactions) && item.transactions.length > 0) {
+              const txUpdates = item.transactions.map(tx => {
+                if (tx.accountId === accId || tx.account === oldName || tx.accountId === oldName) {
+                  return { ...tx, account: newName, accountId: accId };
+                }
+                if (tx.cashAccountName === oldName) {
+                  return { ...tx, cashAccountName: newName };
+                }
+                return tx;
+              });
+              const txChanged = txUpdates.some((tx, i) => tx !== item.transactions[i]);
+              if (txChanged) {
+                updated.transactions = txUpdates;
+                changed = true;
+              }
+            }
+            return changed ? updated : item;
           };
           if (stateData?.financeAssets && stateData.financeAssets.length > 0) {
             stateData.financeAssets = stateData.financeAssets.map(syncItem);
