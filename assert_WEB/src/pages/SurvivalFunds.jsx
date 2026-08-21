@@ -16,7 +16,9 @@ const CURRENCY_SYMBOLS = {
 const SURVIVAL_FUND_TYPES = ['应急储备', '日常开支', '长期储备', '投资本金'];
 
 // 资金记录类型
-const FUND_RECORD_TYPES = ['工资', '理财', '兼职', '奖金', '投资收益', '转账', '其他收入', '支出', '其他支出'];
+const FUND_RECORD_INFLOW_TYPES = ['工资', '兼职', '红包', '调拨'];
+const FUND_RECORD_OUTFLOW_TYPES = ['日常消费', '房租', '保险', '其他'];
+const FUND_RECORD_TYPES = [...FUND_RECORD_INFLOW_TYPES, ...FUND_RECORD_OUTFLOW_TYPES];
 
 const DEFAULT_FREEDOM_CATEGORIES = {
   necessary: ['住房', '基础生活', '水电燃气', '交通', '医疗', '教育'],
@@ -258,6 +260,7 @@ export default function SurvivalFunds() {
     type: '工资',
     amount: '',
     status: 'inflow', // inflow/outflow
+    sourceAccountId: '', // 调拨时的源账户本
     category: '',
     date: new Date().toISOString().slice(0, 10),
     note: '',
@@ -1278,18 +1281,25 @@ export default function SurvivalFunds() {
         return;
       }
       const status = fundRecordForm.status;
-      // 创建资金记录
+      const type = fundRecordForm.type;
+      const isTransfer = status === 'inflow' && type === '调拨';
+      // 调拨校验: 必须选择源账户本
+      if (isTransfer && !fundRecordForm.sourceAccountId) {
+        alert('请选择调拨的源账户本');
+        return;
+      }
       const record = {
         id: `fr_${Date.now()}`,
-        type: fundRecordForm.type,
+        type,
         amount: amt,
         status,
         date: fundRecordForm.date,
         note: fundRecordForm.note || '',
         category: fundRecordForm.category || '',
+        sourceAccountId: isTransfer ? fundRecordForm.sourceAccountId : undefined,
       };
-      // 更新 survivalFunds: transactions 数组 + 同步 amount/usedAmount
       const fundId = selectedFund.fund.id;
+      // 更新 survivalFunds
       const newFunds = survivalFunds.map(f => {
         if (f.id !== fundId) return f;
         const transactions = f.transactions ? [...f.transactions, record] : [record];
@@ -1304,12 +1314,86 @@ export default function SurvivalFunds() {
         }
         return updated;
       });
-      const newState = { ...stateData, survivalFunds: newFunds };
+      // 调拨时: 在源账户本的现金余额资产中生成卖出交易记录
+      let newFinanceAssets = stateData.financeAssets || [];
+      let newAccounts = accounts;
+      if (isTransfer) {
+        const sourceAccId = fundRecordForm.sourceAccountId;
+        const sourceAccount = accounts.find(acc => acc.id === sourceAccId);
+        if (!sourceAccount) {
+          alert('源账户本不存在');
+          return;
+        }
+        // 找到该账户本下 type/assetKind/kind 为 "现金余额" 或 "现金" 的资产
+        const cashAsset = newFinanceAssets.find(a => {
+          const accMatch = a.accountId === sourceAccount.id || a.account === sourceAccount.name;
+          const isCash = a.kind === '现金余额' || a.kind === '现金' ||
+            a.assetKind === '现金余额' || a.assetKind === '现金' ||
+            a.kind === '货币基金' || a.assetKind === '活期';
+          return accMatch && isCash;
+        });
+        if (!cashAsset) {
+          alert(`账户本「${sourceAccount.name}」下没有找到「现金余额」资产，请先在理财模块中创建`);
+          return;
+        }
+        // 在该资产的交易记录中添加一条卖出记录
+        const sellTx = {
+          id: `tx_transfer_${Date.now()}`,
+          direction: '卖出',
+          transaction_date: `${fundRecordForm.date} ${new Date().toTimeString().slice(0, 5)}`,
+          date: fundRecordForm.date,
+          time: new Date().toTimeString().slice(0, 5),
+          shares: amt,
+          quantity: amt,
+          price: 1, // 现金余额价格固定为1
+          net_value: 1,
+          amount: amt,
+          commission: 0,
+          stamp_duty: 0,
+          transfer_fee: 0,
+          cashAccountId: sourceAccount.id,
+        };
+        newFinanceAssets = newFinanceAssets.map(a => {
+          if (a.id !== cashAsset.id) return a;
+          const transactions = a.transactions ? [...a.transactions, sellTx] : [sellTx];
+          const currentValue = Math.max(0, (parseFloat(a.currentValue) || 0) - amt);
+          const currentPrice = amt > 0 ? currentValue / ((parseFloat(a.quantity) || 0) - amt) : 1;
+          return {
+            ...a,
+            transactions,
+            quantity: Math.max(0, (parseFloat(a.quantity) || 0) - amt),
+            shares: Math.max(0, (parseFloat(a.shares) || 0) - amt),
+            currentValue,
+            currentPrice: isFinite(currentPrice) && currentPrice > 0 ? currentPrice : 1,
+          };
+        });
+        // 同步更新账户本余额
+        newAccounts = accounts.map(acc => {
+          if (acc.id !== sourceAccount.id) return acc;
+          return { ...acc, balance: Math.max(0, (parseFloat(acc.balance) || 0) - amt) };
+        });
+      }
+      const newState = {
+        ...stateData,
+        survivalFunds: newFunds,
+        financeAssets: newFinanceAssets,
+        accounts: newAccounts,
+      };
       const result = await saveState(newState);
       setStateData(newState);
       setSurvivalFunds(newFunds);
+      if (isTransfer) setAccounts(newAccounts);
       invalidateStateCache();
       setShowFundRecordModal(false);
+      setFundRecordForm({
+        type: '工资',
+        amount: '',
+        status: 'inflow',
+        sourceAccountId: '',
+        category: '',
+        date: new Date().toISOString().slice(0, 10),
+        note: '',
+      });
       setSelectedFund({ ...selectedFund, fund: newFunds.find(f => f.id === fundId) });
       if (!result?.ok) {
         alert('保存失败：' + (result?.error || '未知错误'));
@@ -1335,23 +1419,57 @@ export default function SurvivalFunds() {
       const curAmount = parseFloat(f.amount) || 0;
       const curUsed = parseFloat(f.usedAmount) || 0;
       if (record.status === 'inflow') {
-        // 删除入账: 减少现有资金
         updated.amount = Math.max(0, curAmount - amt);
       } else {
-        // 删除出账: 增加现有资金, 减少已使用
         updated.amount = curAmount + amt;
         updated.usedAmount = Math.max(0, curUsed - amt);
       }
       return updated;
     });
-    const newState = { ...stateData, survivalFunds: newFunds };
+    // 如果是调拨类型的入账记录, 需要逆向恢复源账户本的现金余额
+    let newFinanceAssets = stateData.financeAssets || [];
+    let newAccounts = accounts;
+    const isTransfer = record.status === 'inflow' && record.type === '调拨' && record.sourceAccountId;
+    if (isTransfer) {
+      const sourceAccount = accounts.find(acc => acc.id === record.sourceAccountId);
+      if (sourceAccount) {
+        // 移除源账户本现金余额中的对应交易记录
+        newFinanceAssets = newFinanceAssets.map(a => {
+          const accMatch = a.accountId === sourceAccount.id || a.account === sourceAccount.name;
+          if (!accMatch) return a;
+          const hasTx = (a.transactions || []).some(t => t.id === recordId || (t.direction === '卖出' && Math.abs((t.amount || 0) - amt) < 0.01));
+          if (!hasTx) return a;
+          const transactions = a.transactions.filter(t => !(t.direction === '卖出' && Math.abs((t.amount || 0) - amt) < 0.01));
+          const currentValue = (parseFloat(a.currentValue) || 0) + amt;
+          return {
+            ...a,
+            transactions,
+            quantity: (parseFloat(a.quantity) || 0) + amt,
+            shares: (parseFloat(a.shares) || 0) + amt,
+            currentValue,
+            currentPrice: 1,
+          };
+        });
+        newAccounts = accounts.map(acc => {
+          if (acc.id !== sourceAccount.id) return acc;
+          return { ...acc, balance: (parseFloat(acc.balance) || 0) + amt };
+        });
+      }
+    }
+    const newState = {
+      ...stateData,
+      survivalFunds: newFunds,
+      financeAssets: newFinanceAssets,
+      accounts: newAccounts,
+    };
     const result = await saveState(newState);
     setStateData(newState);
     setSurvivalFunds(newFunds);
+    if (isTransfer) setAccounts(newAccounts);
     invalidateStateCache();
     setSelectedFund({ ...selectedFund, fund: newFunds.find(f => f.id === fundId) });
-    if (result?.cached === false) {
-      await loadData();
+    if (!result?.ok) {
+      alert('删除失败：' + (result?.error || '未知错误'));
     }
   };
 
@@ -1560,6 +1678,14 @@ export default function SurvivalFunds() {
   // ========== 弹窗：新增资金记录 ==========
   const renderFundRecordModal = () => {
     if (!showFundRecordModal) return null;
+    const isInflow = fundRecordForm.status === 'inflow';
+    const typeOptions = isInflow ? FUND_RECORD_INFLOW_TYPES : FUND_RECORD_OUTFLOW_TYPES;
+    const isTransfer = isInflow && fundRecordForm.type === '调拨';
+    // 过滤掉生存资金所属账户本
+    const fundAccountId = selectedFund?.fund?.accountId;
+    const transferSourceOptions = accounts.filter(acc => {
+      return acc.id !== fundAccountId && acc.name !== fundAccountId;
+    });
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md">
@@ -1570,26 +1696,7 @@ export default function SurvivalFunds() {
             </button>
           </div>
           <div className="p-5 space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">类型</label>
-              <select
-                value={fundRecordForm.type}
-                onChange={(e) => setFundRecordForm({ ...fundRecordForm, type: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {FUND_RECORD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">金额</label>
-              <input
-                type="number"
-                value={fundRecordForm.amount}
-                onChange={(e) => setFundRecordForm({ ...fundRecordForm, amount: e.target.value })}
-                placeholder="请输入金额"
-                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+            {/* 第一行: 状态 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">状态</label>
               <div className="flex gap-3">
@@ -1603,7 +1710,7 @@ export default function SurvivalFunds() {
                     name="fundStatus"
                     value="inflow"
                     checked={fundRecordForm.status === 'inflow'}
-                    onChange={(e) => setFundRecordForm({ ...fundRecordForm, status: 'inflow' })}
+                    onChange={(e) => setFundRecordForm({ ...fundRecordForm, status: 'inflow', type: '工资', sourceAccountId: '' })}
                     className="w-4 h-4"
                   />
                   入账
@@ -1618,13 +1725,59 @@ export default function SurvivalFunds() {
                     name="fundStatus"
                     value="outflow"
                     checked={fundRecordForm.status === 'outflow'}
-                    onChange={(e) => setFundRecordForm({ ...fundRecordForm, status: 'outflow' })}
+                    onChange={(e) => setFundRecordForm({ ...fundRecordForm, status: 'outflow', type: '日常消费', sourceAccountId: '' })}
                     className="w-4 h-4"
                   />
                   出账
                 </label>
               </div>
             </div>
+            {/* 第二行: 类型 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">类型</label>
+              <select
+                value={fundRecordForm.type}
+                onChange={(e) => setFundRecordForm({ ...fundRecordForm, type: e.target.value, sourceAccountId: e.target.value === '调拨' ? '' : '' })}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {typeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            {/* 第三行: 金额 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">金额</label>
+              <input
+                type="number"
+                value={fundRecordForm.amount}
+                onChange={(e) => setFundRecordForm({ ...fundRecordForm, amount: e.target.value })}
+                placeholder="请输入金额"
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            {/* 调拨专用: 源账户本选择 */}
+            {isTransfer && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  从哪个账户本调拨
+                </label>
+                <select
+                  value={fundRecordForm.sourceAccountId}
+                  onChange={(e) => setFundRecordForm({ ...fundRecordForm, sourceAccountId: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">请选择源账户本</option>
+                  {transferSourceOptions.map(acc => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name} ({acc.currency || 'CNY'}) - {formatCurrency(parseFloat(acc.balance) || 0, acc.currency)}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  调拨后，源账户本的现金余额资产将自动减少对应金额，并生成一笔卖出交易记录
+                </p>
+              </div>
+            )}
+            {/* 日期 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">日期</label>
               <input
@@ -1634,6 +1787,7 @@ export default function SurvivalFunds() {
                 className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+            {/* 备注 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">备注</label>
               <input
@@ -1780,7 +1934,7 @@ export default function SurvivalFunds() {
                     ))}
                 </select>
               ) : (
-                <p className="text-sm text-orange-500">暂无可用账户，请先在「账户管理」中创建账户</p>
+                <p className="text-sm text-orange-500">暂无可用账户，请先在 "账户管理" 中创建账户</p>
               )}
             </div>
           </div>
