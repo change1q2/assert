@@ -1,5 +1,5 @@
 import { DEFAULT_EXCHANGE_RATES, CURRENCIES } from '../utils/currency.js'
-import { getCache, setCache, markPendingSync, getPendingSyncs, clearPendingSync, clearAllPendingSyncs } from '../utils/cache.js'
+import { getCache, setCache, markPendingSync, getPendingSyncs, clearPendingSync, clearAllPendingSyncs, removeCache } from '../utils/cache.js'
 
 export { getPendingSyncs }
 
@@ -364,6 +364,10 @@ export async function saveState(state) {
       } catch (_) { /* ignore */ }
       clearPendingSync('state')
       invalidateStateCache()
+      // 同时清除 localStorage 中的 state 缓存，确保刷新/下次拉取直接走后端最新数据，
+      // 避免仅在"后端失败时"才 fallback 到旧缓存导致手动修改的状态看起来"没保存"
+      removeCache('state')
+      removeCache('debts')
       return { ok: true, server: true }
     }
     // 服务端返回非成功状态

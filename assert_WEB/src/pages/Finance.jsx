@@ -35,21 +35,21 @@ import FinanceHoldingsTable from '../components/FinanceHoldingsTable';
 import { Pagination } from '../components/FinanceHoldingsTable.subcomponents';
 
 // ── 工具函数 ──
-function formatCurrency(value) {
+export function formatCurrency(value) {
   return new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
   }).format(value);
 }
 
-function convertCurrency(value, fromCurrency, toCurrency, rates) {
+export function convertCurrency(value, fromCurrency, toCurrency, rates) {
   if (fromCurrency === toCurrency) return value;
   const fromRate = rates[fromCurrency] || 1;
   const toRate = rates[toCurrency] || 1;
   return value * (fromRate / toRate);
 }
 
-function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
+export function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
   const converted = convertCurrency(value, currency, targetCurrency, rates);
   const symbol = getCurrencySymbol(targetCurrency);
   return `${symbol}${new Intl.NumberFormat('zh-CN', {
@@ -58,7 +58,7 @@ function formatCurrencyWithRate(value, currency, targetCurrency, rates) {
   }).format(converted)}`;
 }
 
-function formatPercentage(value) {
+export function formatPercentage(value) {
   if (value === null || value === undefined) return '—';
   const n = parseFloat(value);
   if (isNaN(n)) return '—';
@@ -140,7 +140,7 @@ const HK_MONEY_FUND_SOURCES = [
 ];
 
 // 计算经过 N 天的实际持仓天数
-function computeHoldingDays(account) {
+export function computeHoldingDays(account) {
   if (!account) return 0;
   const base = parseInt(account.holdingDaysBase ?? account.holdingDays, 10) || 0;
   const baseDate = account.holdingDaysDate;
@@ -153,7 +153,7 @@ function computeHoldingDays(account) {
   return base + days;
 }
 
-function formatNum(value) {
+export function formatNum(value) {
   if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 0,
@@ -164,16 +164,16 @@ function formatNum(value) {
 const POS_CLASS = 'text-green-600 dark:text-green-400';
 const NEG_CLASS = 'text-red-500 dark:text-red-400';
 
-function pnlClass(val) {
+export function pnlClass(val) {
   const n = parseFloat(val);
   return isNaN(n) ? '' : (n >= 0 ? POS_CLASS : NEG_CLASS);
 }
 
-function pnlSign(n) {
+export function pnlSign(n) {
   return n > 0 ? '+' : '';
 }
 
-function cleanAssetName(name) {
+export function cleanAssetName(name) {
   if (!name) return '未命名资产';
   return String(name).trim();
 }
@@ -192,7 +192,7 @@ const fieldLabelMap = {
 };
 
 // ── 表单字段子组件 ──
-function FormField({ label, required, markRequired, children, fullWidth }) {
+export function FormField({ label, required, markRequired, children, fullWidth }) {
   return (
     <div className={fullWidth ? 'sm:col-span-2' : ''}>
       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -357,7 +357,7 @@ const updateAccountBalance = (asset, record, accounts, fallbackAccounts, finance
   return { accounts: accountsCopy, financeAssets: financeAssetsCopy };
 };
 
-function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, setStateData, onRefresh, selectedCurrency = 'CNY', exchangeRates = {}, quotesMap = {}, moneyFundMap = {}, hkConnectRate = null, readOnly = false }) {
+export function DetailModal({ data, totalMarketValue, onClose, saveState, stateData, setStateData, onRefresh, selectedCurrency = 'CNY', exchangeRates = {}, quotesMap = {}, moneyFundMap = {}, hkConnectRate = null, readOnly = false }) {
   const latestData = data?.isArchived
     ? data
     : (stateData?.financeAssets?.find(item => String(item.id) === String(data?.id)) || data);

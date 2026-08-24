@@ -786,7 +786,7 @@ export default function FinanceHoldingsTable({
   }, [filteredWithRatio, exchangeRates, categoryName, financeAccounts, totalCurrency, selectedCurrency]);
 
   const showCheckboxCol = !readOnly && showBatchEdit;
-  const showOpsCol = !readOnly;
+  const showOpsCol = !readOnly || !!onDetail;
   const showAddBtn = !readOnly && onAdd;
   const showBatchEditBtn = !readOnly;
   const showSavedFiltersBtn = !readOnly;

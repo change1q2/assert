@@ -196,7 +196,13 @@ export default function Debts() {
             <div>
               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">状态</div>
               {(() => {
-                const hasOverduePayment = plan?.schedule?.some(item => payments[item.period] !== true && new Date(item.date) < new Date());
+                // 三级状态：true=已还, false=手动标记为正常(不逾期), undefined=自动计算
+                const hasOverduePayment = plan?.schedule?.some(item => {
+                  const status = payments[item.period];
+                  if (status === true || status === false) return false; // 已还 or 手动标记正常，均不算逾期
+                  // 只有 undefined（未手动操作）才走自动日期判断
+                  return new Date(item.date) < new Date();
+                });
                 const isManuallyOverdue = debt.status === 'overdue';
                 const showOverdue = hasOverduePayment || isManuallyOverdue;
                 return (
@@ -243,7 +249,7 @@ export default function Debts() {
                 const totalPages = Math.ceil(plan.schedule.length / currentPageSize);
                 const currentPage = pagination[debt.id] || 1;
                 
-                const firstUnpaidIndex = plan.schedule.findIndex((item) => payments[item.period] !== true);
+                const firstUnpaidIndex = plan.schedule.findIndex((item) => payments[item.period] !== true); // 手动标记正常(false)也视为未还，参与分页定位
                 const defaultPage = firstUnpaidIndex >= 0 
                   ? Math.ceil((firstUnpaidIndex + 1) / currentPageSize)
                   : 1;
@@ -281,8 +287,11 @@ export default function Debts() {
                           <tbody>
                             {currentSchedule.map((item, idx) => {
                               const originalIdx = startIdx + idx;
-                              const isPaid = payments[item.period] === true;
-                              const isOverdue = !isPaid && new Date(item.date) < new Date();
+                              // 三级状态：true=已还, false=手动标记正常(不逾期), undefined=自动计算
+                              const periodStatus = payments[item.period];
+                              const isPaid = periodStatus === true;
+                              const isManuallyNormal = periodStatus === false; // 手动标记为正常（未还但不逾期）
+                              const isOverdue = !isPaid && !isManuallyNormal && new Date(item.date) < new Date();
                               const periodPenalty = debt.periodPenalties?.[item.period] || 0;
                               return (
                                 <tr key={originalIdx} className={`border-b border-gray-100 dark:border-slate-700/50 ${isPaid ? 'bg-green-50/50 dark:bg-green-900/20' : isOverdue ? 'bg-red-50/30 dark:bg-red-900/10' : ''}`}>
@@ -632,14 +641,21 @@ export default function Debts() {
     if (!paymentItem) return;
 
     const newPayments = { ...(debt.payments || {}) };
-    const isPaid = newPayments[period] === true;
+    const currentStatus = newPayments[period]; // true=已还, false=手动正常, undefined=自动
 
-    if (isPaid) {
-      delete newPayments[period];
+    // 三级状态循环切换：undefined（自动） → true（已还） → false（手动标记正常/未还但不逾期） → undefined（回到自动）
+    // 但针对"逾期未还"场景：用户点击"已逾期"按钮时最常见诉求是标记为已还款，
+    // 所以优化路径：若当前是自动且已逾期，先跳到 true（已还）；true → false（手动正常，避免逾期红标）；false → undefined（回到自动）
+    if (currentStatus === undefined) {
+      newPayments[period] = true; // 第1步：自动 → 已还
+    } else if (currentStatus === true) {
+      newPayments[period] = false; // 第2步：已还 → 手动标记正常（未还但不显示逾期，永久保存）
     } else {
-      newPayments[period] = true;
+      // currentStatus === false：手动正常 → 回到自动计算
+      delete newPayments[period];
     }
 
+    // paidAmount 只统计 payments[period] === true 的期数（手动标记正常的不累计到已还金额）
     const paidPeriods = Object.keys(newPayments).filter((k) => newPayments[k] === true);
     const newPaidAmount = paidPeriods.reduce((sum, p) => {
       const item = (plan?.schedule || []).find((s) => s.period === parseInt(p, 10));
@@ -653,7 +669,7 @@ export default function Debts() {
     setStateData(newStateData);
     const result = await saveState(newStateData);
     // 如果保存失败（例如后端拒绝），重新拉取一次保证本地与后端一致
-    if (result && result.success === false) {
+    if (result && result.ok === false) {
       console.error('[handlePaymentToggle] saveState failed:', result);
       await loadData();
     }
@@ -675,7 +691,7 @@ export default function Debts() {
 
     setStateData(newStateData);
     const result = await saveState(newStateData);
-    if (result && result.success === false) {
+    if (result && result.ok === false) {
       console.error('[handlePeriodPenaltyChange] saveState failed:', result);
       await loadData();
     }
@@ -688,7 +704,7 @@ export default function Debts() {
 
     setStateData(newStateData);
     const result = await saveState(newStateData);
-    if (result && result.success === false) {
+    if (result && result.ok === false) {
       console.error('[handleStatusToggle] saveState failed:', result);
       await loadData();
     }
@@ -1000,7 +1016,7 @@ export default function Debts() {
       setShowAddModal(false);
       setTotalAmountOverridden(false);
       resetForm();
-      if (result && result.success === false) {
+      if (result && result.ok === false) {
         console.error('[handleSave] saveState failed:', result);
       }
       loadData();
@@ -1021,7 +1037,7 @@ export default function Debts() {
       };
       setStateData(newState);
       const result = await saveState(newState);
-      if (result && result.success === false) {
+      if (result && result.ok === false) {
         console.error('[handleDelete] saveState failed:', result);
       }
       loadData();
@@ -1245,11 +1261,17 @@ export default function Debts() {
       const payments = d.payments || {};
       const rate = DEFAULT_EXCHANGE_RATES[d.currency] ?? 1;
       if (plan?.schedule) {
-        const hasOverdue = plan.schedule.some(item => payments[item.period] !== true && new Date(item.date) < new Date());
+        const hasOverdue = plan.schedule.some(item => {
+          const status = payments[item.period];
+          if (status === true || status === false) return false; // 已还 or 手动标记正常 → 不计入逾期
+          return new Date(item.date) < new Date();
+        });
         if (hasOverdue) {
           overdueDebtCount++;
           plan.schedule.forEach(item => {
-            if (payments[item.period] !== true && new Date(item.date) < new Date()) {
+            const status = payments[item.period];
+            const overdue = (status !== true && status !== false) && new Date(item.date) < new Date();
+            if (overdue) {
               overdueAmount += item.total * rate;
             }
           });

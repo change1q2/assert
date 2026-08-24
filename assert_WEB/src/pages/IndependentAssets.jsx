@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { fetchState, saveState, lookupFinance, fetchFinanceQuotes, peekCachedState, invalidateStateCache } from '../api';
+import { fetchState, saveState, lookupFinance, fetchFinanceQuotes, peekCachedState, invalidateStateCache, fetchExchangeRates } from '../api';
 import { convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency';
 import sanitizeText from '../utils/sanitizeText';
 import FinanceHoldingsTable from '../components/FinanceHoldingsTable';
@@ -27,10 +27,11 @@ import {
   FileText,
   Download,
   PiggyBank,
+  Coins,
 } from 'lucide-react';
 import { VEHICLE_TYPES, VEHICLE_BRANDS, VEHICLE_MODELS } from '../data/vehicle-data';
 
-const CURRENCY_OPTIONS = [
+export const CURRENCY_OPTIONS = [
   { code: 'CNY', symbol: '¥', label: '人民币 (CNY)' },
   { code: 'USD', symbol: '$', label: '美元 (USD)' },
   { code: 'HKD', symbol: 'HK$', label: '港币 (HKD)' },
@@ -47,7 +48,7 @@ const FIXED_INVESTMENT_EVENT_TYPES = [
 
 const FIXED_INVESTMENT_OUTFLOW_EVENTS = ['投入本金', '追加'];
 
-function formatCurrency(value, currency = 'CNY') {
+export function formatCurrency(value, currency = 'CNY') {
   if (value === null || value === undefined) return '—';
   const option = CURRENCY_OPTIONS.find(c => c.code === currency) || CURRENCY_OPTIONS[0];
   const formatted = new Intl.NumberFormat('zh-CN', {
@@ -58,7 +59,7 @@ function formatCurrency(value, currency = 'CNY') {
   return `${option.symbol}${formatted}`;
 }
 
-function formatNumber(value) {
+export function formatNumber(value) {
   if (value === null || value === undefined) return '—';
   return new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 2,
@@ -66,7 +67,7 @@ function formatNumber(value) {
   }).format(value);
 }
 
-function formatPercentage(value) {
+export function formatPercentage(value) {
   if (value === null || value === undefined) return '—';
   const n = parseFloat(value);
   if (isNaN(n)) return '—';
@@ -149,6 +150,7 @@ const ASSET_TABS = [
   { id: 'fixedinvestment', label: '固定投资', icon: Landmark },
   { id: 'equity', label: '股权', icon: DollarSign },
   { id: 'fixeddeposit', label: '定期资产', icon: Clock },
+  { id: 'forex', label: '外汇', icon: Coins },
 ];
 
 // 股权模块 - 同步理财模块的字段选项
@@ -492,6 +494,8 @@ export default function IndependentAssets() {
   const [realEstateTotalCurrency, setRealEstateTotalCurrency] = useState('CNY');
   const [fixedInvestmentTotalCurrency, setFixedInvestmentTotalCurrency] = useState('CNY');
   const [fixedDepositTotalCurrency, setFixedDepositTotalCurrency] = useState('CNY');
+  const [forexTotalCurrency, setForexTotalCurrency] = useState('CNY');
+  const [forexRateLoading, setForexRateLoading] = useState(false);
   const [survivalFundTotalCurrency, setSurvivalFundTotalCurrency] = useState('CNY');
 
   const { accounts = [], independentAssets = {} } = stateData || {};
@@ -875,6 +879,19 @@ export default function IndependentAssets() {
         actualReturn: '',
         accountId: '',
         accountName: '',
+      },
+      forex: {
+        name: '',
+        buyCurrency: 'USD',
+        sellCurrency: 'CNY',
+        buyAmount: '',
+        buyRate: '',
+        currentRate: '',
+        sellRmb: '',
+        purchaseDate: '',
+        accountId: '',
+        accountName: '',
+        note: '',
       },
     };
     return defaults[type] || {};
@@ -1608,6 +1625,31 @@ export default function IndependentAssets() {
     };
   };
 
+  // 获取外汇实时汇率：1 buyCurrency = ? sellCurrency
+  const fetchForexRealTimeRate = async () => {
+    const buyCurrency = formData.buyCurrency || 'USD';
+    const sellCurrency = formData.sellCurrency || 'CNY';
+    if (buyCurrency === sellCurrency) {
+      setFormData({ ...formData, currentRate: '1' });
+      return;
+    }
+    setForexRateLoading(true);
+    try {
+      // fetchExchangeRates 返回以 CNY 为基准的汇率表（1 外币 = x CNY）
+      const rates = await fetchExchangeRates('CNY');
+      const buyToCny = rates[buyCurrency] ?? DEFAULT_EXCHANGE_RATES[buyCurrency] ?? 0;
+      const sellToCny = rates[sellCurrency] ?? DEFAULT_EXCHANGE_RATES[sellCurrency] ?? 1;
+      if (buyToCny > 0 && sellToCny > 0) {
+        const rate = buyToCny / sellToCny;
+        setFormData({ ...formData, currentRate: rate.toFixed(4) });
+      }
+    } catch (err) {
+      console.error('获取实时汇率失败:', err);
+    } finally {
+      setForexRateLoading(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!formData.accountId) {
       alert('请选择账户本');
@@ -1648,7 +1690,20 @@ export default function IndependentAssets() {
         }
       }
     }
-    
+
+    if (activeTab === 'forex') {
+      const buyAmount = parseFloat(formData.buyAmount || 0);
+      const currentRate = parseFloat(formData.currentRate || 0);
+      const sellRmb = parseFloat(formData.sellRmb || 0);
+      if (buyAmount > 0 && currentRate > 0 && sellRmb > 0) {
+        const currentRmb = buyAmount * currentRate;
+        const profitLoss = currentRmb - sellRmb;
+        const profitRate = sellRmb > 0 ? (profitLoss / sellRmb) * 100 : 0;
+        itemData.profitLoss = profitLoss.toFixed(2);
+        itemData.profitRate = profitRate.toFixed(2);
+      }
+    }
+
     const newItem = {
       ...itemData,
       id: editingItem?.id || Date.now().toString(),
@@ -3179,6 +3234,129 @@ export default function IndependentAssets() {
     );
   };
 
+  const renderForexTable = () => {
+    const items = getAssets('forex');
+
+    const forexTotals = items.reduce((acc, item) => {
+      const targetCur = forexTotalCurrency;
+      const buyAmount = parseFloat(item.buyAmount || 0);
+      const currentRate = parseFloat(item.currentRate || 0);
+      const sellRmb = parseFloat(item.sellRmb || 0);
+      const currentRmb = buyAmount * currentRate;
+      const profitLoss = currentRmb - sellRmb;
+      // sellRmb and currentRmb are both in CNY, convert to target currency if needed
+      acc.sellRmb += convertAmount(sellRmb, 'CNY', targetCur, exchangeRates);
+      acc.currentRmb += convertAmount(currentRmb, 'CNY', targetCur, exchangeRates);
+      acc.profitLoss += convertAmount(profitLoss, 'CNY', targetCur, exchangeRates);
+      return acc;
+    }, { sellRmb: 0, currentRmb: 0, profitLoss: 0 });
+
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+          <h3 className="font-semibold text-gray-900 dark:text-white">外汇</h3>
+          <button onClick={handleAdd} className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors">
+            <Plus className="w-4 h-4" />
+            <span>新增</span>
+          </button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 dark:bg-slate-700">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">名称</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">购买币种</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">购买额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">卖出币种</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">卖出RMB额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">买入汇率</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">当前汇率</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">现有RMB额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">盈利额</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">盈利率</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">购买日期</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">账户本</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
+              {items.map(item => {
+                const buyAmount = parseFloat(item.buyAmount || 0);
+                const buyRate = parseFloat(item.buyRate || 0);
+                const currentRate = parseFloat(item.currentRate || 0);
+                const sellRmb = parseFloat(item.sellRmb || 0);
+                const currentRmb = buyAmount * currentRate;
+                const profitLoss = currentRmb - sellRmb;
+                const profitRate = sellRmb > 0 ? (profitLoss / sellRmb) * 100 : 0;
+                const isProfit = profitLoss >= 0;
+                return (
+                <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.name || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.buyCurrency || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{buyAmount > 0 ? formatCurrency(buyAmount, item.buyCurrency) : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.sellCurrency || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{sellRmb > 0 ? formatCurrency(sellRmb, 'CNY') : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{buyRate > 0 ? buyRate.toFixed(4) : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{currentRate > 0 ? currentRate.toFixed(4) : '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{currentRmb > 0 ? formatCurrency(currentRmb, 'CNY') : '—'}</td>
+                  <td className={`px-4 py-3 text-sm font-medium ${isProfit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {profitLoss !== 0 ? formatCurrency(profitLoss, 'CNY') : '—'}
+                  </td>
+                  <td className={`px-4 py-3 text-sm font-medium ${isProfit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {sellRmb > 0 ? formatPercentage(profitRate) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.purchaseDate || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{item.accountName || accounts.find(a => (a.id || a.name) === item.accountId)?.name || '—'}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleEdit(item)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="编辑">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDelete(item)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="删除">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                );
+              })}
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={13} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无外汇数据</td>
+                </tr>
+              )}
+              {items.length > 0 && (
+                <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
+                  <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={4}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>合计</span>
+                      <select
+                        value={forexTotalCurrency}
+                        onChange={(e) => setForexTotalCurrency(e.target.value)}
+                        className="text-xs border border-indigo-200 dark:border-indigo-700 rounded px-1.5 py-0.5 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      >
+                        {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                      </select>
+                      <span className="text-xs text-gray-400 font-normal">（按汇率折算）</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(forexTotals.sellRmb, forexTotalCurrency)}</td>
+                  <td></td>
+                  <td></td>
+                  <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{formatCurrency(forexTotals.currentRmb, forexTotalCurrency)}</td>
+                  <td className={`px-4 py-3 text-sm font-medium ${forexTotals.profitLoss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatCurrency(forexTotals.profitLoss, forexTotalCurrency)}
+                  </td>
+                  <td colSpan={5}></td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   const renderSurvivalFundTable = () => {
     const items = getAssets('survivalfund');
 
@@ -4694,6 +4872,187 @@ export default function IndependentAssets() {
       </>
     );
 
+    const renderForexForm = () => {
+      const buyCurrency = formData.buyCurrency || 'USD';
+      const sellCurrency = formData.sellCurrency || 'CNY';
+
+      const calculateProfit = () => {
+        const buyAmount = parseFloat(formData.buyAmount || 0);
+        const currentRate = parseFloat(formData.currentRate || 0);
+        const sellRmb = parseFloat(formData.sellRmb || 0);
+        if (!buyAmount || !currentRate || !sellRmb) return null;
+        const currentRmb = buyAmount * currentRate;
+        const profitLoss = currentRmb - sellRmb;
+        const profitRate = sellRmb > 0 ? (profitLoss / sellRmb) * 100 : 0;
+        return { profitLoss, profitRate, sellRmb, currentRmb };
+      };
+
+      const profit = calculateProfit();
+
+      return (
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                名称 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.name || ''}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="如：美元兑换"
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">购买日期</label>
+              <input
+                type="date"
+                value={formData.purchaseDate || ''}
+                onChange={(e) => setFormData({ ...formData, purchaseDate: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                购买币种 <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={buyCurrency}
+                onChange={(e) => setFormData({ ...formData, buyCurrency: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                卖出币种 <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={sellCurrency}
+                onChange={(e) => setFormData({ ...formData, sellCurrency: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {CURRENCY_OPTIONS.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                卖出RMB额 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.sellRmb || ''}
+                onChange={(e) => setFormData({ ...formData, sellRmb: e.target.value })}
+                placeholder="实际卖出所得RMB金额"
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                购买额 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                step="0.0001"
+                value={formData.buyAmount || ''}
+                onChange={(e) => setFormData({ ...formData, buyAmount: e.target.value })}
+                placeholder={`购买${buyCurrency}数量`}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                买入汇率 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                step="0.0001"
+                value={formData.buyRate || ''}
+                onChange={(e) => setFormData({ ...formData, buyRate: e.target.value })}
+                placeholder={`1 ${buyCurrency} = ? ${sellCurrency}`}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  当前汇率 <span className="text-red-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={fetchForexRealTimeRate}
+                  disabled={forexRateLoading}
+                  className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="获取实时汇率"
+                >
+                  <RefreshCw className={`w-3 h-3 ${forexRateLoading ? 'animate-spin' : ''}`} />
+                  <span>{forexRateLoading ? '获取中...' : '实时获取'}</span>
+                </button>
+              </div>
+              <input
+                type="number"
+                step="0.0001"
+                value={formData.currentRate || ''}
+                onChange={(e) => setFormData({ ...formData, currentRate: e.target.value })}
+                placeholder={`1 ${buyCurrency} = ? ${sellCurrency}`}
+                className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {(() => {
+                const amt = parseFloat(formData.buyAmount || 0);
+                const rate = parseFloat(formData.currentRate || 0);
+                if (amt > 0 && rate > 0) {
+                  return <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">现有RMB额：<span className="font-medium text-gray-700 dark:text-gray-300">{(amt * rate).toFixed(2)} CNY</span></div>;
+                }
+                return null;
+              })()}
+            </div>
+            {renderAccountSelect()}
+          </div>
+
+          {profit && (
+            <div className="mt-4 p-3 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-gray-500 dark:text-gray-400">卖出RMB额：</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{profit.sellRmb.toFixed(2)} CNY</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 dark:text-gray-400">现有RMB额：</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{profit.currentRmb.toFixed(2)} CNY</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 dark:text-gray-400">盈利额：</span>
+                  <span className={`font-medium ${profit.profitLoss >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {profit.profitLoss >= 0 ? '+' : ''}{profit.profitLoss.toFixed(2)} CNY
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500 dark:text-gray-400">盈利率：</span>
+                  <span className={`font-medium ${profit.profitRate >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {profit.profitRate >= 0 ? '+' : ''}{profit.profitRate.toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">备注</label>
+            <textarea
+              value={formData.note || ''}
+              onChange={(e) => setFormData({ ...formData, note: e.target.value })}
+              rows={2}
+              placeholder="可选备注"
+              className="w-full px-3 py-2 border border-gray-200 dark:border-slate-600 rounded-lg bg-gray-50 dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </>
+      );
+    };
+
     const getFormContent = () => {
       switch (activeTab) {
         case 'insurance':
@@ -4708,6 +5067,8 @@ export default function IndependentAssets() {
           return renderEquityForm();
         case 'fixeddeposit':
           return renderFixedDepositForm();
+        case 'forex':
+          return renderForexForm();
         default:
           return null;
       }
@@ -7454,6 +7815,8 @@ export default function IndependentAssets() {
         return renderEquityTable();
       case 'fixeddeposit':
         return renderFixedDepositTable();
+      case 'forex':
+        return renderForexTable();
       default:
         return renderInsuranceTable();
     }

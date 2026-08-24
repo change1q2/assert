@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Plus, Edit2, Trash2, X, Wallet, DollarSign, TrendingUp, Percent, PiggyBank, ChevronDown, ChevronUp, Settings, Bookmark } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Wallet, DollarSign, TrendingUp, Percent, PiggyBank, ChevronDown, ChevronUp, Settings, Bookmark, Pencil, Search, Star } from 'lucide-react';
 import { fetchState, saveState, invalidateStateCache } from '../api/index.js';
 import { convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency.js';
 
@@ -255,6 +255,7 @@ export default function SurvivalFunds() {
   const [selectedFund, setSelectedFund] = useState(null);
   // 资金记录弹窗
   const [showFundRecordModal, setShowFundRecordModal] = useState(false);
+  const [editingRecordId, setEditingRecordId] = useState(null);
   const [fundRecordForm, setFundRecordForm] = useState({
     type: '工资',
     amount: '',
@@ -280,6 +281,19 @@ export default function SurvivalFunds() {
   const [filterPeriod, setFilterPeriod] = useState(''); // '', 'daily', ...
   const [filterTemplates, setFilterTemplates] = useState([]); // [{id, name, categoryTypes:[], categories:[], period}]
   const [showFilterManager, setShowFilterManager] = useState(false);
+
+  // 生存资金列表排序、筛选、分页、收藏
+  const [fundSortBy, setFundSortBy] = useState('name'); // name, type, currency, initialAmount, incremental, usedAmount, amount
+  const [fundSortDir, setFundSortDir] = useState('asc'); // asc, desc
+  const [fundFilterKeyword, setFundFilterKeyword] = useState('');
+  const [fundFilterType, setFundFilterType] = useState('');
+  const [fundCurrentPage, setFundCurrentPage] = useState(1);
+  const [fundPageSize, setFundPageSize] = useState(10);
+  const [pinnedFundIds, setPinnedFundIds] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('survivalFundPinnedIds') || '[]');
+    } catch { return []; }
+  });
 
   const userId = localStorage.getItem('wealth_os_user_id');
 
@@ -378,6 +392,95 @@ export default function SurvivalFunds() {
   const survivalFundsDerived = useMemo(() => {
     return survivalFunds.map(f => ({ ...f, derived: computeFundDerived(f) }));
   }, [survivalFunds, computeFundDerived]);
+
+  // 生存资金列表：筛选 + 排序 + 收藏置顶
+  const processedFunds = useMemo(() => {
+    let items = [...survivalFundsDerived];
+    // 筛选：关键词搜索（名称/账户本）
+    if (fundFilterKeyword) {
+      const kw = fundFilterKeyword.toLowerCase();
+      items = items.filter(f =>
+        (f.name || '').toLowerCase().includes(kw) ||
+        (f.accountName || '').toLowerCase().includes(kw)
+      );
+    }
+    // 筛选：类型
+    if (fundFilterType) {
+      items = items.filter(f => f.type === fundFilterType);
+    }
+    // 收藏置顶
+    const pinned = items.filter(f => pinnedFundIds.includes(f.id));
+    const unpinned = items.filter(f => !pinnedFundIds.includes(f.id));
+    const sortFn = (a, b) => {
+      let va, vb;
+      switch (fundSortBy) {
+        case 'name':
+          va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase();
+          return va.localeCompare(vb, 'zh') * (fundSortDir === 'asc' ? 1 : -1);
+        case 'type':
+          va = (a.type || '').toLowerCase(); vb = (b.type || '').toLowerCase();
+          return va.localeCompare(vb, 'zh') * (fundSortDir === 'asc' ? 1 : -1);
+        case 'currency':
+          va = a.currency || ''; vb = b.currency || '';
+          return va.localeCompare(vb) * (fundSortDir === 'asc' ? 1 : -1);
+        case 'initialAmount':
+          va = parseFloat(a.derived?.initialAmount || 0); vb = parseFloat(b.derived?.initialAmount || 0);
+          return (fundSortDir === 'asc' ? va - vb : vb - va);
+        case 'incremental':
+          va = parseFloat(a.derived?.inflowTotal || 0); vb = parseFloat(b.derived?.inflowTotal || 0);
+          return (fundSortDir === 'asc' ? va - vb : vb - va);
+        case 'usedAmount':
+          va = parseFloat(a.derived?.usedAmount || 0); vb = parseFloat(b.derived?.usedAmount || 0);
+          return (fundSortDir === 'asc' ? va - vb : vb - va);
+        case 'amount':
+          va = parseFloat(a.derived?.amount || 0); vb = parseFloat(b.derived?.amount || 0);
+          return (fundSortDir === 'asc' ? va - vb : vb - va);
+        default:
+          return 0;
+      }
+    };
+    return [...pinned.sort(sortFn), ...unpinned.sort(sortFn)];
+  }, [survivalFundsDerived, fundFilterKeyword, fundFilterType, fundSortBy, fundSortDir, pinnedFundIds]);
+
+  // 分页
+  const paginatedFunds = useMemo(() => {
+    const total = processedFunds.length;
+    const totalPages = Math.max(1, Math.ceil(total / fundPageSize));
+    const safePage = Math.min(fundCurrentPage, totalPages);
+    const start = (safePage - 1) * fundPageSize;
+    return {
+      items: processedFunds.slice(start, start + fundPageSize),
+      total,
+      totalPages,
+      currentPage: safePage,
+      pageSize: fundPageSize,
+    };
+  }, [processedFunds, fundCurrentPage, fundPageSize]);
+
+  // 生存资金所有类型（用于筛选下拉）
+  const fundTypeOptions = useMemo(() => {
+    const types = new Set(survivalFundsDerived.map(f => f.type).filter(Boolean));
+    return Array.from(types);
+  }, [survivalFundsDerived]);
+
+  // 切换收藏/置顶
+  const togglePinFund = (fundId) => {
+    const next = pinnedFundIds.includes(fundId)
+      ? pinnedFundIds.filter(id => id !== fundId)
+      : [...pinnedFundIds, fundId];
+    setPinnedFundIds(next);
+    localStorage.setItem('survivalFundPinnedIds', JSON.stringify(next));
+  };
+
+  // 切换排序
+  const handleSort = (key) => {
+    if (fundSortBy === key) {
+      setFundSortDir(fundSortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setFundSortBy(key);
+      setFundSortDir('asc');
+    }
+  };
 
   const summaryData = useMemo(() => {
     let totalBalance = 0; // 生存资金 = 结余资金总和
@@ -972,26 +1075,79 @@ export default function SurvivalFunds() {
             </button>
           </div>
         </div>
+        {/* 筛选工具栏 */}
+        <div className="px-4 py-2 border-b border-gray-200 dark:border-slate-700 flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <Search className="w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="搜索名称/账户本"
+              value={fundFilterKeyword}
+              onChange={(e) => { setFundFilterKeyword(e.target.value); setFundCurrentPage(1); }}
+              className="text-sm px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-400 w-44"
+            />
+          </div>
+          <select
+            value={fundFilterType}
+            onChange={(e) => { setFundFilterType(e.target.value); setFundCurrentPage(1); }}
+            className="text-sm px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+          >
+            <option value="">全部类型</option>
+            {fundTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          {(fundFilterKeyword || fundFilterType || pinnedFundIds.length > 0) && (
+            <button
+              onClick={() => { setFundFilterKeyword(''); setFundFilterType(''); setPinnedFundIds([]); localStorage.removeItem('survivalFundPinnedIds'); setFundCurrentPage(1); }}
+              className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            >
+              清除筛选
+            </button>
+          )}
+          <span className="text-xs text-gray-400 ml-auto">
+            共 {paginatedFunds.total} 条 {pinnedFundIds.length > 0 && <span>· 置顶 {pinnedFundIds.length} 条</span>}
+          </span>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 dark:bg-slate-700">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">名称</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">类型</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">币种</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">初始金额</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">增量资金</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">使用资金</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">结余资金</th>
+                <th className="px-3 py-3 w-8"></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-slate-600" onClick={() => handleSort('name')}>
+                  名称 {fundSortBy === 'name' && <span className="text-blue-500">{fundSortDir === 'asc' ? '↑' : '↓'}</span>}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-slate-600" onClick={() => handleSort('type')}>
+                  类型 {fundSortBy === 'type' && <span className="text-blue-500">{fundSortDir === 'asc' ? '↑' : '↓'}</span>}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-slate-600" onClick={() => handleSort('currency')}>
+                  币种 {fundSortBy === 'currency' && <span className="text-blue-500">{fundSortDir === 'asc' ? '↑' : '↓'}</span>}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-slate-600" onClick={() => handleSort('initialAmount')}>
+                  初始金额 {fundSortBy === 'initialAmount' && <span className="text-blue-500">{fundSortDir === 'asc' ? '↑' : '↓'}</span>}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-slate-600" onClick={() => handleSort('incremental')}>
+                  增量资金 {fundSortBy === 'incremental' && <span className="text-blue-500">{fundSortDir === 'asc' ? '↑' : '↓'}</span>}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-slate-600" onClick={() => handleSort('usedAmount')}>
+                  使用资金 {fundSortBy === 'usedAmount' && <span className="text-blue-500">{fundSortDir === 'asc' ? '↑' : '↓'}</span>}
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-slate-600" onClick={() => handleSort('amount')}>
+                  结余资金 {fundSortBy === 'amount' && <span className="text-blue-500">{fundSortDir === 'asc' ? '↑' : '↓'}</span>}
+                </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">账户本</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-slate-700">
-              {survivalFundsDerived.map(fund => {
+              {paginatedFunds.items.map(fund => {
                 const d = fund.derived;
+                const isPinned = pinnedFundIds.includes(fund.id);
                 return (
-                <tr key={fund.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+                <tr key={fund.id} className={`hover:bg-gray-50 dark:hover:bg-slate-700/50 ${isPinned ? 'bg-yellow-50/40 dark:bg-yellow-900/10' : ''}`}>
+                  <td className="px-3 py-3">
+                    <button onClick={() => togglePinFund(fund.id)} className="p-1 text-gray-300 hover:text-yellow-500 rounded" title={isPinned ? '取消置顶' : '置顶'}>
+                      <Star className={`w-4 h-4 ${isPinned ? 'text-yellow-500 fill-yellow-500' : ''}`} />
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{fund.name || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{fund.type || '—'}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{fund.currency || '—'}</td>
@@ -1026,13 +1182,16 @@ export default function SurvivalFunds() {
                 </tr>
                 );
               })}
-              {survivalFunds.length === 0 && (
+              {paginatedFunds.total === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">暂无生存资金数据</td>
+                  <td colSpan={10} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                    {survivalFunds.length === 0 ? '暂无生存资金数据' : '无匹配的记录'}
+                  </td>
                 </tr>
               )}
               {survivalFunds.length > 0 && (
                 <tr className="bg-indigo-50 dark:bg-indigo-900/20 font-semibold">
+                  <td className="px-3 py-3"></td>
                   <td className="px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300" colSpan={3}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span>合计</span>
@@ -1057,6 +1216,50 @@ export default function SurvivalFunds() {
             </tbody>
           </table>
         </div>
+        {/* 分页控件 */}
+        {paginatedFunds.total > 0 && (
+          <div className="px-4 py-2 border-t border-gray-200 dark:border-slate-700 flex items-center justify-between text-sm">
+            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+              <span>每页</span>
+              <select
+                value={fundPageSize}
+                onChange={(e) => { setFundPageSize(Number(e.target.value)); setFundCurrentPage(1); }}
+                className="px-1 py-0.5 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none"
+              >
+                <option value={5}>5</option>
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+              <span>条</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setFundCurrentPage(1)}
+                disabled={paginatedFunds.currentPage <= 1}
+                className="px-2 py-1 text-xs border border-gray-200 dark:border-slate-600 rounded hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >首页</button>
+              <button
+                onClick={() => setFundCurrentPage(p => Math.max(1, p - 1))}
+                disabled={paginatedFunds.currentPage <= 1}
+                className="px-2 py-1 text-xs border border-gray-200 dark:border-slate-600 rounded hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >上一页</button>
+              <span className="text-xs text-gray-600 dark:text-gray-300">
+                第 <span className="font-semibold">{paginatedFunds.currentPage}</span> / {paginatedFunds.totalPages} 页
+              </span>
+              <button
+                onClick={() => setFundCurrentPage(p => Math.min(paginatedFunds.totalPages, p + 1))}
+                disabled={paginatedFunds.currentPage >= paginatedFunds.totalPages}
+                className="px-2 py-1 text-xs border border-gray-200 dark:border-slate-600 rounded hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >下一页</button>
+              <button
+                onClick={() => setFundCurrentPage(paginatedFunds.totalPages)}
+                disabled={paginatedFunds.currentPage >= paginatedFunds.totalPages}
+                className="px-2 py-1 text-xs border border-gray-200 dark:border-slate-600 rounded hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >末页</button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -1310,6 +1513,7 @@ export default function SurvivalFunds() {
   };
 
   const handleAddFundRecord = () => {
+    setEditingRecordId(null);
     setFundRecordForm({
       type: '工资',
       amount: '',
@@ -1317,6 +1521,20 @@ export default function SurvivalFunds() {
       category: '',
       date: new Date().toISOString().slice(0, 10),
       note: '',
+    });
+    setShowFundRecordModal(true);
+  };
+
+  const handleEditFundRecord = (record) => {
+    setEditingRecordId(record.id);
+    setFundRecordForm({
+      type: record.type || '工资',
+      amount: String(record.amount ?? ''),
+      status: record.status || 'inflow',
+      sourceAccountId: record.sourceAccountId || '',
+      category: record.category || '',
+      date: record.date || new Date().toISOString().slice(0, 10),
+      note: record.note || '',
     });
     setShowFundRecordModal(true);
   };
@@ -1344,8 +1562,13 @@ export default function SurvivalFunds() {
         alert('请选择调拨的源账户本');
         return;
       }
+      const fundId = selectedFund.fund.id;
+      const fund = selectedFund.fund;
+      const isEditing = !!editingRecordId;
+      const oldRecord = isEditing ? fund.transactions?.find(r => r.id === editingRecordId) : null;
+
       const record = {
-        id: `fr_${Date.now()}`,
+        id: isEditing ? editingRecordId : `fr_${Date.now()}`,
         type,
         amount: amt,
         status,
@@ -1354,27 +1577,55 @@ export default function SurvivalFunds() {
         category: fundRecordForm.category || '',
         sourceAccountId: isTransfer ? fundRecordForm.sourceAccountId : undefined,
       };
-      const fundId = selectedFund.fund.id;
       // 更新 survivalFunds: transactions 数组
-      // amount 和 usedAmount 由公式推导:
-      //   现有资金 = 原始资金 + 增量资金(入账合计) - 已使用资金(出账合计)
-      //   已使用资金 = 所有出账记录金额之和
       const newFunds = survivalFunds.map(f => {
         if (f.id !== fundId) return f;
-        const transactions = f.transactions ? [...f.transactions, record] : [record];
+        const transactions = isEditing
+          ? (f.transactions || []).map(r => r.id === editingRecordId ? record : r)
+          : (f.transactions ? [...f.transactions, record] : [record]);
         const initialAmt = parseFloat(f.initialAmount || f.amount) || 0;
         const inflowSum = transactions.filter(t => t.status === 'inflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
         const outflowSum = transactions.filter(t => t.status === 'outflow').reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
         return {
           ...f,
           transactions,
-          amount: initialAmt + inflowSum - outflowSum, // 现有资金
-          usedAmount: outflowSum, // 已使用资金
+          amount: initialAmt + inflowSum - outflowSum,
+          usedAmount: outflowSum,
         };
       });
       // 调拨时: 在源账户本的现金余额资产中生成卖出交易记录
       let newFinanceAssets = stateData.financeAssets || [];
       let newAccounts = accounts;
+
+      // 编辑模式：先逆向旧记录的调拨影响
+      if (isEditing && oldRecord) {
+        const wasTransfer = oldRecord.status === 'inflow' && oldRecord.type === '调拨' && oldRecord.sourceAccountId;
+        if (wasTransfer) {
+          const oldAmt = parseFloat(oldRecord.amount) || 0;
+          const sourceAccount = accounts.find(acc => acc.id === oldRecord.sourceAccountId);
+          if (sourceAccount) {
+            newFinanceAssets = newFinanceAssets.map(a => {
+              const accMatch = a.accountId === sourceAccount.id || a.account === sourceAccount.name;
+              if (!accMatch) return a;
+              const transactions = (a.transactions || []).filter(t => !(t.direction === '卖出' && Math.abs((t.amount || 0) - oldAmt) < 0.01));
+              const currentValue = (parseFloat(a.currentValue) || 0) + oldAmt;
+              return {
+                ...a,
+                transactions,
+                quantity: (parseFloat(a.quantity) || 0) + oldAmt,
+                shares: (parseFloat(a.shares) || 0) + oldAmt,
+                currentValue,
+                currentPrice: 1,
+              };
+            });
+            newAccounts = accounts.map(acc => {
+              if (acc.id !== sourceAccount.id) return acc;
+              return { ...acc, balance: (parseFloat(acc.balance) || 0) + oldAmt };
+            });
+          }
+        }
+      }
+
       if (isTransfer) {
         const sourceAccId = fundRecordForm.sourceAccountId;
         const sourceAccount = accounts.find(acc => acc.id === sourceAccId);
@@ -1443,6 +1694,7 @@ export default function SurvivalFunds() {
       if (isTransfer) setAccounts(newAccounts);
       invalidateStateCache();
       setShowFundRecordModal(false);
+      setEditingRecordId(null);
       setFundRecordForm({
         type: '工资',
         amount: '',
@@ -1706,9 +1958,14 @@ export default function SurvivalFunds() {
                         <td className="px-3 py-2 text-gray-600 dark:text-gray-400 text-xs">{t.date || '—'}</td>
                         <td className="px-3 py-2 text-gray-600 dark:text-gray-400 text-xs">{t.note || '—'}</td>
                         <td className="px-3 py-2">
-                          <button onClick={() => handleDeleteFundRecord(t.id)} className="p-1 text-gray-400 hover:text-red-500 rounded">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => handleEditFundRecord(t)} className="p-1 text-gray-400 hover:text-blue-500 rounded" title="编辑">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => handleDeleteFundRecord(t.id)} className="p-1 text-gray-400 hover:text-red-500 rounded" title="删除">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1751,7 +2008,7 @@ export default function SurvivalFunds() {
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-md">
           <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">新增资金记录</h3>
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">{editingRecordId ? '编辑资金记录' : '新增资金记录'}</h3>
             <button onClick={() => setShowFundRecordModal(false)} className="p-1 text-gray-400 hover:text-gray-600 rounded">
               <X className="w-5 h-5" />
             </button>

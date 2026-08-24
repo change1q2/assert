@@ -1,10 +1,26 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import StickyScrollWrapper from '../components/StickyScrollWrapper';
 import { fetchState, saveState, fetchRealTimeExchangeRates, fetchFinanceQuotes } from '../api';
 import { getCurrencySymbol, truncateNum } from '../utils/currency';
 import { formatPercentage } from '../components/FinanceHoldingsTable.utils';
 import sanitizeText from '../utils/sanitizeText';
 import FinanceHoldingsTable from '../components/FinanceHoldingsTable';
+import {
+  DetailModal,
+  formatCurrency as fmtCurr,
+  formatNum,
+  pnlClass,
+  pnlSign,
+  cleanAssetName,
+  computeHoldingDays,
+} from './Finance';
+import {
+  VehicleDetailModal,
+  FixedDepositDetailModal,
+  InsuranceDetailModal,
+  SurvivalFundDetailModal,
+  GenericAssetDetailModal,
+} from '../components/AssetDetailModals';
 import {
   Wallet,
   Plus,
@@ -164,6 +180,16 @@ const independentAssetTypeLabels = {
   survivalfund: '生存资金',
 };
 
+const independentAssetIcons = {
+  insurance: '🛡️',
+  realestate: '🏠',
+  vehicle: '🚗',
+  fixedinvestment: '💼',
+  equity: '📊',
+  fixeddeposit: '🏦',
+  survivalfund: '💰',
+};
+
 const marketOptions = ['国内市场', '港股市场', '美股市场', '其他'];
 const currencyOptions = ['CNY', 'HKD', 'USD', 'EUR', 'JPY'];
 const assetTypeOptions = ['股票', '基金', '债券', '现金', '保险', '理财', '其他'];
@@ -265,6 +291,12 @@ export default function Accounts() {
   const [selectedCurrency, setSelectedCurrency] = useState('CNY');
   const [exchangeRates, setExchangeRates] = useState({ CNY: 1, USD: 7.15, JPY: 0.046, HKD: 0.86, EUR: 7.85 });
   const [quotesMap, setQuotesMap] = useState({});
+  const [selectedAsset, setSelectedAsset] = useState(null); // 资产详情弹窗 (holding or independent asset)
+
+  // 统一的资产详情弹窗打开函数
+  const openAssetDetail = (data, type = 'holding') => {
+    setSelectedAsset({ type, data });
+  };
 
   const { accounts = [], records = [], finance = {}, debts = [], accountCategories = {}, independentAssets = {}, accountTypes = [], financeAssets = [], survivalFunds: survivalFundsRaw = [] } = stateData || {};
 
@@ -2117,7 +2149,7 @@ export default function Accounts() {
             dividend = records.reduce((sum, r) => sum + parseFloat(r.bonusDividend || 0) + parseFloat(r.midTermDividend || 0), 0);
           }
           return (
-            <tr key={item.id}>
+            <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 cursor-pointer transition-colors" onClick={() => openAssetDetail({ ...item, assetType: type }, 'independent')}>
               {td(item.policyNumber)}
               {td(item.policyName)}
               {td(fmt(item.paidAmount, item.currency), true)}
@@ -2129,7 +2161,7 @@ export default function Accounts() {
       }
       if (type === 'realestate') {
         return items.map(item => (
-          <tr key={item.id}>
+          <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 cursor-pointer transition-colors" onClick={() => openAssetDetail({ ...item, assetType: type }, 'independent')}>
             {td(item.type)}
             {td(item.usage)}
             {td(item.selfUseMarketArea || item.area)}
@@ -2140,7 +2172,7 @@ export default function Accounts() {
       }
       if (type === 'vehicle') {
         return items.map(item => (
-          <tr key={item.id}>
+          <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 cursor-pointer transition-colors" onClick={() => openAssetDetail({ ...item, assetType: type }, 'independent')}>
             {td(item.manufacturer)}
             {td(item.model)}
             {td(fmt(item.purchasePrice, item.currency), true)}
@@ -2156,7 +2188,7 @@ export default function Accounts() {
             return sum + (amt > 0 ? amt : 0);
           }, 0);
           return (
-            <tr key={item.id}>
+            <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 cursor-pointer transition-colors" onClick={() => openAssetDetail({ ...item, assetType: type }, 'independent')}>
               {td(item.name)}
               {td(fmt(item.investmentCost, item.currency), true)}
               {td(fmt(dividend, item.currency), true)}
@@ -2180,7 +2212,7 @@ export default function Accounts() {
           const listDaysToMaturity = item.endDate ? Math.max(0, Math.ceil((new Date(item.endDate) - new Date()) / (1000 * 60 * 60 * 24))) : null;
           const accountName = item.accountName || accounts.find(a => (a.id || a.name) === item.accountId)?.name || '';
           return (
-            <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+            <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 cursor-pointer transition-colors" onClick={() => openAssetDetail({ ...item, assetType: type }, 'independent')}>
               {td(item.market || '—')}
               {td(item.location || '—')}
               {td(item.type || '—')}
@@ -2200,7 +2232,9 @@ export default function Accounts() {
         });
       }
       return items.map(item => (
-        <tr key={item.id}>{td(item.name || item.id)}</tr>
+        <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 cursor-pointer" onClick={() => openAssetDetail({ ...item, assetType: type }, 'independent')}>
+          {td(item.name || item.id)}
+        </tr>
       ));
     };
 
@@ -2740,6 +2774,7 @@ export default function Accounts() {
               holdings={scaledAccountHoldings}
               readOnly={true}
               lockedAccountFilter={account?.name || ''}
+              onDetail={(h) => openAssetDetail(h, 'holding')}
               colorIdx={0}
               marketOptions={marketOptions}
               currencyOptions={currencyOptions}
@@ -2771,6 +2806,7 @@ export default function Accounts() {
                   holdings={scaleAssetList(accountArchivedHoldings, s)}
                   readOnly={true}
                   lockedAccountFilter={account?.name || ''}
+                  onDetail={(h) => openAssetDetail(h, 'holding')}
                   colorIdx={1}
                   marketOptions={marketOptions}
                   currencyOptions={currencyOptions}
@@ -4215,6 +4251,144 @@ export default function Accounts() {
           </div>
         )}
       </div>
+
+      {/* 资产详情弹窗 */}
+      {selectedAsset && selectedAsset.type === 'holding' && (
+        <DetailModal
+          data={selectedAsset.data}
+          totalMarketValue={0}
+          onClose={() => setSelectedAsset(null)}
+          saveState={saveState}
+          stateData={stateData}
+          setStateData={(updater) => setStateData(prev => typeof updater === 'function' ? updater(prev) : updater)}
+          onRefresh={() => loadData()}
+          selectedCurrency={selectedCurrency}
+          exchangeRates={exchangeRates}
+          quotesMap={quotesMap}
+          moneyFundMap={{}}
+          hkConnectRate={null}
+          readOnly={true}
+        />
+      )}
+      {selectedAsset && selectedAsset.type === 'independent' && (() => {
+        const data = selectedAsset.data;
+        const assetType = data.assetType || data.type;
+        const onClose = () => setSelectedAsset(null);
+        switch (assetType) {
+          case 'vehicle':
+            return <VehicleDetailModal item={data} onClose={onClose} readOnly={true} />;
+          case 'insurance':
+            return <InsuranceDetailModal item={data} onClose={onClose} readOnly={true} />;
+          case 'fixeddeposit':
+            return <FixedDepositDetailModal item={data} onClose={onClose} readOnly={true} />;
+          case 'survivalfund':
+            return <SurvivalFundDetailModal fund={data} onClose={onClose} readOnly={true} />;
+          default:
+            return <GenericAssetDetailModal item={data} onClose={onClose} readOnly={true} />;
+        }
+      })()}
     </div>
   );
 }
+
+// 持仓资产详情子组件
+function HoldingDetail({ asset }) {
+  const entries = Object.entries(asset).filter(([k, v]) => {
+    if (v === null || v === undefined || v === '') return false;
+    if (Array.isArray(v) && v.length === 0) return false;
+    if (typeof v === 'object' && !Array.isArray(v)) {
+      const subKeys = Object.keys(v);
+      return subKeys.length > 0 && subKeys.some(sk => v[sk] != null && v[sk] !== '');
+    }
+    return true;
+  });
+
+  const skipKeys = new Set(['transactions', 'transactionRecords', 'dividendRecords', 'metadata']);
+  const labelMap = {
+    id: 'ID', name: '资产名称', code: '代码', market: '市场', currency: '货币',
+    assetKind: '资产种类', assetType: '资产类型', assetClass: '资产分类',
+    categoryL1: '一级分类', categoryL2: '二级分类', categoryL3: '三级分类', categoryL4: '四级分类',
+    positionGroup: '持仓分组', positionType: '持仓分类', positionCategory: '持仓分类',
+    account: '所属账户', accountId: '账户ID', accountName: '账户名称',
+    quantity: '数量', shares: '份额', availableShares: '可用份额',
+    cost: '持仓成本', avgCost: '平均买入成本', currentPrice: '现价', purchasePrice: '买入价',
+    currentValue: '当前市值', balance: '余额', cashValue: '现金价值',
+    holdingPnl: '持仓盈亏', holdingPnlRate: '持仓盈亏率',
+    dailyPnl: '当日盈亏', dailyPnlRate: '当日收益率',
+    positionRatio: '仓位占比', holdingDays: '持有天数', tags: '标签',
+    status: '状态', type: '类型', subtype: '子类型',
+    interestRate: '利率', annualizedRate: '年化率', startDate: '开始日期', endDate: '结束日期',
+    totalAmount: '总金额', totalInterest: '总利息', daysToMaturity: '到期天数',
+    paidAmount: '已付金额', marketValue: '市场估值', residualValue: '残值',
+    dividendAmount: '分红金额', cumulativeDividend: '累计分红',
+    insuranceType: '保险类型', policyNumber: '保单号', policyName: '保单名称',
+    manufacturer: '厂商', model: '型号', usage: '用途', area: '面积',
+    termType: '期限方式', location: '地点', interest: '利率',
+    availableBalance: '可用余额', frozenAmount: '冻结金额',
+    createdAt: '创建时间', updatedAt: '更新时间', lastUpdateTime: '最后更新时间',
+    dataSource: '数据来源', refreshTime: '刷新时间',
+  };
+
+  const formatVal = (key, val) => {
+    if (skipKeys.has(key)) return null;
+    if (key === 'tags' && Array.isArray(val)) return val.join(', ');
+    if (key === 'transactionRecords' || key === 'dividendRecords') return `${val.length} 条记录`;
+    if (key === 'transactions') return `${val.length} 条交易记录`;
+    if (key === 'metadata') return null;
+    if (typeof val === 'number') return val.toLocaleString('zh-CN', { maximumFractionDigits: 4 });
+    if (typeof val === 'boolean') return val ? '是' : '否';
+    return String(val);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* 基本信息卡片 */}
+      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 rounded-xl p-5">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="bg-indigo-100 dark:bg-indigo-900/40 rounded-lg p-2.5">
+            <span className="text-xl">{asset.code ? '📈' : '💰'}</span>
+          </div>
+          <div>
+            <div className="text-lg font-bold text-gray-900 dark:text-white">{asset.name || '未命名资产'}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">{asset.code || ''} · {asset.market || ''} · {asset.currency || ''}</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">当前市值</div>
+            <div className="text-lg font-bold text-gray-900 dark:text-white">{formatVal('currentValue', asset.currentValue || asset.balance || 0)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">持仓盈亏</div>
+            <div className={`text-lg font-bold ${(asset.holdingPnl || 0) >= 0 ? 'text-green-600' : 'text-red-500'}`}>{formatVal('holdingPnl', asset.holdingPnl || 0)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">持仓盈亏率</div>
+            <div className={`text-lg font-bold ${(asset.holdingPnlRate || 0) >= 0 ? 'text-green-600' : 'text-red-500'}`}>{asset.holdingPnlRate ? `${(asset.holdingPnlRate * 100).toFixed(2)}%` : '—'}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 详细字段 */}
+      <div>
+        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">详细信息</h4>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+          {entries.map(([k, v]) => {
+            const formatted = formatVal(k, v);
+            if (formatted === null) return null;
+            const label = labelMap[k] || k;
+            return (
+              <div key={k} className="flex justify-between py-1.5 border-b border-gray-100 dark:border-slate-700">
+                <span className="text-xs text-gray-500 dark:text-gray-400">{label}</span>
+                <span className="text-sm text-gray-900 dark:text-white font-medium text-right max-w-[200px] truncate" title={String(formatted)}>{formatted}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 独立资产详情子组件
+
