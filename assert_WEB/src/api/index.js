@@ -597,10 +597,11 @@ export async function fetchHkConnectRate(force = false) {
   }
 }
 
-export async function lookupFinance(q, market) {
+export async function lookupFinance(q, market, options = {}) {
   try {
     const params = new URLSearchParams({ q });
     if (market) params.append('market', market);
+    if (options.excludeStock) params.append('excludeStock', '1');
     const response = await request(`/finance/lookup?${params.toString()}`)
     return response.items || []
   } catch {

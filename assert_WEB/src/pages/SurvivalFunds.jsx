@@ -287,6 +287,7 @@ export default function SurvivalFunds() {
   const [fundSortDir, setFundSortDir] = useState('asc'); // asc, desc
   const [fundFilterKeyword, setFundFilterKeyword] = useState('');
   const [fundFilterType, setFundFilterType] = useState('');
+  const [fundFilterCurrency, setFundFilterCurrency] = useState('');
   const [fundCurrentPage, setFundCurrentPage] = useState(1);
   const [fundPageSize, setFundPageSize] = useState(10);
   const [pinnedFundIds, setPinnedFundIds] = useState(() => {
@@ -408,6 +409,10 @@ export default function SurvivalFunds() {
     if (fundFilterType) {
       items = items.filter(f => f.type === fundFilterType);
     }
+    // 筛选：币种
+    if (fundFilterCurrency) {
+      items = items.filter(f => (f.currency || 'CNY') === fundFilterCurrency);
+    }
     // 收藏置顶
     const pinned = items.filter(f => pinnedFundIds.includes(f.id));
     const unpinned = items.filter(f => !pinnedFundIds.includes(f.id));
@@ -440,7 +445,7 @@ export default function SurvivalFunds() {
       }
     };
     return [...pinned.sort(sortFn), ...unpinned.sort(sortFn)];
-  }, [survivalFundsDerived, fundFilterKeyword, fundFilterType, fundSortBy, fundSortDir, pinnedFundIds]);
+  }, [survivalFundsDerived, fundFilterKeyword, fundFilterType, fundFilterCurrency, fundSortBy, fundSortDir, pinnedFundIds]);
 
   // 分页
   const paginatedFunds = useMemo(() => {
@@ -1095,9 +1100,17 @@ export default function SurvivalFunds() {
             <option value="">全部类型</option>
             {fundTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
-          {(fundFilterKeyword || fundFilterType || pinnedFundIds.length > 0) && (
+          <select
+            value={fundFilterCurrency}
+            onChange={(e) => { setFundFilterCurrency(e.target.value); setFundCurrentPage(1); }}
+            className="text-sm px-2 py-1 border border-gray-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+          >
+            <option value="">全部币种</option>
+            {CURRENCY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          {(fundFilterKeyword || fundFilterType || fundFilterCurrency || pinnedFundIds.length > 0) && (
             <button
-              onClick={() => { setFundFilterKeyword(''); setFundFilterType(''); setPinnedFundIds([]); localStorage.removeItem('survivalFundPinnedIds'); setFundCurrentPage(1); }}
+              onClick={() => { setFundFilterKeyword(''); setFundFilterType(''); setFundFilterCurrency(''); setPinnedFundIds([]); localStorage.removeItem('survivalFundPinnedIds'); setFundCurrentPage(1); }}
               className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               清除筛选

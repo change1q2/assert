@@ -4951,7 +4951,11 @@ export default function Finance({ onAssetPenetration }) {
         const effectiveSearchMarket = (cur.categoryL2 === '港股') ? '港股市场'
           : (cur.categoryL2 === '美股') ? '美股市场'
           : cur.market;
-        let results = await lookupFinance(q.trim(), effectiveSearchMarket);
+        const at = cur.assetType || '';
+        const shouldExcludeStock = at && at !== '股票';
+        console.log('[DEBUG handleCodeSearch]', { q, assetType: at, categoryL1: cur.categoryL1, categoryL2: cur.categoryL2, categoryL3: cur.categoryL3, excludeStock: shouldExcludeStock });
+        let results = await lookupFinance(q.trim(), effectiveSearchMarket, { excludeStock: shouldExcludeStock });
+        console.log('[DEBUG handleCodeSearch] results:', results.length, results.map(r => ({code: r.code, name: r.name, classify: r.classify})));
         // 货基/货币基金选中时：过滤掉股票数据，只保留基金类
         const isMoneyFundType = cur.assetType === '货基' || cur.positionType === '货币基金';
         if (isMoneyFundType) {
@@ -4966,6 +4970,7 @@ export default function Finance({ onAssetPenetration }) {
         const curAssetType = cur.assetType || '';
         const isNonStockAsset = curAssetType && curAssetType !== '股票';
         const allowStockInResults = categoryL3 === '场内'; // 场内允许股票
+        console.log('[DEBUG handleCodeSearch filter]', { categoryL3, curAssetType, isNonStockAsset, allowStockInResults, resultsBeforeFilter: results.length });
         if (!allowStockInResults && (isNonStockAsset || (categoryL3 === '场外' && curAssetType !== '股票'))) {
           results = results.filter(r => {
             const classify = r.classify || '';
@@ -5148,11 +5153,13 @@ export default function Finance({ onAssetPenetration }) {
       const effectiveVerifyMarket = (cur.categoryL2 === '港股') ? '港股市场'
         : (cur.categoryL2 === '美股') ? '美股市场'
         : cur.market;
+      const verifyAt = cur.assetType || '';
+      const verifyExcludeStock = verifyAt && verifyAt !== '股票';
       let results = [];
       if (type === 'code' && code) {
-        results = await lookupFinance(code, effectiveVerifyMarket);
+        results = await lookupFinance(code, effectiveVerifyMarket, { excludeStock: verifyExcludeStock });
       } else if (type === 'name' && name) {
-        results = await lookupFinance(name, effectiveVerifyMarket);
+        results = await lookupFinance(name, effectiveVerifyMarket, { excludeStock: verifyExcludeStock });
       } else {
         return;
       }

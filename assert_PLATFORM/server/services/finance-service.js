@@ -82,11 +82,13 @@ function tencentCodeFor(code, market) {
 // 当所有数据源都取不到有效价格时，回退使用上一次保留的不为0的数据
 const lastValidQuotesCache = new Map();
 
-async function lookupSecurities(q, market) {
+async function lookupSecurities(q, market, options = {}) {
+  const { excludeStock = false } = options;
   const normalizedQuery = q.trim().toUpperCase();
   const normalizedMarket = String(market || '').toLowerCase();
   const isHKMarket = normalizedMarket === 'hk' || normalizedMarket === '港股市场' || normalizedMarket === '港股';
   const isUSMarket = normalizedMarket === 'us' || normalizedMarket === '美股市场' || normalizedMarket === '美股';
+  const STOCK_CLASSIFIES = ['AStock', 'UsStock', 'UsADR', 'HK'];
   const localInstruments = [
     { code: "XAU", name: "现货黄金", classify: "Commodity", typeName: "贵金属", marketType: "overseas", mktNum: "" },
     { code: "XAG", name: "现货白银", classify: "Commodity", typeName: "贵金属", marketType: "overseas", mktNum: "" },
@@ -556,7 +558,16 @@ async function lookupSecurities(q, market) {
       }
     }
 
-    return { items: items.slice(0, 10) };
+    // 排除股票类资产（用于债券等非股票类资产搜索）
+    let finalItems = items;
+    if (excludeStock) {
+      finalItems = items.filter(item => {
+        if (STOCK_CLASSIFIES.includes(item.classify)) return false;
+        if (item.classify === 'ETF' && !/ETF|基金/.test(item.name || '')) return false;
+        return true;
+      });
+    }
+    return { items: finalItems.slice(0, 10) };
   } catch (err) {
     return { items: localItems, error: err.message };
   }

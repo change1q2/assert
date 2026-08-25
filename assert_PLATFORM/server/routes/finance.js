@@ -5,12 +5,13 @@ async function handler(req, res, body, origin, pathname, url) {
   if (req.method === "GET" && pathname === "/api/finance/lookup") {
     const q = (url.searchParams.get("q") || "").trim();
     const market = (url.searchParams.get("market") || "").trim();
+    const excludeStock = url.searchParams.get("excludeStock") === "1";
     if (!q) {
       json(res, 200, { items: [] }, origin);
       return;
     }
     try {
-      const result = await lookupSecurities(q, market);
+      const result = await lookupSecurities(q, market, { excludeStock });
       json(res, 200, result, origin);
     } catch (err) {
       json(res, 200, { items: [], error: err.message }, origin);

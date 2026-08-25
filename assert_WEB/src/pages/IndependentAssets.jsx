@@ -399,7 +399,9 @@ export default function IndependentAssets() {
     setEquityShowLookupDropdown(true);
     equityLookupTimerRef.current = setTimeout(async () => {
       try {
-        const results = await lookupFinance(q.trim(), formData.market);
+        const at = formData.assetType || '';
+        const shouldExcludeStock = at && at !== '股票';
+        const results = await lookupFinance(q.trim(), formData.market, { excludeStock: shouldExcludeStock });
         setEquityLookupResults(results);
       } catch (e) {
         console.error('Equity lookup failed:', e);
