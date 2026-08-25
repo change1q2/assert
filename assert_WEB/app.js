@@ -349,6 +349,40 @@ let analysisPeriod = String(new Date().getFullYear());
 let analysisShowTotalDebt = false;
 // ── 实时行情 ──
 let realtimeQuoteMap = {}; // code -> { price, changePct, changeAmt, prevClose, name, session, source }
+
+// 名称归一化：用于验证行情返回的名称与资产名称是否一致
+function normalizeAssetName(name) {
+  if (!name) return '';
+  return String(name)
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[()（）\[\]【】\(\)]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+// 验证行情名称与资产名称是否匹配
+function isQuoteNameMatch(assetName, quoteName) {
+  const a = normalizeAssetName(assetName);
+  const q = normalizeAssetName(quoteName);
+  if (!a || !q) return true; // 任一为空时不阻断
+  if (a === q) return true;
+  // 包含关系判断：一方包含另一方
+  if (a.includes(q) || q.includes(a)) return true;
+  return false;
+}
+
+// 从 realtimeQuoteMap 获取经过名称验证的行情数据
+function getValidQuote(asset) {
+  if (!asset || !asset.code) return {};
+  const q = realtimeQuoteMap[asset.code];
+  if (!q) return {};
+  if (q.name && asset.name && !isQuoteNameMatch(asset.name, q.name)) {
+    return {};
+  }
+  return q;
+}
+
 let premiumRows = [];
 let premiumLoading = false;
 let premiumError = "";
@@ -2902,11 +2936,11 @@ function refreshFinanceAssetAfterTransaction(assetId) {
 
 // ── 统一取价：实时价 → 昨收价 → 保存的currentPrice → 成本+盈亏反算 ──
 function resolveAssetPrice(asset) {
-  const q = realtimeQuoteMap[asset.code] || {};
+  const validQ = getValidQuote(asset);
   const cost = Number(asset.costPrice) || 0;
   const shares = Number(asset.shares) || 0;
   const calcPrice = (shares > 0 && cost > 0) ? (cost + (Number(asset.pnl) || 0) / shares) : 0;
-  return q.price || q.prevClose || Number(asset.currentPrice) || (calcPrice > 0 ? calcPrice : 0);
+  return validQ.price || validQ.prevClose || Number(asset.currentPrice) || (calcPrice > 0 ? calcPrice : 0);
 }
 
 // ── 个股仓位计算（独立于行情接口，每次渲染都可调用）──
@@ -2936,7 +2970,7 @@ function applyRealtimeQuotes() {
   const stockAssets = (state.financeAssets || []).filter((a) => ["stock", "fund"].includes(a.kind));
   // First pass: update current prices and calculate per-asset values
   for (const asset of stockAssets) {
-    const q = realtimeQuoteMap[asset.code];
+    const q = getValidQuote(asset);
     if (q && q.price > 0) {
       asset.currentPrice = q.price;
       // Recalculate market value
@@ -3148,7 +3182,7 @@ async function openKlineChart(assetId) {
   klineCurrentAsset = asset;
   klineCurrentRange = "6m";
   const dialog = document.querySelector("#klineChartDialog");
-  const quote = realtimeQuoteMap[asset.code] || {};
+  const quote = getValidQuote(asset);
   document.getElementById("klineChartTitle").textContent = `${asset.name} (${asset.code})`;
   document.getElementById("klineChartSubtitle").textContent = `${financeMarketLabel(asset.market)} · ${asset.kind === "stock" ? "股票" : asset.kind}`;
   const cp = resolveAssetPrice(asset);
@@ -3221,12 +3255,12 @@ function renderStockSummaryBar(assets, kind = "stock") {
     return s + financeAmountToRmb(pnl, a.currency);
   }, 0);
   const totalTodayPnl = assets.reduce((s, a) => {
-    const q = realtimeQuoteMap[a.code];
+    const q = getValidQuote(a);
     const todayPnl = calculateFinanceTodayPnl(a, q);
     return s + financeAmountToRmb(todayPnl, a.currency);
   }, 0);
   const allFinanceValue = (state.financeAssets || []).reduce((s, a) => {
-    const q = realtimeQuoteMap[a.code];
+    const q = getValidQuote(a);
     const price = q?.price || Number(a.currentPrice) || 0;
     const shares = Number(a.shares) || 0;
     return s + financeAmountToRmb(price * shares || financeAssetValue(a), a.currency);
@@ -3265,7 +3299,7 @@ function sortStockAssets(assets) {
       case "shares": va = Number(a.shares) || 0; vb = Number(b.shares) || 0; break;
       case "price": va = Number(a.currentPrice) || 0; vb = Number(b.currentPrice) || 0; break;
       case "pnl": va = Number(a.pnl) || 0; vb = Number(b.pnl) || 0; break;
-      case "todayPnl": va = calculateFinanceTodayPnl(a, realtimeQuoteMap[a.code]); vb = calculateFinanceTodayPnl(b, realtimeQuoteMap[b.code]); break;
+      case "todayPnl": va = calculateFinanceTodayPnl(a, getValidQuote(a)); vb = calculateFinanceTodayPnl(b, getValidQuote(b)); break;
       case "positionWeight": va = Number(a.positionWeight) || 0; vb = Number(b.positionWeight) || 0; break;
       case "code": va = a.code || ""; vb = b.code || ""; return va.localeCompare(vb) * dir;
       case "category": va = a.category || ""; vb = b.category || ""; return va.localeCompare(vb, "zh-CN") * dir;
@@ -3292,7 +3326,7 @@ function sortStockAssets(assets) {
 function stockCellContent(item, colKey) {
   const account = state.accounts.find((e) => e.id === item.accountId);
   // 现价：实时价 → 昨收价 → 保存的currentPrice → 成本+盈亏反算
-  const quoteData = realtimeQuoteMap[item.code] || {};
+  const quoteData = getValidQuote(item);
   const cp = resolveAssetPrice(item);
   const cost = Number(item.costPrice) || 0;
   const shares = Number(item.shares) || 0;
@@ -8474,7 +8508,7 @@ function renderHoldingTab(asset) {
   const { lots, totalShares, totalCost, avgCost, marketPrice: calcMarketPrice, dilutedCostPrice, buyAvgPrice } = computeHoldingLots(asset);
   const currentShares = Number(asset.shares) || 0;
   // 现价：实时价 → 昨收价 → 保存的currentPrice → 成本+盈亏反算
-  const quoteData = realtimeQuoteMap[asset.code] || {};
+  const quoteData = getValidQuote(asset);
   const realTimePrice = Number(quoteData.price) > 0;
   const marketPrice = resolveAssetPrice(asset) || calcMarketPrice;
   // 持仓市值：现价 × 份额
@@ -8496,7 +8530,7 @@ function renderHoldingTab(asset) {
   // 个股仓位：占全部股票资产的比例
   const stockAssets = (state.financeAssets || []).filter((a) => a.kind === "stock");
   const totalStockValue = stockAssets.reduce((s, a) => {
-    const q = realtimeQuoteMap[a.code];
+    const q = getValidQuote(a);
     const aPrice = q?.price || Number(a.currentPrice) || 0;
     const aShares = Number(a.shares) || 0;
     // 优先用现价×份额，没有现价则用 成本+盈亏 作为市值兜底
