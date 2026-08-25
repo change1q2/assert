@@ -42,6 +42,7 @@ import {
   LabelList,
 } from 'recharts';
 import { truncateNum } from '../utils/currency';
+import sanitizeText from '../utils/sanitizeText';
 
 function formatCurrency(value, currency = 'CNY') {
   const num = value == null || isNaN(value) ? 0 : Number(value);
@@ -193,8 +194,10 @@ function aggregateClassesFromFinance(financeAccounts, existingClasses) {
   const childrenMap = {};
 
   accounts.forEach((account) => {
-    const categoryL1 = account.categoryL1 || account.category || '其他';
-    const assetType = account.assetType || account.kind || account.category || '其他';
+    const rawL1 = account.categoryL1 || account.category || '其他';
+    const categoryL1 = sanitizeText(rawL1, '') || rawL1;
+    const rawAssetType = account.assetType || account.kind || account.category || '其他';
+    const assetType = sanitizeText(rawAssetType, '') || rawAssetType;
     const market = normalizeMarket(account.market);
     const value = parseFloat(account.currentValue || account.balance || account.currentPrice * account.shares || 0);
     const cost = parseFloat(account.cost || account.costPrice * account.shares || 0);
@@ -369,7 +372,8 @@ function computeCategoryL1Amounts(financeAccounts) {
   const categoryMap = {};
   
   accounts.forEach((account) => {
-    const categoryL1 = account.categoryL1 || account.category || '其他';
+    const rawL1 = account.categoryL1 || account.category || '其他';
+    const categoryL1 = sanitizeText(rawL1, '') || rawL1;
     const value = parseFloat(account.currentValue || account.balance || account.currentPrice * account.shares || 0);
     if (!categoryMap[categoryL1]) {
       categoryMap[categoryL1] = 0;
@@ -391,7 +395,8 @@ function generateTrendData(financeAccounts, classes) {
   // 按一级分类聚合当前金额
   const categoryValueMap = {};
   accounts.forEach((account) => {
-    const categoryL1 = account.categoryL1 || account.category || '其他';
+    const rawL1 = account.categoryL1 || account.category || '其他';
+    const categoryL1 = sanitizeText(rawL1, '') || rawL1;
     const value = parseFloat(account.currentValue || account.balance || account.currentPrice * account.shares || 0);
     if (!categoryValueMap[categoryL1]) {
       categoryValueMap[categoryL1] = 0;
@@ -679,6 +684,20 @@ export default function AssetClasses({ onCategorySelect }) {
     try {
       const data = await fetchState();
       let currentClasses = data.assetClasses || [];
+
+      // 清洗分类名称中的乱码字符
+      currentClasses = currentClasses.map((cls) => {
+        const safeName = sanitizeText(cls.name, '') || cls.name;
+        const safeChildren = Array.isArray(cls.children)
+          ? cls.children.map((c) => {
+              if (typeof c === 'object') {
+                return { ...c, name: sanitizeText(c.name, '') || c.name };
+              }
+              return sanitizeText(c, '') || c;
+            })
+          : cls.children;
+        return { ...cls, name: safeName, children: safeChildren };
+      });
 
       // 合并重复分类（同名的分类合并为一个，资产和子分类归并到第一个）
       const seen = {};

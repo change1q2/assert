@@ -641,21 +641,19 @@ export default function Debts() {
     if (!paymentItem) return;
 
     const newPayments = { ...(debt.payments || {}) };
-    const currentStatus = newPayments[period]; // true=已还, false=手动正常, undefined=自动
+    const currentStatus = newPayments[period]; // true=已还, false=未还(手动标记), undefined=自动计算
 
-    // 三级状态循环切换：undefined（自动） → true（已还） → false（手动标记正常/未还但不逾期） → undefined（回到自动）
-    // 但针对"逾期未还"场景：用户点击"已逾期"按钮时最常见诉求是标记为已还款，
-    // 所以优化路径：若当前是自动且已逾期，先跳到 true（已还）；true → false（手动正常，避免逾期红标）；false → undefined（回到自动）
-    if (currentStatus === undefined) {
-      newPayments[period] = true; // 第1步：自动 → 已还
-    } else if (currentStatus === true) {
-      newPayments[period] = false; // 第2步：已还 → 手动标记正常（未还但不显示逾期，永久保存）
+    // 两态切换：未还（含自动/手动未还）↔ 已还
+    // 用户明确点击"已还"后，状态将被持久化保存，直到用户再次点击
+    if (currentStatus === true) {
+      // 已还 → 未还（手动标记，永久保存，不再自动变回）
+      newPayments[period] = false;
     } else {
-      // currentStatus === false：手动正常 → 回到自动计算
-      delete newPayments[period];
+      // 未还（自动或手动未还）→ 已还
+      newPayments[period] = true;
     }
 
-    // paidAmount 只统计 payments[period] === true 的期数（手动标记正常的不累计到已还金额）
+    // paidAmount 只统计 payments[period] === true 的期数（手动标记的不累计到已还金额）
     const paidPeriods = Object.keys(newPayments).filter((k) => newPayments[k] === true);
     const newPaidAmount = paidPeriods.reduce((sum, p) => {
       const item = (plan?.schedule || []).find((s) => s.period === parseInt(p, 10));
