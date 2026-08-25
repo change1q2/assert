@@ -65,6 +65,38 @@ export function formatPercentage(value) {
   return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
+// 名称归一化：用于验证行情返回的名称与资产名称是否一致
+function normalizeAssetName(name) {
+  if (!name) return '';
+  return String(name)
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[()（）\[\]【】\(\)]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+// 验证行情名称与资产名称是否匹配
+function isQuoteNameMatch(assetName, quoteName) {
+  const a = normalizeAssetName(assetName);
+  const q = normalizeAssetName(quoteName);
+  if (!a || !q) return true;
+  if (a === q) return true;
+  if (a.includes(q) || q.includes(a)) return true;
+  return false;
+}
+
+// 从 quotesMap 获取匹配的行情（含名称验证）
+function getQuoteForAsset(asset, quotesMap) {
+  if (!asset || !asset.code || !quotesMap) return null;
+  const q = quotesMap[asset.code];
+  if (!q) return null;
+  if (q.name && asset.name && !isQuoteNameMatch(asset.name, q.name)) {
+    return null;
+  }
+  return q;
+}
+
 // 港股货币基金数据源配置（模块级常量，供 DetailModal 和主组件共用）
 const HK_MONEY_FUND_SOURCES = [
   {
@@ -790,7 +822,7 @@ export function DetailModal({ data, totalMarketValue, onClose, saveState, stateD
   })();
   // 非现金类（现金类不显示盈亏汇总和数据校验）
   const isEquityIndoor = latestData.categoryL1 !== '现金类' && !_isDetailMoneyFund;
-  const _quote = quotesMap && latestData.code ? quotesMap[latestData.code] : null;
+  const _quote = getQuoteForAsset(latestData, quotesMap);
   const _quotePrice = _quote && _quote.price != null ? parseFloat(_quote.price) : null;
   const _quotePrevClose = _quote && _quote.prevClose != null ? parseFloat(_quote.prevClose) : null;
   const _quoteChangePct = _quote && _quote.changePct != null ? parseFloat(_quote.changePct) : null;
@@ -5849,7 +5881,7 @@ export default function Finance({ onAssetPenetration }) {
         }
         return parseFloat(a.todayPnl) || parseFloat(a.dailyPnl) || 0;
       }
-      const q = a.code && quotesMap[a.code] ? quotesMap[a.code] : null;
+      const q = getQuoteForAsset(a, quotesMap);
       const isUSMarket = a.market === '美股市场' || a.market === '美股';
       const _storedPrevPrice = parseFloat(a.prevPrice) || 0;
       const isManualPrice = a.priceManualEdit === true || a.priceManualEdit === 'true';
@@ -5894,7 +5926,7 @@ export default function Finance({ onAssetPenetration }) {
         }
         return 0;
       }
-      const q = a.code && quotesMap[a.code] ? quotesMap[a.code] : null;
+      const q = getQuoteForAsset(a, quotesMap);
       const isUSMarket = a.market === '美股市场' || a.market === '美股';
       const _storedPrevPrice = parseFloat(a.prevPrice) || 0;
       const isManualPrice = a.priceManualEdit === true || a.priceManualEdit === 'true';
@@ -5949,8 +5981,9 @@ export default function Finance({ onAssetPenetration }) {
         }
       }
       // 从 quotesMap 取到的实时行情：港股通时转换成 CNY，其他情况直接使用
-      const _quoteRawPrice = parseFloat(quotesMap[a.code]?.price);
-      const _quoteRawPrevClose = parseFloat(quotesMap[a.code]?.prevClose);
+      const _validQuote = getQuoteForAsset(a, quotesMap);
+      const _quoteRawPrice = _validQuote ? parseFloat(_validQuote.price) : NaN;
+      const _quoteRawPrevClose = _validQuote ? parseFloat(_validQuote.prevClose) : NaN;
       const _quotePrice = (isHKConnect && _quoteRawPrice) ? (_quoteRawPrice * _hkConnectValueFactor) : _quoteRawPrice;
       const _quotePrevClose = (isHKConnect && _quoteRawPrevClose) ? (_quoteRawPrevClose * _hkConnectValueFactor) : _quoteRawPrevClose;
 
@@ -6249,8 +6282,9 @@ export default function Finance({ onAssetPenetration }) {
       const cat = a.categoryL1 || a.category || '其他';
       if (!categorizedHoldings[cat]) categorizedHoldings[cat] = [];
       const _isManual = a.priceManualEdit === true || a.priceManualEdit === 'true';
-      const _price = _isManual ? (parseFloat(a.currentPrice) || 0) : (parseFloat(quotesMap[a.code]?.price) || parseFloat(a.currentPrice) || 0);
-      const _prevClose = _isManual ? (parseFloat(a.prevPrice) || 0) : (parseFloat(quotesMap[a.code]?.prevClose) || parseFloat(a.prevPrice) || 0);
+      const _catQuote = getQuoteForAsset(a, quotesMap);
+      const _price = _isManual ? (parseFloat(a.currentPrice) || 0) : ((_catQuote ? parseFloat(_catQuote.price) : NaN) || parseFloat(a.currentPrice) || 0);
+      const _prevClose = _isManual ? (parseFloat(a.prevPrice) || 0) : ((_catQuote ? parseFloat(_catQuote.prevClose) : NaN) || parseFloat(a.prevPrice) || 0);
       const _priceChange = _price > _prevClose ? 'up' : _price < _prevClose ? 'down' : 'unchanged';
       const _qty = parseFloat(a.quantity) || 0;
       categorizedHoldings[cat].push({
