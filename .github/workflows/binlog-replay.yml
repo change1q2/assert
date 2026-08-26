@@ -194,31 +194,59 @@ jobs:
                   i=$((i+1))
                   
                   if docker exec "$CONTAINER_ID" test -f "$CONTAINER_PATH" 2>/dev/null; then
-                    if [ "$SZ" -gt 104857600 ] 2>/dev/null; then
+                    # Process large files in 200MB chunks
+                    CHUNK_SIZE=209715200
+                    
+                    if [ "$SZ" -gt "$CHUNK_SIZE" ] 2>/dev/null; then
                       echo ""
-                      echo "$BF: ${SZ} bytes - SKIPPING (>100MB)"
-                      continue
-                    fi
-                    
-                    echo ""
-                    echo "Decoding $BF ($SZ bytes)..."
-                    
-                    DECODED_FILE="$DECODED_DIR/${BF}.txt"
-                    docker exec "$CONTAINER_ID" "$MYSQLBINLOG" \
-                      --no-defaults --force-read \
-                      --verbose --verbose \
-                      --base64-output=DECODE-ROWS \
-                      "$CONTAINER_PATH" > "$DECODED_FILE" 2>&1
-                    
-                    DEC_SZ=$(stat -c%s "$DECODED_FILE" 2>/dev/null || echo 0)
-                    INS=$(grep -c 'INSERT INTO' "$DECODED_FILE" 2>/dev/null || echo 0)
-                    DEL=$(grep -c 'DELETE FROM' "$DECODED_FILE" 2>/dev/null || echo 0)
-                    UPD=$(grep -c 'UPDATE.*SET' "$DECODED_FILE" 2>/dev/null || echo 0)
-                    echo "  Decoded: $DEC_SZ bytes, INSERT=$INS, DELETE=$DEL, UPDATE=$UPD"
-                    
-                    if [ "$INS" -gt 0 ] 2>/dev/null || [ "$DEL" -gt 0 ] 2>/dev/null; then
-                      echo "  Key events:"
-                      grep -E 'INSERT INTO|DELETE FROM|UPDATE.*SET' "$DECODED_FILE" 2>/dev/null | head -10 | sed 's/^/    /'
+                      echo "$BF: ${SZ} bytes - processing in 200MB chunks..."
+                      
+                      OFFSET=4
+                      CHUNK_NUM=0
+                      while [ "$OFFSET" -lt "$SZ" ] 2>/dev/null; do
+                        CHUNK_NUM=$((CHUNK_NUM + 1))
+                        END_POS=$((OFFSET + CHUNK_SIZE))
+                        [ "$END_POS" -gt "$SZ" ] 2>/dev/null && END_POS=$SZ
+                        
+                        echo "  Chunk $CHUNK_NUM: $OFFSET - $END_POS"
+                        
+                        CHUNK_FILE="$DECODED_DIR/${BF}_chunk${CHUNK_NUM}.txt"
+                        docker exec "$CONTAINER_ID" "$MYSQLBINLOG" \
+                          --no-defaults --force-read \
+                          --verbose --verbose \
+                          --base64-output=DECODE-ROWS \
+                          --start-position=$OFFSET \
+                          --stop-position=$END_POS \
+                          "$CONTAINER_PATH" > "$CHUNK_FILE" 2>/dev/null
+                        
+                        CHUNK_SZ=$(stat -c%s "$CHUNK_FILE" 2>/dev/null || echo 0)
+                        CHUNK_INS=$(grep -c 'INSERT INTO' "$CHUNK_FILE" 2>/dev/null || echo 0)
+                        CHUNK_DEL=$(grep -c 'DELETE FROM' "$CHUNK_FILE" 2>/dev/null || echo 0)
+                        echo "    Decoded: $CHUNK_SZ bytes, INSERT=$CHUNK_INS, DELETE=$CHUNK_DEL"
+                        
+                        OFFSET=$END_POS
+                      done
+                    else
+                      echo ""
+                      echo "Decoding $BF ($SZ bytes)..."
+                      
+                      DECODED_FILE="$DECODED_DIR/${BF}.txt"
+                      docker exec "$CONTAINER_ID" "$MYSQLBINLOG" \
+                        --no-defaults --force-read \
+                        --verbose --verbose \
+                        --base64-output=DECODE-ROWS \
+                        "$CONTAINER_PATH" > "$DECODED_FILE" 2>&1
+                      
+                      DEC_SZ=$(stat -c%s "$DECODED_FILE" 2>/dev/null || echo 0)
+                      INS=$(grep -c 'INSERT INTO' "$DECODED_FILE" 2>/dev/null || echo 0)
+                      DEL=$(grep -c 'DELETE FROM' "$DECODED_FILE" 2>/dev/null || echo 0)
+                      UPD=$(grep -c 'UPDATE.*SET' "$DECODED_FILE" 2>/dev/null || echo 0)
+                      echo "  Decoded: $DEC_SZ bytes, INSERT=$INS, DELETE=$DEL, UPDATE=$UPD"
+                      
+                      if [ "$INS" -gt 0 ] 2>/dev/null || [ "$DEL" -gt 0 ] 2>/dev/null; then
+                        echo "  Key events:"
+                        grep -E 'INSERT INTO|DELETE FROM|UPDATE.*SET' "$DECODED_FILE" 2>/dev/null | head -10 | sed 's/^/    /'
+                      fi
                     fi
                   else
                     echo "$BF: NOT FOUND"
