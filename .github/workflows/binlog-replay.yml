@@ -1,0 +1,203 @@
+name: Binlog Replay - Extract Deleted Data
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract and replay deleted data from binary logs
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 120m
+          script: |
+            set +e
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            [ -z "$CONTAINER_ID" ] && echo "❌ No MySQL container" && exit 1
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            echo "========================================"
+            echo "  Binlog 数据回放入围"
+            echo "  提取删除前的 INSERT 操作"
+            echo "========================================"
+
+            RECOVER_DIR="/tmp/binlog_recovery_$(date +%Y%m%d_%H%M%S)"
+            mkdir -p "$RECOVER_DIR"
+
+            # ========== 1. 确认 binlog 格式 ==========
+            echo ""
+            echo "=== 1. 检查 binlog 格式 ==="
+            BINLOG_FORMAT=$($MYSQL -N -B -e "SHOW VARIABLES LIKE 'binlog_format';" 2>/dev/null | awk '{print $2}')
+            echo "binlog_format = $BINLOG_FORMAT"
+
+            # ========== 2. 逐个 binlog 解码分析 ==========
+            echo ""
+            echo "=== 2. 解码 binlog 文件 ==="
+            
+            BINLOG_FILES=$(docker exec "$CONTAINER_ID" ls /var/lib/mysql/binlog.00000{6,7,8,9} /var/lib/mysql/binlog.00010 2>/dev/null)
+            
+            for BF in $BINLOG_FILES; do
+              BASENAME=$(basename "$BF")
+              echo ""
+              echo "--- 处理 $BASENAME ---"
+              
+              # 解码 binlog（使用 --verbose --verbose 获取行详情）
+              OUTPUT="$RECOVER_DIR/${BASENAME%.00*}_decoded.txt"
+              
+              docker exec "$CONTAINER_ID" mysqlbinlog \
+                --verbose --verbose \
+                --base64-output=DECODE-ROWS \
+                "$BF" > "$OUTPUT" 2>/dev/null
+              
+              if [ -f "$OUTPUT" ]; then
+                SIZE=$(stat -c%s "$OUTPUT" 2>/dev/null)
+                echo "  解码完成: $SIZE bytes"
+                
+                # 统计事件
+                DEL_LINES=$(grep -c "DELETE FROM" "$OUTPUT" 2>/dev/null || echo 0)
+                INS_LINES=$(grep -c "INSERT INTO" "$OUTPUT" 2>/dev/null || echo 0)
+                echo "  DELETE: $DEL_LINES, INSERT: $INS_LINES"
+                
+                # 列出 DELETE 的表
+                if [ "$DEL_LINES" -gt 0 ] 2>/dev/null; then
+                  echo "  删除的表:"
+                  grep "DELETE FROM" "$OUTPUT" 2>/dev/null | grep -oP "DELETE FROM \S+" | sort | uniq -c | sort -rn
+                  
+                  # 提取 asset_platform 数据库的 DELETE
+                  grep -A5 "DELETE FROM" "$OUTPUT" 2>/dev/null | grep -i "asset_platform" | head -20
+                fi
+              fi
+            done
+
+            # ========== 3. 从 binlog 提取 INSERT 用于恢复 ==========
+            echo ""
+            echo "=== 3. 提取 INSERT 语句用于恢复 ==="
+            
+            # 合并所有解码的 binlog
+            cat "$RECOVER_DIR"/*_decoded.txt 2>/dev/null > "$RECOVER_DIR/all_events.txt"
+            
+            echo "总事件数: $(wc -l < "$RECOVER_DIR/all_events.txt" 2>/dev/null)"
+            
+            # 提取所有涉及资产相关表的 INSERT
+            echo ""
+            echo "--- 提取关键表的 INSERT ---"
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              echo ""
+              echo "INSERT INTO $TABLE:"
+              grep -A20 "INSERT INTO.*$TABLE" "$RECOVER_DIR/all_events.txt" 2>/dev/null | grep -v "^--$" | head -30
+            done
+
+            # ========== 4. 构建恢复 SQL ==========
+            echo ""
+            echo "=== 4. 构建恢复 SQL 脚本 ==="
+            
+            RECOVER_SQL="$RECOVER_DIR/binlog_recovery.sql"
+            echo "-- Binlog 数据恢复脚本" > "$RECOVER_SQL"
+            echo "-- 从二进制日志中提取的 INSERT 语句" >> "$RECOVER_SQL"
+            echo "" >> "$RECOVER_SQL"
+            
+            # 提取所有 INSERT INTO asset_platform.* 语句
+            grep "INSERT INTO asset_platform\." "$RECOVER_DIR/all_events.txt" 2>/dev/null | \
+              sed 's/^### //' | \
+              while read -r line; do
+                # 跳过空行
+                [ -z "$line" ] && continue
+                # 跳过 DELETE
+                echo "$line" | grep -q "DELETE" && continue
+                echo "$line" >> "$RECOVER_SQL"
+              done
+            
+            echo "恢复 SQL 行数: $(wc -l < "$RECOVER_SQL" 2>/dev/null)"
+            
+            # ========== 5. 分析 binlog 中的数据模式 ==========
+            echo ""
+            echo "=== 5. 分析 binlog 中的事件模式 ==="
+            
+            # 查找是否有连续的 DELETE + INSERT 模式（saveUserState 的特征）
+            echo ""
+            echo "--- 查找 DELETE 后跟 INSERT 的模式 ---"
+            for TABLE in accounts finance_assets records debts; do
+              echo ""
+              echo "$TABLE 模式:"
+              grep -B2 -A5 "DELETE FROM.*$TABLE" "$RECOVER_DIR/all_events.txt" 2>/dev/null | head -20
+            done
+
+            # ========== 6. 从 binlog 恢复数据（仅增量）==========
+            echo ""
+            echo "=== 6. 尝试从 binlog 恢复数据 ==="
+            
+            # 方法：如果 binlog 中有 INSERT 语句（删除前的数据），我们可以回放它们
+            # 但 ROW 格式的 binlog 需要特殊处理
+            
+            # 先尝试用 mysqlbinlog 生成可执行 SQL
+            echo "--- 尝试直接从 binlog 回放入围 ---"
+            
+            for BF in /var/lib/mysql/binlog.000006 /var/lib/mysql/binlog.000007 /var/lib/mysql/binlog.000008; do
+              BASENAME=$(basename "$BF")
+              
+              # 使用 --rewrite-db 重写数据库名 + --exclude-gtids 跳过 GTID
+              # 提取 DELETE 之前的所有 INSERT（即原始数据）
+              echo "处理 $BASENAME ..."
+              
+              # 方法：使用 mysqlbinlog 将 ROW 格式转换为语句格式
+              # 然后用 sed 提取 INSERT，跳过 DELETE
+              docker exec "$CONTAINER_ID" mysqlbinlog \
+                --verbose --verbose \
+                "$BF" 2>/dev/null | \
+                grep -E "INSERT INTO.*asset_platform|### INSERT" | \
+                sed 's/^### //' | \
+                while read -r line; do
+                  # 验证这是 INSERT 不是 DELETE
+                  if echo "$line" | grep -qi "^INSERT"; then
+                    echo "$line" >> "$RECOVER_DIR/replay_inserts.sql"
+                  fi
+                done
+            done
+            
+            if [ -f "$RECOVER_DIR/replay_inserts.sql" ]; then
+              echo "提取到的 INSERT 数量: $(wc -l < "$RECOVER_DIR/replay_inserts.sql")"
+              echo ""
+              echo "--- 前 20 条 INSERT ---"
+              head -20 "$RECOVER_DIR/replay_inserts.sql"
+              
+              # 尝试增量导入（INSERT IGNORE 避免冲突）
+              echo ""
+              echo "--- 尝试增量导入 ---"
+              # 修改为 INSERT IGNORE
+              sed 's/^INSERT INTO/INSERT IGNORE INTO/' "$RECOVER_DIR/replay_inserts.sql" > "$RECOVER_DIR/replay_ignore.sql"
+              
+              # 限制导入数量（安全起见）
+              head -100 "$RECOVER_DIR/replay_ignore.sql" > "$RECOVER_DIR/replay_100.sql"
+              
+              $MYSQL asset_platform < "$RECOVER_DIR/replay_100.sql" 2>&1 | head -10
+              
+              echo "如果导入有错误，检查日志"
+            else
+              echo "未找到可回放的 INSERT"
+            fi
+
+            # ========== 7. 生成最终报告 ==========
+            echo ""
+            echo "========================================"
+            echo "  Binlog 恢复报告"
+            echo "========================================"
+            echo "解码文件: $RECOVER_DIR/"
+            echo ""
+            echo "关键发现:"
+            echo "  - Binlog 文件: $(ls "$RECOVER_DIR"/*_decoded.txt 2>/dev/null | wc -l) 个"
+            echo "  - 总事件行数: $(wc -l < "$RECOVER_DIR/all_events.txt" 2>/dev/null)"
+            echo "  - 恢复 SQL: $(wc -l < "$RECOVER_DIR/binlog_recovery.sql" 2>/dev/null) 行"
+            echo ""
+            echo "下一步操作:"
+            echo "  1. 查看 $RECOVER_DIR/replay_inserts.sql 中的 INSERT"
+            echo "  2. 手动验证数据后执行导入"
+            echo "  3. 考虑启用 GTID + binlog 备份以防未来丢失"

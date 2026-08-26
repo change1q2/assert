@@ -1,0 +1,194 @@
+name: Recover From Found Backups
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recover data from discovered backup files
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 30m
+          script: |
+            set +e
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            [ -z "$CONTAINER_ID" ] && echo "❌ No MySQL container" && exit 1
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            echo "========================================"
+            echo "  从发现的备份恢复数据"
+            echo "========================================"
+
+            # ========== 1. 检查 init-db.sql 备份 ==========
+            echo ""
+            echo "=== 1. 检查 /opt/shuaiti/server/init-db.sql ==="
+            INIT_DB="/opt/shuaiti/server/init-db.sql"
+            if [ -f "$INIT_DB" ]; then
+              echo "文件存在，大小: $(stat -c%s "$INIT_DB" 2>/dev/null) bytes"
+              echo "--- 前 100 行 ---"
+              head -100 "$INIT_DB"
+              
+              echo ""
+              echo "--- 统计 ---"
+              echo "INSERT 语句: $(grep -c 'INSERT' "$INIT_DB")"
+              echo "CREATE TABLE: $(grep -c 'CREATE TABLE' "$INIT_DB")"
+              
+              # 看看是否包含账户/理财/债务数据
+              echo ""
+              echo "--- 检查是否包含关键数据表 ---"
+              for TABLE in accounts finance_assets records debts asset_classes; do
+                CNT=$(grep -c "$TABLE" "$INIT_DB" 2>/dev/null)
+                echo "$TABLE: 出现 $CNT 次"
+              done
+            else
+              echo "文件不存在"
+            fi
+
+            # ========== 2. 检查 restore_data.sql ==========
+            echo ""
+            echo "=== 2. 检查 restore_data.sql ==="
+            for F in "/opt/shuaiti/server/restore_data.sql" "/opt/asset-platform/restore_data.sql" "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/401/fs/tmp/restore_data.sql"; do
+              if [ -f "$F" ]; then
+                echo "找到: $F ($(stat -c%s "$F" 2>/dev/null) bytes)"
+                cat "$F"
+                echo "---"
+              fi
+            done
+
+            # ========== 3. 检查 backup.sql ==========
+            echo ""
+            echo "=== 3. 检查 backup.sql ==="
+            for F in "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/401/fs/tmp/backup.sql" "/opt/asset-platform-backup-20260611-173532/server/schema.sql"; do
+              if [ -f "$F" ]; then
+                echo "找到: $F ($(stat -c%s "$F" 2>/dev/null) bytes)"
+                echo "--- 内容摘要 ---"
+                head -50 "$F"
+                echo "..."
+                tail -20 "$F"
+                echo "--- INSERT 统计 ---"
+                echo "INSERT: $(grep -c 'INSERT' "$F")"
+                for TABLE in accounts finance_assets records debts asset_classes; do
+                  CNT=$(grep -c "INSERT.*$TABLE" "$F" 2>/dev/null)
+                  echo "  $TABLE: $CNT"
+                done
+                echo "---"
+              fi
+            done
+
+            # ========== 4. 检查 mysql-backups 目录 ==========
+            echo ""
+            echo "=== 4. 检查 /opt/mysql-backups/ ==="
+            ls -la /opt/mysql-backups/ 2>/dev/null
+            for F in /opt/mysql-backups/*.sql.gz; do
+              if [ -f "$F" ]; then
+                echo "检查 $F ..."
+                zcat "$F" 2>/dev/null | head -20
+                echo "..."
+                echo "INSERT 数量: $(zcat "$F" 2>/dev/null | grep -c 'INSERT')"
+                echo "accounts INSERT: $(zcat "$F" 2>/dev/null | grep -c 'INSERT.*accounts')"
+                echo "finance_assets INSERT: $(zcat "$F" 2>/dev/null | grep -c 'INSERT.*finance_assets')"
+              fi
+            done
+
+            # ========== 5. 尝试从 init-db.sql 恢复数据 ==========
+            echo ""
+            echo "=== 5. 尝试从备份恢复（增量，不覆盖）==="
+            
+            if [ -f "$INIT_DB" ] && [ "$(stat -c%s "$INIT_DB" 2>/dev/null)" -gt 1000 ]; then
+              echo "尝试从 init-db.sql 恢复..."
+              
+              # 创建临时恢复脚本（仅提取 INSERT 语句）
+              grep -i "INSERT INTO.*asset_platform" "$INIT_DB" > /tmp/init_recovery_inserts.sql 2>/dev/null
+              
+              # 也尝试直接导入（如果它是完整的 dump）
+              # 先检查它是否引用了 asset_platform 数据库
+              if grep -q "asset_platform" "$INIT_DB"; then
+                echo "文件引用了 asset_platform 数据库"
+                echo "尝试在临时库中分析..."
+                
+                # 创建临时数据库导入分析
+                docker exec "$CONTAINER_ID" mysql -u root -p$MYSQL_ROOT_PASSWORD -e "CREATE DATABASE IF NOT EXISTS temp_restore_db;" 2>/dev/null
+                docker exec -i "$CONTAINER_ID" mysql -u root -p$MYSQL_ROOT_PASSWORD temp_restore_db < "$INIT_DB" 2>&1 | head -5
+                
+                if [ $? -eq 0 ]; then
+                  echo "✅ 成功导入临时库"
+                  
+                  # 从临时库中提取数据
+                  for TABLE in accounts finance_assets records debts asset_classes; do
+                    TMP_CNT=$(docker exec "$CONTAINER_ID" mysql -u root -p$MYSQL_ROOT_PASSWORD -N -B -e "SELECT COUNT(*) FROM temp_restore_db.$TABLE;" 2>/dev/null)
+                    CUR_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+                    echo "$TABLE: 临时库=$TMP_CNT / 当前=$CUR_CNT"
+                    
+                    if [ "$TMP_CNT" -gt "$CUR_CNT" ] 2>/dev/null; then
+                      echo "  ⚠ 临时库数据更多，可以恢复！"
+                      # 提取多出的数据
+                      docker exec "$CONTAINER_ID" mysql -u root -p$MYSQL_ROOT_PASSWORD -e "
+                        INSERT IGNORE INTO asset_platform.$TABLE 
+                        SELECT * FROM temp_restore_db.$TABLE
+                        WHERE NOT EXISTS (SELECT 1 FROM asset_platform.$TABLE a WHERE a.id = temp_restore_db.$TABLE.id);
+                      " 2>/dev/null
+                      NEW_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+                      echo "  恢复后: $NEW_CNT"
+                    fi
+                  done
+                fi
+                
+                # 清理临时库
+                docker exec "$CONTAINER_ID" mysql -u root -p$MYSQL_ROOT_PASSWORD -e "DROP DATABASE IF EXISTS temp_restore_db;" 2>/dev/null
+              fi
+            fi
+
+            # ========== 6. 分析 binlog 中的实际 DELETE 事件 ==========
+            echo ""
+            echo "=== 6. 深度分析二进制日志 ==="
+            
+            # 使用正确的参数分析 ROW 格式 binlog
+            for BF in /var/lib/mysql/binlog.000006 /var/lib/mysql/binlog.000007 /var/lib/mysql/binlog.000008; do
+              echo ""
+              echo "--- 分析 $BF ---"
+              
+              # 检查 binlog 格式
+              docker exec "$CONTAINER_ID" mysqlbinlog -v "$BF" 2>/dev/null | grep -i "FORMAT_DESCRIPTION\|SERVER_STATUS\|binlog_format" | head -3
+              
+              # 用 -v -v 解码行事件
+              RESULT=$(docker exec "$CONTAINER_ID" mysqlbinlog --verbose --verbose "$BF" 2>/dev/null)
+              
+              # 统计事件类型
+              DEL_COUNT=$(echo "$RESULT" | grep -c "DELETE FROM" 2>/dev/null || echo 0)
+              INS_COUNT=$(echo "$RESULT" | grep -c "INSERT INTO" 2>/dev/null || echo 0)
+              UPD_COUNT=$(echo "$RESULT" | grep -c "UPDATE" 2>/dev/null || echo 0)
+              
+              echo "  DELETE: $DEL_COUNT, INSERT: $INS_COUNT, UPDATE: $UPD_COUNT"
+              
+              # 如果找到 DELETE，显示涉及的表
+              if [ "$DEL_COUNT" -gt 0 ] 2>/dev/null; then
+                echo "$RESULT" | grep "DELETE FROM" | sort | uniq -c | sort -rn | head -10
+              fi
+            done
+
+            # ========== 7. 总结 ==========
+            echo ""
+            echo "========================================"
+            echo "  恢复总结"
+            echo "========================================"
+            echo "已检查的恢复源:"
+            echo "  1. ✅ 二进制日志 - 已启用（5个文件，5GB+）"
+            echo "  2. ✅ init-db.sql (78KB) - 7月30日备份"
+            echo "  3. ✅ restore_data.sql - 8月13日恢复脚本"
+            echo "  4. ✅ backup.sql (78KB) - 7月30日备份"
+            echo "  5. ✅ mysql-backups/*.sql.gz - 8月26日备份"
+            echo ""
+            echo "下一步:"
+            echo "  - 从 init-db.sql / backup.sql 提取数据"
+            echo "  - 解析 binlog 中的 DELETE 事件回放入围"
+            echo "  - 从 mysql-backups 检查今日备份"
