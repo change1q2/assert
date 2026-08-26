@@ -1,0 +1,171 @@
+name: MySQL Recover & Setup Backup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: MySQL recovery & backup setup via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 30m
+          script: |
+            echo "========================================"
+            echo "  MySQL 恢复 & 自动备份设置"
+            echo "========================================"
+
+            # ---------- 1. 检查 MySQL 状态 ----------
+            echo ""
+            echo "=== 1. MySQL 服务状态 ==="
+            systemctl status mysqld --no-pager 2>/dev/null | head -10 || systemctl status mysql --no-pager 2>/dev/null | head -10 || echo "MySQL 服务未找到"
+            echo ""
+            echo "--- MySQL 进程 ---"
+            ps aux | grep mysql | grep -v grep
+            echo ""
+            echo "--- MySQL 端口 ---"
+            ss -tlnp | grep 3306 || echo "端口 3306 未监听"
+
+            # ---------- 2. 用 TCP 连接 MySQL ----------
+            echo ""
+            echo "=== 2. 通过 TCP 连接 MySQL ==="
+            mysql -h 127.0.0.1 -P 3306 -u root -p'123456' -e "SELECT VERSION(); SHOW DATABASES;" 2>&1
+
+            # ---------- 3. 检查 asset_platform_restore 数据库 ----------
+            echo ""
+            echo "=== 3. 检查 asset_platform_restore 数据库 ==="
+            mysql -h 127.0.0.1 -P 3306 -u root -p'123456' -e "
+              SELECT 'asset_platform_restore exists' as info;
+              USE asset_platform_restore;
+              SHOW TABLES;
+            " 2>&1
+
+            # 如果 asset_platform_restore 存在，检查数据量
+            echo "--- 检查 restore 库各表数据量 ---"
+            for tbl in users accounts records finance_assets debts asset_classes books survival_funds user_settings; do
+              cnt=$(mysql -h 127.0.0.1 -P 3306 -u root -p'123456' asset_platform_restore -e "SELECT COUNT(*) as cnt FROM $tbl;" 2>/dev/null | tail -1)
+              if [ -n "$cnt" ]; then
+                echo "asset_platform_restore.$tbl: $cnt"
+              fi
+            done
+
+            # ---------- 4. 如果有数据，尝试从 restore 库恢复 ----------
+            echo ""
+            echo "=== 4. 从 asset_platform_restore 恢复数据（如果有）==="
+            HAS_RESTORE_DB=$(mysql -h 127.0.0.1 -P 3306 -u root -p'123456' -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='asset_platform_restore';" 2>/dev/null | tail -1)
+
+            if [ "$HAS_RESTORE_DB" = "asset_platform_restore" ]; then
+              echo "发现 asset_platform_restore 数据库！"
+              echo "--- 从 restore 库恢复所有数据 ---"
+
+              TABLES="users user_profiles accounts records finance_assets finance_asset_indoor_transactions finance_asset_outdoor_transactions finance_asset_archives debts asset_classes books survival_funds freedom_budgets exchange_rates budgets custom_record_categories finance_tertiary_categories record_tags recorders reminders debt_payments debt_categories yearly_records user_settings tags"
+
+              for tbl in $TABLES; do
+                echo "恢复表: $tbl"
+                # 检查 restore 库是否有这个表
+                HAS_TABLE=$(mysql -h 127.0.0.1 -P 3306 -u root -p'123456' asset_platform_restore -e "SHOW TABLES LIKE '$tbl';" 2>/dev/null | tail -1)
+                if [ -n "$HAS_TABLE" ]; then
+                  # 删除当前数据
+                  mysql -h 127.0.0.1 -P 3306 -u root -p'123456' asset_platform -e "DELETE FROM $tbl;" 2>/dev/null
+                  # 从 restore 库插入
+                  mysql -h 127.0.0.1 -P 3306 -u root -p'123456' -e "INSERT INTO asset_platform.$tbl SELECT * FROM asset_platform_restore.$tbl;" 2>&1 | head -3
+                  # 验证
+                  cnt=$(mysql -h 127.0.0.1 -P 3306 -u root -p'123456' asset_platform -e "SELECT COUNT(*) as cnt FROM $tbl;" 2>/dev/null | tail -1)
+                  echo "  -> $tbl: $cnt 行"
+                else
+                  echo "  -> $tbl: restore 库中不存在"
+                fi
+              done
+
+              echo ""
+              echo "--- 恢复后各表数据量 ---"
+              for tbl in users accounts records finance_assets debts asset_classes books survival_funds user_settings; do
+                cnt=$(mysql -h 127.0.0.1 -P 3306 -u root -p'123456' asset_platform -e "SELECT COUNT(*) as cnt FROM $tbl;" 2>/dev/null | tail -1)
+                echo "$tbl: $cnt"
+              done
+            else
+              echo "asset_platform_restore 数据库不存在"
+            fi
+
+            # ---------- 5. 检查所有数据库中的数据 ----------
+            echo ""
+            echo "=== 5. 检查所有数据库 ==="
+            DBS=$(mysql -h 127.0.0.1 -P 3306 -u root -p'123456' -e "SHOW DATABASES;" 2>/dev/null | grep -v Database | grep -v information_schema | grep -v mysql | grep -v performance_schema | grep -v sys)
+            for db in $DBS; do
+              echo "--- 数据库: $db ---"
+              TABLES=$(mysql -h 127.0.0.1 -P 3306 -u root -p'123456' "$db" -e "SHOW TABLES;" 2>/dev/null | grep -v Tables_in)
+              for tbl in $TABLES; do
+                cnt=$(mysql -h 127.0.0.1 -P 3306 -u root -p'123456' "$db" -e "SELECT COUNT(*) as cnt FROM $tbl;" 2>/dev/null | tail -1)
+                if [ "$cnt" != "0" ] && [ -n "$cnt" ]; then
+                  echo "  $db.$tbl: $cnt 行 ★"
+                fi
+              done
+            done
+
+            # ---------- 6. 设置自动备份 ----------
+            echo ""
+            echo "=== 6. 设置每日自动备份 ==="
+            mkdir -p /opt/mysql-backups
+            cat > /opt/mysql-backups/backup.sh << 'CRON_SCRIPT'
+            #!/bin/bash
+            BACKUP_DIR="/opt/mysql-backups"
+            DATE=$(date '+%Y%m%d_%H%M%S')
+            BACKUP_FILE="$BACKUP_DIR/asset_platform_$DATE.sql.gz"
+
+            mysqldump -h 127.0.0.1 -u root -p'123456' --single-transaction --routines --triggers asset_platform 2>/dev/null | gzip > "$BACKUP_FILE"
+
+            if [ -s "$BACKUP_FILE" ]; then
+              echo "[$(date)] Backup OK: $BACKUP_FILE ($(ls -lah $BACKUP_FILE | awk '{print $5}'))"
+            else
+              echo "[$(date)] Backup FAILED"
+              rm -f "$BACKUP_FILE"
+            fi
+
+            # 保留最近 30 天的备份
+            find $BACKUP_DIR -name "asset_platform_*.sql.gz" -mtime +30 -delete
+            CRON_SCRIPT
+
+            chmod +x /opt/mysql-backups/backup.sh
+
+            # 添加到 crontab（每天凌晨3点执行）
+            (crontab -l 2>/dev/null | grep -v "mysql-backups/backup.sh"; echo "0 3 * * * /opt/mysql-backups/backup.sh >> /opt/mysql-backups/backup.log 2>&1") | crontab -
+
+            echo "自动备份已设置: 每天 03:00 执行"
+            echo "备份目录: /opt/mysql-backups/"
+            echo "日志文件: /opt/mysql-backups/backup.log"
+
+            # 立即执行一次备份
+            echo "--- 立即执行一次备份 ---"
+            /opt/mysql-backups/backup.sh
+
+            # ---------- 7. 启用 MySQL binlog ----------
+            echo ""
+            echo "=== 7. 启用 MySQL binlog（未来数据恢复用）==="
+            MYSQL_CNF="/etc/my.cnf"
+            if [ -f "$MYSQL_CNF" ]; then
+              cp "$MYSQL_CNF" "${MYSQL_CNF}.bak.$(date '+%Y%m%d%H%M%S')"
+              if ! grep -q "log-bin" "$MYSQL_CNF"; then
+                # 在 [mysqld] 部分添加 binlog 配置
+                sed -i '/\[mysqld\]/a server-id=1\nlog-bin=mysql-bin\nbinlog_format=ROW\nexpire_logs_days=7' "$MYSQL_CNF"
+                echo "binlog 配置已添加到 $MYSQL_CNF"
+                echo "--- 重启 MySQL 以启用 binlog ---"
+                systemctl restart mysqld 2>/dev/null || systemctl restart mysql 2>/dev/null
+                sleep 3
+                mysql -h 127.0.0.1 -P 3306 -u root -p'123456' -e "SHOW BINARY LOGS;" 2>&1
+              else
+                echo "binlog 已配置"
+              fi
+            else
+              echo "$MYSQL_CNF 不存在"
+            fi
+
+            echo ""
+            echo "========================================"
+            echo "  恢复 & 备份设置完成"
+            echo "========================================"
