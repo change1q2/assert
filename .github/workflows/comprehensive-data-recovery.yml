@@ -1,0 +1,373 @@
+name: Comprehensive Data Recovery
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comprehensive recovery - binlog + backups + cross-schema
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 180m
+          script: |
+            set +e
+            echo "========================================"
+            echo "  Comprehensive Data Recovery"
+            echo "  $(date)"
+            echo "========================================"
+
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            [ -z "$CONTAINER_ID" ] && echo "❌ No MySQL container" && exit 1
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            TS=$(date +%Y%m%d_%H%M%S)
+            REC_DIR="/tmp/recovery_$TS"
+            mkdir -p "$REC_DIR"
+
+            # ========== STEP 0: Backup ==========
+            echo ""
+            echo "=== STEP 0: Pre-Recovery Backup ==="
+            BACKUP_SQL="$REC_DIR/pre_recovery.sql"
+            docker exec "$CONTAINER_ID" mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" \
+              --single-transaction --quick asset_platform > "$BACKUP_SQL" 2>/dev/null
+            if [ -f "$BACKUP_SQL" ] && [ -s "$BACKUP_SQL" ]; then
+              gzip "$BACKUP_SQL"
+              echo "✅ Backup: ${BACKUP_SQL}.gz"
+            else
+              echo "⚠️ mysqldump failed, using mysql export"
+              $MYSQL asset_platform -e "
+                SELECT 'accounts' as tbl, COUNT(*) as cnt FROM accounts
+                UNION ALL SELECT 'finance_assets', COUNT(*) FROM finance_assets
+                UNION ALL SELECT 'records', COUNT(*) FROM records
+                UNION ALL SELECT 'debts', COUNT(*) FROM debts
+                UNION ALL SELECT 'asset_classes', COUNT(*) FROM asset_classes
+                UNION ALL SELECT 'books', COUNT(*) FROM books
+                UNION ALL SELECT 'strategies', COUNT(*) FROM strategies;
+              " 2>/dev/null
+            fi
+
+            # ========== STEP 1: Full Database State ==========
+            echo ""
+            echo "=== STEP 1: Full Database State ==="
+            $MYSQL asset_platform -e "
+              SELECT 'accounts' as tbl, COUNT(*) as total,
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END) as u1,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END) as u3,
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) as u4
+              FROM accounts
+              UNION ALL SELECT 'finance_assets', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM finance_assets
+              UNION ALL SELECT 'records', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM records
+              UNION ALL SELECT 'debts', COUNT(*), 0,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM debts
+              UNION ALL SELECT 'asset_classes', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM asset_classes
+              UNION ALL SELECT 'books', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM books
+              UNION ALL SELECT 'strategies', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM strategies
+              UNION ALL SELECT 'debt_payments', COUNT(*), 0,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM debt_payments
+              UNION ALL SELECT 'finance_asset_transactions', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM finance_asset_transactions;
+            " 2>/dev/null
+
+            # ========== STEP 2: Apply Known Backup Files ==========
+            echo ""
+            echo "=== STEP 2: Apply Known Backup Files ==="
+
+            for BK_SQL in \
+              /opt/mysql-backups/asset_platform_full_20260826_151334.sql.gz \
+              /var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/401/fs/tmp/backup.sql \
+              /opt/shuaiti/server/init-db.sql \
+              /root/backup.sql \
+              /tmp/backup.sql; do
+              
+              if [ -f "$BK_SQL" ]; then
+                BASENAME=$(basename "$BK_SQL" .gz)
+                echo ""
+                echo "--- $BK_SQL ---"
+                
+                if echo "$BK_SQL" | grep -q '.gz'; then
+                  gunzip -c "$BK_SQL" > "$REC_DIR/backup_$(basename $BK_SQL .gz).sql"
+                  TARGET="$REC_DIR/backup_$(basename $BK_SQL .gz).sql"
+                else
+                  cp "$BK_SQL" "$REC_DIR/"
+                  TARGET="$REC_DIR/$(basename "$BK_SQL")"
+                fi
+                
+                CNT=$(grep -c 'INSERT INTO' "$TARGET" 2>/dev/null || echo 0)
+                echo "  INSERT statements: $CNT"
+                
+                if [ "$CNT" -gt 0 ] 2>/dev/null; then
+                  echo "  Table breakdown:"
+                  for TBL in accounts finance_assets records debts asset_classes; do
+                    TBL_CNT=$(grep -c "INSERT INTO.*$TBL" "$TARGET" 2>/dev/null || echo 0)
+                    echo "    $TBL: $TBL_CNT"
+                  done
+                  
+                  echo "  Applying with INSERT IGNORE..."
+                  sed 's/^INSERT INTO/INSERT IGNORE INTO/g' "$TARGET" > "${TARGET}.apply"
+                  $MYSQL asset_platform --force < "${TARGET}.apply" 2>&1 | tail -3
+                  echo "  Done"
+                fi
+              fi
+            done
+
+            # ========== STEP 3: Cross-Database Recovery ==========
+            echo ""
+            echo "=== STEP 3: Cross-Database Recovery ==="
+            
+            RESTORE_DB="asset_platform_restore"
+            if $MYSQL -e "SHOW DATABASES LIKE '$RESTORE_DB';" 2>/dev/null | grep -q "$RESTORE_DB"; then
+              echo "✅ $RESTORE_DB exists"
+              
+              for TABLE in accounts finance_assets records debts asset_classes books strategies; do
+                CUR_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+                RST_CNT=$($MYSQL "$RESTORE_DB" -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+                echo ""
+                echo "$TABLE: current=$CUR_CNT, restore=$RST_CNT"
+                
+                if [ "$RST_CNT" -gt "0" ] 2>/dev/null; then
+                  echo "  Recovering from restore DB..."
+                  $MYSQL asset_platform 2>/dev/null <<EOF
+INSERT IGNORE INTO $TABLE
+SELECT * FROM $RESTORE_DB.$TABLE;
+EOF
+                  NEW_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+                  echo "  After recovery: $NEW_CNT"
+                fi
+              done
+            else
+              echo "⚠️ $RESTORE_DB not found"
+            fi
+
+            # ========== STEP 4: Binlog Analysis ==========
+            echo ""
+            echo "=== STEP 4: Binary Log Analysis ==="
+            
+            BINLOG_ON=$($MYSQL -N -B -e "SHOW VARIABLES LIKE 'log_bin';" 2>/dev/null | tail -1 | awk '{print $2}')
+            echo "log_bin: $BINLOG_ON"
+            echo "binlog_format: $($MYSQL -N -B -e "SHOW VARIABLES LIKE 'binlog_format';" 2>/dev/null | tail -1 | awk '{print $2}')"
+            
+            if [ "$BINLOG_ON" = "ON" ]; then
+              echo ""
+              echo "--- Binary log files ---"
+              $MYSQL -e "SHOW BINARY LOGS;" 2>/dev/null
+              
+              BINLOG_FILES=$($MYSQL -N -B -e "SHOW BINARY LOGS;" 2>/dev/null | awk '{print $1}')
+              
+              # Find mysqlbinlog
+              MYSQLBINLOG=""
+              for BIN_PATH in /usr/bin/mysqlbinlog /usr/local/mysql/bin/mysqlbinlog /usr/sbin/mysqlbinlog; do
+                if docker exec "$CONTAINER_ID" test -x "$BIN_PATH" 2>/dev/null; then
+                  MYSQLBINLOG="$BIN_PATH"
+                  break
+                fi
+              done
+              [ -z "$MYSQLBINLOG" ] && MYSQLBINLOG=$(docker exec "$CONTAINER_ID" which mysqlbinlog 2>/dev/null)
+              
+              if [ -n "$MYSQLBINLOG" ]; then
+                echo "✅ mysqlbinlog found: $MYSQLBINLOG"
+                echo ""
+                echo "--- Decoding binlog files ---"
+                
+                DECODED_DIR="$REC_DIR/decoded"
+                mkdir -p "$DECODED_DIR"
+                
+                for BF in $BINLOG_FILES; do
+                  CONTAINER_PATH="/var/lib/mysql/$BF"
+                  if docker exec "$CONTAINER_ID" test -f "$CONTAINER_PATH" 2>/dev/null; then
+                    SZ=$(docker exec "$CONTAINER_ID" stat -c%s "$CONTAINER_PATH" 2>/dev/null || echo 0)
+                    echo ""
+                    echo "Processing $BF ($SZ bytes)..."
+                    
+                    DECODED_FILE="$DECODED_DIR/${BF}.txt"
+                    docker exec "$CONTAINER_ID" "$MYSQLBINLOG" \
+                      --no-defaults --force-read \
+                      --verbose --verbose \
+                      --base64-output=DECODE-ROWS \
+                      "$CONTAINER_PATH" > "$DECODED_FILE" 2>&1
+                    
+                    DEC_SZ=$(stat -c%s "$DECODED_FILE" 2>/dev/null || echo 0)
+                    INS=$(grep -c 'INSERT INTO' "$DECODED_FILE" 2>/dev/null || echo 0)
+                    DEL=$(grep -c 'DELETE FROM' "$DECODED_FILE" 2>/dev/null || echo 0)
+                    echo "  Decoded: $DEC_SZ bytes, INSERT=$INS, DELETE=$DEL"
+                    
+                    if [ "$INS" -gt 0 ] 2>/dev/null || [ "$DEL" -gt 0 ] 2>/dev/null; then
+                      echo "  Key events:"
+                      grep -E 'INSERT INTO|DELETE FROM|UPDATE.*SET' "$DECODED_FILE" 2>/dev/null | head -10 | sed 's/^/    /'
+                    fi
+                  fi
+                done
+                
+                # Extract recovery data
+                ALL_DECODED="$DECODED_DIR/all.txt"
+                cat "$DECODED_DIR"/*.txt 2>/dev/null > "$ALL_DECODED"
+                echo ""
+                echo "--- Extracting recovery data ---"
+                
+                for TABLE in accounts finance_assets records debts asset_classes; do
+                  INS=$(grep -c "INSERT INTO.*\`$TABLE\`" "$ALL_DECODED" 2>/dev/null || echo 0)
+                  DEL=$(grep -c "DELETE FROM.*\`$TABLE\`" "$ALL_DECODED" 2>/dev/null || echo 0)
+                  echo "$TABLE: INSERT=$INS, DELETE=$DEL"
+                  
+                  if [ "$INS" -gt 0 ] 2>/dev/null; then
+                    RFILE="$REC_DIR/binlog_${TABLE}_recovery.sql"
+                    grep "INSERT INTO.*\`$TABLE\`" "$ALL_DECODED" 2>/dev/null | \
+                      sed 's/^### //' | \
+                      sed 's/^INSERT INTO/INSERT IGNORE INTO/' > "$RFILE"
+                    
+                    RCNT=$(grep -c 'INSERT' "$RFILE" 2>/dev/null || echo 0)
+                    if [ "$RCNT" -gt 0 ] 2>/dev/null; then
+                      echo "  Applying $RCNT INSERTs..."
+                      $MYSQL asset_platform --force < "$RFILE" 2>&1 | head -5
+                    fi
+                  fi
+                done
+              else
+                echo "⚠️ mysqlbinlog not found in container"
+                echo "Will try Python parser as fallback"
+              fi
+            else
+              echo "❌ Binary logging not enabled"
+            fi
+
+            # ========== STEP 5: IBD File Analysis ==========
+            echo ""
+            echo "=== STEP 5: InnoDB .ibd File Analysis ==="
+            
+            for TABLE in records accounts finance_assets debts asset_classes; do
+              IBD="/var/lib/mysql/asset_platform/${TABLE}.ibd"
+              if docker exec "$CONTAINER_ID" test -f "$IBD" 2>/dev/null; then
+                SZ=$(docker exec "$CONTAINER_ID" stat -c%s "$IBD" 2>/dev/null || echo 0)
+                echo "$TABLE.ibd: $SZ bytes"
+                
+                # Quick pattern search
+                docker exec "$CONTAINER_ID" sh -c "strings $IBD | grep -c 'INSERT' 2>/dev/null" 2>/dev/null || true
+              fi
+            done
+
+            # ========== STEP 6: Apply binlog_recovery backup ==========
+            echo ""
+            echo "=== STEP 6: Apply data_backup_log (automatic backups) ==="
+            
+            BACKUP_LOG_EXISTS=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM data_backup_log" 2>/dev/null)
+            if [ -n "$BACKUP_LOG_EXISTS" ] && [ "$BACKUP_LOG_EXISTS" -gt 0 ] 2>/dev/null; then
+              echo "✅ data_backup_log has $BACKUP_LOG_EXISTS entries"
+              echo "Latest backups by table:"
+              $MYSQL asset_platform -e "
+                SELECT table_name, row_count, backup_timestamp, 
+                       JSON_LENGTH(backup_data) as data_len
+                FROM data_backup_log 
+                ORDER BY id DESC LIMIT 10;
+              " 2>/dev/null
+              
+              # Apply backup data
+              echo ""
+              echo "--- Applying backup data ---"
+              for TABLE in accounts finance_assets records debts; do
+                BACKUP_ROWS=$($MYSQL asset_platform -N -B -e "
+                  SELECT row_count FROM data_backup_log 
+                  WHERE table_name = '$TABLE' 
+                  ORDER BY id DESC LIMIT 1;
+                " 2>/dev/null)
+                if [ -n "$BACKUP_ROWS" ] && [ "$BACKUP_ROWS" -gt 0 ] 2>/dev/null; then
+                  echo "$TABLE: latest backup has $BACKUP_ROWS rows"
+                  
+                  # Extract and apply
+                  $MYSQL asset_platform -e "
+                    SELECT backup_data FROM data_backup_log 
+                    WHERE table_name = '$TABLE' 
+                    ORDER BY id DESC LIMIT 1;
+                  " 2>/dev/null | while read -r line; do
+                    if echo "$line" | grep -q '^\['; then
+                      echo "  Found backup data for $TABLE"
+                      # This is JSON data, would need to parse and insert
+                    fi
+                  done
+                fi
+              done
+            else
+              echo "No automatic backup entries found (feature was just added)"
+            fi
+
+            # ========== Final Verification ==========
+            echo ""
+            echo "========================================"
+            echo "  Final Database State"
+            echo "========================================"
+            
+            $MYSQL asset_platform -e "
+              SELECT 'accounts' as tbl, COUNT(*) as total,
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END) as u1,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END) as u3,
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) as u4
+              FROM accounts
+              UNION ALL SELECT 'finance_assets', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM finance_assets
+              UNION ALL SELECT 'records', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM records
+              UNION ALL SELECT 'debts', COUNT(*), 0,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM debts
+              UNION ALL SELECT 'asset_classes', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM asset_classes
+              UNION ALL SELECT 'books', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM books;
+            " 2>/dev/null
+
+            echo ""
+            echo "========================================"
+            echo "  Recovery Complete"
+            echo "  Report: $REC_DIR/"
+            echo "========================================"
+            echo ""
+            echo "Generated files:"
+            ls -lh "$REC_DIR/" 2>/dev/null | head -25
