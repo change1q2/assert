@@ -1,4 +1,4 @@
-name: Comprehensive IBD + Binlog Recovery
+name: Comprehensive IBD Binlog Recovery
 
 on:
   workflow_dispatch:
@@ -156,26 +156,18 @@ jobs:
             echo ""
             echo "=== 5. 构建恢复 SQL ==="
             
-            cat > "$REC_DIR/recovery.sql" << 'SQLHEAD'
--- 自动生成的恢复 SQL
--- 使用 INSERT IGNORE 避免主键冲突
--- 只插入不存在的数据
-
-SQLHEAD
-
-            # 处理 binlog 中的 INSERT 事件
+            echo "-- 自动生成的恢复 SQL" > "$REC_DIR/recovery.sql"
+            echo "-- 使用 INSERT IGNORE 避免主键冲突" >> "$REC_DIR/recovery.sql"
+            
             for TABLE in records accounts finance_assets debts; do
               echo ""
               echo "--- 构建 $TABLE 的 INSERT ---"
               
-              cat >> "$REC_DIR/recovery.sql" << EOTABLE
--- === $TABLE ===
-EOTABLE
+              echo "-- === $TABLE ===" >> "$REC_DIR/recovery.sql"
               
               # 从所有 binlog 提取该表的 INSERT
               for F in "$REC_DIR"/*insert*binlog.*.txt; do
                 if [ -f "$F" ] && echo "$F" | grep -q "$TABLE"; then
-                  # 提取 INSERT 语句
                   grep -A30 '### INSERT INTO' "$F" 2>/dev/null | \
                     sed 's/^### //' | \
                     sed 's/^INSERT INTO/INSERT IGNORE INTO/' | \
@@ -183,7 +175,7 @@ EOTABLE
                 fi
               done
             done
-
+            
             echo "恢复 SQL 文件大小: $(stat -c%s "$REC_DIR/recovery.sql" 2>/dev/null) bytes"
 
             # ========== 6. 查找并恢复备份文件 ==========
