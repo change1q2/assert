@@ -434,8 +434,69 @@ async function saveUserState(conn, userId, state) {
     "freedom_budgets": "freedomBudgets",
   };
 
-  // Force delete transaction tables and child tables that are embedded in parent records
+  // Force delete transaction tables and child tables
   const forceDeleteTables = ["finance_asset_indoor_transactions", "finance_asset_outdoor_transactions", "finance_asset_archives", "debt_payments"];
+
+  // ========== 自动备份：删除前先保存数据快照 ==========
+  // 这是防止数据丢失的最后防线
+  const _backupTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  try {
+    // 为即将被删除的表创建备份
+    const tablesNeedingBackup = [];
+    for (const table of [...forceDeleteTables, ...tables]) {
+      if (!tablesToSkipDeletion.has(table) && table !== 'user_settings') {
+        const dbCount = existingCounts[table] || 0;
+        if (dbCount > 0) {
+          tablesNeedingBackup.push(table);
+        }
+      }
+    }
+    
+    if (tablesNeedingBackup.length > 0) {
+      console.warn(`[state-service] 用户 ${userId} 备份 ${tablesNeedingBackup.length} 个表 (${tablesNeedingBackup.join(',')})`);
+      
+      // 创建备份记录表
+      await sqlRun(conn, `
+        CREATE TABLE IF NOT EXISTS data_backup_log (
+          id BIGINT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL,
+          table_name VARCHAR(100) NOT NULL,
+          row_count INT NOT NULL,
+          backup_data JSON,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          backup_timestamp VARCHAR(50) NOT NULL,
+          INDEX idx_backup_user (user_id),
+          INDEX idx_backup_table (table_name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+      
+      // 备份每个表的数据
+      for (const table of tablesNeedingBackup) {
+        try {
+          const [rows] = await conn.execute(`SELECT * FROM ${table} WHERE user_id = ?`, [userId]);
+          if (rows.length > 0) {
+            // 分批备份 (每批最多 500 行)
+            const BATCH_SIZE = 500;
+            for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+              const batch = rows.slice(i, i + BATCH_SIZE);
+              await sqlRun(conn, `
+                INSERT INTO data_backup_log (user_id, table_name, row_count, backup_data, backup_timestamp)
+                VALUES (?, ?, ?, ?, ?)
+              `, [userId, table, batch.length, JSON.stringify(batch), _backupTimestamp]);
+            }
+            console.warn(`[state-service] 备份 ${table}: ${rows.length} 行`);
+          }
+        } catch (backupErr) {
+          console.warn(`[state-service] 备份 ${table} 失败: ${backupErr.message}`);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[state-service] 备份过程出错 (不影响主流程): ${e.message}`);
+  }
+  // ========== 备份结束 ==========
+
+  // Force delete transaction tables and child tables that are embedded in parent records
   for (const table of forceDeleteTables) {
     const dbCount = existingCounts[table] || 0;
     if (tablesToSkipDeletion.has(table)) {
