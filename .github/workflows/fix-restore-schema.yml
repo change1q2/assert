@@ -1,0 +1,177 @@
+name: Fix Restore - Schema Diff & Recovery
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fix restore with schema-aware column mapping
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 30m
+          script: |
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            echo "=== 检查表结构差异 ==="
+
+            # 检查 accounts 表结构
+            echo ""
+            echo "--- accounts: asset_platform ---"
+            $MYSQL asset_platform -e "DESCRIBE accounts;" 2>/dev/null
+            echo ""
+            echo "--- accounts: asset_platform_restore ---"
+            $MYSQL asset_platform_restore -e "DESCRIBE accounts;" 2>/dev/null
+
+            # 检查 finance_assets 表结构
+            echo ""
+            echo "--- finance_assets: asset_platform ---"
+            $MYSQL asset_platform -e "DESCRIBE finance_assets;" 2>/dev/null
+            echo ""
+            echo "--- finance_assets: asset_platform_restore ---"
+            $MYSQL asset_platform_restore -e "DESCRIBE finance_assets;" 2>/dev/null
+
+            # 检查 debts 表结构
+            echo ""
+            echo "--- debts: asset_platform ---"
+            $MYSQL asset_platform -e "DESCRIBE debts;" 2>/dev/null
+            echo ""
+            echo "--- debts: asset_platform_restore ---"
+            $MYSQL asset_platform_restore -e "DESCRIBE debts;" 2>/dev/null
+
+            # 检查 records 表结构
+            echo ""
+            echo "--- records: asset_platform ---"
+            $MYSQL asset_platform -e "DESCRIBE records;" 2>/dev/null
+            echo ""
+            echo "--- records: asset_platform_restore ---"
+            $MYSQL asset_platform_restore -e "DESCRIBE records;" 2>/dev/null
+
+            # 生成列名列表
+            echo ""
+            echo "=== 生成公共列名 ==="
+
+            get_common_cols() {
+              local table=$1
+              local db1=$2
+              local db2=$3
+              local cols1=$($MYSQL "$db1" -e "SHOW COLUMNS FROM $table;" 2>/dev/null | awk '{print $1}')
+              local cols2=$($MYSQL "$db2" -e "SHOW COLUMNS FROM $table;" 2>/dev/null | awk '{print $1}')
+              local common=""
+              for c in $cols1; do
+                if echo "$cols2" | grep -qx "$c"; then
+                  if [ -z "$common" ]; then
+                    common="$c"
+                  else
+                    common="$common,$c"
+                  fi
+                fi
+              done
+              echo "$common"
+            }
+
+            ACCT_COLS=$(get_common_cols "accounts" "asset_platform" "asset_platform_restore")
+            echo "accounts 公共列: $ACCT_COLS"
+
+            FIN_COLS=$(get_common_cols "finance_assets" "asset_platform" "asset_platform_restore")
+            echo "finance_assets 公共列: $FIN_COLS"
+
+            DEBT_COLS=$(get_common_cols "debts" "asset_platform" "asset_platform_restore")
+            echo "debts 公共列: $DEBT_COLS"
+
+            REC_COLS=$(get_common_cols "records" "asset_platform" "asset_platform_restore")
+            echo "records 公共列: $REC_COLS"
+
+            # 恢复用户 1 的数据
+            echo ""
+            echo "=== 恢复用户 1 (13896375671) ==="
+
+            # 1. 恢复 accounts
+            echo "--- 恢复 accounts ---"
+            $MYSQL asset_platform -e "DELETE FROM accounts WHERE user_id=1;" 2>/dev/null
+            $MYSQL asset_platform -e "INSERT INTO accounts ($ACCT_COLS) SELECT $ACCT_COLS FROM asset_platform_restore.accounts WHERE user_id=1;" 2>&1
+            CNT=$($MYSQL asset_platform -e "SELECT COUNT(*) FROM accounts WHERE user_id=1;" 2>/dev/null | tail -1)
+            echo "accounts: $CNT 行"
+
+            # 2. 恢复 finance_assets
+            echo "--- 恢复 finance_assets ---"
+            $MYSQL asset_platform -e "DELETE FROM finance_assets WHERE user_id=1;" 2>/dev/null
+            $MYSQL asset_platform -e "INSERT INTO finance_assets ($FIN_COLS) SELECT $FIN_COLS FROM asset_platform_restore.finance_assets WHERE user_id=1;" 2>&1
+            CNT=$($MYSQL asset_platform -e "SELECT COUNT(*) FROM finance_assets WHERE user_id=1;" 2>/dev/null | tail -1)
+            echo "finance_assets: $CNT 行"
+
+            # 3. 恢复 indoor/outdoor 交易
+            echo "--- 恢复 finance_asset_indoor_transactions ---"
+            INDOOR_COLS=$($MYSQL asset_platform -e "SHOW COLUMNS FROM finance_asset_indoor_transactions;" 2>/dev/null | awk '{print $1}' | grep -v "^Field$" | tr '\n' ',')
+            INDOOR_COLS="${INDOOR_COLS%,}"
+            echo "列: $INDOOR_COLS"
+
+            # 获取 restore 库的列
+            RESTORE_INDOOR_COLS=$($MYSQL asset_platform_restore -e "SHOW COLUMNS FROM finance_asset_indoor_transactions;" 2>/dev/null | awk '{print $1}')
+            MY_INDOOR_COLS=""
+            for c in $(echo "$INDOOR_COLS" | tr ',' ' '); do
+              if echo "$RESTORE_INDOOR_COLS" | grep -qx "$c"; then
+                if [ -z "$MY_INDOOR_COLS" ]; then
+                  MY_INDOOR_COLS="$c"
+                else
+                  MY_INDOOR_COLS="$MY_INDOOR_COLS,$c"
+                fi
+              fi
+            done
+            echo "公共列: $MY_INDOOR_COLS"
+
+            if [ -n "$MY_INDOOR_COLS" ]; then
+              $MYSQL asset_platform -e "DELETE FROM finance_asset_indoor_transactions WHERE user_id=1;" 2>/dev/null
+              $MYSQL asset_platform -e "INSERT INTO finance_asset_indoor_transactions ($MY_INDOOR_COLS) SELECT $MY_INDOOR_COLS FROM asset_platform_restore.finance_asset_indoor_transactions WHERE user_id=1;" 2>&1
+              CNT=$($MYSQL asset_platform -e "SELECT COUNT(*) FROM finance_asset_indoor_transactions WHERE user_id=1;" 2>/dev/null | tail -1)
+              echo "indoor_transactions: $CNT 行"
+            fi
+
+            # 4. 恢复 debts
+            echo "--- 恢复 debts ---"
+            $MYSQL asset_platform -e "DELETE FROM debt_payments WHERE user_id=1;" 2>/dev/null
+            $MYSQL asset_platform -e "DELETE FROM debts WHERE user_id=1;" 2>/dev/null
+            $MYSQL asset_platform -e "INSERT INTO debts ($DEBT_COLS) SELECT $DEBT_COLS FROM asset_platform_restore.debts WHERE user_id=1;" 2>&1
+            CNT=$($MYSQL asset_platform -e "SELECT COUNT(*) FROM debts WHERE user_id=1;" 2>/dev/null | tail -1)
+            echo "debts: $CNT 行"
+
+            # 5. 恢复 records
+            echo "--- 恢复 records ---"
+            $MYSQL asset_platform -e "DELETE FROM record_tags WHERE user_id=1;" 2>/dev/null
+            $MYSQL asset_platform -e "DELETE FROM records WHERE user_id=1;" 2>/dev/null
+            $MYSQL asset_platform -e "INSERT INTO records ($REC_COLS) SELECT $REC_COLS FROM asset_platform_restore.records WHERE user_id=1;" 2>&1
+            CNT=$($MYSQL asset_platform -e "SELECT COUNT(*) FROM records WHERE user_id=1;" 2>/dev/null | tail -1)
+            echo "records: $CNT 行"
+
+            # 最终验证
+            echo ""
+            echo "=== 恢复后用户 1 数据 ==="
+            $MYSQL asset_platform -e "
+              SELECT 'accounts' as tbl, COUNT(*) as cnt FROM accounts WHERE user_id=1
+              UNION ALL SELECT 'finance_assets', COUNT(*) FROM finance_assets WHERE user_id=1
+              UNION ALL SELECT 'debts', COUNT(*) FROM debts WHERE user_id=1
+              UNION ALL SELECT 'records', COUNT(*) FROM records WHERE user_id=1;
+            " 2>/dev/null
+
+            # 检查恢复后的账户
+            echo ""
+            echo "=== 用户 1 的账户 ==="
+            $MYSQL asset_platform -e "SELECT id, name, type, balance, liability FROM accounts WHERE user_id=1;" 2>/dev/null
+
+            echo ""
+            echo "=== 用户 1 的理财资产 ==="
+            $MYSQL asset_platform -e "SELECT id, kind, name, code, market, current_price, pnl FROM finance_assets WHERE user_id=1 LIMIT 10;" 2>/dev/null
+
+            echo ""
+            echo "========================================"
+            echo "  恢复完成"
+            echo "========================================"
