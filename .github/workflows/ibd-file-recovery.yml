@@ -1,0 +1,149 @@
+name: IBD File Recovery
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: InnoDB .ibd recovery
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 60m
+          script: |
+            set +e
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            echo "=== Database State ==="
+            $MYSQL asset_platform -e "SELECT 'accounts' as tbl, COUNT(*) as total, SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END) as u1, SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END) as u3, SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) as u4 FROM accounts UNION ALL SELECT 'finance_assets', COUNT(*), SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END), SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END), SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) FROM finance_assets UNION ALL SELECT 'records', COUNT(*), SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END), SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END), SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) FROM records UNION ALL SELECT 'debts', COUNT(*), 0, SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END), SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) FROM debts;" 2>/dev/null
+
+            echo ""
+            echo "=== .ibd File Sizes ==="
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              IBD="/var/lib/mysql/asset_platform/${TABLE}.ibd"
+              if docker exec "$CONTAINER_ID" test -f "$IBD" 2>/dev/null; then
+                SZ=$(docker exec "$CONTAINER_ID" stat -c%s "$IBD" 2>/dev/null)
+                echo "$TABLE.ibd: $SZ bytes"
+              fi
+            done
+
+            echo ""
+            echo "=== Install Python ==="
+            apt-get update -qq 2>/dev/null && apt-get install -y -qq python3 2>/dev/null
+            echo "Python: $(python3 --version 2>&1)"
+
+            echo ""
+            echo "=== Copy .ibd Files ==="
+            IBD_DIR="/tmp/ibd_files_$(date +%Y%m%d)"
+            mkdir -p "$IBD_DIR"
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              IBD="/var/lib/mysql/asset_platform/${TABLE}.ibd"
+              if docker exec "$CONTAINER_ID" test -f "$IBD" 2>/dev/null; then
+                docker cp "$CONTAINER_ID:$IBD" "$IBD_DIR/" 2>/dev/null
+                SZ=$(stat -c%s "$IBD_DIR/${TABLE}.ibd" 2>/dev/null || echo 0)
+                echo "  $TABLE.ibd: $SZ bytes"
+              fi
+            done
+
+            echo ""
+            echo "=== Deep String Analysis ==="
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              IBD_FILE="$IBD_DIR/${TABLE}.ibd"
+              if [ -f "$IBD_FILE" ]; then
+                echo ""
+                echo "--- $TABLE ---"
+                STRINGS_FILE="$IBD_DIR/${TABLE}_strings.txt"
+                strings "$IBD_FILE" 2>/dev/null > "$STRINGS_FILE"
+                CNT=$(wc -l < "$STRINGS_FILE" 2>/dev/null || echo 0)
+                echo "  Total strings: $CNT"
+                echo "  UUIDs found:"
+                grep -E '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$' "$STRINGS_FILE" 2>/dev/null | head -5 | sed 's/^/    /'
+                echo "  Names (10-50 chars):"
+                grep -E '^[A-Za-z][A-Za-z0-9 ]{5,49}$' "$STRINGS_FILE" 2>/dev/null | head -10 | sed 's/^/    /'
+                echo "  JSON patterns:"
+                grep -E '^\[.*\]$' "$STRINGS_FILE" 2>/dev/null | head -3 | sed 's/^/    /'
+              fi
+            done
+
+            echo ""
+            echo "=== InnoDB Python Parser ==="
+            cat > /tmp/ibd_parser.py << 'EOF'
+import struct, sys, os
+
+PAGE_SIZE = 16384
+FIL_PAGE_INDEX = 0x45BF
+
+def parse_ibd(filepath):
+    fsize = os.path.getsize(filepath)
+    npages = fsize // PAGE_SIZE
+    results = []
+    with open(filepath, 'rb') as f:
+        for pn in range(npages):
+            data = f.read(PAGE_SIZE)
+            if len(data) < 38:
+                break
+            ptype = struct.unpack_from('>H', data, 24)[0]
+            plevel = struct.unpack_from('>H', data, 26)[0]
+            nrecs = struct.unpack_from('>H', data, 34)[0]
+            if ptype == FIL_PAGE_INDEX and plevel == 0 and nrecs > 0 and nrecs < 50000:
+                region = data[38:PAGE_SIZE-20]
+                cur = b''
+                for b in region:
+                    if 32 <= b <= 126:
+                        cur += bytes([b])
+                    else:
+                        if len(cur) >= 6:
+                            try:
+                                s = cur.decode('ascii')
+                                if any(c.isalpha() for c in s):
+                                    results.append(s)
+                            except:
+                                pass
+                        cur = b''
+    return results
+
+for f in sys.argv[1:]:
+    tname = os.path.basename(f, '.ibd')
+    print(f"\nParsing {tname}...")
+    recs = parse_ibd(f)
+    outfile = f"/tmp/{tname}_extracted.txt"
+    with open(outfile, 'w') as out:
+        for r in recs:
+            if len(r) >= 8:
+                out.write(r + '\n')
+    print(f"  Found {len(recs)} strings, saved to {outfile}")
+EOF
+
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              if [ -f "$IBD_DIR/${TABLE}.ibd" ]; then
+                python3 /tmp/ibd_parser.py "$IBD_DIR/${TABLE}.ibd"
+              fi
+            done
+
+            echo ""
+            echo "=== Results Summary ==="
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              EF="/tmp/${TABLE}_extracted.txt"
+              if [ -f "$EF" ]; then
+                CNT=$(wc -l < "$EF" 2>/dev/null || echo 0)
+                echo "$TABLE: $CNT extracted strings"
+                echo "  Sample:"
+                head -5 "$EF" | sed 's/^/    /'
+              fi
+            done
+
+            echo ""
+            echo "=== Final State ==="
+            $MYSQL asset_platform -e "SELECT 'accounts' as tbl, COUNT(*) as total, SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END) as u1, SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END) as u3, SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) as u4 FROM accounts UNION ALL SELECT 'finance_assets', COUNT(*), SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END), SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END), SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) FROM finance_assets UNION ALL SELECT 'records', COUNT(*), SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END), SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END), SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) FROM records UNION ALL SELECT 'debts', COUNT(*), 0, SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END), SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) FROM debts;" 2>/dev/null
+
+            echo ""
+            echo "=== IBD Recovery Complete ==="
