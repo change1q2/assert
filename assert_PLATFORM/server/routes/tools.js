@@ -57,6 +57,131 @@ async function handler(req, res, body, origin, pathname, url) {
     return;
   }
 
+  // 动量排名代理：抓取 zhibeiquant.com 页面，注入CSS隐藏"实盘更新"板块
+  if (req.method === "GET" && pathname === "/api/tools/momentum-ranking") {
+    try {
+      const upstream = await fetch("https://zhibeiquant.com/", {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      });
+      let html = await upstream.text();
+      const inject = `<base href="https://zhibeiquant.com/"><style>
+        /* 隐藏"实盘更新"板块 */
+        .bg-gradient-to-br.from-blue-900.to-slate-800.rounded-lg.border-blue-800 { display: none !important; }
+      </style>
+      <script>
+        // 覆盖 fetch：将 zhibeiquant.com 的 API 请求代理到后端，避免 CORS
+        (function(){
+          var ORIGIN_HOST = 'https://zhibeiquant.com';
+          var PROXY_PREFIX = location.origin + '/api/tools/momentum-proxy?path=';
+          function rewriteUrl(url){
+            if (typeof url !== 'string' || !url) return url;
+            try {
+              var abs = new URL(url, document.baseURI).href;
+              if (abs.indexOf(ORIGIN_HOST) === 0){
+                var rel = abs.slice(ORIGIN_HOST.length);
+                return PROXY_PREFIX + encodeURIComponent(rel);
+              }
+            } catch(e) {}
+            return url;
+          }
+          var origFetch = window.fetch;
+          window.fetch = function(input, init){
+            try {
+              if (typeof input === 'string'){
+                input = rewriteUrl(input);
+              } else if (input && typeof input.url === 'string'){
+                var rewritten = rewriteUrl(input.url);
+                if (rewritten !== input.url){
+                  input = rewritten;
+                }
+              }
+            } catch(e) {}
+            return origFetch.call(window, input, init);
+          };
+          var OrigXHR = window.XMLHttpRequest;
+          function PatchedXHR(){
+            var xhr = new OrigXHR();
+            var origOpen = xhr.open;
+            xhr.open = function(method, url){
+              var args = Array.prototype.slice.call(arguments);
+              if (typeof url === 'string'){
+                args[1] = rewriteUrl(url);
+              }
+              return origOpen.apply(xhr, args);
+            };
+            return xhr;
+          }
+          PatchedXHR.prototype = OrigXHR.prototype;
+          window.XMLHttpRequest = PatchedXHR;
+        })();
+        // 隐藏"实盘更新"板块
+        (function(){
+          function hideLiveUpdate(){
+            var h3s = document.querySelectorAll('h3');
+            for (var i=0;i<h3s.length;i++){
+              if (h3s[i].textContent.indexOf('实盘更新')>=0){
+                var p = h3s[i].parentElement;
+                while(p && p !== document.body){
+                  if (p.tagName === 'DIV' && p.parentElement === document.querySelector('main')){
+                    p.style.display = 'none';
+                    return;
+                  }
+                  p = p.parentElement;
+                }
+                h3s[i].parentElement.style.display = 'none';
+                return;
+              }
+            }
+          }
+          if (document.readyState === 'loading'){
+            document.addEventListener('DOMContentLoaded', hideLiveUpdate);
+          } else {
+            hideLiveUpdate();
+          }
+          setTimeout(hideLiveUpdate, 1000);
+        })();
+      </script>`;
+      if (html.includes("</head>")) {
+        html = html.replace("</head>", `${inject}</head>`);
+      } else {
+        html = inject + html;
+      }
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-cache",
+        ...(allowedOrigins.has(origin) ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : {}),
+      });
+      res.end(html);
+      return;
+    } catch (e) {
+      json(res, 200, { success: false, error: String(e.message || e) }, origin);
+      return;
+    }
+  }
+
+  // 动量排名 API 代理：转发到 zhibeiquant.com 的 API，绕过 CORS
+  if (req.method === "GET" && pathname === "/api/tools/momentum-proxy") {
+    try {
+      const targetPath = url.searchParams.get("path") || "/";
+      const targetUrl = "https://zhibeiquant.com" + targetPath;
+      const upstream = await fetch(targetUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/json" },
+      });
+      const body = await upstream.text();
+      const ct = upstream.headers.get("content-type") || "application/json; charset=utf-8";
+      res.writeHead(200, {
+        "Content-Type": ct,
+        "Cache-Control": "no-cache",
+        ...(allowedOrigins.has(origin) ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : {}),
+      });
+      res.end(body);
+      return;
+    } catch (e) {
+      json(res, 200, { success: false, error: String(e.message || e) }, origin);
+      return;
+    }
+  }
+
   // 港股通参考汇率接口
   if (req.method === "GET" && pathname === "/api/tools/hk-connect-rate") {
     const force = url.searchParams.get("refresh") === "1";

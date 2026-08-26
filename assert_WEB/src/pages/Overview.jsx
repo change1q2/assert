@@ -288,7 +288,7 @@ export default function Overview() {
   });
   const [editingYearIndex, setEditingYearIndex] = useState(-1);
 
-  const { debts = [], records = [], accounts = [], overviewGoals = {}, financeAssets = [], independentAssets = {}, budgets = [] } = stateData || {};
+  const { debts = [], records = [], accounts = [], overviewGoals = {}, financeAssets = [], independentAssets = {}, budgets = [], survivalFunds = [], freedomBudgets = [] } = stateData || {};
 
   useEffect(() => {
     loadData();
@@ -731,8 +731,28 @@ export default function Overview() {
   const independentTotalPnl = independentTotalValue - independentTotalCost;
   const independentTotalPnlRate = independentTotalCost > 0 ? (independentTotalPnl / independentTotalCost) * 100 : 0;
 
-  // 资产总览 = 理财总资产 + 独立总资产 - 总负债
-  const netAssetValue = financeTotalValue + independentTotalValue - liabilities.total;
+  // 计算生存资金总额（与自由现金流计算逻辑一致）
+  const survivalTotalValue = (survivalFunds || []).reduce((sum, fund) => {
+    const meta = fund.metadata || {};
+    const initialAmount = parseFloat(meta.initialAmount ?? fund.initialAmount ?? fund.amount) || 0;
+    const transactions = meta.transactions ?? fund.transactions ?? [];
+    const inflowSum = transactions
+      .filter(t => t.status === 'inflow')
+      .reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+    const outflowSum = transactions
+      .filter(t => t.status === 'outflow')
+      .reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+    const amount = initialAmount + inflowSum - outflowSum;
+    if (isNaN(amount)) return sum;
+    const currency = fund.currency || 'CNY';
+    const fromRate = exchangeRates[currency] ?? 1;
+    const toRate = exchangeRates['CNY'] ?? 1;
+    const rmbValue = currency === 'CNY' ? amount : (amount * fromRate) / toRate;
+    return sum + (isNaN(rmbValue) ? 0 : rmbValue);
+  }, 0);
+
+  // 资产总览 = 理财总资产 + 生存资金 + 独立总资产 - 总负债
+  const netAssetValue = financeTotalValue + survivalTotalValue + independentTotalValue - liabilities.total;
 
   const cooperationFunds = useMemo(() => {
     return calcCooperationFunds(accounts, acc => computeAccountAmountForCooperation(acc, accounts, financeAssets, independentAssets, records, debts));
@@ -756,26 +776,35 @@ export default function Overview() {
   const totalOutflow = incomeExpense.totalExpense + financeNegativePnl + independentNegativePnl - liabilities.total;
   const netCashflow = totalInflow - totalOutflow;
 
-  // 自由现金流计算：理财模块中持仓分组为"自由现金流"的资产市值
-  const totalBudget = budgets.reduce((sum, b) => sum + (parseFloat(b.amount) || 0), 0);
-  const freeCashFlowCurrent = (financeAssets || [])
-    .filter(a => a.positionGroup === '自由现金流')
-    .reduce((sum, a) => {
-      const _price = parseFloat(a.currentPrice);
-      const _costPrice = parseFloat(a.costPrice);
-      const _cost = parseFloat(a.cost);
-      const safePrice = !isNaN(_price) ? _price : (!isNaN(_costPrice) ? _costPrice : (!isNaN(_cost) ? _cost : 0));
-      const _qty = parseFloat(a.shares);
-      const _qty2 = parseFloat(a.quantity);
-      const safeQty = !isNaN(_qty) ? _qty : (!isNaN(_qty2) ? _qty2 : 0);
-      const value = safePrice * safeQty;
-      if (isNaN(value)) return sum;
-      const currency = a.currency || 'CNY';
-      const fromRate = exchangeRates[currency] ?? 1;
-      const toRate = exchangeRates['CNY'] ?? 1;
-      const rmbValue = currency === 'CNY' ? value : (value * fromRate) / toRate;
-      return sum + (isNaN(rmbValue) ? 0 : rmbValue);
-    }, 0);
+  // 自由现金流计算：生存资金模块中的资金结余总额
+  const totalBudget = freedomBudgets.reduce((sum, b) => {
+    const meta = b.metadata || {};
+    const currency = meta.currency || b.currency || 'CNY';
+    const amount = parseFloat(b.budgetAmount) || 0;
+    if (isNaN(amount)) return sum;
+    const fromRate = exchangeRates[currency] ?? 1;
+    const toRate = exchangeRates['CNY'] ?? 1;
+    const rmbValue = currency === 'CNY' ? amount : (amount * fromRate) / toRate;
+    return sum + (isNaN(rmbValue) ? 0 : rmbValue);
+  }, 0);
+  const freeCashFlowCurrent = (survivalFunds || []).reduce((sum, fund) => {
+    const meta = fund.metadata || {};
+    const initialAmount = parseFloat(meta.initialAmount ?? fund.initialAmount ?? fund.amount) || 0;
+    const transactions = meta.transactions ?? fund.transactions ?? [];
+    const inflowSum = transactions
+      .filter(t => t.status === 'inflow')
+      .reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+    const outflowSum = transactions
+      .filter(t => t.status === 'outflow')
+      .reduce((s, t) => s + (parseFloat(t.amount) || 0), 0);
+    const amount = initialAmount + inflowSum - outflowSum;
+    if (isNaN(amount)) return sum;
+    const currency = fund.currency || 'CNY';
+    const fromRate = exchangeRates[currency] ?? 1;
+    const toRate = exchangeRates['CNY'] ?? 1;
+    const rmbValue = currency === 'CNY' ? amount : (amount * fromRate) / toRate;
+    return sum + (isNaN(rmbValue) ? 0 : rmbValue);
+  }, 0);
   const freeCashFlowExpected = totalBudget;
 
   // 独立资产配置计算
@@ -1979,7 +2008,7 @@ export default function Overview() {
               </div>
               <div className="mt-1 flex items-center justify-center lg:justify-end gap-1 text-sm text-green-600">
                 <TrendingUp className="w-4 h-4" />
-                <span>{excludeCooperationFunds ? '资产总览 = 理财 + 独立 - 负债 - 合作资金' : '资产总览 = 理财 + 独立 - 负债'}</span>
+                <span>{excludeCooperationFunds ? '资产总览 = 理财 + 生存 + 独立 - 负债 - 合作资金' : '资产总览 = 理财 + 生存 + 独立 - 负债'}</span>
               </div>
               <label className="mt-2 flex items-center justify-center lg:justify-end gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none">
                 <input
@@ -2080,7 +2109,7 @@ export default function Overview() {
               <div className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 flex-shrink-0" />
               <div>
                 <span className="font-medium text-gray-900 dark:text-white">合作资金：</span>
-                多人所有账户中非默认所有者按占比占有的资金份额。勾选「去除合作他人资金」后，资产总览 = 理财 + 独立 - 负债 - 合作资金
+                多人所有账户中非默认所有者按占比占有的资金份额。勾选「去除合作他人资金」后，资产总览 = 理财 + 生存 + 独立 - 负债 - 合作资金
               </div>
             </div>
           </div>

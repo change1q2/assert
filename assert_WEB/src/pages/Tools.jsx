@@ -24,6 +24,7 @@ const builtInTools = [
   { id: 'hk-ipo', name: '港股打新分析', icon: BarChart3, description: '分析港股新股认购价值', color: 'green' },
   { id: 'hkipo-calculator', name: '港股打新计算器', icon: Activity, description: '港股打新溢价计算与收益分析', color: 'blue' },
   { id: 'value-investing-tool', name: '四大价值投资', icon: Zap, description: '四大师视角AI投资分析、价值评分与深度报告', color: 'purple' },
+  { id: 'momentum-ranking', name: '动量排名', icon: TrendingUp, description: 'ETF动量评分与策略监测看板', color: 'green', url: 'https://zhibeiquant.com/' },
 ];
 
 const defaultGroups = [
@@ -345,7 +346,7 @@ export default function Tools({ onNavigate }) {
               return (
                 <div
                   key={tool.id}
-                  onClick={() => onNavigate && onNavigate(tool.id)}
+                  onClick={() => tool.url ? window.open(tool.url, '_blank') : (onNavigate && onNavigate(tool.id))}
                   className="p-4 rounded-xl border border-gray-200 dark:border-slate-700 hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-md transition-all cursor-pointer group"
                 >
                   <div className="flex items-start gap-3">

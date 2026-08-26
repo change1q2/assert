@@ -37,6 +37,7 @@ import PremiumCheck from './pages/PremiumCheck.jsx';
 import HkIpo from './pages/HkIpo.jsx';
 import HkipoCalculator from './pages/HkipoCalculator.jsx';
 import ValueInvestingTool from './pages/ValueInvestingTool.jsx';
+import MomentumRanking from './pages/MomentumRanking.jsx';
 import BudgetManagement from './pages/BudgetManagement.jsx';
 import AssetPenetration from './pages/AssetPenetration.jsx';
 import IndependentAssets from './pages/IndependentAssets.jsx';
@@ -238,6 +239,8 @@ export default function App() {
         return <HkipoCalculator onBack={() => handleSetActiveMenu('tools')} />;
       case 'value-investing-tool':
         return <ValueInvestingTool onBack={() => handleSetActiveMenu('tools')} />;
+      case 'momentum-ranking':
+        return <MomentumRanking onBack={() => handleSetActiveMenu('tools')} />;
       case 'budget':
         return <BudgetManagement onBack={() => handleSetActiveMenu('records')} />;
       default:

@@ -158,6 +158,65 @@ function computeIndependentAssetsPie(independentAssets) {
   return result;
 }
 
+function computeExistingAssetsPie(stateData) {
+  const result = [];
+  const survivalFunds = stateData?.survivalFunds || [];
+  const financeAssets = stateData?.financeAssets || [];
+  const independentAssets = stateData?.independentAssets || {};
+
+  // 生存资金总额
+  const survivalTotal = survivalFunds.reduce((sum, f) => {
+    const amount = parseFloat(f.amount || 0);
+    const costBasis = parseFloat(f.costBasis || 0);
+    return sum + (isNaN(amount) ? costBasis : amount);
+  }, 0);
+
+  // 理财模块总市值
+  const financeTotal = financeAssets.reduce((sum, a) => {
+    const currentValue = parseFloat(a.currentValue || a.balance || 0);
+    return sum + (isNaN(currentValue) ? 0 : currentValue);
+  }, 0);
+
+  // 独立资产总价值
+  let independentTotal = 0;
+  Object.values(independentAssets).forEach(assets => {
+    if (!Array.isArray(assets)) return;
+    assets.forEach(asset => {
+      const assetType = asset.type || asset.category || '';
+      let val = 0;
+      if (assetType === 'insurance') {
+        val = parseFloat(asset.premiumTotal || 0);
+      } else if (assetType === 'realestate') {
+        const mv = parseFloat(asset.marketValue || 0);
+        val = mv > 0 ? mv : parseFloat(asset.purchasePrice || 0);
+      } else if (assetType === 'vehicle') {
+        val = parseFloat(asset.purchasePrice || 0);
+      } else if (assetType === 'fixedinvestment') {
+        val = parseFloat(asset.investmentCost || 0);
+      } else if (assetType === 'equity') {
+        val = parseFloat(asset.marketValue || asset.investmentCost || 0);
+      } else if (assetType === 'fixeddeposit') {
+        val = parseFloat(asset.amount || 0);
+      } else {
+        val = parseFloat(asset.currentValue || asset.balance || 0);
+      }
+      independentTotal += isNaN(val) ? 0 : val;
+    });
+  });
+
+  if (survivalTotal > 0) {
+    result.push({ name: '生存资金', value: survivalTotal, color: '#10B981' });
+  }
+  if (financeTotal > 0) {
+    result.push({ name: '理财持仓', value: financeTotal, color: '#6366F1' });
+  }
+  if (independentTotal > 0) {
+    result.push({ name: '独立资产', value: independentTotal, color: '#F59E0B' });
+  }
+
+  return result;
+}
+
 function createDefaultClass({ name, color }) {
   return {
     id: `default-${name}`,
@@ -465,6 +524,7 @@ function computeStatsForClasses(assetClasses, stateData) {
   let classes;
   let domesticOverseasData = [];
   let independentAssetsData = [];
+  let existingAssetsData = [];
   let financeAccountsRef = financeAccounts;
 
   if (hasFinanceData) {
@@ -477,6 +537,7 @@ function computeStatsForClasses(assetClasses, stateData) {
   }
 
   independentAssetsData = computeIndependentAssetsPie(independentAssets);
+  existingAssetsData = computeExistingAssetsPie(stateData);
 
   const classesWithPnl = classes.map((cls) => {
     const pnl = (cls.value || 0) - (cls.openingValue || 0);
@@ -547,6 +608,7 @@ function computeStatsForClasses(assetClasses, stateData) {
     avgExpectedReturn,
     domesticOverseasData,
     independentAssetsData,
+    existingAssetsData,
     financeAccounts: financeAccountsRef,
     assetTypeBreakdownMap,
   };
@@ -793,6 +855,7 @@ export default function AssetClasses({ onCategorySelect }) {
     avgExpectedReturn = 0,
     domesticOverseasData = [],
     independentAssetsData = [],
+    existingAssetsData = [],
     financeAccounts = [],
     assetTypeBreakdownMap = {},
   } = stats || {};
@@ -1618,18 +1681,18 @@ export default function AssetClasses({ onCategorySelect }) {
                   </div>
                 </div>
 
-                {/* Independent Assets Pie Chart */}
+                {/* Existing Assets Pie Chart - 生存资金/理财持仓/独立资产占比 */}
                 <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-soft border border-gray-100 dark:border-slate-700 overflow-visible">
                   <div className="flex items-center gap-2 mb-3">
                     <Briefcase className="w-4 h-4 text-primary-500" />
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">独立资产占比</h3>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">现有资产占比</h3>
                   </div>
                   <div className="h-64 relative">
-                    {independentAssetsData.length > 0 ? (
+                    {existingAssetsData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart padding={{ top: 30, right: 30, bottom: 30, left: 30 }}>
                           <Pie
-                            data={independentAssetsData}
+                            data={existingAssetsData}
                             dataKey="value"
                             nameKey="name"
                             innerRadius="40%"
@@ -1638,8 +1701,8 @@ export default function AssetClasses({ onCategorySelect }) {
                             label={renderCustomLabel}
                             labelLine={false}
                           >
-                            {independentAssetsData.map((entry, index) => (
-                              <Cell key={`cell-ia-${index}`} fill={entry.color} />
+                            {existingAssetsData.map((entry, index) => (
+                              <Cell key={`cell-ea-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
                           <ReTooltip content={<CustomPieTooltip />} />

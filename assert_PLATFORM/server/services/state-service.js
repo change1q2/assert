@@ -35,7 +35,7 @@ async function loadUserState(userId) {
   );
   const accounts = (await safeSqlAll(pool, "SELECT id, name, owner, owners_json, ownership_type, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category FROM accounts WHERE user_id = ? ORDER BY sort_order", [userId]))
     .map((row) => ({
-      id: row.id, name: row.name, owner: row.owner,
+      id: row.id, name: sanitizeAccountName(row.name), owner: row.owner,
       owners: maybeParseJson(row.owners_json, null),
       ownershipType: row.ownership_type || 'personal',
       currency: row.currency, type: row.type,
@@ -271,9 +271,25 @@ async function loadUserState(userId) {
   };
 
   // 过滤乱码字段 - 增强版：检测 Unicode 特殊字符和编码异常
-  const GARBLED_PATTERN = /[◈◆◇◉●○□■□△▽◇◈◎¤¦¨©®°±²³´µ¶·¸¹º»¼½¾¿À-ÿØ-ÿ]/;
+  // 覆盖：菱形符(◇◆◇◈◆)、星号符(✦✧★☆)、几何符号(●○□■△▽)、货币符号(¤¦)
+  // 以及扩展拉丁补充区(À-ÿ)和其他乱码字符
+  const GARBLED_PATTERN = /[◇◆◇◈✦✧★☆●○□■△▽◎¤¦¨©®°±²³´µ¶·¸¹º»¼½¾¿À-ÿØ-ÿ\u25C0-\u25FF\u2600-\u26FF\u2700-\u27BF]/;
   // 已知合法的市场值列表
   const VALID_MARKETS = ['国内市场', '港股市场', '美股市场', '其他市场'];
+  // 账户名清理：去除乱码字符，保留中文、英文、数字、连字符、下划线
+  const sanitizeAccountName = (val) => {
+    if (val == null) return '';
+    const str = String(val).trim();
+    if (!str) return '';
+    // 去除乱码字符
+    let cleaned = str.replace(GARBLED_PATTERN, '');
+    // 清理连续的特殊符号残留
+    cleaned = cleaned.replace(/[◇◆◇◈✦✧★☆●○□■△▽◎¤¦]+/g, '');
+    // 清理多余的连字符和空格
+    cleaned = cleaned.replace(/\s*-+\s*-+\s*/g, ' - ');
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    return cleaned;
+  };
   const sanitizeStr = (val, fallback = '', isMarket = false) => {
     if (val == null) return fallback;
     const str = String(val).trim();
@@ -425,9 +441,10 @@ async function saveUserState(conn, userId, state) {
   }
 
   for (const row of (state.accounts || [])) {
+    const cleanedName = sanitizeAccountName(row.name);
     await sqlRun(conn, `INSERT INTO accounts (user_id, id, name, owner, owners_json, ownership_type, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, text(row.id), text(row.name), text(row.owner),
+      [userId, text(row.id), text(cleanedName || row.name), text(row.owner),
        row.owners ? JSON.stringify(row.owners) : null,
        text(row.ownershipType || 'personal'),
        text(row.currency), text(row.type),
