@@ -1,0 +1,447 @@
+name: Deep IBD Hex Extraction + Binlog Fix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hex-level IBD analysis and fix binlog decoding
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 120m
+          script: |
+            set +e
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            [ -z "$CONTAINER_ID" ] && echo "❌ No MySQL container" && exit 1
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            TS=$(date +%Y%m%d_%H%M%S)
+            REC_DIR="/tmp/recovery_$TS"
+            mkdir -p "$REC_DIR"
+
+            echo "========================================"
+            echo "  深度 IBD + Binlog 恢复 v3"
+            echo "========================================"
+
+            # ========== 1. 检查 mysqlbinlog 为什么失败 ==========
+            echo ""
+            echo "=== 1. 诊断 mysqlbinlog ==="
+            
+            echo "检查 mysqlbinlog 是否存在:"
+            docker exec "$CONTAINER_ID" which mysqlbinlog 2>/dev/null
+            
+            echo "检查 binlog 文件格式:"
+            for BF in /var/lib/mysql/binlog.000006 /var/lib/mysql/binlog.000010; do
+              if docker exec "$CONTAINER_ID" test -f "$BF"; then
+                echo ""
+                echo "--- $BF ---"
+                echo "文件大小: $(docker exec "$CONTAINER_ID" stat -c%s "$BF" 2>/dev/null) bytes"
+                echo "Magic bytes (first 4):"
+                docker exec "$CONTAINER_ID" xxd -l 16 "$BF" 2>/dev/null
+                echo "尝试 mysqlbinlog 不带选项:"
+                docker exec "$CONTAINER_ID" mysqlbinlog "$BF" 2>&1 | head -5
+              fi
+            done
+            
+            # 尝试用 mysqlbinlog --force-read
+            echo ""
+            echo "尝试 mysqlbinlog --force-read:"
+            docker exec "$CONTAINER_ID" mysqlbinlog --force-read /var/lib/mysql/binlog.000010 2>&1 | head -20
+            
+            echo ""
+            echo "尝试 mysqlbinlog --verify-binlog-checksum:"
+            docker exec "$CONTAINER_ID" mysqlbinlog --verify-binlog-checksum /var/lib/mysql/binlog.000010 2>&1 | head -20
+
+            # ========== 2. Hex dump IBD 文件 ==========
+            echo ""
+            echo "=== 2. Hex dump IBD 文件 ==="
+            
+            for TABLE in records accounts finance_assets; do
+              IBD="/var/lib/mysql/asset_platform/${TABLE}.ibd"
+              if docker exec "$CONTAINER_ID" test -f "$IBD"; then
+                SZ=$(docker exec "$CONTAINER_ID" stat -c%s "$IBD" 2>/dev/null)
+                echo ""
+                echo "--- $TABLE.ibd ($SZ bytes) ---"
+                
+                # 提取 hex dump (前 1MB)
+                docker exec "$CONTAINER_ID" xxd -l 1048576 "$IBD" > "$REC_DIR/${TABLE}_hex.txt" 2>/dev/null
+                HEX_LINES=$(wc -l < "$REC_DIR/${TABLE}_hex.txt" 2>/dev/null)
+                echo "Hex dump 行数: $HEX_LINES"
+                
+                # 查找 InnoDB 页面标记
+                echo "InnoDB 页面检查:"
+                grep -c "InnoDB" "$REC_DIR/${TABLE}_hex.txt" 2>/dev/null
+                grep -c "PAGE" "$REC_DIR/${TABLE}_hex.txt" 2>/dev/null
+                
+                # 查找日期模式 (在 hex 中搜索 ASCII "2026-")
+                echo "日期搜索 (2026):"
+                grep -c "2026" "$REC_DIR/${TABLE}_hex.txt" 2>/dev/null
+                
+                # 查找已知字符串
+                echo "查找已知数据模式:"
+                grep -o "income\|expense\|CNY\|cash\|broker\| records\|balance" "$REC_DIR/${TABLE}_hex.txt" 2>/dev/null | sort | uniq -c | sort -rn
+                
+                # 导出 records.ibd 到宿主机以供进一步分析
+                docker cp "$CONTAINER_ID":"$IBD" "$REC_DIR/" 2>/dev/null
+                echo "已复制 $TABLE.ibd 到 $REC_DIR/"
+              fi
+            done
+
+            # ========== 3. 深入分析 records.ibd ==========
+            echo ""
+            echo "=== 3. 深入分析 records.ibd (10MB) ==="
+            
+            # 在宿主机上分析
+            if [ -f "$REC_DIR/records.ibd" ]; then
+                echo "分析 10MB records.ibd..."
+                
+                # 1. 使用 xxd 查看各个 InnoDB 页面
+                # InnoDB 默认页面大小 16KB = 16384 bytes
+                # 每个页面开头有 FIL header (8 bytes)
+                echo ""
+                echo "--- InnoDB 页面结构 ---"
+                
+                PAGE_SIZE=16384
+                TOTAL_PAGES=$(echo "scale=0; $(stat -c%s "$REC_DIR/records.ibd") / $PAGE_SIZE" | bc 2>/dev/null || echo 640)
+                echo "总页面数: $TOTAL_PAGES (假设 16KB 页面)"
+                
+                # 检查每个页面的类型
+                echo ""
+                echo "前 20 个页面的页类型:"
+                for ((i=0; i<20; i++)); do
+                  OFFSET=$((i * PAGE_SIZE))
+                  # InnoDB 页面类型在 offset 24-25 (PAGE_TYPE 字段)
+                  PAGE_TYPE=$(xxd -s +$((OFFSET + 24)) -l 2 "$REC_DIR/records.ibd" 2>/dev/null)
+                  echo "  页面 $i (offset $OFFSET): $PAGE_TYPE"
+                done
+                
+                # InnoDB 页面类型:
+                # 0x45BF = INDEX page (B-tree 索引页, 存储实际数据)
+                # 0x45BD = ALLOCATOR page
+                # 0x45C2 = SYS page  
+                # 0x45B5 = INODE page
+                
+                echo ""
+                echo "--- 搜索数据区域 ---"
+                
+                # 在 INDEX 页面中查找记录
+                # InnoDB 行格式:
+                # - 变长字段长度列表 (反向)
+                # - NULL 标志位
+                # - 记录头 (5字节)
+                # - 实际列数据
+                
+                # 搜索日期字符串
+                echo "搜索 '2026' 在 records.ibd:"
+                grep -boa "2026" "$REC_DIR/records.ibd" 2>/dev/null | head -30
+                
+                echo ""
+                echo "搜索 '2025' 在 records.ibd:"
+                grep -boa "2025" "$REC_DIR/records.ibd" 2>/dev/null | head -30
+                
+                echo ""
+                echo "搜索 'income' 在 records.ibd:"
+                grep -boa "income" "$REC_DIR/records.ibd" 2>/dev/null | head -10
+                
+                echo ""
+                echo "搜索 'expense' 在 records.ibd:"
+                grep -boa "expense" "$REC_DIR/records.ibd" 2>/dev/null | head -10
+                
+                echo ""
+                echo "搜索 'CNY' 在 records.ibd:"
+                grep -boa "CNY" "$REC_DIR/records.ibd" 2>/dev/null | head -20
+                
+                # 使用 grep -a (binary mode) 提取可读文本片段
+                echo ""
+                echo "--- 提取 records.ibd 中的文本片段 ---"
+                # grep -a 强制以文本模式处理二进制文件
+                grep -aoP '[ -~]{8,}' "$REC_DIR/records.ibd" 2>/dev/null | sort -u | head -100
+                
+                echo ""
+                echo "--- 提取 accounts.ibd 中的文本片段 ---"
+                grep -aoP '[ -~]{8,}' "$REC_DIR/accounts.ibd" 2>/dev/null | sort -u | head -50
+                
+                echo ""
+                echo "--- 提取 finance_assets.ibd 中的文本片段 ---"
+                grep -aoP '[ -~]{8,}' "$REC_DIR/finance_assets.ibd" 2>/dev/null | sort -u | head -50
+            fi
+
+            # ========== 4. InnoDB 数据恢复策略 ==========
+            echo ""
+            echo "=== 4. InnoDB 强制恢复策略 ==="
+            
+            # 方法: 使用 innodb_force_recovery
+            # 级别 1-6，逐级尝试
+            # 级别 4 会跳过损坏的记录，可能导致数据丢失
+            # 但比级别 6 (阻止所有 InnoDB 处理) 要好
+            
+            echo "当前 InnoDB 状态:"
+            $MYSQL -e "SHOW VARIABLES LIKE 'innodb_force_recovery';" 2>/dev/null
+            
+            echo ""
+            echo "如果需要强制恢复:"
+            echo "  1. docker stop <mysql_container>"
+            echo "  2. 在 MySQL 配置中添加 innodb_force_recovery=4"
+            echo "  3. docker start <mysql_container>"
+            echo "  4. 导出数据: mysqldump -u root -p asset_platform > recovery.sql"
+            echo "  5. 重启 MySQL 去掉 innodb_force_recovery"
+
+            # ========== 5. 分析现有数据和已恢复数据 ==========
+            echo ""
+            echo "=== 5. 数据分析 ==="
+            
+            echo ""
+            echo "--- 现有 records 数据分布 ---"
+            $MYSQL asset_platform -e "
+              SELECT 
+                user_id,
+                COUNT(*) as cnt,
+                GROUP_CONCAT(DISTINCT type ORDER BY type) as types,
+                MIN(amount) as min_amt,
+                MAX(amount) as max_amt,
+                MIN(record_date) as min_date,
+                MAX(record_date) as max_date
+              FROM records
+              GROUP BY user_id;
+            " 2>/dev/null
+            
+            echo ""
+            echo "--- 现有 accounts 数据分布 ---"
+            $MYSQL asset_platform -e "
+              SELECT 
+                user_id,
+                COUNT(*) as cnt,
+                GROUP_CONCAT(DISTINCT type ORDER BY type) as types,
+                SUM(balance) as total_balance,
+                SUM(liability) as total_liability
+              FROM accounts
+              GROUP BY user_id;
+            " 2>/dev/null
+            
+            echo ""
+            echo "--- 现有 finance_assets 数据分布 ---"
+            $MYSQL asset_platform -e "
+              SELECT 
+                user_id,
+                COUNT(*) as cnt,
+                GROUP_CONCAT(DISTINCT kind ORDER BY kind) as kinds,
+                SUM(shares) as total_shares,
+                SUM(current_price) as total_current,
+                SUM(pnl) as total_pnl
+              FROM finance_assets
+              GROUP BY user_id;
+            " 2>/dev/null
+
+            # ========== 6. 备份文件深入分析 ==========
+            echo ""
+            echo "=== 6. 深入分析备份 SQL ==="
+            
+            # 解压最近的备份
+            BK="/opt/mysql-backups/asset_platform_full_20260826_151334.sql.gz"
+            if [ -f "$BK" ]; then
+                echo ""
+                echo "分析 $BK ..."
+                gunzip -c "$BK" > "$REC_DIR/latest_backup.sql"
+                
+                echo "Backup 内容统计:"
+                echo "  总行数: $(wc -l < "$REC_DIR/latest_backup.sql")"
+                echo "  INSERT: $(grep -c 'INSERT INTO' "$REC_DIR/latest_backup.sql")"
+                echo "  records INSERT: $(grep -c 'INSERT INTO.*records' "$REC_DIR/latest_backup.sql")"
+                echo "  accounts INSERT: $(grep -c 'INSERT INTO.*accounts' "$REC_DIR/latest_backup.sql")"
+                echo "  finance_assets INSERT: $(grep -c 'INSERT INTO.*finance_assets' "$REC_DIR/latest_backup.sql")"
+                
+                echo ""
+                echo "--- backup 中的 records INSERT ---"
+                grep 'INSERT INTO.*records' "$REC_DIR/latest_backup.sql" > "$REC_DIR/backup_records.sql" 2>/dev/null
+                cat "$REC_DIR/backup_records.sql"
+                
+                echo ""
+                echo "--- backup 中的 accounts INSERT ---"
+                grep 'INSERT INTO.*accounts' "$REC_DIR/latest_backup.sql" > "$REC_DIR/backup_accounts.sql" 2>/dev/null
+                cat "$REC_DIR/backup_accounts.sql"
+                
+                echo ""
+                echo "--- backup 中的 finance_assets INSERT ---"
+                grep 'INSERT INTO.*finance_assets' "$REC_DIR/latest_backup.sql" > "$REC_DIR/backup_finance.sql" 2>/dev/null
+                wc -l "$REC_DIR/backup_finance.sql"
+                
+                # 尝试在 backup SQL 中搜索更多 records 数据
+                echo ""
+                echo "--- backup.sql (Jul 30) 分析 ---"
+                BK2="/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/401/fs/tmp/backup.sql"
+                if [ -f "$BK2" ]; then
+                  cp "$BK2" "$REC_DIR/backup_jul30.sql"
+                  echo "大小: $(stat -c%s "$BK2") bytes"
+                  echo "INSERT: $(grep -c 'INSERT INTO' "$BK2")"
+                  echo "records INSERT: $(grep -c 'INSERT INTO.*records' "$BK2")"
+                  
+                  # 查看 records 数据
+                  grep -A2 'INSERT INTO.*records' "$BK2" | head -50
+                fi
+            fi
+
+            # ========== 7. 使用 Python 解析 IBD ==========
+            echo ""
+            echo "=== 7. Python IBD 解析 ==="
+            
+            # 安装必要的 Python 库
+            pip install struct 2>/dev/null
+            
+            # 创建解析脚本
+            cat > "$REC_DIR/parse_ibd.py" << 'PYEOF'
+import struct
+import sys
+
+def parse_innodb_ibd(filepath, table_name):
+    """解析 InnoDB .ibd 文件"""
+    print(f"Parsing {filepath} for table {table_name}")
+    
+    with open(filepath, 'rb') as f:
+        data = f.read()
+    
+    page_size = 16384  # 默认 InnoDB 页面大小
+    num_pages = len(data) // page_size
+    
+    print(f"File size: {len(data)} bytes, Pages: {num_pages}")
+    
+    found_records = []
+    
+    for page_idx in range(min(num_pages, 1000)):  # 分析前1000页
+        offset = page_idx * page_size
+        
+        # 读取 FIL header (8 bytes)
+        if offset + 40 > len(data):
+            break
+        
+        # 检查页面类型 (offset 24-25)
+        page_type = struct.unpack('>H', data[offset+24:offset+26])[0]
+        
+        # 0x45BF = INDEX page (B-tree leaf node containing actual data)
+        if page_type == 0x45BF:
+            # 这是一个索引页面，可能包含数据
+            # 尝试在页面中搜索字符串
+            page_data = data[offset:offset+page_size]
+            
+            # 搜索日期模式 (ASCII "2026")
+            pos = 0
+            while True:
+                idx = page_data.find(b'2026', pos)
+                if idx == -1:
+                    break
+                # 找到日期，提取周围的数据
+                context_start = max(0, idx - 20)
+                context_end = min(len(page_data), idx + 30)
+                context = page_data[context_start:context_end]
+                try:
+                    text = context.decode('latin-1')
+                    found_records.append((page_idx, idx, text))
+                except:
+                    pass
+                pos = idx + 1
+            
+            # 搜索金额模式 (如 "36000", "12600" 等)
+            # InnoDB 中 DOUBLE 类型存储为 8 字节 IEEE 754 浮点数
+            # 但这里先搜索 ASCII 数字
+            import re
+            for match in re.finditer(rb'\d{4,8}\.\d{2}', page_data):
+                context_start = max(0, match.start() - 10)
+                context_end = min(len(page_data), match.end() + 10)
+                context = page_data[context_start:context_end]
+                try:
+                    text = context.decode('latin-1')
+                    found_records.append((page_idx, match.start(), text))
+                except:
+                    pass
+    
+    # 输出找到的记录
+    print(f"\nFound {len(found_records)} potential data fragments:")
+    for i, (page, pos, text) in enumerate(found_records[:100]):
+        print(f"  [{i}] Page {page} Offset {pos}: {repr(text)}")
+    
+    return found_records
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print("Usage: python parse_ibd.py <ibd_file> [table_name]")
+        sys.exit(1)
+    
+    filepath = sys.argv[1]
+    table_name = sys.argv[2] if len(sys.argv) > 2 else 'unknown'
+    parse_innodb_ibd(filepath, table_name)
+PYEOF
+
+    echo "运行 Python IBD 解析..."
+    python3 "$REC_DIR/parse_ibd.py" "$REC_DIR/records.ibd" records > "$REC_DIR/ibd_analysis.txt" 2>&1
+    cat "$REC_DIR/ibd_analysis.txt"
+
+    # ========== 8. 生成恢复 SQL ==========
+    echo ""
+    echo "=== 8. 生成并应用恢复 SQL ==="
+    
+    # 从 backup SQL 中提取并应用所有可用数据
+    if [ -f "$REC_DIR/latest_backup.sql" ]; then
+        echo ""
+        echo "--- 应用最新备份 ---"
+        
+        # 转换为 INSERT IGNORE 并应用
+        sed 's/^INSERT INTO/INSERT IGNORE INTO/g' "$REC_DIR/latest_backup.sql" > "$REC_DIR/apply_latest.sql"
+        $MYSQL asset_platform --force < "$REC_DIR/apply_latest.sql" 2>/dev/null
+        echo "备份已应用"
+    fi
+    
+    # 从 Jul 30 备份恢复
+    if [ -f "$REC_DIR/backup_jul30.sql" ]; then
+        echo ""
+        echo "--- 应用 7月30日 备份 ---"
+        sed 's/^INSERT INTO/INSERT IGNORE INTO/g' "$REC_DIR/backup_jul30.sql" > "$REC_DIR/apply_jul30.sql"
+        $MYSQL asset_platform --force < "$REC_DIR/apply_jul30.sql" 2>/dev/null
+        echo "7月30日备份已应用"
+    fi
+
+    # ========== 9. 最终验证 ==========
+    echo ""
+    echo "========================================"
+    echo "  9. 最终验证"
+    echo "========================================"
+    
+    $MYSQL asset_platform -e "
+      SELECT 
+        'accounts' as tbl, COUNT(*) as total,
+          SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END) as u1,
+          SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END) as u3,
+          SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) as u4
+        FROM accounts
+        UNION ALL
+        SELECT 'finance_assets', COUNT(*),
+          SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+          SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+          SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+        FROM finance_assets
+        UNION ALL
+        SELECT 'records', COUNT(*),
+          SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+          SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+          SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+        FROM records
+        UNION ALL
+        SELECT 'debts', COUNT(*), 0,
+          SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+          SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+        FROM debts;
+    " 2>/dev/null
+    
+    echo ""
+    echo "恢复文件目录: $REC_DIR/"
+    echo "========================================"
+    echo "  完成"
+    echo "========================================"
