@@ -182,7 +182,7 @@ function computeExistingAssetsPie(stateData) {
   Object.entries(independentAssets).forEach(([typeKey, assets]) => {
     if (!Array.isArray(assets)) return;
     assets.forEach(asset => {
-      const assetType = asset.type || asset.category || typeKey || '';
+      const assetType = typeKey || asset.type || asset.category || '';
       let val = 0;
       if (assetType === 'insurance') {
         val = parseFloat(asset.premiumTotal || 0);
