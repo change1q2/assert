@@ -154,160 +154,110 @@ jobs:
               echo "⚠️ $RESTORE_DB not found"
             fi
 
-            # ========== STEP 4: Dynamic Binlog Analysis ==========
+            # ========== STEP 4: InnoDB .ibd File Recovery ==========
             echo ""
-            echo "=== STEP 4: Dynamic Binary Log Analysis ==="
+            echo "=== STEP 4: InnoDB .ibd File Recovery ==="
             
-            BINLOG_ON=$($MYSQL -N -B -e "SHOW VARIABLES LIKE 'log_bin';" 2>/dev/null | tail -1 | awk '{print $2}')
-            echo "log_bin: $BINLOG_ON"
-            echo "binlog_format: $($MYSQL -N -B -e "SHOW VARIABLES LIKE 'binlog_format';" 2>/dev/null | tail -1 | awk '{print $2}')"
-            
-            if [ "$BINLOG_ON" = "ON" ]; then
-              echo ""
-              echo "--- ALL binary log files ---"
-              $MYSQL -e "SHOW BINARY LOGS;" 2>/dev/null
-              
-              # Dynamically get ALL binlog files
-              BINLOG_FILES=$($MYSQL -N -B -e "SHOW BINARY LOGS;" 2>/dev/null | awk '{print $1}')
-              BINLOG_SIZES=$($MYSQL -N -B -e "SHOW BINARY LOGS;" 2>/dev/null | awk '{print $2}')
-              
-              # Find mysqlbinlog
-              MYSQLBINLOG=""
-              for BIN_PATH in /usr/bin/mysqlbinlog /usr/local/mysql/bin/mysqlbinlog /usr/sbin/mysqlbinlog; do
-                if docker exec "$CONTAINER_ID" test -x "$BIN_PATH" 2>/dev/null; then
-                  MYSQLBINLOG="$BIN_PATH"
-                  break
-                fi
-              done
-              [ -z "$MYSQLBINLOG" ] && MYSQLBINLOG=$(docker exec "$CONTAINER_ID" which mysqlbinlog 2>/dev/null)
-              
-              if [ -n "$MYSQLBINLOG" ]; then
-                echo "✅ mysqlbinlog found: $MYSQLBINLOG"
-                
-                DECODED_DIR="$REC_DIR/decoded"
-                mkdir -p "$DECODED_DIR"
-                
-                i=0
-                for BF in $BINLOG_FILES; do
-                  SZ=$(echo "$BINLOG_SIZES" | sed -n "$((i+1))p")
-                  CONTAINER_PATH="/var/lib/mysql/$BF"
-                  i=$((i+1))
-                  
-                  if docker exec "$CONTAINER_ID" test -f "$CONTAINER_PATH" 2>/dev/null; then
-                    # Process large files in 200MB chunks
-                    CHUNK_SIZE=209715200
-                    
-                    if [ "$SZ" -gt "$CHUNK_SIZE" ] 2>/dev/null; then
-                      echo ""
-                      echo "$BF: ${SZ} bytes - processing in 200MB chunks..."
-                      
-                      OFFSET=4
-                      CHUNK_NUM=0
-                      while [ "$OFFSET" -lt "$SZ" ] 2>/dev/null; do
-                        CHUNK_NUM=$((CHUNK_NUM + 1))
-                        END_POS=$((OFFSET + CHUNK_SIZE))
-                        [ "$END_POS" -gt "$SZ" ] 2>/dev/null && END_POS=$SZ
-                        
-                        echo "  Chunk $CHUNK_NUM: $OFFSET - $END_POS"
-                        
-                        CHUNK_FILE="$DECODED_DIR/${BF}_chunk${CHUNK_NUM}.txt"
-                        docker exec "$CONTAINER_ID" "$MYSQLBINLOG" \
-                          --no-defaults --force-read \
-                          --verbose --verbose \
-                          --base64-output=DECODE-ROWS \
-                          --start-position=$OFFSET \
-                          --stop-position=$END_POS \
-                          "$CONTAINER_PATH" > "$CHUNK_FILE" 2>/dev/null
-                        
-                        CHUNK_SZ=$(stat -c%s "$CHUNK_FILE" 2>/dev/null || echo 0)
-                        CHUNK_INS=$(grep -c 'INSERT INTO' "$CHUNK_FILE" 2>/dev/null || echo 0)
-                        CHUNK_DEL=$(grep -c 'DELETE FROM' "$CHUNK_FILE" 2>/dev/null || echo 0)
-                        echo "    Decoded: $CHUNK_SZ bytes, INSERT=$CHUNK_INS, DELETE=$CHUNK_DEL"
-                        
-                        OFFSET=$END_POS
-                      done
-                    else
-                      echo ""
-                      echo "Decoding $BF ($SZ bytes)..."
-                      
-                      DECODED_FILE="$DECODED_DIR/${BF}.txt"
-                      docker exec "$CONTAINER_ID" "$MYSQLBINLOG" \
-                        --no-defaults --force-read \
-                        --verbose --verbose \
-                        --base64-output=DECODE-ROWS \
-                        "$CONTAINER_PATH" > "$DECODED_FILE" 2>&1
-                      
-                      DEC_SZ=$(stat -c%s "$DECODED_FILE" 2>/dev/null || echo 0)
-                      INS=$(grep -c 'INSERT INTO' "$DECODED_FILE" 2>/dev/null || echo 0)
-                      DEL=$(grep -c 'DELETE FROM' "$DECODED_FILE" 2>/dev/null || echo 0)
-                      UPD=$(grep -c 'UPDATE.*SET' "$DECODED_FILE" 2>/dev/null || echo 0)
-                      echo "  Decoded: $DEC_SZ bytes, INSERT=$INS, DELETE=$DEL, UPDATE=$UPD"
-                      
-                      if [ "$INS" -gt 0 ] 2>/dev/null || [ "$DEL" -gt 0 ] 2>/dev/null; then
-                        echo "  Key events:"
-                        grep -E 'INSERT INTO|DELETE FROM|UPDATE.*SET' "$DECODED_FILE" 2>/dev/null | head -10 | sed 's/^/    /'
-                      fi
-                    fi
-                  else
-                    echo "$BF: NOT FOUND"
-                  fi
-                done
-                
-                # Extract recovery data
-                ALL_DECODED="$DECODED_DIR/all.txt"
-                cat "$DECODED_DIR"/*.txt 2>/dev/null > "$ALL_DECODED"
-                
-                echo ""
-                echo "--- Extracting recovery data from ALL decoded binlogs ---"
-                
-                for TABLE in accounts finance_assets records debts asset_classes books; do
-                  INS=$(grep -c "INSERT INTO.*\`$TABLE\`" "$ALL_DECODED" 2>/dev/null || echo 0)
-                  DEL=$(grep -c "DELETE FROM.*\`$TABLE\`" "$ALL_DECODED" 2>/dev/null || echo 0)
-                  echo "$TABLE: INSERT=$INS, DELETE=$DEL"
-                  
-                  if [ "$INS" -gt 0 ] 2>/dev/null; then
-                    RFILE="$REC_DIR/binlog_${TABLE}_recovery.sql"
-                    {
-                      echo "USE asset_platform;"
-                      grep "INSERT INTO.*\`$TABLE\`" "$ALL_DECODED" 2>/dev/null | \
-                        sed 's/^### //' | \
-                        sed 's/^INSERT INTO/INSERT IGNORE INTO/'
-                    } > "$RFILE"
-                    
-                    RCNT=$(grep -c 'INSERT' "$RFILE" 2>/dev/null || echo 0)
-                    if [ "$RCNT" -gt 0 ] 2>/dev/null; then
-                      echo "  Applying $RCNT INSERTs..."
-                      $MYSQL asset_platform --force < "$RFILE" 2>&1 | head -5
-                    fi
-                  fi
-                done
-              else
-                echo "⚠️ mysqlbinlog not found"
-                echo "Will check if we can install it..."
-                docker exec "$CONTAINER_ID" apt-get update -qq 2>/dev/null
-                docker exec "$CONTAINER_ID" apt-get install -y -qq mysql-client 2>/dev/null
-                MYSQLBINLOG=$(docker exec "$CONTAINER_ID" which mysqlbinlog 2>/dev/null)
-                [ -n "$MYSQLBINLOG" ] && echo "✅ Installed: $MYSQLBINLOG"
+            echo "--- .ibd File Sizes ---"
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              IBD_PATH="/var/lib/mysql/asset_platform/${TABLE}.ibd"
+              if docker exec "$CONTAINER_ID" test -f "$IBD_PATH" 2>/dev/null; then
+                IBD_SZ=$(docker exec "$CONTAINER_ID" stat -c%s "$IBD_PATH" 2>/dev/null)
+                ROW_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+                echo "  $TABLE.ibd: $IBD_SZ bytes, $ROW_CNT rows"
               fi
-            else
-              echo "❌ Binary logging not enabled"
-            fi
-
-            # ========== STEP 5: Apply data_backup_log ==========
-            echo ""
-            echo "=== STEP 5: Apply Automatic Backups (data_backup_log) ==="
+            done
             
-            BACKUP_LOG_EXISTS=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM data_backup_log" 2>/dev/null)
-            if [ -n "$BACKUP_LOG_EXISTS" ] && [ "$BACKUP_LOG_EXISTS" -gt 0 ] 2>/dev/null; then
-              echo "✅ data_backup_log has $BACKUP_LOG_EXISTS entries"
-              $MYSQL asset_platform -e "
-                SELECT table_name, row_count, backup_timestamp
-                FROM data_backup_log 
-                ORDER BY id DESC LIMIT 10;
-              " 2>/dev/null
-            else
-              echo "No automatic backup entries yet (feature was just deployed)"
-            fi
+            echo ""
+            echo "--- Copy .ibd Files to Host ---"
+            IBD_DIR="$REC_DIR/ibd_files"
+            mkdir -p "$IBD_DIR"
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              IBD_PATH="/var/lib/mysql/asset_platform/${TABLE}.ibd"
+              if docker exec "$CONTAINER_ID" test -f "$IBD_PATH" 2>/dev/null; then
+                docker cp "$CONTAINER_ID:$IBD_PATH" "$IBD_DIR/" 2>/dev/null
+                SZ=$(stat -c%s "$IBD_DIR/${TABLE}.ibd" 2>/dev/null || echo 0)
+                echo "  $TABLE.ibd: $SZ bytes copied"
+              fi
+            done
+            
+            echo ""
+            echo "--- Install Python ---"
+            apt-get update -qq 2>/dev/null && apt-get install -y -qq python3 2>/dev/null
+            echo "  Python: $(python3 --version 2>&1)"
+            
+            echo ""
+            echo "--- String Pattern Analysis ---"
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              IBD_FILE="$IBD_DIR/${TABLE}.ibd"
+              if [ -f "$IBD_FILE" ]; then
+                echo ""
+                echo "  $TABLE:"
+                STR_FILE="$IBD_DIR/${TABLE}_strings.txt"
+                strings "$IBD_FILE" 2>/dev/null > "$STR_FILE"
+                CNT=$(wc -l < "$STR_FILE" 2>/dev/null || echo 0)
+                echo "    Total strings: $CNT"
+                echo "    UUID patterns:"
+                grep -E '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$' "$STR_FILE" 2>/dev/null | head -5 | sed 's/^/      /'
+                echo "    Short strings (potential names):"
+                grep -E '^[A-Za-z][A-Za-z0-9 ]{4,30}$' "$STR_FILE" 2>/dev/null | head -8 | sed 's/^/      /'
+              fi
+            done
+            
+            echo ""
+            echo "--- InnoDB Python Parser ---"
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              IBD_FILE="$IBD_DIR/${TABLE}.ibd"
+              if [ -f "$IBD_FILE" ]; then
+                echo ""
+                echo "  Parsing $TABLE.ibd..."
+                python3 -c "
+import struct, sys
+f = '$IBD_FILE'
+fsize = __import__('os').path.getsize(f)
+npages = fsize // 16384
+results = []
+with open(f, 'rb') as fh:
+    for pn in range(npages):
+        data = fh.read(16384)
+        if len(data) < 38: break
+        ptype = struct.unpack_from('>H', data, 24)[0]
+        plevel = struct.unpack_from('>H', data, 26)[0]
+        nrecs = struct.unpack_from('>H', data, 34)[0]
+        if ptype == 0x45BF and plevel == 0 and nrecs > 0 and nrecs < 50000:
+            region = data[38:16364]
+            cur = b''
+            for b in region:
+                if 32 <= b <= 126:
+                    cur += bytes([b])
+                else:
+                    if len(cur) >= 6:
+                        try:
+                            s = cur.decode('ascii')
+                            if any(c.isalpha() for c in s):
+                                results.append(s)
+                        except: pass
+                    cur = b''
+outfile = '/tmp/${TABLE}_extracted.txt'
+with open(outfile, 'w') as out:
+    for r in results:
+        if len(r) >= 8:
+            out.write(r + '\n')
+print(f'    Found {len(results)} strings -> {outfile}')
+" 2>&1
+              fi
+            done
+            
+            echo ""
+            echo "--- Extraction Results ---"
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              EF="/tmp/${TABLE}_extracted.txt"
+              if [ -f "$EF" ]; then
+                CNT=$(wc -l < "$EF" 2>/dev/null || echo 0)
+                echo "  $TABLE: $CNT strings extracted"
+                head -3 "$EF" 2>/dev/null | sed 's/^/    /'
+              fi
+            done
 
             # ========== Final Verification ==========
             echo ""
