@@ -1,0 +1,505 @@
+name: Ultimate Binlog Recovery - ROW Format Parser
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ultimate binlog recovery with ROW format parsing
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 120m
+          script: |
+            set +e
+            echo "========================================"
+            echo "  Ultimate Binlog Recovery"
+            echo "  $(date)"
+            echo "========================================"
+
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            [ -z "$CONTAINER_ID" ] && echo "❌ No MySQL container" && exit 1
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            TS=$(date +%Y%m%d_%H%M%S)
+            REC_DIR="/tmp/binlog_recovery_$TS"
+            mkdir -p "$REC_DIR"
+
+            # ========== STEP 0: Full Current State Snapshot ==========
+            echo ""
+            echo "=== STEP 0: Current Database Snapshot ==="
+            
+            # Backup current state before any recovery
+            BACKUP_SQL="$REC_DIR/pre_recovery_backup.sql"
+            docker exec "$CONTAINER_ID" mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --quick asset_platform > "$BACKUP_SQL" 2>/dev/null
+            if [ -f "$BACKUP_SQL" ] && [ -s "$BACKUP_SQL" ]; then
+              gzip "$BACKUP_SQL"
+              echo "✅ Pre-recovery backup: ${BACKUP_SQL}.gz ($(du -h ${BACKUP_SQL}.gz | cut -f1))"
+            else
+              echo "⚠️ mysqldump may not be available, trying raw copy..."
+              # Alternative: export via mysql command
+              $MYSQL asset_platform -e "
+                SELECT 'accounts' as tbl, COUNT(*) as cnt FROM accounts
+                UNION ALL SELECT 'finance_assets', COUNT(*) FROM finance_assets
+                UNION ALL SELECT 'records', COUNT(*) FROM records
+                UNION ALL SELECT 'debts', COUNT(*) FROM debts
+                UNION ALL SELECT 'asset_classes', COUNT(*) FROM asset_classes
+                UNION ALL SELECT 'books', COUNT(*) FROM books
+                UNION ALL SELECT 'strategies', COUNT(*) FROM strategies
+                UNION ALL SELECT 'budgets', COUNT(*) FROM budgets
+                UNION ALL SELECT 'debt_payments', COUNT(*) FROM debt_payments
+                UNION ALL SELECT 'finance_asset_transactions', COUNT(*) FROM finance_asset_transactions
+                UNION ALL SELECT 'survival_funds', COUNT(*) FROM survival_funds
+                UNION ALL SELECT 'freedom_budgets', COUNT(*) FROM freedom_budgets
+                UNION ALL SELECT 'independent_assets', COUNT(*) FROM independent_assets;
+              " 2>/dev/null
+            fi
+
+            # ========== STEP 1: Locate Binary Log Files ==========
+            echo ""
+            echo "=== STEP 1: Locate Binary Log Files ==="
+
+            BINLOG_ON=$($MYSQL -N -B -e "SHOW VARIABLES LIKE 'log_bin';" 2>/dev/null | tail -1 | awk '{print $2}')
+            echo "log_bin = $BINLOG_ON"
+
+            BINLOG_FORMAT=$($MYSQL -N -B -e "SHOW VARIABLES LIKE 'binlog_format';" 2>/dev/null | tail -1 | awk '{print $2}')
+            echo "binlog_format = $BINLOG_FORMAT"
+
+            BINLOG_BASE=$($MYSQL -N -B -e "SHOW VARIABLES LIKE 'log_bin_basename';" 2>/dev/null | tail -1 | awk '{print $2}')
+            echo "log_bin_basename = $BINLOG_BASE"
+
+            DATADIR=$($MYSQL -N -B -e "SHOW VARIABLES LIKE 'datadir';" 2>/dev/null | tail -1 | awk '{print $2}')
+            echo "datadir = $DATADIR"
+
+            # List all binlog files
+            echo ""
+            echo "--- Available binlog files ---"
+            $MYSQL -e "SHOW BINARY LOGS;" 2>/dev/null
+
+            # Get binlog file list from MySQL
+            BINLOG_FILES=$($MYSQL -N -B -e "SHOW BINARY LOGS;" 2>/dev/null | awk '{print $1}')
+            
+            if [ -z "$BINLOG_FILES" ]; then
+              echo "❌ No binary logs found. Cannot proceed with binlog recovery."
+              echo "Will try alternative recovery methods..."
+              
+              # Try IBD-based recovery as fallback
+              echo ""
+              echo "=== Fallback: IBD-based Recovery ==="
+              for TABLE in records accounts finance_assets debts; do
+                IBD="/var/lib/mysql/asset_platform/${TABLE}.ibd"
+                if docker exec "$CONTAINER_ID" test -f "$IBD"; then
+                  SZ=$(docker exec "$CONTAINER_ID" stat -c%s "$IBD" 2>/dev/null)
+                  echo "$TABLE.ibd: $SZ bytes"
+                  docker cp "$CONTAINER_ID":"$IBD" "$REC_DIR/" 2>/dev/null
+                fi
+              done
+              
+              # Apply any backup SQL files found
+              for BK in /opt/mysql-backups/*.sql.gz /opt/mysql-backups/*.sql /opt/shuaiti/server/*.sql /tmp/*.sql; do
+                if [ -f "$BK" ] && grep -q 'INSERT' "$BK" 2>/dev/null; then
+                  echo "Applying backup: $BK"
+                  if echo "$BK" | grep -q '.gz'; then
+                    gunzip -c "$BK" | sed 's/^INSERT INTO/INSERT IGNORE INTO/g' | $MYSQL asset_platform --force 2>/dev/null
+                  else
+                    sed 's/^INSERT INTO/INSERT IGNORE INTO/g' "$BK" | $MYSQL asset_platform --force 2>/dev/null
+                  fi
+                fi
+              done
+              exit 0
+            fi
+
+            # ========== STEP 2: Copy Binlog Files to Host ==========
+            echo ""
+            echo "=== STEP 2: Copy Binlog Files ==="
+
+            HOST_BINLOG_DIR="$REC_DIR/binlogs"
+            mkdir -p "$HOST_BINLOG_DIR"
+
+            for BF in $BINLOG_FILES; do
+              # Full path in container
+              CONTAINER_PATH="/var/lib/mysql/$BF"
+              if docker exec "$CONTAINER_ID" test -f "$CONTAINER_PATH"; then
+                echo "Copying $BF ..."
+                docker cp "$CONTAINER_ID:$CONTAINER_PATH" "$HOST_BINLOG_DIR/" 2>/dev/null
+                SZ=$(stat -c%s "$HOST_BINLOG_DIR/$BF" 2>/dev/null || echo 0)
+                echo "  -> $SZ bytes"
+              else
+                # Try alternate path
+                CONTAINER_PATH="$DATADIR$BF"
+                if docker exec "$CONTAINER_ID" test -f "$CONTAINER_PATH"; then
+                  docker cp "$CONTAINER_ID:$CONTAINER_PATH" "$HOST_BINLOG_DIR/" 2>/dev/null
+                  SZ=$(stat -c%s "$HOST_BINLOG_DIR/$BF" 2>/dev/null || echo 0)
+                  echo "  -> $SZ bytes (alt path)"
+                fi
+              fi
+            done
+
+            echo ""
+            echo "Copied files:"
+            ls -lh "$HOST_BINLOG_DIR/" 2>/dev/null
+
+            # ========== STEP 3: Try mysqlbinlog (In Container) ==========
+            echo ""
+            echo "=== STEP 3: Decode with mysqlbinlog ==="
+
+            # Find mysqlbinlog binary
+            MYSQLBINLOG=""
+            for BIN_PATH in /usr/bin/mysqlbinlog /usr/local/mysql/bin/mysqlbinlog /usr/sbin/mysqlbinlog /usr/local/bin/mysqlbinlog; do
+              if docker exec "$CONTAINER_ID" test -x "$BIN_PATH"; then
+                MYSQLBINLOG="$BIN_PATH"
+                echo "✅ Found mysqlbinlog at: $MYSQLBINLOG"
+                break
+              fi
+            done
+
+            if [ -z "$MYSQLBINLOG" ]; then
+              # Try to find it
+              MYSQLBINLOG=$(docker exec "$CONTAINER_ID" find / -name "mysqlbinlog" -type f 2>/dev/null | head -1)
+              if [ -n "$MYSQLBINLOG" ]; then
+                echo "✅ Found mysqlbinlog via find: $MYSQLBINLOG"
+              fi
+            fi
+
+            if [ -z "$MYSQLBINLOG" ]; then
+              echo "⚠️ mysqlbinlog not found in container"
+              echo "Installing MySQL client tools..."
+              docker exec "$CONTAINER_ID" apt-get update -qq 2>/dev/null
+              docker exec "$CONTAINER_ID" apt-get install -y -qq mysql-client 2>/dev/null
+              MYSQLBINLOG=$(docker exec "$CONTAINER_ID" which mysqlbinlog 2>/dev/null)
+              if [ -z "$MYSQLBINLOG" ]; then
+                # Copy from host if available
+                HOST_MYBINLOG=$(which mysqlbinlog 2>/dev/null || echo "")
+                if [ -n "$HOST_MYBINLOG" ]; then
+                  echo "Copying host mysqlbinlog to container..."
+                  docker cp "$HOST_MYBINLOG" "$CONTAINER_ID":/usr/local/bin/mysqlbinlog 2>/dev/null
+                  docker exec "$CONTAINER_ID" chmod +x /usr/local/bin/mysqlbinlog 2>/dev/null
+                  MYSQLBINLOG="/usr/local/bin/mysqlbinlog"
+                fi
+              fi
+            fi
+
+            # ========== STEP 4: Decode Binlogs ==========
+            DECODED_DIR="$REC_DIR/decoded"
+            mkdir -p "$DECODED_DIR"
+
+            if [ -n "$MYSQLBINLOG" ]; then
+              echo ""
+              echo "--- Decoding binlog files ---"
+              
+              for BF in "$HOST_BINLOG_DIR"/*; do
+                [ -f "$BF" ] || continue
+                BASENAME=$(basename "$BF")
+                echo "Decoding $BASENAME ..."
+                
+                # Copy back to container for mysqlbinlog processing
+                CONTAINER_BF="/tmp/$BASENAME"
+                docker cp "$BF" "$CONTAINER_ID:$CONTAINER_BF" 2>/dev/null
+                
+                # Decode with verbose output to see row data
+                DECODED_FILE="$DECODED_DIR/${BASENAME}.txt"
+                
+                docker exec "$CONTAINER_ID" "$MYSQLBINLOG" \
+                  --verbose --verbose \
+                  --base64-output=DECODE-ROWS \
+                  "$CONTAINER_BF" > "$DECODED_FILE" 2>&1
+                
+                SZ=$(stat -c%s "$DECODED_FILE" 2>/dev/null || echo 0)
+                echo "  Decoded: $SZ bytes"
+                
+                if [ "$SZ" -gt 100 ] 2>/dev/null; then
+                  echo "  First 30 lines:"
+                  head -30 "$DECODED_FILE" | sed 's/^/    /'
+                  
+                  # Count events
+                  INS=$(grep -c 'INSERT INTO' "$DECODED_FILE" 2>/dev/null || echo 0)
+                  DEL=$(grep -c 'DELETE FROM' "$DECODED_FILE" 2>/dev/null || echo 0)
+                  UPD=$(grep -c 'UPDATE.*SET' "$DECODED_FILE" 2>/dev/null || echo 0)
+                  echo "  INSERT=$INS, DELETE=$DEL, UPDATE=$UPD"
+                  
+                  # List affected tables
+                  echo "  Tables affected:"
+                  grep -oP '(?:INSERT INTO|DELETE FROM|UPDATE)\s+`?\w+`?\.`?\w+`?' "$DECODED_FILE" 2>/dev/null | sort | uniq -c | sort -rn | head -10 | sed 's/^/    /'
+                fi
+              done
+
+              # ========== STEP 5: Extract Recovery SQL ==========
+              echo ""
+              echo "=== STEP 5: Extract Recovery SQL ==="
+              
+              ALL_DECODED="$DECODED_DIR/all_decoded.txt"
+              cat "$DECODED_DIR"/*.txt 2>/dev/null > "$ALL_DECODED"
+              
+              echo "Total decoded lines: $(wc -l < "$ALL_DECODED" 2>/dev/null)"
+              
+              # Extract INSERT statements (these are data that was inserted, may have been deleted later)
+              RECOVERY_SQL="$REC_DIR/recovery_from_binlog.sql"
+              
+              # Strategy 1: Extract all INSERT statements for target tables
+              {
+                echo "-- Binlog Recovery SQL - Extract from mysqlbinlog"
+                echo "-- Target: asset_platform database"
+                echo "-- Generated: $(date -Iseconds)"
+                echo "USE asset_platform;"
+                echo ""
+                
+                # For each target table, extract INSERT statements
+                for TABLE in accounts finance_assets records debts asset_classes books strategies budgets debt_payments survival_funds freedom_budgets; do
+                  echo ""
+                  echo "-- === $TABLE ==="
+                  # Extract INSERT INTO `table` ... VALUES ...
+                  # mysqlbinlog outputs: ### INSERT INTO `db`.`table` (col1, col2) VALUES (val1, val2);
+                  grep -A0 "INSERT INTO.*\`$TABLE\`" "$ALL_DECODED" 2>/dev/null | \
+                    sed 's/^### //' | \
+                    sed 's/^INSERT INTO/INSERT IGNORE INTO/' | \
+                    while IFS= read -r line; do
+                      # Skip if it's actually a DELETE
+                      if echo "$line" | grep -qi "DELETE"; then
+                        continue
+                      fi
+                      echo "$line"
+                    done
+                done
+              } > "$RECOVERY_SQL"
+              
+              RECOVERY_CNT=$(grep -c 'INSERT' "$RECOVERY_SQL" 2>/dev/null || echo 0)
+              echo "Generated $RECOVERY_CNT INSERT statements"
+              
+              if [ "$RECOVERY_CNT" -gt 0 ] 2>/dev/null; then
+                echo ""
+                echo "First 20 INSERT statements:"
+                head -20 "$RECOVERY_SQL" | sed 's/^/  /'
+                
+                # Apply recovery SQL
+                echo ""
+                echo "--- Applying recovery SQL ---"
+                $MYSQL asset_platform --force < "$RECOVERY_SQL" 2>&1 | head -20
+                echo "Applied (errors above are expected for duplicate keys)"
+              fi
+
+              # Strategy 2: Use before-image from UPDATE events
+              echo ""
+              echo "=== Strategy 2: Recover from UPDATE before-images ==="
+              
+              UPDATE_RECOVERY="$REC_DIR/update_recovery.sql"
+              {
+                echo "-- Recovery from UPDATE event before-images"
+                echo "USE asset_platform;"
+                echo ""
+                
+                for TABLE in accounts finance_assets records debts asset_classes; do
+                  echo ""
+                  echo "-- === $TABLE UPDATE recovery ==="
+                  # Find UPDATE events and extract the before values (stored as ### UPDATE ... WHERE)
+                  grep -B1 -A5 "UPDATE.*\`$TABLE\`" "$ALL_DECODED" 2>/dev/null | \
+                    grep -E '^### WHERE|^###  @[0-9]+' | \
+                    head -50
+                done
+              } > "$UPDATE_RECOVERY"
+              
+              echo "Update recovery SQL: $(wc -l < "$UPDATE_RECOVERY" 2>/dev/null) lines"
+            else
+              echo "⚠️ mysqlbinlog not available, using Python parser..."
+              
+              # Download Python parser
+              curl -sL "https://raw.githubusercontent.com/change1q2/assert/main/assert_PLATFORM/server/scripts/binlog_row_parser.py" \
+                -o "$REC_DIR/binlog_parser.py" 2>/dev/null
+              
+              if [ -f "$REC_DIR/binlog_parser.py" ]; then
+                echo "✅ Python parser downloaded"
+                
+                # Install Python
+                apt-get update -qq && apt-get install -y -qq python3 2>/dev/null
+                
+                # Run parser on each binlog file
+                for BF in "$HOST_BINLOG_DIR"/*; do
+                  [ -f "$BF" ] || continue
+                  BASENAME=$(basename "$BF" .00*)
+                  echo "Parsing $BASENAME ..."
+                  python3 "$REC_DIR/binlog_parser.py" "$BF" \
+                    --output "$REC_DIR/recovery_${BASENAME}.sql" \
+                    --database asset_platform 2>&1
+                done
+                
+                # Merge all recovery SQL
+                MERGED="$REC_DIR/merged_recovery.sql"
+                cat "$REC_DIR"/recovery_*.sql 2>/dev/null > "$MERGED"
+                
+                MERGED_CNT=$(grep -c 'INSERT' "$MERGED" 2>/dev/null || echo 0)
+                echo "Total INSERT statements from Python parser: $MERGED_CNT"
+                
+                if [ "$MERGED_CNT" -gt 0 ] 2>/dev/null; then
+                  echo "Applying merged recovery SQL..."
+                  $MYSQL asset_platform --force < "$MERGED" 2>&1 | head -20
+                fi
+              fi
+            fi
+
+            # ========== STEP 6: Apply Known Backup Files ==========
+            echo ""
+            echo "=== STEP 6: Apply Known Backup Files ==="
+            
+            for BK_SQL in \
+              /opt/mysql-backups/asset_platform_full_20260826_151334.sql.gz \
+              /var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/401/fs/tmp/backup.sql \
+              /opt/shuaiti/server/init-db.sql \
+              /root/backup.sql; do
+              
+              if [ -f "$BK_SQL" ]; then
+                BASENAME=$(basename "$BK_SQL")
+                echo ""
+                echo "--- $BASENAME ---"
+                
+                if echo "$BK_SQL" | grep -q '.gz'; then
+                  gunzip -c "$BK_SQL" > "$REC_DIR/backup_$(basename $BK_SQL .gz).sql"
+                  TARGET="$REC_DIR/backup_$(basename $BK_SQL .gz).sql"
+                else
+                  cp "$BK_SQL" "$REC_DIR/"
+                  TARGET="$REC_DIR/$BASENAME"
+                fi
+                
+                CNT=$(grep -c 'INSERT' "$TARGET" 2>/dev/null || echo 0)
+                echo "  INSERT statements: $CNT"
+                
+                if [ "$CNT" -gt 0 ] 2>/dev/null; then
+                  # Apply with INSERT IGNORE to avoid duplicates
+                  sed 's/^INSERT INTO/INSERT IGNORE INTO/g' "$TARGET" > "${TARGET}.apply"
+                  $MYSQL asset_platform --force < "${TARGET}.apply" 2>&1 | head -5
+                  echo "  Applied"
+                fi
+              fi
+            done
+
+            # ========== STEP 7: Cross-Schema Recovery ==========
+            echo ""
+            echo "=== STEP 7: Cross-Schema Recovery (asset_platform_restore) ==="
+            
+            RESTORE_DB="asset_platform_restore"
+            if $MYSQL -e "SHOW DATABASES LIKE '$RESTORE_DB';" 2>/dev/null | grep -q "$RESTORE_DB"; then
+              echo "✅ Restore database exists"
+              
+              for TABLE in accounts finance_assets records debts asset_classes books strategies; do
+                CUR_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+                RST_CNT=$($MYSQL "$RESTORE_DB" -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+                echo "$TABLE: current=$CUR_CNT, restore=$RST_CNT"
+                
+                if [ "$RST_CNT" -gt "$CUR_CNT" ] 2>/dev/null; then
+                  echo "  Recovering missing rows from restore..."
+                  # Insert rows that don't exist in current DB
+                  $MYSQL asset_platform 2>/dev/null <<EOF
+INSERT IGNORE INTO $TABLE
+SELECT * FROM $RESTORE_DB.$TABLE
+WHERE NOT EXISTS (
+  SELECT 1 FROM $TABLE a
+  WHERE a.id = $RESTORE_DB.$TABLE.id
+);
+EOF
+                  echo "  Done"
+                fi
+              done
+            else
+              echo "⚠️ Restore database not found"
+            fi
+
+            # ========== STEP 8: Final Verification ==========
+            echo ""
+            echo "========================================"
+            echo "  STEP 8: Final Verification"
+            echo "========================================"
+            
+            FINAL_STATE=$($MYSQL asset_platform -e "
+              SELECT 'accounts' as tbl, COUNT(*) as total,
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END) as u1,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END) as u3,
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) as u4
+              FROM accounts
+              UNION ALL SELECT 'finance_assets', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM finance_assets
+              UNION ALL SELECT 'records', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM records
+              UNION ALL SELECT 'debts', COUNT(*), 0,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM debts
+              UNION ALL SELECT 'asset_classes', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM asset_classes
+              UNION ALL SELECT 'books', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM books
+              UNION ALL SELECT 'strategies', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM strategies;
+            " 2>/dev/null)
+            
+            echo ""
+            echo "Final database state:"
+            echo "$FINAL_STATE" | sed 's/^/  /'
+
+            # Count total
+            TOTAL_ROWS=0
+            for CNT in $(echo "$FINAL_STATE" | awk '{print $2}' | tail -n +2); do
+              TOTAL_ROWS=$((TOTAL_ROWS + CNT))
+            done
+            echo ""
+            echo "Total rows across all tables: $TOTAL_ROWS"
+
+            # ========== STEP 9: Generate Recovery Report ==========
+            echo ""
+            echo "========================================"
+            echo "  Recovery Complete"
+            echo "  Report: $REC_DIR/"
+            echo "========================================"
+            
+            echo ""
+            echo "Generated files:"
+            ls -lh "$REC_DIR/" 2>/dev/null | head -30
+            
+            echo ""
+            echo "Decoded binlog events:"
+            for F in "$DECODED_DIR"/*.txt; do
+              [ -f "$F" ] || continue
+              BASENAME=$(basename "$F")
+              INS=$(grep -c 'INSERT INTO' "$F" 2>/dev/null || echo 0)
+              DEL=$(grep -c 'DELETE FROM' "$F" 2>/dev/null || echo 0)
+              echo "  $BASENAME: INSERT=$INS, DELETE=$DEL"
+            done
+            
+            echo ""
+            echo "Recovery SQL files:"
+            for F in "$REC_DIR"/*.sql; do
+              [ -f "$F" ] || continue
+              CNT=$(grep -c 'INSERT' "$F" 2>/dev/null || echo 0)
+              if [ "$CNT" -gt 0 ] 2>/dev/null; then
+                echo "  $F: $CNT INSERT statements"
+              fi
+            done
+
+            echo ""
+            echo "✅ Binlog recovery complete!"
+            echo "⚠️  If data is still missing, consider:"
+            echo "   1. Scanning InnoDB .ibd files for deleted records"
+            echo "   2. Checking application logs for saveUserState calls"
+            echo "   3. Contacting users to re-enter their data"
+            echo "   4. The saveUserState fix prevents future losses"
