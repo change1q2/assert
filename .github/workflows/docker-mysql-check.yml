@@ -1,0 +1,144 @@
+name: Docker MySQL Data Check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  docker-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Docker MySQL data via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 30m
+          script: |
+            echo "========================================"
+            echo "  Docker MySQL 数据检查 & 恢复"
+            echo "========================================"
+
+            # ---------- 1. 检查 Docker 容器 ----------
+            echo ""
+            echo "=== 1. Docker 容器列表 ==="
+            docker ps -a 2>/dev/null || echo "Docker 未安装或未运行"
+
+            echo ""
+            echo "--- MySQL 相关容器 ---"
+            docker ps -a 2>/dev/null | grep -i mysql || echo "未找到 MySQL 容器"
+
+            # ---------- 2. 检查 MySQL 容器环境变量 ----------
+            echo ""
+            echo "=== 2. MySQL 容器环境变量 ==="
+            CONTAINER_ID=$(docker ps 2>/dev/null | grep -i mysql | awk '{print $1}' | head -1)
+            if [ -n "$CONTAINER_ID" ]; then
+              echo "MySQL 容器 ID: $CONTAINER_ID"
+              echo "--- 环境变量 ---"
+              docker exec "$CONTAINER_ID" env 2>/dev/null | grep -iE "MYSQL|PASSWORD|ROOT|DATABASE|USER" || echo "无法获取环境变量"
+
+              echo ""
+              echo "--- 容器信息 ---"
+              docker inspect "$CONTAINER_ID" 2>/dev/null | grep -A 5 -i "Env\|mysql\|password" | head -30
+            else
+              echo "未找到运行中的 MySQL 容器"
+            fi
+
+            # ---------- 3. 尝试在容器内连接 MySQL ----------
+            echo ""
+            echo "=== 3. 容器内 MySQL 连接 ==="
+            if [ -n "$CONTAINER_ID" ]; then
+              # 获取密码
+              MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env 2>/dev/null | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+              if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+                MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env 2>/dev/null | grep -i "MYSQL_PASSWORD" | cut -d= -f2)
+              fi
+              echo "获取到的密码: ${MYSQL_ROOT_PASSWORD:-(空)}"
+
+              # 尝试连接
+              echo ""
+              echo "--- MySQL 版本 ---"
+              docker exec "$CONTAINER_ID" mysql -u root -p"${MYSQL_ROOT_PASSWORD:-123456}" -e "SELECT VERSION(); SHOW DATABASES;" 2>&1
+
+              # ---------- 4. 检查 asset_platform 数据库 ----------
+              echo ""
+              echo "=== 4. 检查 asset_platform 数据库 ==="
+              docker exec "$CONTAINER_ID" mysql -u root -p"${MYSQL_ROOT_PASSWORD:-123456}" asset_platform -e "SHOW TABLES;" 2>&1
+
+              echo ""
+              echo "--- 各表数据量 ---"
+              for tbl in users user_profiles accounts records finance_assets finance_asset_indoor_transactions finance_asset_outdoor_transactions finance_asset_archives debts asset_classes books survival_funds freedom_budgets exchange_rates budgets custom_record_categories finance_tertiary_categories record_tags recorders reminders debt_payments debt_categories yearly_records user_settings tags; do
+                cnt=$(docker exec "$CONTAINER_ID" mysql -u root -p"${MYSQL_ROOT_PASSWORD:-123456}" asset_platform -e "SELECT COUNT(*) as cnt FROM $tbl;" 2>/dev/null | tail -1)
+                if [ "$cnt" != "0" ] && [ -n "$cnt" ]; then
+                  echo "  $tbl: $cnt ★"
+                else
+                  echo "  $tbl: $cnt"
+                fi
+              done
+
+              # ---------- 5. 检查所有用户的数据量 ----------
+              echo ""
+              echo "=== 5. 每个用户的数据量 ==="
+              docker exec "$CONTAINER_ID" mysql -u root -p"${MYSQL_ROOT_PASSWORD:-123456}" asset_platform -e "
+                SELECT u.id, u.account, p.name,
+                  (SELECT COUNT(*) FROM accounts WHERE user_id=u.id) as accounts,
+                  (SELECT COUNT(*) FROM records WHERE user_id=u.id) as records,
+                  (SELECT COUNT(*) FROM finance_assets WHERE user_id=u.id) as finance_assets,
+                  (SELECT COUNT(*) FROM debts WHERE user_id=u.id) as debts,
+                  (SELECT COUNT(*) FROM survival_funds WHERE user_id=u.id) as survival_funds,
+                  (SELECT COUNT(*) FROM asset_classes WHERE user_id=u.id) as asset_classes,
+                  (SELECT COUNT(*) FROM books WHERE user_id=u.id) as books
+                FROM users u
+                LEFT JOIN user_profiles p ON p.user_id=u.id
+                ORDER BY u.id;
+              " 2>&1
+
+              # ---------- 6. 检查 user_settings 中的独立资产 ----------
+              echo ""
+              echo "=== 6. 独立资产数据 ==="
+              docker exec "$CONTAINER_ID" mysql -u root -p"${MYSQL_ROOT_PASSWORD:-123456}" asset_platform -e "
+                SELECT user_id,
+                  LENGTH(independent_assets_json) as ind_assets_len,
+                  LEFT(independent_assets_json, 300) as preview
+                FROM user_settings
+                WHERE independent_assets_json IS NOT NULL AND independent_assets_json != '{}' AND independent_assets_json != '';
+              " 2>&1
+
+              # ---------- 7. 如果有数据，创建完整备份 ----------
+              echo ""
+              echo "=== 7. 创建完整数据备份 ==="
+              BACKUP_FILE="/opt/mysql-backups/asset_platform_full_$(date '+%Y%m%d_%H%M%S').sql.gz"
+              docker exec "$CONTAINER_ID" mysqldump -u root -p"${MYSQL_ROOT_PASSWORD:-123456}" --single-transaction --routines --triggers asset_platform 2>/dev/null | gzip > "$BACKUP_FILE"
+              if [ -s "$BACKUP_FILE" ]; then
+                echo "完整备份已创建: $BACKUP_FILE ($(ls -lah $BACKUP_FILE | awk '{print $5}'))"
+              else
+                echo "备份创建失败"
+              fi
+
+              # ---------- 8. 检查所有数据库 ----------
+              echo ""
+              echo "=== 8. 检查所有数据库 ==="
+              docker exec "$CONTAINER_ID" mysql -u root -p"${MYSQL_ROOT_PASSWORD:-123456}" -e "SHOW DATABASES;" 2>&1
+
+              # 检查每个非系统数据库
+              DBS=$(docker exec "$CONTAINER_ID" mysql -u root -p"${MYSQL_ROOT_PASSWORD:-123456}" -e "SHOW DATABASES;" 2>/dev/null | grep -v Database | grep -v information_schema | grep -v mysql | grep -v performance_schema | grep -v sys)
+              for db in $DBS; do
+                echo "--- 数据库: $db ---"
+                TABLES=$(docker exec "$CONTAINER_ID" mysql -u root -p"${MYSQL_ROOT_PASSWORD:-123456}" "$db" -e "SHOW TABLES;" 2>/dev/null | grep -v Tables_in)
+                for tbl in $TABLES; do
+                  cnt=$(docker exec "$CONTAINER_ID" mysql -u root -p"${MYSQL_ROOT_PASSWORD:-123456}" "$db" -e "SELECT COUNT(*) as cnt FROM $tbl;" 2>/dev/null | tail -1)
+                  if [ "$cnt" != "0" ] && [ -n "$cnt" ]; then
+                    echo "  $db.$tbl: $cnt ★"
+                  fi
+                done
+              done
+            else
+              echo "未找到 MySQL 容器，无法检查"
+            fi
+
+            echo ""
+            echo "========================================"
+            echo "  Docker MySQL 检查完成"
+            echo "========================================"
