@@ -1,0 +1,11 @@
+name: Test Recovery Trigger
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simple test
+        run: echo "test ok"
