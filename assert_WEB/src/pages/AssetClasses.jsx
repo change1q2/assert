@@ -179,10 +179,10 @@ function computeExistingAssetsPie(stateData) {
 
   // 独立资产总价值
   let independentTotal = 0;
-  Object.values(independentAssets).forEach(assets => {
+  Object.entries(independentAssets).forEach(([typeKey, assets]) => {
     if (!Array.isArray(assets)) return;
     assets.forEach(asset => {
-      const assetType = asset.type || asset.category || '';
+      const assetType = asset.type || asset.category || typeKey || '';
       let val = 0;
       if (assetType === 'insurance') {
         val = parseFloat(asset.premiumTotal || 0);
@@ -190,11 +190,21 @@ function computeExistingAssetsPie(stateData) {
         const mv = parseFloat(asset.marketValue || 0);
         val = mv > 0 ? mv : parseFloat(asset.purchasePrice || 0);
       } else if (assetType === 'vehicle') {
-        val = parseFloat(asset.purchasePrice || 0);
+        const purchasePrice = parseFloat(asset.purchasePrice || 0);
+        const depreciationRate = parseFloat(asset.depreciationRate || 0);
+        const years = parseFloat(asset.ownershipYears || 0);
+        val = purchasePrice * Math.pow(1 - depreciationRate / 100, years);
       } else if (assetType === 'fixedinvestment') {
         val = parseFloat(asset.investmentCost || 0);
       } else if (assetType === 'equity') {
-        val = parseFloat(asset.marketValue || asset.investmentCost || 0);
+        const mv = parseFloat(asset.marketValue || 0);
+        if (mv > 0) {
+          val = mv;
+        } else {
+          const price = parseFloat(asset.currentPrice || 0);
+          const qty = parseFloat(asset.quantity || asset.shares || 0);
+          val = (price > 0 && qty > 0) ? price * qty : parseFloat(asset.investmentCost || 0);
+        }
       } else if (assetType === 'fixeddeposit') {
         val = parseFloat(asset.amount || 0);
       } else {
