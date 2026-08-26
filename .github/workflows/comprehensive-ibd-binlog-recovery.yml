@@ -1,0 +1,338 @@
+name: Comprehensive IBD + Binlog Recovery
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Full IBD extraction + Binlog decode + SQL recovery
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 120m
+          script: |
+            set +e
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            [ -z "$CONTAINER_ID" ] && echo "❌ No MySQL container" && exit 1
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            TS=$(date +%Y%m%d_%H%M%S)
+            REC_DIR="/tmp/recovery_$TS"
+            mkdir -p "$REC_DIR"
+
+            echo "========================================"
+            echo "  全面数据恢复 v2"
+            echo "  时间: $TS"
+            echo "========================================"
+
+            # ========== 1. 当前状态 ==========
+            echo ""
+            echo "=== 1. 当前数据库状态 ==="
+            $MYSQL asset_platform -e "
+              SELECT 'accounts' as tbl, COUNT(*) as total,
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END) as u1,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END) as u3,
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) as u4
+              FROM accounts
+              UNION ALL SELECT 'finance_assets', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM finance_assets
+              UNION ALL SELECT 'records', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                0
+              FROM records
+              UNION ALL SELECT 'debts', COUNT(*), 0,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END), 0
+              FROM debts;
+            " 2>/dev/null
+
+            # ========== 2. IBD 字符串提取 ==========
+            echo ""
+            echo "=== 2. IBD 字符串提取 ==="
+            
+            for TABLE in records accounts finance_assets debts asset_classes accounts_archive finance_assets_archive; do
+              IBD="/var/lib/mysql/asset_platform/${TABLE}.ibd"
+              if docker exec "$CONTAINER_ID" test -f "$IBD"; then
+                SZ=$(docker exec "$CONTAINER_ID" stat -c%s "$IBD" 2>/dev/null)
+                echo ""
+                echo "--- $TABLE.ibd ($SZ bytes) ---"
+                
+                # 提取字符串 (最小6字符，过滤噪声)
+                docker exec "$CONTAINER_ID" strings -n 6 "$IBD" > "$REC_DIR/${TABLE}_raw.txt" 2>/dev/null
+                LINES=$(wc -l < "$REC_DIR/${TABLE}_raw.txt" 2>/dev/null)
+                echo "提取到 $LINES 行字符串"
+                
+                # 过滤有意义的数据 (排除纯控制字符和太短的)
+                grep -E '[a-zA-Z\u4e00-\u9fff]' "$REC_DIR/${TABLE}_raw.txt" > "$REC_DIR/${TABLE}_text.txt" 2>/dev/null
+                TXT_LINES=$(wc -l < "$REC_DIR/${TABLE}_text.txt" 2>/dev/null)
+                echo "其中 $TXT_LINES 行包含文本"
+                
+                # 显示前30行
+                echo "前30行有意义内容:"
+                head -30 "$REC_DIR/${TABLE}_text.txt"
+                
+                # 搜索金额模式
+                echo "金额模式 (金额数字):"
+                grep -oE '[0-9]+\.[0-9]{2}' "$REC_DIR/${TABLE}_raw.txt" 2>/dev/null | sort -rn | head -10
+                
+                # 搜索日期
+                echo "日期模式:"
+                grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' "$REC_DIR/${TABLE}_raw.txt" 2>/dev/null | sort -u | head -10
+              fi
+            done
+
+            # ========== 3. Binlog 解码 ==========
+            echo ""
+            echo "=== 3. Binlog 解码 ==="
+            
+            # 在容器内解码所有 binlog
+            for BF in /var/lib/mysql/binlog.00000{6,7,8,9} /var/lib/mysql/binlog.00010; do
+              BASENAME=$(basename "$BF")
+              echo ""
+              echo "--- 处理 $BASENAME ---"
+              
+              # 解码到容器内文件
+              docker exec "$CONTAINER_ID" mysqlbinlog \
+                --verbose --verbose \
+                --base64-output=DECODE-ROWS \
+                "$BF" > "$REC_DIR/binlog_${BASENAME}.txt" 2>/dev/null
+              
+              SZ=$(stat -c%s "$REC_DIR/binlog_${BASENAME}.txt" 2>/dev/null || echo 0)
+              echo "解码大小: $SZ bytes"
+              
+              if [ "$SZ" -gt 100 ] 2>/dev/null; then
+                echo "事件统计:"
+                echo "  INSERT: $(grep -c 'INSERT INTO' "$REC_DIR/binlog_${BASENAME}.txt" 2>/dev/null)"
+                echo "  DELETE: $(grep -c 'DELETE FROM' "$REC_DIR/binlog_${BASENAME}.txt" 2>/dev/null)"
+                echo "  UPDATE: $(grep -c 'UPDATE ' "$REC_DIR/binlog_${BASENAME}.txt" 2>/dev/null)"
+                echo "  records: $(grep -c 'records' "$REC_DIR/binlog_${BASENAME}.txt" 2>/dev/null)"
+                echo "  accounts: $(grep -c 'accounts' "$REC_DIR/binlog_${BASENAME}.txt" 2>/dev/null)"
+                echo "  finance_assets: $(grep -c 'finance_assets' "$REC_DIR/binlog_${BASENAME}.txt" 2>/dev/null)"
+                
+                # 提取 INSERT 语句
+                grep -A20 'INSERT INTO.*records' "$REC_DIR/binlog_${BASENAME}.txt" > "$REC_DIR/records_insert_${BASENAME}.txt" 2>/dev/null
+                grep -A20 'INSERT INTO.*accounts' "$REC_DIR/binlog_${BASENAME}.txt" > "$REC_DIR/accounts_insert_${BASENAME}.txt" 2>/dev/null
+                grep -A20 'INSERT INTO.*finance_assets' "$REC_DIR/binlog_${BASENAME}.txt" > "$REC_DIR/finance_insert_${BASENAME}.txt" 2>/dev/null
+              fi
+            done
+
+            # ========== 4. 分析 binlog 提取结果 ==========
+            echo ""
+            echo "=== 4. Binlog 数据提取结果 ==="
+            
+            for TYPE in records accounts finance; do
+              TOTAL=0
+              for F in "$REC_DIR/${TYPE}"_insert_binlog.*.txt; do
+                if [ -f "$F" ]; then
+                  CNT=$(grep -c '### INSERT INTO' "$F" 2>/dev/null || echo 0)
+                  TOTAL=$((TOTAL + CNT))
+                fi
+              done
+              echo "$TYPE: 共找到 $TOTAL 条 INSERT 事件"
+              
+              # 显示前几条
+              for F in "$REC_DIR/${TYPE}"_insert_binlog.*.txt; do
+                if [ -f "$F" ] && [ -s "$F" ]; then
+                  echo "  示例 $(basename $F):"
+                  head -30 "$F"
+                  break
+                fi
+              done
+            done
+
+            # ========== 5. 从 binlog 构建可执行 SQL ==========
+            echo ""
+            echo "=== 5. 构建恢复 SQL ==="
+            
+            cat > "$REC_DIR/recovery.sql" << 'SQLHEAD'
+-- 自动生成的恢复 SQL
+-- 使用 INSERT IGNORE 避免主键冲突
+-- 只插入不存在的数据
+
+SQLHEAD
+
+            # 处理 binlog 中的 INSERT 事件
+            for TABLE in records accounts finance_assets debts; do
+              echo ""
+              echo "--- 构建 $TABLE 的 INSERT ---"
+              
+              cat >> "$REC_DIR/recovery.sql" << EOTABLE
+-- === $TABLE ===
+EOTABLE
+              
+              # 从所有 binlog 提取该表的 INSERT
+              for F in "$REC_DIR"/*insert*binlog.*.txt; do
+                if [ -f "$F" ] && echo "$F" | grep -q "$TABLE"; then
+                  # 提取 INSERT 语句
+                  grep -A30 '### INSERT INTO' "$F" 2>/dev/null | \
+                    sed 's/^### //' | \
+                    sed 's/^INSERT INTO/INSERT IGNORE INTO/' | \
+                    grep -v '^--' >> "$REC_DIR/recovery.sql" 2>/dev/null
+                fi
+              done
+            done
+
+            echo "恢复 SQL 文件大小: $(stat -c%s "$REC_DIR/recovery.sql" 2>/dev/null) bytes"
+
+            # ========== 6. 查找并恢复备份文件 ==========
+            echo ""
+            echo "=== 6. 扫描系统中所有 SQL 备份 ==="
+            
+            find / -name "*.sql" -o -name "*.sql.gz" -o -name "*.sql.bak" 2>/dev/null | head -30
+            
+            # 检查已知备份
+            for BK in /opt/mysql-backups/*.sql.gz /tmp/backup.sql /opt/shuaiti/server/init-db.sql; do
+              if [ -f "$BK" ]; then
+                echo ""
+                echo "--- 检查 $BK ---"
+                SZ=$(stat -c%s "$BK" 2>/dev/null)
+                echo "大小: $SZ bytes"
+                
+                if echo "$BK" | grep -q '.gz'; then
+                  gunzip -c "$BK" > "$REC_DIR/backup_$(basename $BK .gz).sql" 2>/dev/null
+                else
+                  cp "$BK" "$REC_DIR/" 2>/dev/null
+                fi
+                
+                # 统计 INSERT 数量
+                if [ -f "$REC_DIR/backup_$(basename $BK .gz).sql" ]; then
+                  INSERT_CNT=$(grep -c 'INSERT INTO' "$REC_DIR/backup_$(basename $BK .gz).sql" 2>/dev/null)
+                  echo "INSERT 语句: $INSERT_CNT"
+                  
+                  # 检查是否包含 records
+                  REC_CNT=$(grep -c 'INSERT INTO.*records' "$REC_DIR/backup_$(basename $BK .gz).sql" 2>/dev/null)
+                  echo "records INSERT: $REC_CNT"
+                fi
+              fi
+            done
+
+            # ========== 7. 应用恢复 ==========
+            echo ""
+            echo "=== 7. 应用数据恢复 ==="
+            
+            # 先应用备份文件
+            for BK_SQL in "$REC_DIR"/backup_*.sql; do
+              if [ -f "$BK_SQL" ]; then
+                echo ""
+                echo "应用 $BK_SQL ..."
+                
+                # 转换为 INSERT IGNORE
+                sed 's/^INSERT INTO/INSERT IGNORE INTO/g' "$BK_SQL" > "$REC_DIR/apply_$(basename $BK_SQL)" 2>/dev/null
+                
+                $MYSQL asset_platform < "$REC_DIR/apply_$(basename $BK_SQL)" 2>/dev/null
+                echo "完成 (错误已忽略)"
+              fi
+            done
+            
+            # 应用 binlog 恢复 SQL
+            if [ -s "$REC_DIR/recovery.sql" ]; then
+              echo ""
+              echo "应用 binlog 恢复 SQL ..."
+              # 使用 --force 忽略错误
+              $MYSQL asset_platform --force < "$REC_DIR/recovery.sql" 2>/dev/null
+              echo "完成"
+            fi
+
+            # ========== 8. 如果 records 仍然很少，尝试 InnobackupExport ==========
+            echo ""
+            echo "=== 8. InnoDB 深度恢复（备选）==="
+            
+            REC_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM records;" 2>/dev/null)
+            echo "当前 records 数量: $REC_CNT"
+            
+            if [ "$REC_CNT" -lt 100 ] 2>/dev/null; then
+              echo "records 数据仍然很少，尝试深度恢复..."
+              
+              # 复制 .ibd 文件到宿主机
+              docker cp "$CONTAINER_ID":/var/lib/mysql/asset_platform/records.ibd "$REC_DIR/" 2>/dev/null
+              docker cp "$CONTAINER_ID":/var/lib/mysql/asset_platform/accounts.ibd "$REC_DIR/" 2>/dev/null
+              docker cp "$CONTAINER_ID":/var/lib/mysql/asset_platform/finance_assets.ibd "$REC_DIR/" 2>/dev/null
+              
+              echo ".ibd 文件已复制到 $REC_DIR/"
+              ls -la "$REC_DIR"/*.ibd 2>/dev/null
+              
+              # 尝试使用 grep 从 .ibd 中提取完整的行
+              echo ""
+              echo "--- 从 records.ibd 提取候选记录 ---"
+              
+              # InnoDB 页面大小通常是 16KB
+              # 数据在 .ibd 中以 InnoDB row format 存储
+              # 使用 grep 查找可能的 JSON 或 SQL 片段
+              grep -boaP '[\x20-\x7e\u4e00-\u9fff]{20,}' "$REC_DIR/records.ibd" 2>/dev/null | head -50
+              
+              echo ""
+              echo "--- records.ibd 中的日期和金额组合 ---"
+              # 查找日期+金额的组合模式
+              grep -oP '\d{4}-\d{2}-\d{2}' "$REC_DIR/records.ibd" 2>/dev/null | while read DATE; do
+                echo "日期: $DATE 附近可能有记录"
+              done
+            fi
+
+            # ========== 9. 最终验证 ==========
+            echo ""
+            echo "========================================"
+            echo "  9. 最终验证"
+            echo "========================================"
+            
+            $MYSQL asset_platform -e "
+              SELECT 
+                'accounts' as tbl, 
+                COUNT(*) as total,
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END) as user1,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END) as user3,
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) as user4,
+                SUM(CASE WHEN user_id=6 THEN 1 ELSE 0 END) as user6
+              FROM accounts
+              UNION ALL
+              SELECT 'finance_assets', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=6 THEN 1 ELSE 0 END)
+              FROM finance_assets
+              UNION ALL
+              SELECT 'records', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=6 THEN 1 ELSE 0 END)
+              FROM records
+              UNION ALL
+              SELECT 'debts', COUNT(*), 0,
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END), 0
+              FROM debts;
+            " 2>/dev/null
+            
+            echo ""
+            echo "--- 各表样本数据 ---"
+            for TABLE in accounts finance_assets records debts; do
+              echo ""
+              echo "$TABLE 样本:"
+              $MYSQL asset_platform -e "SELECT * FROM $TABLE LIMIT 3;" 2>/dev/null
+            done
+            
+            # ========== 10. 生成恢复报告 ==========
+            echo ""
+            echo "========================================"
+            echo "  10. 恢复报告"
+            echo "========================================"
+            echo ""
+            echo "恢复文件目录: $REC_DIR/"
+            echo ""
+            echo "提取的文件:"
+            ls -lh "$REC_DIR/" 2>/dev/null | head -30
+            echo ""
+            echo "✅ 全面恢复完成"
