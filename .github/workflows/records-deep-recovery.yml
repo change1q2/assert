@@ -1,0 +1,219 @@
+name: Binlog Deep Extract - Records Focused
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deep binlog extraction targeting records table
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 120m
+          script: |
+            set +e
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            [ -z "$CONTAINER_ID" ] && echo "❌ No MySQL container" && exit 1
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            echo "========================================"
+            echo "  Records 表深度恢复 (10MB .ibd)"
+            echo "========================================"
+
+            RECOVER_DIR="/tmp/records_recovery_$(date +%Y%m%d_%H%M%S)"
+            mkdir -p "$RECOVER_DIR"
+
+            # ========== 1. 分析 records 表空间 ==========
+            echo ""
+            echo "=== 1. Records 表空间分析 ==="
+            
+            echo "当前 records 数据:"
+            $MYSQL asset_platform -e "SELECT COUNT(*) as total FROM records;" 2>/dev/null
+            $MYSQL asset_platform -e "SELECT * FROM records LIMIT 5;" 2>/dev/null
+            
+            echo ""
+            echo "records.ibd 文件大小: $(docker exec "$CONTAINER_ID" stat -c%s /var/lib/mysql/asset_platform/records.ibd 2>/dev/null) bytes"
+            echo "这表明 records 表曾有大量数据，但被删除了"
+
+            # ========== 2. 提取 binlog 到容器内文件 ==========
+            echo ""
+            echo "=== 2. Binlog 解码（写入容器内文件）==="
+            
+            # 在容器内直接解码，避免 docker exec 输出限制
+            for BF in /var/lib/mysql/binlog.00000{6,7,8,9} /var/lib/mysql/binlog.00010; do
+              BASENAME=$(basename "$BF")
+              echo ""
+              echo "处理 $BASENAME ..."
+              
+              # 在容器内直接解码到文件
+              docker exec "$CONTAINER_ID" bash -c "
+                mysqlbinlog --verbose --verbose --base64-output=DECODE-ROWS $BF > /tmp/binlog_${BASENAME}_decoded.txt 2>/dev/null
+              "
+              
+              DECODED_SIZE=$(docker exec "$CONTAINER_ID" stat -c%s "/tmp/binlog_${BASENAME}_decoded.txt" 2>/dev/null || echo 0)
+              echo "  解码后大小: $DECODED_SIZE bytes"
+              
+              # 在容器内统计事件
+              docker exec "$CONTAINER_ID" bash -c "
+                echo '  DELETE: \$(grep -c 'DELETE FROM' /tmp/binlog_${BASENAME}_decoded.txt 2>/dev/null)'
+                echo '  INSERT: \$(grep -c 'INSERT INTO' /tmp/binlog_${BASENAME}_decoded.txt 2>/dev/null)'
+                echo '  UPDATE: \$(grep -c 'UPDATE ' /tmp/binlog_${BASENAME}_decoded.txt 2>/dev/null)'
+                echo '  RECORDS 相关: \$(grep -c 'records' /tmp/binlog_${BASENAME}_decoded.txt 2>/dev/null)'
+              "
+            done
+
+            # ========== 3. 提取 records 表的 INSERT 事件 ==========
+            echo ""
+            echo "=== 3. 提取 records 表数据 ==="
+            
+            # 在容器内提取所有与 records 相关的事件
+            docker exec "$CONTAINER_ID" bash -c '
+              cat /tmp/binlog_*_decoded.txt 2>/dev/null > /tmp/all_binlog_decoded.txt
+              
+              echo "总解码大小: $(stat -c%s /tmp/all_binlog_decoded.txt 2>/dev/null) bytes"
+              echo "总行数: $(wc -l < /tmp/all_binlog_decoded.txt 2>/dev/null)"
+              
+              # 查找 records 相关事件
+              echo ""
+              echo "--- records 表 INSERT 事件 ---"
+              grep -B5 -A10 "INSERT INTO.*records" /tmp/all_binlog_decoded.txt 2>/dev/null | head -100
+              
+              echo ""
+              echo "--- records 表 DELETE 事件 ---"  
+              grep -B5 -A10 "DELETE FROM.*records" /tmp/all_binlog_decoded.txt 2>/dev/null | head -50
+              
+              # 提取 DELETE 前的 INSERT（即被删除的原始数据）
+              echo ""
+              echo "--- 提取被删除前的 records 数据 ---"
+              grep -B60 "DELETE FROM.*records" /tmp/all_binlog_decoded.txt 2>/dev/null | grep "### INSERT INTO.*records" | head -30
+            '
+
+            # ========== 4. 使用 mysqlbinlog 直接回放 ==========
+            echo ""
+            echo "=== 4. 直接回放 binlog 到临时库 ==="
+            
+            # 创建临时数据库
+            $MYSQL -e "CREATE DATABASE IF NOT EXISTS binlog_recovery;" 2>/dev/null
+            
+            # 找到正确的起始位置（在数据删除之前）
+            # 使用 mysqlbinlog 的 --position 或 --datetime 参数
+            
+            echo "分析 binlog 起始位置..."
+            
+            # 方法: 使用 mysqlbinlog 直接应用到临时库
+            # 首先用 --offset 跳过早期事件
+            for BF in /var/lib/mysql/binlog.00000{6,7,8,9} /var/lib/mysql/binlog.00010; do
+              BASENAME=$(basename "$BF")
+              echo ""
+              echo "回放 $BASENAME 到临时库..."
+              
+              # 使用 sed 过滤出 INSERT 语句
+              docker exec "$CONTAINER_ID" bash -c "
+                mysqlbinlog --verbose --verbose --base64-output=DECODE-ROWS $BF 2>/dev/null | \
+                  grep '### INSERT INTO' | \
+                  sed 's/^### //' > /tmp/replay_${BASENAME}.sql
+                
+                if [ -s /tmp/replay_${BASENAME}.sql ]; then
+                  echo '  找到 \$(wc -l < /tmp/replay_${BASENAME}.sql) 条 INSERT'
+                  
+                  # 转换为可执行的 INSERT
+                  sed -i 's/^INSERT INTO/INSERT IGNORE INTO/' /tmp/replay_${BASENAME}.sql
+                  
+                  # 导入临时库
+                  mysql -u root -p\$MYSQL_ROOT_PASSWORD binlog_recovery < /tmp/replay_${BASENAME}.sql 2>/dev/null
+                  echo '  导入完成'
+                else
+                  echo '  无 INSERT'
+                fi
+              "
+            done
+            
+            # 检查临时库中的数据
+            echo ""
+            echo "--- 临时库数据统计 ---"
+            $MYSQL binlog_recovery -e "
+              SELECT 'accounts' as tbl, COUNT(*) as cnt FROM accounts
+              UNION ALL SELECT 'finance_assets', COUNT(*) FROM finance_assets
+              UNION ALL SELECT 'records', COUNT(*) FROM records
+              UNION ALL SELECT 'debts', COUNT(*) FROM debts;
+            " 2>/dev/null
+
+            # ========== 5. 从临时库合并回主库 ==========
+            echo ""
+            echo "=== 5. 合并临时库数据到主库 ==="
+            
+            for TABLE in accounts finance_assets records debts; do
+              TMP_CNT=$($MYSQL binlog_recovery -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+              CUR_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+              echo "$TABLE: 临时库=$TMP_CNT / 当前=$CUR_CNT"
+              
+              if [ "$TMP_CNT" -gt 0 ] 2>/dev/null; then
+                echo "  合并 $TABLE ..."
+                $MYSQL asset_platform -e "
+                  INSERT IGNORE INTO asset_platform.$TABLE 
+                  SELECT * FROM binlog_recovery.$TABLE;
+                " 2>/dev/null
+                NEW_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+                echo "  合并后: $NEW_CNT"
+              fi
+            done
+
+            # ========== 6. 替代方案: 从 InnoDB 直接提取 ==========
+            echo ""
+            echo "=== 6. InnoDB 强制恢复（备选）==="
+            
+            echo "检查 records.ibd 是否包含可恢复数据..."
+            
+            # 使用 strings 命令尝试提取可读文本
+            docker exec "$CONTAINER_ID" bash -c "
+              strings /var/lib/mysql/asset_platform/records.ibd | head -50
+            "
+            
+            echo ""
+            echo "--- 检查 .ibd 中的 SQL 语句 ---"
+            docker exec "$CONTAINER_ID" bash -c "
+              strings /var/lib/mysql/asset_platform/records.ibd | grep -i 'INSERT\|SELECT\|CREATE\|amount\|balance\|category' | head -30
+            "
+
+            # ========== 7. 最终验证 ==========
+            echo ""
+            echo "========================================"
+            echo "  最终验证"
+            echo "========================================"
+            
+            $MYSQL asset_platform -e "
+              SELECT 
+                'accounts' as tbl, 
+                COUNT(*) as total,
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END) as user1,
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) as user4
+              FROM accounts
+              UNION ALL
+              SELECT 'finance_assets', COUNT(*),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+              FROM finance_assets
+              UNION ALL
+              SELECT 'records', COUNT(*),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END)
+              FROM records
+              UNION ALL
+              SELECT 'debts', COUNT(*),
+                SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END), 0
+              FROM debts;
+            " 2>/dev/null
+            
+            echo ""
+            echo "========================================"
+            echo "  深度恢复完成"
+            echo "========================================"
