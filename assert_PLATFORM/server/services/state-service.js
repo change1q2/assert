@@ -3,6 +3,29 @@ import { sqlRun, sqlAll, sqlGet, maybeParseJson } from "../utils/db.js";
 import { text, number, numericIfPossible } from "../utils/validators.js";
 import { profileForUser } from "./user-service.js";
 
+// 乱码匹配正则 - 覆盖菱形符、星号符、几何符号、货币符号及扩展拉丁补充区
+const GARBLED_PATTERN = /[◇◆◇◈✦✧★☆●○□■△▽◎¤¦¨©®°±²³´µ¶·¸¹º»¼½¾¿À-ÿØ-ÿ\u25C0-\u25FF\u2600-\u26FF\u2700-\u27BF]/;
+const VALID_MARKETS = ['国内市场', '港股市场', '美股市场', '其他市场'];
+// 账户名清理：去除乱码字符，保留中文、英文、数字、连字符、下划线
+const sanitizeAccountName = (val) => {
+  if (val == null) return '';
+  const str = String(val).trim();
+  if (!str) return '';
+  let cleaned = str.replace(GARBLED_PATTERN, '');
+  cleaned = cleaned.replace(/[◇◆◇◈✦✧★☆●○□■△▽◎¤¦]+/g, '');
+  cleaned = cleaned.replace(/\s*-+\s*-+\s*/g, ' - ');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned;
+};
+const sanitizeStr = (val, fallback = '', isMarket = false) => {
+  if (val == null) return fallback;
+  const str = String(val).trim();
+  if (!str) return fallback;
+  if (GARBLED_PATTERN.test(str)) return fallback;
+  if (isMarket && VALID_MARKETS.indexOf(str) === -1) return fallback;
+  return val;
+};
+
 async function safeSqlAll(pool, sql, params = [], fallback = []) {
   try {
     return await sqlAll(pool, sql, params);
@@ -270,38 +293,7 @@ async function loadUserState(userId) {
     freedomBudgets,
   };
 
-  // 过滤乱码字段 - 增强版：检测 Unicode 特殊字符和编码异常
-  // 覆盖：菱形符(◇◆◇◈◆)、星号符(✦✧★☆)、几何符号(●○□■△▽)、货币符号(¤¦)
-  // 以及扩展拉丁补充区(À-ÿ)和其他乱码字符
-  const GARBLED_PATTERN = /[◇◆◇◈✦✧★☆●○□■△▽◎¤¦¨©®°±²³´µ¶·¸¹º»¼½¾¿À-ÿØ-ÿ\u25C0-\u25FF\u2600-\u26FF\u2700-\u27BF]/;
-  // 已知合法的市场值列表
-  const VALID_MARKETS = ['国内市场', '港股市场', '美股市场', '其他市场'];
-  // 账户名清理：去除乱码字符，保留中文、英文、数字、连字符、下划线
-  const sanitizeAccountName = (val) => {
-    if (val == null) return '';
-    const str = String(val).trim();
-    if (!str) return '';
-    // 去除乱码字符
-    let cleaned = str.replace(GARBLED_PATTERN, '');
-    // 清理连续的特殊符号残留
-    cleaned = cleaned.replace(/[◇◆◇◈✦✧★☆●○□■△▽◎¤¦]+/g, '');
-    // 清理多余的连字符和空格
-    cleaned = cleaned.replace(/\s*-+\s*-+\s*/g, ' - ');
-    cleaned = cleaned.replace(/\s+/g, ' ').trim();
-    return cleaned;
-  };
-  const sanitizeStr = (val, fallback = '', isMarket = false) => {
-    if (val == null) return fallback;
-    const str = String(val).trim();
-    if (!str) return fallback;
-    // 只在明确命中乱码正则时才 fallback；否则保留原值（含 ASCII 字母数字/短名称等合法内容）
-    if (GARBLED_PATTERN.test(str)) return fallback;
-    // 市场字段：精确匹配有效值
-    if (isMarket && VALID_MARKETS.indexOf(str) === -1) return fallback;
-    return val;
-  };
-
-  // 清理 financeAssets 中的乱码字段
+  // 清理 financeAssets 中的乱码字段（sanitizeStr 已移至模块作用域）
   if (result.financeAssets && result.financeAssets.length > 0) {
     result.financeAssets = result.financeAssets.map(a => {
       const sanitizedName = sanitizeStr(a.name);
