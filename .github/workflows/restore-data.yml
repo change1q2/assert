@@ -1,0 +1,132 @@
+name: Check & Restore Data from Backups
+
+on:
+  workflow_dispatch:
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check backup files & restore via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 30m
+          script: |
+            echo "========================================"
+            echo "  检查备份文件 & 尝试恢复"
+            echo "========================================"
+
+            # ---------- 1. 检查备份目录 ----------
+            echo ""
+            echo "=== 1. 检查 /opt/asset-platform-backup-20260611-173532/ ==="
+            ls -lah /opt/asset-platform-backup-20260611-173532/ 2>/dev/null || echo "目录不存在"
+            echo "--- 子目录 ---"
+            find /opt/asset-platform-backup-20260611-173532/ -type f -name "*.sql" 2>/dev/null | head -20
+            find /opt/asset-platform-backup-20260611-173532/ -type f -name "*.sql.gz" 2>/dev/null | head -20
+            find /opt/asset-platform-backup-20260611-173532/ -type f -name "*dump*" 2>/dev/null | head -20
+
+            # ---------- 2. 检查 restore_data.sql ----------
+            echo ""
+            echo "=== 2. 检查 /opt/asset-platform/restore_data.sql ==="
+            ls -lah /opt/asset-platform/restore_data.sql 2>/dev/null
+            echo "--- 前 100 行 ---"
+            head -100 /opt/asset-platform/restore_data.sql 2>/dev/null || echo "文件不存在或为空"
+            echo "--- 最后 50 行 ---"
+            tail -50 /opt/asset-platform/restore_data.sql 2>/dev/null
+
+            # ---------- 3. 检查备份目录中的所有 .sql 文件 ----------
+            echo ""
+            echo "=== 3. 搜索所有 SQL 文件 ==="
+            find /opt/asset-platform-backup-20260611-173532/ -type f \( -name "*.sql" -o -name "*.sql.gz" \) -exec ls -lah {} \; 2>/dev/null
+
+            # ---------- 4. 检查备份目录中的数据库导出 ----------
+            echo ""
+            echo "=== 4. 检查备份中的数据文件 ==="
+            find /opt/asset-platform-backup-20260611-173532/ -type f \( -name "*.sql" -o -name "*.sql.gz" -o -name "*.dump" \) -exec sh -c 'echo "--- {} ---"; head -20 "{}" 2>/dev/null; echo ""; wc -l "{}" 2>/dev/null' \;
+
+            # ---------- 5. 如果找到数据备份，检查内容 ----------
+            echo ""
+            echo "=== 5. 检查备份 SQL 中的表和行数 ==="
+            for f in $(find /opt/asset-platform-backup-20260611-173532/ -type f -name "*.sql" 2>/dev/null); do
+              echo "--- $f ---"
+              echo "文件大小: $(wc -c < "$f") 字节"
+              echo "行数: $(wc -l < "$f")"
+              echo "包含的表:"
+              grep -i "INSERT INTO" "$f" 2>/dev/null | sed 's/.*INSERT INTO `\?\([a-z_]*\)`\?.*/\1/' | sort | uniq -c | sort -rn | head -20
+              echo ""
+            done
+
+            # 检查 restore_data.sql
+            echo "--- /opt/asset-platform/restore_data.sql ---"
+            if [ -f /opt/asset-platform/restore_data.sql ]; then
+              echo "文件大小: $(wc -c < /opt/asset-platform/restore_data.sql) 字节"
+              echo "行数: $(wc -l < /opt/asset-platform/restore_data.sql)"
+              echo "包含的表:"
+              grep -i "INSERT INTO" /opt/asset-platform/restore_data.sql 2>/dev/null | sed 's/.*INSERT INTO `\?\([a-z_]*\)`\?.*/\1/' | sort | uniq -c | sort -rn | head -20
+            fi
+
+            # ---------- 6. 检查数据库当前状态 ----------
+            echo ""
+            echo "=== 6. 当前数据库各表数据量 ==="
+            mysql -u root -p'123456' asset_platform -e "SHOW TABLES;" 2>/dev/null
+            echo "--- 数据量 ---"
+            for tbl in users accounts records finance_assets debts asset_classes books survival_funds user_settings; do
+              cnt=$(mysql -u root -p'123456' asset_platform -e "SELECT COUNT(*) as cnt FROM $tbl;" 2>/dev/null | tail -1)
+              echo "$tbl: $cnt"
+            done
+
+            # ---------- 7. 恢复数据（如果有可用备份）----------
+            echo ""
+            echo "=== 7. 尝试恢复数据 ==="
+
+            # 找最大的 SQL 备份文件
+            BEST_BACKUP=""
+            BEST_SIZE=0
+            for f in $(find /opt/asset-platform-backup-20260611-173532/ -type f -name "*.sql" 2>/dev/null) /opt/asset-platform/restore_data.sql; do
+              if [ -f "$f" ]; then
+                fsize=$(wc -c < "$f")
+                echo "检查: $f ($fsize 字节)"
+                if [ "$fsize" -gt "$BEST_SIZE" ]; then
+                  BEST_SIZE=$fsize
+                  BEST_BACKUP=$f
+                fi
+              fi
+            done
+
+            if [ -n "$BEST_BACKUP" ] && [ "$BEST_SIZE" -gt 1000 ]; then
+              echo ""
+              echo "找到最佳备份: $BEST_BACKUP ($BEST_SIZE 字节)"
+              echo "--- 备份内容预览 ---"
+              head -30 "$BEST_BACKUP"
+              echo ""
+              echo "--- 开始恢复 ---"
+
+              # 备份当前（空的）数据库结构
+              mysqldump -u root -p'123456' --no-data asset_platform > /tmp/current_schema.sql 2>/dev/null
+
+              # 恢复数据
+              mysql -u root -p'123456' asset_platform < "$BEST_BACKUP" 2>&1 | head -20
+
+              # 检查恢复后的数据量
+              echo ""
+              echo "--- 恢复后数据量 ---"
+              for tbl in users accounts records finance_assets debts asset_classes books survival_funds user_settings; do
+                cnt=$(mysql -u root -p'123456' asset_platform -e "SELECT COUNT(*) as cnt FROM $tbl;" 2>/dev/null | tail -1)
+                echo "$tbl: $cnt"
+              done
+
+              echo ""
+              echo "=== 恢复完成 ==="
+            else
+              echo "未找到有效的数据备份文件"
+            fi
+
+            echo ""
+            echo "========================================"
+            echo "  检查 & 恢复完成"
+            echo "========================================"
