@@ -1,0 +1,194 @@
+name: Full Data Recovery - All Tables
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Complete recovery of all tables from restore DB
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 30m
+          script: |
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            echo "========================================"
+            echo "  全量数据恢复 - 所有表"
+            echo "========================================"
+
+            # 列出 restore 库所有表
+            echo ""
+            echo "=== restore 库的所有表 ==="
+            $MYSQL asset_platform_restore -e "SHOW TABLES;" 2>/dev/null
+
+            # 列出当前库所有表
+            echo ""
+            echo "=== 当前库的所有表 ==="
+            $MYSQL asset_platform -e "SHOW TABLES;" 2>/dev/null
+
+            # 获取公共列的函数
+            get_common_cols() {
+              local table=$1
+              local db1=$2
+              local db2=$3
+              local cols1=$($MYSQL "$db1" -e "DESCRIBE $table;" 2>/dev/null | tail -n +2 | awk '{print $1}')
+              local cols2=$($MYSQL "$db2" -e "DESCRIBE $table;" 2>/dev/null | tail -n +2 | awk '{print $1}')
+              local first=1
+              local result=""
+              for c in $cols1; do
+                if echo "$cols2" | grep -qx "$c"; then
+                  if [ $first -eq 1 ]; then
+                    result="$c"
+                    first=0
+                  else
+                    result="$result,$c"
+                  fi
+                fi
+              done
+              echo "$result"
+            }
+
+            # 获取 restore 库中所有用户 ID
+            echo ""
+            echo "=== restore 库的用户列表 ==="
+            $MYSQL asset_platform_restore -e "
+              SELECT 'accounts' as tbl, user_id, COUNT(*) as cnt FROM accounts GROUP BY user_id
+              UNION ALL
+              SELECT 'finance_assets', user_id, COUNT(*) FROM finance_assets GROUP BY user_id
+              UNION ALL
+              SELECT 'records', user_id, COUNT(*) FROM records GROUP BY user_id
+              UNION ALL
+              SELECT 'debts', user_id, COUNT(*) FROM debts GROUP BY user_id
+              UNION ALL
+              SELECT 'finance_asset_indoor_transactions', user_id, COUNT(*) FROM finance_asset_indoor_transactions GROUP BY user_id;
+            " 2>/dev/null
+
+            # 定义要恢复的表列表
+            TABLES=(
+              "accounts"
+              "finance_assets"
+              "records"
+              "debts"
+              "debt_payments"
+              "finance_asset_indoor_transactions"
+              "finance_asset_outdoor_transactions"
+              "finance_asset_transactions"
+              "finance_asset_archives"
+              "asset_classes"
+              "custom_record_categories"
+              "record_tags"
+              "recorders"
+              "reminders"
+              "debt_categories"
+              "strategies"
+              "books"
+              "tags"
+              "yearly_records"
+              "survival_funds"
+              "freedom_budgets"
+              "budgets"
+            )
+
+            SUCCESS_COUNT=0
+            FAIL_COUNT=0
+
+            for TABLE in "${TABLES[@]}"; do
+              echo ""
+              echo "--- 恢复 $TABLE ---"
+
+              # 检查表是否存在于两个库
+              EXISTS_CURRENT=$($MYSQL asset_platform -e "SHOW TABLES LIKE '$TABLE';" 2>/dev/null | wc -l)
+              EXISTS_RESTORE=$($MYSQL asset_platform_restore -e "SHOW TABLES LIKE '$TABLE';" 2>/dev/null | wc -l)
+
+              if [ "$EXISTS_CURRENT" -eq 0 ]; then
+                echo "  ⏭ 跳过: 当前库不存在 $TABLE"
+                continue
+              fi
+              if [ "$EXISTS_RESTORE" -eq 0 ]; then
+                echo "  ⏭ 跳过: restore 库不存在 $TABLE"
+                continue
+              fi
+
+              # 获取公共列
+              COLS=$(get_common_cols "$TABLE" "asset_platform" "asset_platform_restore")
+              if [ -z "$COLS" ]; then
+                echo "  ❌ 无公共列"
+                FAIL_COUNT=$((FAIL_COUNT + 1))
+                continue
+              fi
+
+              COL_COUNT=$(echo "$COLS" | tr ',' '\n' | wc -l)
+              echo "  公共列: $COL_COUNT 个"
+
+              # 获取 restore 库中的数据量
+              RESTORE_CNT=$($MYSQL asset_platform_restore -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null | tail -1)
+              if [ "$RESTORE_CNT" -eq 0 ] 2>/dev/null; then
+                echo "  ⏭ restore 库中此表为空"
+                continue
+              fi
+              echo "  restore 库有 $RESTORE_CNT 行"
+
+              # 清空当前表（仅当 restore 有数据时）
+              $MYSQL asset_platform -e "DELETE FROM $TABLE;" 2>/dev/null
+
+              # 恢复数据
+              RESULT=$($MYSQL asset_platform -e "INSERT INTO $TABLE ($COLS) SELECT $COLS FROM asset_platform_restore.$TABLE;" 2>&1)
+              if echo "$RESULT" | grep -q "ERROR"; then
+                echo "  ❌ 恢复失败: $RESULT"
+                FAIL_COUNT=$((FAIL_COUNT + 1))
+              else
+                RESTORED_CNT=$($MYSQL asset_platform -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null | tail -1)
+                echo "  ✅ 恢复成功: $RESTORED_CNT 行"
+                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+              fi
+            done
+
+            echo ""
+            echo "========================================"
+            echo "  恢复完成统计"
+            echo "========================================"
+            echo "成功: $SUCCESS_COUNT 个表"
+            echo "失败: $FAIL_COUNT 个表"
+
+            # 最终验证 - 按用户汇总
+            echo ""
+            echo "=== 最终数据汇总（按用户） ==="
+            $MYSQL asset_platform -e "
+              SELECT 'accounts' as tbl, user_id, COUNT(*) as cnt FROM accounts GROUP BY user_id
+              UNION ALL
+              SELECT 'finance_assets', user_id, COUNT(*) FROM finance_assets GROUP BY user_id
+              UNION ALL
+              SELECT 'records', user_id, COUNT(*) FROM records GROUP BY user_id
+              UNION ALL
+              SELECT 'debts', user_id, COUNT(*) FROM debts GROUP BY user_id
+              UNION ALL
+              SELECT 'indoor_tx', user_id, COUNT(*) FROM finance_asset_indoor_transactions GROUP BY user_id
+              UNION ALL
+              SELECT 'outdoor_tx', user_id, COUNT(*) FROM finance_asset_outdoor_transactions GROUP BY user_id
+              UNION ALL
+              SELECT 'asset_classes', user_id, COUNT(*) FROM asset_classes GROUP BY user_id
+              UNION ALL
+              SELECT 'books', user_id, COUNT(*) FROM books GROUP BY user_id
+              UNION ALL
+              SELECT 'tags', user_id, COUNT(*) FROM tags GROUP BY user_id;
+            " 2>/dev/null
+
+            # 检查用户表
+            echo ""
+            echo "=== 用户列表 ==="
+            $MYSQL asset_platform -e "SELECT id, account, phone, name FROM users;" 2>/dev/null
+
+            echo ""
+            echo "========================================"
+            echo "  全量恢复完成"
+            echo "========================================"
