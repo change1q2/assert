@@ -207,66 +207,35 @@ jobs:
             echo ""
             echo "--- InnoDB Python Parser ---"
             PARSER_FILE=$REC_DIR/ibd_parser.py
-            base64 -d << 'B64EOF' > $PARSER_FILE
-aW1wb3J0IHN0cnVjdCwgc3lzLCBvcwo="
-            # Download the actual parser from repo
             curl -sL "https://raw.githubusercontent.com/change1q2/assert/main/assert_PLATFORM/server/scripts/parse_records_ibd.py" -o $PARSER_FILE 2>/dev/null
-            if [ ! -f "$PARSER_FILE" ] || [ ! -s "$PARSER_FILE" ]; then
-              # Fallback: create simple parser
-              cat > $PARSER_FILE << 'PYEOF'
-import struct, sys, os
-PAGE_SIZE = 16384
-FIL_PAGE_INDEX = 0x45BF
-for f in sys.argv[1:]:
-    tname = os.path.basename(f, '.ibd')
-    fsize = os.path.getsize(f)
-    npages = fsize // PAGE_SIZE
-    results = []
-    with open(f, 'rb') as fh:
-        for pn in range(npages):
-            data = fh.read(PAGE_SIZE)
-            if len(data) < 38: break
-            ptype = struct.unpack_from('>H', data, 24)[0]
-            plevel = struct.unpack_from('>H', data, 26)[0]
-            nrecs = struct.unpack_from('>H', data, 34)[0]
-            if ptype == FIL_PAGE_INDEX and plevel == 0 and nrecs > 0 and nrecs < 50000:
-                region = data[38:PAGE_SIZE-20]
-                cur = b''
-                for b in region:
-                    if 32 <= b <= 126: cur += bytes([b])
-                    else:
-                        if len(cur) >= 6:
-                            try:
-                                s = cur.decode('ascii')
-                                if any(c.isalpha() for c in s): results.append(s)
-                            except: pass
-                        cur = b''
-    outfile = '/tmp/' + tname + '_extracted.txt'
-    with open(outfile, 'w') as out:
-        for r in results:
-            if len(r) >= 8: out.write(r + '\n')
-    print('  ' + tname + ': ' + str(len(results)) + ' strings')
-PYEOF
+            if [ -f "$PARSER_FILE" ] && [ -s "$PARSER_FILE" ]; then
+              echo "  Downloaded parser: $(wc -l < $PARSER_FILE 2>/dev/null) lines"
+            else
+              echo "  WARNING: Could not download parser, using strings-only analysis"
             fi
-            echo "  Parser ready: $(wc -l < $PARSER_FILE 2>/dev/null) lines"
             
-            for TABLE in accounts finance_assets records debts asset_classes; do
-              if [ -f "$IBD_DIR/${TABLE}.ibd" ]; then
-                echo "  Parsing $TABLE.ibd..."
-                python3 $PARSER_FILE "$IBD_DIR/${TABLE}.ibd" 2>&1
-              fi
-            done
-            
-            echo ""
-            echo "--- Extraction Results ---"
-            for TABLE in accounts finance_assets records debts asset_classes; do
-              EF="/tmp/${TABLE}_extracted.txt"
-              if [ -f "$EF" ]; then
-                CNT=$(wc -l < "$EF" 2>/dev/null || echo 0)
-                echo "  $TABLE: $CNT strings"
-                head -3 "$EF" 2>/dev/null | sed 's/^/    /'
-              fi
-            done
+            if [ -f "$PARSER_FILE" ] && [ -s "$PARSER_FILE" ]; then
+              for TABLE in accounts finance_assets records debts asset_classes; do
+                if [ -f "$IBD_DIR/${TABLE}.ibd" ]; then
+                  echo "  Parsing $TABLE.ibd..."
+                  python3 $PARSER_FILE "$IBD_DIR/${TABLE}.ibd" 2>&1
+                fi
+              done
+              
+              echo ""
+              echo "--- Extraction Results ---"
+              for TABLE in accounts finance_assets records debts asset_classes; do
+                EF="/tmp/${TABLE}_extracted.txt"
+                if [ -f "$EF" ]; then
+                  CNT=$(wc -l < "$EF" 2>/dev/null || echo 0)
+                  echo "  $TABLE: $CNT strings"
+                  head -3 "$EF" 2>/dev/null | sed 's/^/    /'
+                fi
+              done
+            else
+              echo "  Skipping Python parsing (no parser available)"
+              echo "  Use strings analysis results above"
+            fi
 
             # ========== Final Verification ==========
             echo ""
