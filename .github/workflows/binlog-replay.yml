@@ -144,10 +144,8 @@ jobs:
                 
                 if [ "$RST_CNT" -gt "0" ] 2>/dev/null; then
                   echo "  Recovering from restore DB..."
-                  $MYSQL asset_platform 2>/dev/null <<EOF
-INSERT IGNORE INTO $TABLE
-SELECT * FROM $RESTORE_DB.$TABLE;
-EOF
+                  RECOVER_SQL="INSERT IGNORE INTO $TABLE SELECT * FROM $RESTORE_DB.$TABLE;"
+                  $MYSQL asset_platform -e "$RECOVER_SQL" 2>/dev/null
                   NEW_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
                   echo "  After recovery: $NEW_CNT"
                 fi
