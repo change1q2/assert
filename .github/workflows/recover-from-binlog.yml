@@ -1,0 +1,170 @@
+name: Recover From Binlog - Data Replay
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recover deleted data from MySQL binary logs
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 60m
+          script: |
+            set +e
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            [ -z "$CONTAINER_ID" ] && echo "❌ No MySQL container" && exit 1
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            echo "========================================"
+            echo "  Binlog 数据恢复 - 尝试回放入围"
+            echo "========================================"
+
+            # 检查 binlog 是否启用
+            BINLOG_ON=$($MYSQL -N -B -e "SHOW VARIABLES LIKE 'log_bin';" 2>/dev/null | awk '{print $2}')
+            echo "log_bin = $BINLOG_ON"
+
+            if [ "$BINLOG_ON" != "ON" ]; then
+              echo "⚠️ 二进制日志未启用，无法通过 binlog 恢复"
+              echo "尝试其他恢复方式..."
+              
+              # 方式2: 从 InnoDB 表空间文件恢复
+              echo ""
+              echo "=== 尝试从 InnoDB .ibd 文件恢复 ==="
+              IBD_FILES=$(docker exec "$CONTAINER_ID" find /var/lib/mysql/asset_platform -name "*.ibd" 2>/dev/null)
+              if [ -n "$IBD_FILES" ]; then
+                echo "找到 .ibd 文件:"
+                echo "$IBD_FILES"
+                
+                # 使用 innodb_force_recovery 尝试提取数据
+                echo ""
+                echo "--- 尝试 force recovery ---"
+                CUR_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM accounts;" 2>/dev/null)
+                echo "当前 accounts 数量: $CUR_CNT"
+              fi
+
+              # 方式3: 检查 sync_change_log 表
+              echo ""
+              echo "=== 检查 sync_change_log ==="
+              $MYSQL asset_platform -e "SELECT * FROM sync_change_log ORDER BY id DESC LIMIT 20;" 2>/dev/null
+
+              # 方式4: 检查应用日志
+              echo ""
+              echo "=== 检查应用日志 ==="
+              APP_DIR=$(docker inspect "$CONTAINER_ID" --format '{{range .Mounts}}{{if or (eq .Destination "/app") (eq .Destination "/home/app") (eq .Destination "/opt/app")}}{{.Source}}{{end}}{{end}}' 2>/dev/null)
+              [ -z "$APP_DIR" ] && APP_DIR="/var/log"
+              find "$APP_DIR" -name "*.log" -mtime -30 2>/dev/null | head -10
+              find /var/log -name "*.log*" -mtime -30 2>/dev/null | head -10
+
+              # 方式5: 从 user_settings JSON 字段恢复（可能包含部分数据）
+              echo ""
+              echo "=== 从 user_settings 检查 JSON 数据 ==="
+              $MYSQL asset_platform -e "SELECT user_id, LENGTH(independent_assets_json) as ind_len, LENGTH(strategies_json) as strat_len FROM user_settings;" 2>/dev/null
+              
+              # 检查是否有财务数据存在 JSON 字段中
+              echo ""
+              echo "--- 检查可能包含财务数据的 JSON 字段 ---"
+              $MYSQL asset_platform -e "
+                SELECT user_id, 
+                       CASE WHEN independent_assets_json IS NOT NULL AND LENGTH(independent_assets_json) > 100 THEN '有数据' ELSE '空' END as independent_assets,
+                       CASE WHEN hk_ipo_rules_json IS NOT NULL AND LENGTH(hk_ipo_rules_json) > 100 THEN '有数据' ELSE '空' END as ipo_rules,
+                       CASE WHEN fee_config_json IS NOT NULL AND LENGTH(fee_config_json) > 100 THEN '有数据' ELSE '空' END as fee_config,
+                       CASE WHEN overview_goals_json IS NOT NULL AND LENGTH(overview_goals_json) > 100 THEN '有数据' ELSE '空' END as goals
+                FROM user_settings;
+              " 2>/dev/null
+
+              # 方式6: 从 Docker 日志中提取保存的 state
+              echo ""
+              echo "=== 检查 Docker 日志中的 state 数据 ==="
+              docker logs "$CONTAINER_ID" --since "30d" 2>/dev/null | grep -i "saveUserState\|user_state\|state.*save\|/api/state" | tail -20
+
+              # 方式7: 检查服务器上的所有 .sql 文件
+              echo ""
+              echo "=== 全系统 .sql 文件搜索 ==="
+              find / -maxdepth 4 -name "*.sql" -o -name "*.sql.gz" 2>/dev/null | head -20
+              
+              echo ""
+              echo "========================================"
+              echo "  扫描完成 - 无 binlog 可用"
+              echo "========================================"
+              echo "已检查的恢复源:"
+              echo "  1. ❌ 二进制日志 - 未启用"
+              echo "  2. ⚠ InnoDB 表空间 - 需要手动提取"
+              echo "  3. ⚠ sync_change_log - 需检查"
+              echo "  4. ⚠ 应用日志 - 需检查"  
+              echo "  5. ✅ user_settings JSON - 可能有数据"
+              echo "  6. ⚠ Docker 日志 - 需检查"
+              echo "  7. ⚠ 系统 .sql 文件 - 需检查"
+              exit 0
+            fi
+
+            # ============ binlog 启用时的恢复逻辑 ============
+            echo ""
+            echo "=== 二进制日志恢复流程 ==="
+            
+            # 获取 binlog 文件列表
+            BINLOG_FILES=$($MYSQL -N -B -e "SHOW BINARY LOGS;" 2>/dev/null | awk '{print $1}')
+            echo "可用 binlog 文件:"
+            echo "$BINLOG_FILES"
+
+            # 创建临时恢复目录
+            RECOVER_DIR="/tmp/binlog_recovery"
+            mkdir -p "$RECOVER_DIR"
+
+            # 遍历所有 binlog，提取删除前的 INSERT 语句
+            echo ""
+            echo "--- 分析 binlog 中的数据变更 ---"
+            
+            for BF in $BINLOG_FILES; do
+              echo "分析 $BF ..."
+              
+              # 提取所有涉及 asset_platform 数据库的事件
+              docker exec "$CONTAINER_ID" mysqlbinlog \
+                --base64-output=DECODE-ROWS \
+                --verbose \
+                --database=asset_platform \
+                "$BF" 2>/dev/null > "$RECOVER_DIR/binlog_$(echo $BF | tr '/' '_').txt"
+              
+              # 统计删除操作
+              DEL_COUNT=$(grep -c "DELETE FROM" "$RECOVER_DIR/binlog_$(echo $BF | tr '/' '_').txt" 2>/dev/null || echo 0)
+              INS_COUNT=$(grep -c "INSERT INTO" "$RECOVER_DIR/binlog_$(echo $BF | tr '/' '_').txt" 2>/dev/null || echo 0)
+              echo "  $BF: INSERT=$INS_COUNT, DELETE=$DEL_COUNT"
+            done
+
+            # 汇总分析
+            echo ""
+            echo "--- 汇总分析 ---"
+            cat "$RECOVER_DIR"/binlog_*.txt 2>/dev/null | grep "DELETE FROM" | sed 's/^/  /' | head -30
+
+            # 尝试提取被删除的数据
+            echo ""
+            echo "--- 尝试恢复被删除的数据 ---"
+            
+            # 方法：查找 DELETE 之前发生的 INSERT 操作
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              echo ""
+              echo "恢复 $TABLE ..."
+              
+              # 在所有 binlog 中查找该表的 INSERT 和 DELETE
+              ALL_EVENTS=$(cat "$RECOVER_DIR"/binlog_*.txt 2>/dev/null)
+              
+              # 找到 DELETE 的位置，然后回溯找对应的 INSERT
+              echo "$ALL_EVENTS" | awk "/INSERT INTO.*$TABLE/,/DELETE FROM.*$TABLE/" \
+                | grep -E "(INSERT|DELETE|@1|@2|@3)" \
+                | head -50
+            done
+
+            echo ""
+            echo "========================================"
+            echo "  Binlog 恢复分析完成"
+            echo "========================================"
+            echo "详细日志在 $RECOVER_DIR/"

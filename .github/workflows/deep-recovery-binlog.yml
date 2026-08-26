@@ -1,0 +1,179 @@
+name: Deep Data Recovery - Binlog & All Sources
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deep recovery from all sources including binary logs
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 60m
+          script: |
+            set +e
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            if [ -z "$CONTAINER_ID" ]; then
+              echo "❌ No MySQL container found"
+              exit 1
+            fi
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            echo "========================================"
+            echo "  深度数据恢复 - 全源扫描"
+            echo "  $(date)"
+            echo "========================================"
+
+            # ========== 1. 检查二进制日志状态 ==========
+            echo ""
+            echo "=== 1. 二进制日志检查 ==="
+            $MYSQL -e "SHOW VARIABLES LIKE 'log_bin';" 2>/dev/null
+            $MYSQL -e "SHOW VARIABLES LIKE 'log_bin_basename';" 2>/dev/null
+            $MYSQL -e "SHOW BINARY LOGS;" 2>/dev/null
+            $MYSQL -e "SHOW VARIABLES LIKE 'binlog_format';" 2>/dev/null
+            $MYSQL -e "SHOW VARIABLES LIKE 'datadir';" 2>/dev/null
+
+            # 获取数据目录
+            DATADIR=$($MYSQL -N -B -e "SHOW VARIABLES LIKE 'datadir';" 2>/dev/null | tail -1 | awk '{print $2}')
+            echo "MySQL 数据目录: $DATADIR"
+
+            # 在宿主机和容器内查找 binlog 文件
+            echo ""
+            echo "--- 查找 binlog 文件 ---"
+            HOST_DATADIR=$(docker inspect "$CONTAINER_ID" --format '{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' 2>/dev/null)
+            echo "挂载点: $HOST_DATADIR"
+
+            # 在容器内查找
+            docker exec "$CONTAINER_ID" find /var/lib/mysql -name "*.00*" -o -name "mysql-bin*" -o -name "binlog*" 2>/dev/null | head -20
+            # 在宿主机查找
+            docker inspect "$CONTAINER_ID" --format '{{range .Mounts}}{{if eq .Destination "/var/lib/mysql"}}{{.Source}}{{end}}{{end}}' 2>/dev/null
+
+            # ========== 2. 查找所有备份文件 ==========
+            echo ""
+            echo "=== 2. 全系统备份文件搜索 ==="
+            echo "--- 宿主机上的 SQL 备份 ---"
+            find / -name "*.sql" -mtime -90 2>/dev/null | head -20
+            find / -name "*.sql.gz" -mtime -90 2>/dev/null | head -10
+            find /root -type f \( -name "*backup*" -o -name "*dump*" -o -name "*mysql*" -o -name "*.sql*" \) 2>/dev/null | head -20
+            find /home -type f \( -name "*backup*" -o -name "*dump*" -o -name "*.sql*" \) 2>/dev/null | head -20
+
+            echo ""
+            echo "--- Docker 卷备份 ---"
+            docker volume ls | grep -i mysql
+            docker run --rm -v $(docker inspect "$CONTAINER_ID" --format '{{range .Mounts}}{{if eq .Destination "/var/lib/mysql"}}{{.Source}}{{end}}{{end}}' 2>/dev/null | grep -o '[^:]*' | head -1):/data alpine ls -la /data 2>/dev/null | head -30
+
+            echo ""
+            echo "--- 查找 .ibd 文件（InnoDB 表空间）---"
+            docker exec "$CONTAINER_ID" find /var/lib/mysql/asset_platform -name "*.ibd" 2>/dev/null | head -30
+
+            # ========== 3. 检查 binlog 内容 ==========
+            echo ""
+            echo "=== 3. 分析二进制日志中的删除操作 ==="
+            BINLOG_DIR=$($MYSQL -N -B -e "SHOW VARIABLES LIKE 'log_bin_basename';" 2>/dev/null | awk '{print $2}')
+            if [ -n "$BINLOG_DIR" ]; then
+              BINLOG_PATH=$(dirname "$BINLOG_DIR")
+              BINLOG_PREFIX=$(basename "$BINLOG_DIR")
+              echo "Binlog 路径: $BINLOG_PATH"
+              echo "Binlog 前缀: $BINLOG_PREFIX"
+
+              # 在容器内查找 binlog
+              echo ""
+              echo "--- 容器内 binlog 文件 ---"
+              docker exec "$CONTAINER_ID" ls -la "$BINLOG_PATH"/${BINLOG_PREFIX}* 2>/dev/null | head -10
+
+              # 使用 mysqlbinlog 解析删除操作
+              BINLOG_FILES=$(docker exec "$CONTAINER_ID" ls "$BINLOG_PATH"/${BINLOG_PREFIX}* 2>/dev/null | grep -v index | sort)
+              if [ -n "$BINLOG_FILES" ]; then
+                echo ""
+                echo "--- 分析 DELETE 语句 ---"
+                COUNT=0
+                for BF in $BINLOG_FILES; do
+                  echo "分析 $BF ..."
+                  DELETES=$(docker exec "$CONTAINER_ID" mysqlbinlog --base64-output=DECODE-ROWS -v "$BF" 2>/dev/null | grep -i "DELETE.*FROM.*asset_platform" | head -5)
+                  if [ -n "$DELETES" ]; then
+                    echo "$DELETES"
+                    COUNT=$((COUNT + 1))
+                  fi
+                done
+                echo "在 $COUNT 个 binlog 文件中发现 DELETE 操作"
+
+                # 提取 INSERT 语句（删除前的记录）
+                echo ""
+                echo "--- 尝试恢复 INSERT 记录 ---"
+                for BF in $BINLOG_FILES; do
+                  INSERTS=$(docker exec "$CONTAINER_ID" mysqlbinlog --base64-output=DECODE-ROWS -v "$BF" 2>/dev/null | grep -B20 "DELETE FROM asset_platform" | grep "INSERT" | head -10)
+                  if [ -n "$INSERTS" ]; then
+                    echo "$INSERTS"
+                  fi
+                done
+              fi
+            else
+              echo "⚠ 二进制日志未启用或无法定位"
+              echo "--- 检查 log_bin 设置 ---"
+              $MYSQL -e "SHOW VARIABLES LIKE 'log%';" 2>/dev/null | grep -i bin
+            fi
+
+            # ========== 4. 检查现有数据完整性 ==========
+            echo ""
+            echo "=== 4. 当前数据库完整统计 ==="
+            $MYSQL asset_platform -e "
+              SELECT 
+                (SELECT COUNT(*) FROM accounts) as accounts,
+                (SELECT COUNT(*) FROM finance_assets) as finance_assets,
+                (SELECT COUNT(*) FROM records) as records,
+                (SELECT COUNT(*) FROM debts) as debts,
+                (SELECT COUNT(*) FROM asset_classes) as asset_classes,
+                (SELECT COUNT(*) FROM books) as books,
+                (SELECT COUNT(*) FROM strategies) as strategies,
+                (SELECT COUNT(*) FROM reminders) as reminders,
+                (SELECT COUNT(*) FROM budgets) as budgets,
+                (SELECT COUNT(*) FROM debt_payments) as debt_payments,
+                (SELECT COUNT(*) FROM finance_asset_indoor_transactions) as indoor_tx,
+                (SELECT COUNT(*) FROM finance_asset_outdoor_transactions) as outdoor_tx,
+                (SELECT COUNT(*) FROM finance_asset_transactions) as all_tx;
+            " 2>/dev/null
+
+            # ========== 5. 检查 asset_platform_restore 与当前差异 ==========
+            echo ""
+            echo "=== 5. restore 库与当前库对比 ==="
+            for TABLE in accounts finance_assets records debts asset_classes; do
+              CUR_CNT=$($MYSQL asset_platform -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+              RST_CNT=$($MYSQL asset_platform_restore -N -B -e "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null)
+              echo "$TABLE: 当前=$CUR_CNT / restore=$RST_CNT"
+            done
+
+            # ========== 6. 查找 Docker MySQL 历史 dump ==========
+            echo ""
+            echo "=== 6. 查找 mysqldump 历史文件 ==="
+            find / -name "*.sql" -o -name "*.sql.gz" -o -name "*.dump" 2>/dev/null | while read f; do
+              SIZE=$(stat -c%s "$f" 2>/dev/null || echo 0)
+              MOD=$(stat -c%y "$f" 2>/dev/null)
+              echo "$f | 大小: $SIZE | 修改: $MOD"
+            done
+
+            # ========== 7. 导出现有数据作为最终备份 ==========
+            echo ""
+            echo "=== 7. 导出当前数据（安全备份）==="
+            BACKUP_FILE="/tmp/final_backup_$(date +%Y%m%d_%H%M%S).sql"
+            docker exec "$CONTAINER_ID" mysqldump -u root -p$MYSQL_ROOT_PASSWORD asset_platform > "$BACKUP_FILE" 2>/dev/null
+            if [ -f "$BACKUP_FILE" ]; then
+              echo "✅ 安全备份已创建: $BACKUP_FILE"
+              gzip "$BACKUP_FILE"
+              echo "压缩后: ${BACKUP_FILE}.gz ($(du -h ${BACKUP_FILE}.gz | cut -f1))"
+            else
+              echo "❌ 备份失败"
+            fi
+
+            echo ""
+            echo "========================================"
+            echo "  深度扫描完成"
+            echo "========================================"

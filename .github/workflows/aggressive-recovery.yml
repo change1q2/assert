@@ -1,0 +1,283 @@
+name: Aggressive Recovery - All Remaining Sources
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggressive recovery from all remaining sources
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 60m
+          script: |
+            set +e
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            [ -z "$CONTAINER_ID" ] && echo "❌ No MySQL container" && exit 1
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            echo "========================================"
+            echo "  积极数据恢复 - 全源深度扫描"
+            echo "  $(date)"
+            echo "========================================"
+
+            RECOVER_DIR="/tmp/aggressive_recovery_$(date +%Y%m%d_%H%M%S)"
+            mkdir -p "$RECOVER_DIR"
+
+            # ========== 1. 导出当前所有数据（安全备份）==========
+            echo ""
+            echo "=== 1. 安全导出当前数据 ==="
+            docker exec "$CONTAINER_ID" mysqldump -u root -p$MYSQL_ROOT_PASSWORD \
+              --single-transaction --routines --triggers --events \
+              asset_platform > "$RECOVER_DIR/current_state.sql" 2>/dev/null
+            echo "✅ 当前数据已导出"
+            wc -l "$RECOVER_DIR/current_state.sql"
+
+            # ========== 2. 从 InnoDB .ibd 文件提取数据 ==========
+            echo ""
+            echo "=== 2. InnoDB 表空间分析 ==="
+            
+            DOCKER_MOUNT=$(docker inspect "$CONTAINER_ID" --format '{{range .Mounts}}{{if eq .Destination "/var/lib/mysql"}}{{.Source}}{{end}}{{end}}' 2>/dev/null)
+            echo "Docker MySQL 挂载: $DOCKER_MOUNT"
+            
+            if [ -n "$DOCKER_MOUNT" ] && [ -d "$DOCKER_MOUNT" ]; then
+              echo ""
+              echo "--- 挂载目录中的 .ibd 文件 ---"
+              find "$DOCKER_MOUNT/asset_platform" -name "*.ibd" 2>/dev/null | while read f; do
+                SIZE=$(stat -c%s "$f" 2>/dev/null)
+                TABLE=$(basename "$f" .ibd)
+                echo "$TABLE: $SIZE bytes"
+              done
+              
+              # 检查是否有被删除但未覆盖的 InnoDB 空间
+              echo ""
+              echo "--- 检查 InnoDB 空间 ---"
+              for IBD in "$DOCKER_MOUNT"/asset_platform/*.ibd; do
+                TABLE=$(basename "$IBD" .ibd)
+                SIZE=$(stat -c%s "$IBD" 2>/dev/null || echo 0)
+                echo "$TABLE: $SIZE bytes ($(echo "scale=2; $SIZE/1024/1024" | bc 2>/dev/null || echo "N/A") MB)"
+              done
+            fi
+
+            # ========== 3. 查找所有 mysqldump 备份 ==========
+            echo ""
+            echo "=== 3. 系统级备份搜索 ==="
+            
+            echo "--- 查找 mysqldump 文件 ---"
+            find / -type f \( -name "*.sql" -o -name "*.sql.gz" -o -name "*.dump" -o -name "*.sql.bz2" \) \
+              -size +10k -mtime -365 2>/dev/null | while read f; do
+              SIZE=$(stat -c%s "$f" 2>/dev/null)
+              MOD=$(stat -c%y "$f" 2>/dev/null | cut -d' ' -f1)
+              echo "  $f | $(numfmt --to=iec $SIZE 2>/dev/null || echo ${SIZE}B) | $MOD"
+            done
+
+            echo ""
+            echo "--- 查找 cron 备份任务 ---"
+            crontab -l 2>/dev/null | grep -i mysql
+            crontab -l 2>/dev/null | grep -i backup
+            ls /etc/cron.d/ 2>/dev/null | grep -i mysql
+            ls /etc/cron.daily/ 2>/dev/null | grep -i mysql
+
+            echo ""
+            echo "--- 查找备份脚本 ---"
+            find / -maxdepth 4 -type f -name "*mysql*backup*" -o -name "*backup*mysql*" -o -name "*dbbackup*" 2>/dev/null | head -10
+
+            # ========== 4. 检查 Docker 历史卷 ==========
+            echo ""
+            echo "=== 4. Docker 卷分析 ==="
+            
+            echo "--- 所有 MySQL 相关卷 ---"
+            docker volume ls | grep -i mysql
+            
+            echo ""
+            echo "--- 当前容器使用的卷 ---"
+            docker inspect "$CONTAINER_ID" --format '{{range .Mounts}}{{.Type}}: {{.Source}} -> {{.Destination}}{{println}}{{end}}' 2>/dev/null
+
+            echo ""
+            echo "--- 检查最近删除的容器 ---"
+            docker ps -a --filter "status=exited" | grep -i mysql
+
+            # ========== 5. 应用层数据恢复 ==========
+            echo ""
+            echo "=== 5. 应用层数据检查 ==="
+            
+            # 检查所有用户表
+            echo ""
+            echo "--- 所有用户数据汇总 ---"
+            for USER_ID in 1 2 3 4 5; do
+              echo ""
+              echo "用户 $USER_ID:"
+              $MYSQL asset_platform -e "
+                SELECT 'accounts' as tbl, COUNT(*) as cnt FROM accounts WHERE user_id=$USER_ID
+                UNION ALL SELECT 'finance_assets', COUNT(*) FROM finance_assets WHERE user_id=$USER_ID
+                UNION ALL SELECT 'records', COUNT(*) FROM records WHERE user_id=$USER_ID
+                UNION ALL SELECT 'debts', COUNT(*) FROM debts WHERE user_id=$USER_ID
+                UNION ALL SELECT 'asset_classes', COUNT(*) FROM asset_classes WHERE user_id=$USER_ID
+                UNION ALL SELECT 'books', COUNT(*) FROM books WHERE user_id=$USER_ID
+                UNION ALL SELECT 'budgets', COUNT(*) FROM budgets WHERE user_id=$USER_ID
+                UNION ALL SELECT 'reminders', COUNT(*) FROM reminders WHERE user_id=$USER_ID
+                UNION ALL SELECT 'strategies', COUNT(*) FROM strategies WHERE user_id=$USER_ID
+                UNION ALL SELECT 'debt_payments', COUNT(*) FROM debt_payments WHERE user_id=$USER_ID;
+              " 2>/dev/null
+            done
+
+            # 检查 user_settings 中的 JSON 数据
+            echo ""
+            echo "--- user_settings JSON 数据 ---"
+            $MYSQL asset_platform -e "
+              SELECT user_id,
+                     LENGTH(independent_assets_json) as independent_assets_len,
+                     LENGTH(strategies_json) as strategies_len,
+                     LENGTH(hk_ipo_rules_json) as ipo_rules_len,
+                     LENGTH(fee_config_json) as fee_len,
+                     LENGTH(overview_goals_json) as goals_len,
+                     LENGTH(account_categories_json) as categories_len,
+                     LENGTH(finance_asset_draft_json) as draft_len
+              FROM user_settings;
+            " 2>/dev/null
+
+            # 检查 finance_asset_draft_json 中是否有草稿数据
+            echo ""
+            echo "--- 检查草稿数据 ---"
+            DRAFT_DATA=$($MYSQL asset_platform -N -B -e "SELECT user_id, SUBSTRING(finance_asset_draft_json, 1, 200) FROM user_settings WHERE finance_asset_draft_json IS NOT NULL AND LENGTH(finance_asset_draft_json) > 10;" 2>/dev/null)
+            if [ -n "$DRAFT_DATA" ]; then
+              echo "$DRAFT_DATA"
+            else
+              echo "无草稿数据"
+            fi
+
+            # ========== 6. 从 Docker 日志恢复 ==========
+            echo ""
+            echo "=== 6. Docker 日志分析 ==="
+            
+            # 查找保存 state 的日志
+            echo "--- 查找 state 保存日志 ---"
+            docker logs "$CONTAINER_ID" --since "60d" 2>/dev/null | grep -c "state-service"
+            docker logs "$CONTAINER_ID" --since "60d" 2>/dev/null | grep "state-service" | tail -10
+
+            # ========== 7. 检查 Docker 网络上的 API 历史 ==========
+            echo ""
+            echo "=== 7. API 数据快照检查 ==="
+            
+            # 检查是否有 Vercel 或 Nginx 缓存
+            echo "--- 检查 Vercel 相关 ---"
+            find / -maxdepth 5 -type d -name ".vercel" 2>/dev/null
+            find / -maxdepth 5 -type f -name "*.vercel*" 2>/dev/null | head -5
+
+            # 检查 Nginx 缓存
+            echo "--- 检查 Nginx ---"
+            nginx -t 2>/dev/null
+            find /var/cache/nginx -type f 2>/dev/null | head -5
+            cat /etc/nginx/sites-enabled/* 2>/dev/null | grep -i proxy | head -5
+
+            # ========== 8. 最终：生成恢复 SQL ==========
+            echo ""
+            echo "=== 8. 生成恢复 SQL 脚本 ==="
+            
+            # 基于 restore 库 + 当前库的综合恢复
+            cat > "$RECOVER_DIR/final_recovery.sql" << 'SQLEOF'
+-- 最终恢复脚本
+-- 基于 asset_platform_restore + 当前数据库的综合恢复
+
+-- 1. 恢复 accounts (不删除现有，只补充)
+INSERT INTO asset_platform.accounts (user_id, id, name, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category)
+SELECT r.user_id, r.id, r.name, r.currency, r.type, r.balance, r.liability, r.enabled, r.is_default, r.sort_order, r.category, r.sub_category
+FROM asset_platform_restore.accounts r
+WHERE NOT EXISTS (SELECT 1 FROM asset_platform.accounts a WHERE a.id = r.id AND a.user_id = r.user_id);
+
+-- 2. 恢复 finance_assets
+INSERT INTO asset_platform.finance_assets (user_id, id, name, type, market, cost, shares, price, value)
+SELECT r.user_id, r.id, r.name, r.type, r.market, r.cost, r.shares, r.price, r.value
+FROM asset_platform_restore.finance_assets r
+WHERE NOT EXISTS (SELECT 1 FROM asset_platform.finance_assets a WHERE a.id = r.id AND a.user_id = r.user_id);
+
+-- 3. 恢复 records
+INSERT INTO asset_platform.records (user_id, id, type, category, subcategory, amount, currency, account_id, record_date, note)
+SELECT r.user_id, r.id, r.type, r.category, r.subcategory, r.amount, r.currency, r.account_id, r.record_date, r.note
+FROM asset_platform_restore.records r
+WHERE NOT EXISTS (SELECT 1 FROM asset_platform.records a WHERE a.id = r.id AND a.user_id = r.user_id);
+
+-- 4. 恢复 debts
+INSERT INTO asset_platform.debts (user_id, id, name, type, amount, rate, term, monthly_payment, remaining)
+SELECT r.user_id, r.id, r.name, r.type, r.amount, r.rate, r.term, r.monthly_payment, r.remaining
+FROM asset_platform_restore.debts r
+WHERE NOT EXISTS (SELECT 1 FROM asset_platform.debts a WHERE a.id = r.id AND a.user_id = r.user_id);
+
+-- 5. 恢复 asset_classes
+INSERT INTO asset_platform.asset_classes (user_id, id, name, children_json, visible, value, color)
+SELECT r.user_id, r.id, r.name, r.children_json, r.visible, r.value, r.color
+FROM asset_platform_restore.asset_classes r
+WHERE NOT EXISTS (SELECT 1 FROM asset_platform.asset_classes a WHERE a.id = r.id AND a.user_id = r.user_id);
+
+-- 6. 恢复 indoor transactions
+INSERT INTO asset_platform.finance_asset_indoor_transactions (user_id, asset_id, type, shares, price, date, amount)
+SELECT r.user_id, r.asset_id, r.type, r.shares, r.price, r.date, r.amount
+FROM asset_platform_restore.finance_asset_indoor_transactions r
+WHERE NOT EXISTS (SELECT 1 FROM asset_platform.finance_asset_indoor_transactions a WHERE a.id = r.id AND a.user_id = r.user_id);
+
+-- 7. 恢复 strategies
+INSERT INTO asset_platform.strategies (user_id, id, name, allocation_json)
+SELECT r.user_id, r.id, r.name, r.allocation_json
+FROM asset_platform_restore.strategies r
+WHERE NOT EXISTS (SELECT 1 FROM asset_platform.strategies a WHERE a.id = r.id AND a.user_id = r.user_id);
+
+-- 8. 恢复 books
+INSERT INTO asset_platform.books (user_id, id, name, color)
+SELECT r.user_id, r.id, r.name, r.color
+FROM asset_platform_restore.books r
+WHERE NOT EXISTS (SELECT 1 FROM asset_platform.books a WHERE a.id = r.id AND a.user_id = r.user_id);
+
+-- 9. 恢复 reminders
+INSERT INTO asset_platform.reminders (user_id, id, title, type, due_date, completed)
+SELECT r.user_id, r.id, r.title, r.type, r.due_date, r.completed
+FROM asset_platform_restore.reminders r
+WHERE NOT EXISTS (SELECT 1 FROM asset_platform.reminders a WHERE a.id = r.id AND a.user_id = r.user_id);
+
+-- 10. 恢复 budgets
+INSERT INTO asset_platform.budgets (user_id, id, category, amount, period)
+SELECT r.user_id, r.id, r.category, r.amount, r.period
+FROM asset_platform_restore.budgets r
+WHERE NOT EXISTS (SELECT 1 FROM asset_platform.budgets a WHERE a.id = r.id AND a.user_id = r.user_id);
+SQLEOF
+
+            echo "✅ 恢复 SQL 已生成: $RECOVER_DIR/final_recovery.sql"
+            
+            # ========== 9. 执行恢复 ==========
+            echo ""
+            echo "=== 9. 执行增量恢复（不覆盖现有数据）==="
+            
+            # 使用 INSERT IGNORE 风格恢复
+            # 因为最终脚本用了 WHERE NOT EXISTS，所以是安全的
+            $MYSQL asset_platform < "$RECOVER_DIR/final_recovery.sql" 2>&1 | head -20
+            
+            # ========== 10. 最终验证 ==========
+            echo ""
+            echo "=== 10. 最终验证 ==="
+            $MYSQL asset_platform -e "
+              SELECT 'accounts' as tbl, COUNT(*) as cnt FROM accounts
+              UNION ALL SELECT 'finance_assets', COUNT(*) FROM finance_assets
+              UNION ALL SELECT 'records', COUNT(*) FROM records
+              UNION ALL SELECT 'debts', COUNT(*) FROM debts
+              UNION ALL SELECT 'asset_classes', COUNT(*) FROM asset_classes
+              UNION ALL SELECT 'indoor_tx', COUNT(*) FROM finance_asset_indoor_transactions
+              UNION ALL SELECT 'outdoor_tx', COUNT(*) FROM finance_asset_outdoor_transactions
+              UNION ALL SELECT 'strategies', COUNT(*) FROM strategies
+              UNION ALL SELECT 'books', COUNT(*) FROM books
+              UNION ALL SELECT 'reminders', COUNT(*) FROM reminders
+              UNION ALL SELECT 'budgets', COUNT(*) FROM budgets;
+            " 2>/dev/null
+
+            echo ""
+            echo "========================================"
+            echo "  积极恢复完成"
+            echo "  数据保存在: $RECOVER_DIR/"
+            echo "========================================"
