@@ -3,7 +3,8 @@ import { pool } from "../db/index.js";
 import { json, readBody } from "../utils/http.js";
 import { sqlRun, sqlAll, sqlGet } from "../utils/db.js";
 import { text } from "../utils/validators.js";
-import { verifyPassword, hashPassword } from "../utils/crypto.js";
+import { loadUserState } from "../services/state-service.js";
+import { hashPassword } from "../utils/crypto.js";
 import { issueAdminToken } from "../auth/token.js";
 import { fmtDt } from "../utils/date.js";
 import { TOKEN_TTL_DAYS } from "../config/index.js";
@@ -208,6 +209,28 @@ async function handler(req, res, body, origin, pathname, url) {
     await sqlRun(pool, "DELETE FROM sessions WHERE user_id = ?", [userId]);
     
     json(res, 200, { ok: true, message: "密码重置成功。" }, origin);
+    return;
+  }
+
+  if (req.method === "GET" && pathname.startsWith("/api/admin/users/") && pathname.endsWith("/export")) {
+    const segments = pathname.split("/").filter(Boolean);
+    const userId = parseInt(segments[3], 10);
+    if (isNaN(userId)) {
+      json(res, 400, { message: "无效的用户ID。" }, origin);
+      return;
+    }
+    try {
+      const state = await loadUserState(userId);
+      const exportData = {
+        userId,
+        exportedAt: new Date().toISOString(),
+        data: state,
+      };
+      json(res, 200, exportData, origin);
+    } catch (error) {
+      console.error("[admin] Export user data error:", error.message);
+      json(res, 500, { message: "导出失败: " + error.message }, origin);
+    }
     return;
   }
 
