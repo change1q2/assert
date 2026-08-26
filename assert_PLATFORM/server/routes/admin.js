@@ -3,7 +3,7 @@ import { pool } from "../db/index.js";
 import { json, readBody } from "../utils/http.js";
 import { sqlRun, sqlAll, sqlGet } from "../utils/db.js";
 import { text } from "../utils/validators.js";
-import { verifyPassword } from "../utils/crypto.js";
+import { verifyPassword, hashPassword } from "../utils/crypto.js";
 import { issueAdminToken } from "../auth/token.js";
 import { fmtDt } from "../utils/date.js";
 import { TOKEN_TTL_DAYS } from "../config/index.js";
@@ -182,6 +182,32 @@ async function handler(req, res, body, origin, pathname, url) {
     const reviewed = !!body.reviewed;
     const result = await updateFeedbackReview(id, reviewed);
     json(res, 200, result, origin);
+    return;
+  }
+
+  if (req.method === "POST" && pathname.startsWith("/api/admin/users/") && pathname.endsWith("/reset-password")) {
+    const segments = pathname.split("/").filter(Boolean);
+    const userId = parseInt(segments[3], 10);
+    if (isNaN(userId)) {
+      json(res, 400, { message: "无效的用户ID。" }, origin);
+      return;
+    }
+    const newPassword = text(body.newPassword);
+    if (!newPassword || newPassword.length < 6) {
+      json(res, 400, { message: "新密码至少需要 6 位。" }, origin);
+      return;
+    }
+    
+    const user = await sqlGet(pool, "SELECT id FROM users WHERE id = ?", [userId]);
+    if (!user) {
+      json(res, 404, { message: "用户不存在。" }, origin);
+      return;
+    }
+    
+    await sqlRun(pool, "UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?", [hashPassword(newPassword), userId]);
+    await sqlRun(pool, "DELETE FROM sessions WHERE user_id = ?", [userId]);
+    
+    json(res, 200, { ok: true, message: "密码重置成功。" }, origin);
     return;
   }
 
