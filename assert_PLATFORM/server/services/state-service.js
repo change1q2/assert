@@ -360,28 +360,33 @@ async function saveUserState(conn, userId, state) {
     console.warn(`[state-service] 无法检查现有数据量: ${e.message}`);
   }
 
-  // 逐表检查：如果数据库有数据但提交的 state 为空，标记为跳过删除
+  // 逐表检查：如果 state 中对应字段为空数组或未提供，标记为跳过删除
+  // 这是数据保护的核心：前端发空数组时绝不删除数据库已有数据
   const tablesToSkipDeletion = new Set();
-  const tableStateReverseMap = {
-    'accounts': 'accounts', 'records': 'records', 'finance_assets': 'financeAssets',
-    'debts': 'debts', 'asset_classes': 'assetClasses', 'books': 'books',
-    'budgets': 'budgets', 'survival_funds': 'survivalFunds', 'freedom_budgets': 'freedomBudgets',
-    'custom_record_categories': 'customRecordCategories', 'finance_tertiary_categories': 'financeTertiaryCategories',
+  const ALL_TABLE_STATE_MAP = {
+    'exchange_rates': 'rates',
+    'accounts': 'accounts', 'asset_classes': 'assetClasses', 'records': 'records',
+    'budgets': 'budgets', 'finance_asset_transactions': 'financeAssetTransactions',
+    'finance_asset_indoor_transactions': 'financeAssetIndoorTransactions',
+    'finance_asset_outdoor_transactions': 'financeAssetOutdoorTransactions',
+    'finance_assets': 'financeAssets', 'finance_asset_archives': 'financeAssetArchives',
+    'custom_record_categories': 'customRecordCategories',
+    'finance_tertiary_categories': 'financeTertiaryCategories',
     'record_tags': 'recordTags', 'recorders': 'recorders', 'reminders': 'reminders',
-    'debt_categories': 'debtCategories', 'tags': 'tags', 'yearly_records': 'yearlyRecords',
+    'debt_payments': 'debtPayments', 'debts': 'debts',
+    'debt_categories': 'debtCategories', 'strategies': 'strategies',
+    'books': 'books', 'tags': 'tags', 'yearly_records': 'yearlyRecords',
+    'survival_funds': 'survivalFunds', 'freedom_budgets': 'freedomBudgets',
   };
 
-  for (const [table, stateKey] of Object.entries(tableStateReverseMap)) {
-    const dbCount = existingCounts[table] || 0;
-    if (dbCount > 0) {
-      const stateVal = state[stateKey];
-      if (stateVal === undefined) {
-        tablesToSkipDeletion.add(table);
-        console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: 数据库有 ${dbCount} 条数据但 state 中未提供 ${stateKey}`);
-      } else if (Array.isArray(stateVal) && stateVal.length === 0) {
-        tablesToSkipDeletion.add(table);
-        console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: 数据库有 ${dbCount} 条数据但 state 中 ${stateKey} 为空数组`);
-      }
+  for (const [table, stateKey] of Object.entries(ALL_TABLE_STATE_MAP)) {
+    const stateVal = state[stateKey];
+    if (stateVal === undefined) {
+      tablesToSkipDeletion.add(table);
+      console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: state 未提供 ${stateKey}`);
+    } else if (Array.isArray(stateVal) && stateVal.length === 0) {
+      tablesToSkipDeletion.add(table);
+      console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: state 中 ${stateKey} 为空数组，保留数据库数据`);
     }
   }
 
@@ -446,9 +451,20 @@ async function saveUserState(conn, userId, state) {
       console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除（保护数据）`);
       continue;
     }
-    if (stateKey === "__always_delete__" || state[stateKey] !== undefined) {
+    if (stateKey === "__always_delete__") {
       await sqlRun(conn, `DELETE FROM ${table} WHERE user_id = ?`, [userId]);
+      continue;
     }
+    const stateVal = state[stateKey];
+    if (stateVal === undefined) {
+      console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: state 中无 ${stateKey}`);
+      continue;
+    }
+    if (Array.isArray(stateVal) && stateVal.length === 0) {
+      console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: ${stateKey} 为空数组`);
+      continue;
+    }
+    await sqlRun(conn, `DELETE FROM ${table} WHERE user_id = ?`, [userId]);
   }
 
   for (const [currency, rate] of Object.entries(state.rates || {})) {
