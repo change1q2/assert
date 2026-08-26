@@ -1,0 +1,128 @@
+name: Check Backup & Data Status
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check backups & data via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 30m
+          script: |
+            echo "========================================"
+            echo "  数据备份检查 & 恢复"
+            echo "========================================"
+
+            # ---------- 1. 检查 MySQL 备份文件 ----------
+            echo ""
+            echo "=== 1. 检查 MySQL 备份文件 ==="
+            echo "--- /backup/ ---"
+            ls -lah /backup/ 2>/dev/null || echo "目录 /backup/ 不存在"
+            echo "--- /opt/backup/ ---"
+            ls -lah /opt/backup/ 2>/dev/null || echo "目录 /opt/backup/ 不存在"
+            echo "--- /home/ ---"
+            find /home -name "*.sql" -o -name "*dump*" 2>/dev/null | head -20 || echo "未找到 SQL 备份"
+            echo "--- /tmp/ ---"
+            find /tmp -name "*.sql" -o -name "*dump*" 2>/dev/null | head -20 || echo "未找到 SQL 备份"
+            echo "--- /var/backup/ ---"
+            ls -lah /var/backup/ 2>/dev/null || echo "目录 /var/backup/ 不存在"
+            echo "--- 全局搜索 mysqldump 文件 ---"
+            find / -maxdepth 4 -name "*.sql" -size +1k 2>/dev/null | head -20 || echo "未找到 SQL 文件"
+
+            # ---------- 2. 检查 MySQL binlog ----------
+            echo ""
+            echo "=== 2. 检查 MySQL binlog ==="
+            mysql -u root -p'123456' -e "SHOW BINARY LOGS;" 2>/dev/null || echo "binlog 未启用或无法访问"
+            echo "--- binlog 文件列表 ---"
+            ls -lah /var/lib/mysql/mysql-bin.* 2>/dev/null || echo "未找到 binlog 文件"
+            echo "--- MySQL 数据目录 ---"
+            ls -lah /var/lib/mysql/asset_platform/ 2>/dev/null | head -30
+
+            # ---------- 3. 检查各表数据量 ----------
+            echo ""
+            echo "=== 3. 检查各表数据量 ==="
+            mysql -u root -p'123456' asset_platform -e "
+              SELECT 'users' as tbl, COUNT(*) as cnt FROM users
+              UNION ALL SELECT 'accounts', COUNT(*) FROM accounts
+              UNION ALL SELECT 'records', COUNT(*) FROM records
+              UNION ALL SELECT 'finance_assets', COUNT(*) FROM finance_assets
+              UNION ALL SELECT 'finance_asset_indoor_transactions', COUNT(*) FROM finance_asset_indoor_transactions
+              UNION ALL SELECT 'finance_asset_outdoor_transactions', COUNT(*) FROM finance_asset_outdoor_transactions
+              UNION ALL SELECT 'debts', COUNT(*) FROM debts
+              UNION ALL SELECT 'asset_classes', COUNT(*) FROM asset_classes
+              UNION ALL SELECT 'books', COUNT(*) FROM books
+              UNION ALL SELECT 'survival_funds', COUNT(*) FROM survival_funds
+              UNION ALL SELECT 'user_settings', COUNT(*) FROM user_settings
+              UNION ALL SELECT 'yearly_records', COUNT(*) FROM yearly_records
+              UNION ALL SELECT 'freedom_budgets', COUNT(*) FROM freedom_budgets;
+            " 2>/dev/null
+
+            # ---------- 4. 检查每个用户的数据量 ----------
+            echo ""
+            echo "=== 4. 每个用户的数据量 ==="
+            mysql -u root -p'123456' asset_platform -e "
+              SELECT u.id, u.account, p.name,
+                (SELECT COUNT(*) FROM accounts WHERE user_id=u.id) as accounts,
+                (SELECT COUNT(*) FROM records WHERE user_id=u.id) as records,
+                (SELECT COUNT(*) FROM finance_assets WHERE user_id=u.id) as finance_assets,
+                (SELECT COUNT(*) FROM debts WHERE user_id=u.id) as debts,
+                (SELECT COUNT(*) FROM survival_funds WHERE user_id=u.id) as survival_funds
+              FROM users u
+              LEFT JOIN user_profiles p ON p.user_id=u.id
+              ORDER BY u.id;
+            " 2>/dev/null
+
+            # ---------- 5. 检查是否有 independent_assets_json 数据 ----------
+            echo ""
+            echo "=== 5. 检查 user_settings 中的独立资产数据 ==="
+            mysql -u root -p'123456' asset_platform -e "
+              SELECT user_id,
+                LENGTH(independent_assets_json) as ind_assets_len,
+                LEFT(independent_assets_json, 200) as ind_assets_preview
+              FROM user_settings
+              WHERE independent_assets_json IS NOT NULL AND independent_assets_json != '{}';
+            " 2>/dev/null
+
+            # ---------- 6. 检查 crontab 是否有备份任务 ----------
+            echo ""
+            echo "=== 6. 检查定时备份任务 ==="
+            crontab -l 2>/dev/null || echo "无 crontab"
+            ls -lah /etc/cron.daily/ 2>/dev/null | grep -i mysql || echo "cron.daily 无 MySQL 备份"
+
+            # ---------- 7. 如果有 binlog，检查最近的操作 ----------
+            echo ""
+            echo "=== 7. 检查 binlog 最近操作（如果有）==="
+            BINLOG_FILES=$(mysql -u root -p'123456' -e "SHOW BINARY LOGS;" 2>/dev/null | grep mysql-bin | tail -3 | awk '{print $1}')
+            if [ -n "$BINLOG_FILES" ]; then
+              echo "最近的 binlog 文件: $BINLOG_FILES"
+              for f in $BINLOG_FILES; do
+                echo "--- $f (最后50行) ---"
+                mysqlbinlog --base64-output=DECODE-ROWS -v /var/lib/mysql/$f 2>/dev/null | tail -50
+              done
+            else
+              echo "binlog 未启用"
+            fi
+
+            # ---------- 8. 尝试创建紧急备份 ----------
+            echo ""
+            echo "=== 8. 创建紧急备份 ==="
+            BACKUP_FILE="/opt/asset-platform/backup_$(date '+%Y%m%d_%H%M%S').sql.gz"
+            mysqldump -u root -p'123456' asset_platform 2>/dev/null | gzip > "$BACKUP_FILE"
+            if [ -s "$BACKUP_FILE" ]; then
+              echo "紧急备份已创建: $BACKUP_FILE ($(ls -lah $BACKUP_FILE | awk '{print $5}'))"
+            else
+              echo "备份创建失败"
+            fi
+
+            echo ""
+            echo "========================================"
+            echo "  检查完成"
+            echo "========================================"
