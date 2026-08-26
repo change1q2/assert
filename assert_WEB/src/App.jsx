@@ -340,6 +340,15 @@ export default function App() {
     );
   }
 
+  if (currentPage === 'admin-login') {
+    return (
+      <AdminLogin
+        onLogin={() => setCurrentPage('admin')}
+        onBack={() => setCurrentPage(loggedIn ? 'main' : 'login')}
+      />
+    );
+  }
+
   if (currentPage === 'admin') {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-slate-950">

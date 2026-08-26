@@ -48,6 +48,7 @@ export default function Login({ onLogin, onRegister, onForgotPassword, onAdminLo
       } else if ((account === 'admin' || account === '13896375671') && (password === 'admin123' || password === 'whjQQ123')) {
         const mockData = {
           token: 'mock-token-' + Date.now(),
+          isAdmin: true,
           state: {
             debts: [
               {
@@ -118,6 +119,7 @@ export default function Login({ onLogin, onRegister, onForgotPassword, onAdminLo
       if ((account === 'admin' || account === '13896375671') && (password === 'admin123' || password === 'whjQQ123')) {
         const mockData = {
           token: 'mock-token-' + Date.now(),
+          isAdmin: true,
           state: {
             debts: [
               {
