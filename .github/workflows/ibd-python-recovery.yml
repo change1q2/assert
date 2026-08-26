@@ -1,0 +1,203 @@
+name: Extract Records from IBD with Python Parser
+
+on:
+  workflow_dispatch:
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and run Python IBD parser
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: false
+          command_timeout: 60m
+          script: |
+            set +e
+            CONTAINER_ID=$(docker ps | grep -i mysql | awk '{print $1}' | head -1)
+            [ -z "$CONTAINER_ID" ] && echo "ERROR: No MySQL container" && exit 1
+
+            MYSQL_ROOT_PASSWORD=$(docker exec "$CONTAINER_ID" env | grep -i "MYSQL_ROOT_PASSWORD" | cut -d= -f2)
+            [ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD="123456"
+            MYSQL="docker exec $CONTAINER_ID mysql -u root -p$MYSQL_ROOT_PASSWORD"
+
+            TS=$(date +%Y%m%d_%H%M%S)
+            REC_DIR="/tmp/recovery_$TS"
+            mkdir -p "$REC_DIR"
+
+            echo "========================================"
+            echo "  Python IBD Parser Recovery"
+            echo "========================================"
+
+            # ========== 1. Copy .ibd files ==========
+            echo ""
+            echo "=== 1. Copy .ibd files ==="
+            
+            docker cp "$CONTAINER_ID":/var/lib/mysql/asset_platform/records.ibd "$REC_DIR/" 2>/dev/null
+            docker cp "$CONTAINER_ID":/var/lib/mysql/asset_platform/accounts.ibd "$REC_DIR/" 2>/dev/null
+            docker cp "$CONTAINER_ID":/var/lib/mysql/asset_platform/finance_assets.ibd "$REC_DIR/" 2>/dev/null
+            docker cp "$CONTAINER_ID":/var/lib/mysql/asset_platform/debts.ibd "$REC_DIR/" 2>/dev/null
+            
+            ls -lh "$REC_DIR/"*.ibd 2>/dev/null
+
+            # ========== 2. Download Python parser ==========
+            echo ""
+            echo "=== 2. Download Python parser ==="
+            
+            curl -sL "https://raw.githubusercontent.com/change1q2/assert/main/assert_PLATFORM/server/scripts/parse_records_ibd.py" -o "$REC_DIR/parse_records_ibd.py"
+            wc -l "$REC_DIR/parse_records_ibd.py"
+
+            # ========== 3. Run Python parser ==========
+            echo ""
+            echo "=== 3. Run Python InnoDB parser ==="
+            
+            python3 "$REC_DIR/parse_records_ibd.py" "$REC_DIR/records.ibd" "$REC_DIR/recovered_records.sql" 2>&1
+
+            # ========== 4. Fallback: grep-based extraction ==========
+            echo ""
+            echo "=== 4. Fallback: grep-based extraction ==="
+            
+            if [ -f "$REC_DIR/records.ibd" ]; then
+              echo ""
+              echo "Searching for records patterns..."
+              
+              # Extract all unique dates
+              echo "Unique dates found:"
+              grep -boa "20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]" "$REC_DIR/records.ibd" 2>/dev/null | cut -d: -f3 | sort -u | head -30
+              
+              # Extract unique account IDs
+              echo ""
+              echo "Unique account IDs:"
+              grep -boa "1785925406[0-9\-]*" "$REC_DIR/records.ibd" 2>/dev/null | cut -d: -f3 | sort -u | head -30
+              
+              # Extract all numeric amounts that look like money
+              echo ""
+              echo "Potential amounts (500-999999):"
+              grep -boa "[1-9][0-9]\{2,5\}\.[0-9][0-9]" "$REC_DIR/records.ibd" 2>/dev/null | cut -d: -f3 | sort -rn | head -30
+              
+              # Extract type keywords with context
+              echo ""
+              echo "Record types with context:"
+              for TYPE in income expense transfer; do
+                echo "--- $TYPE ---"
+                grep -boa "$TYPE" "$REC_DIR/records.ibd" 2>/dev/null | head -5
+              done
+              
+              # Extract complete record fragments (surrounding each date)
+              echo ""
+              echo "=== Extract complete record fragments ==="
+              
+              # For each date found, extract the surrounding context (100 bytes before and after)
+              grep -boa "20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]" "$REC_DIR/records.ibd" 2>/dev/null | \
+                while IFS=: read -r offset rest; do
+                  if [ -n "$offset" ]; then
+                    START=$((offset - 100))
+                    [ $START -lt 0 ] && START=0
+                    END=$((offset + 150))
+                    dd if="$REC_DIR/records.ibd" bs=1 skip=$START count=$((END - START)) 2>/dev/null | strings | tr '\n' ' '
+                    echo " [offset=$offset]"
+                  fi
+                done > "$REC_DIR/record_fragments.txt"
+                
+              echo "Record fragments:"
+              cat "$REC_DIR/record_fragments.txt" | head -100
+            fi
+
+            # ========== 5. Apply recovered data ==========
+            echo ""
+            echo "=== 5. Apply Recovered Data ==="
+            
+            # Apply if the Python parser produced SQL
+            if [ -f "$REC_DIR/recovered_records.sql" ] && [ -s "$REC_DIR/recovered_records.sql" ]; then
+              echo "Applying recovered_records.sql..."
+              $MYSQL asset_platform --force < "$REC_DIR/recovered_records.sql" 2>/dev/null
+              echo "Applied"
+            else
+              echo "Python parser didn't produce SQL - manually reconstructing..."
+              
+              # Manual reconstruction based on grep data
+              # The fragments show records for user_id=1
+              # Extract and construct INSERT statements
+              
+              cat > "$REC_DIR/manual_recovery.sql" << 'EOF'
+-- Manual recovery based on IBD grep analysis
+-- Records found in records.ibd (10MB file)
+-- Contains records for user 1 from Sep-Nov 2025
+
+EOF
+              
+              # Extract unique dates and generate placeholder records
+              grep -boa "20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]" "$REC_DIR/records.ibd" 2>/dev/null | \
+                cut -d: -f3 | sort -u | \
+                while read DATE; do
+                  echo "INSERT IGNORE INTO records (user_id, id, type, category, amount, currency, record_date, account_id, created_at) VALUES (1, 'recovered_$(echo $DATE | tr '-' '')', 'expense', '未知', 0, 'CNY', '$DATE', 'unknown', '2026-08-05T10:23:26Z');"
+                done >> "$REC_DIR/manual_recovery.sql"
+              
+              echo "Generated manual SQL with $(grep -c INSERT "$REC_DIR/manual_recovery.sql" 2>/dev/null) statements"
+              
+              # Don't auto-apply - need manual review
+              echo "Manual SQL saved to $REC_DIR/manual_recovery.sql"
+              echo "Review before applying!"
+            fi
+
+            # ========== 6. Apply backup SQLs ==========
+            echo ""
+            echo "=== 6. Apply Backup SQLs ==="
+            
+            for BK in /opt/mysql-backups/asset_platform_full_20260826_151334.sql.gz /var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/401/fs/tmp/backup.sql; do
+              if [ -f "$BK" ]; then
+                echo ""
+                echo "Applying $BK ..."
+                BASENAME=$(basename "$BK" .gz)
+                if echo "$BK" | grep -q '.gz'; then
+                  gunzip -c "$BK" > "$REC_DIR/${BASENAME}.sql"
+                else
+                  cp "$BK" "$REC_DIR/"
+                fi
+                sed 's/^INSERT INTO/INSERT IGNORE INTO/g' "$REC_DIR/${BASENAME}.sql" > "$REC_DIR/apply_${BASENAME}.sql"
+                $MYSQL asset_platform --force < "$REC_DIR/apply_${BASENAME}.sql" 2>/dev/null
+                echo "Applied"
+              fi
+            done
+
+            # ========== 7. Final state ==========
+            echo ""
+            echo "========================================"
+            echo "  7. Final State"
+            echo "========================================"
+            
+            $MYSQL asset_platform -e "
+              SELECT 
+                'accounts' as tbl, COUNT(*) as total,
+                  SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END) as u1,
+                  SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END) as u3,
+                  SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END) as u4
+                FROM accounts
+                UNION ALL
+                SELECT 'finance_assets', COUNT(*),
+                  SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+                FROM finance_assets
+                UNION ALL
+                SELECT 'records', COUNT(*),
+                  SUM(CASE WHEN user_id=1 THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+                FROM records
+                UNION ALL
+                SELECT 'debts', COUNT(*), 0,
+                  SUM(CASE WHEN user_id=3 THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN user_id=4 THEN 1 ELSE 0 END)
+                FROM debts;
+            " 2>/dev/null
+            
+            echo ""
+            echo "Recovery directory: $REC_DIR/"
+            echo "========================================"
+            echo "  Complete"
+            echo "========================================"
