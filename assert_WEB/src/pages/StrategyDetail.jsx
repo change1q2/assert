@@ -134,6 +134,12 @@ export default function StrategyDetail({ strategyId, onBack, onNavigate }) {
 
   const accountsForStrategy = useMemo(() => {
     const accountNames = new Set();
+    // 从账户管理模块获取账户名
+    (stateData?.accounts || []).forEach(a => {
+      const accountName = a.name || '';
+      if (accountName) accountNames.add(accountName);
+    });
+    // 同时从理财持仓中获取账户名（覆盖可能不在账户管理中的持仓账户）
     (stateData?.financeAssets || []).forEach(a => {
       const accountName = a.account || a.accountId || '';
       if (accountName) accountNames.add(accountName);

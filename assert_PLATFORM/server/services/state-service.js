@@ -1,4 +1,4 @@
-import { pool } from "../db/index.js";
+﻿import { pool } from "../db/index.js";
 import { sqlRun, sqlAll, sqlGet, maybeParseJson } from "../utils/db.js";
 import { text, number, numericIfPossible } from "../utils/validators.js";
 import { profileForUser } from "./user-service.js";
@@ -325,51 +325,19 @@ async function loadUserState(userId) {
 async function saveUserState(conn, userId, state) {
   const user = state.user || {};
 
-  const stateCounts = {
-    accounts: (state.accounts || []).length,
-    records: (state.records || []).length,
-    financeAssets: (state.financeAssets || []).length,
-    debts: (state.debts || []).length,
-    assetClasses: (state.assetClasses || []).length,
-    independentAssets: state.independentAssets ? Object.values(state.independentAssets).flat().length : 0,
-    books: (state.books || []).length,
-    budgets: (state.budgets || []).length,
-    survivalFunds: (state.survivalFunds || []).length,
-    freedomBudgets: (state.freedomBudgets || []).length,
-  };
-  const totalStateItems = Object.values(stateCounts).reduce((a, b) => a + b, 0);
+  // ========== 数据安全检查：防止数据被意外清空 ==========
+  // 1. 逐表检查：如果 state 中某表未提供或为空数组，标记为跳过删除
+  // 2. 额外检查：如果数据库有数据但 state 为空，也跳过该表
+  // 3. 全局检查：如果所有关键表都被跳过，拒绝整个保存
 
-  // 检查数据库中现有的数据量
-  const coreTables = ['accounts', 'records', 'finance_assets', 'debts', 'asset_classes', 'books', 'budgets', 'survival_funds', 'freedom_budgets'];
-  let existingCounts = {};
-  try {
-    for (const table of coreTables) {
-      const [rows] = await conn.execute(`SELECT COUNT(*) as cnt FROM ${table} WHERE user_id = ?`, [userId]);
-      existingCounts[table] = rows[0].cnt;
-    }
-    const totalExisting = Object.values(existingCounts).reduce((a, b) => a + b, 0);
-
-    if (totalExisting > 0 && totalStateItems === 0) {
-      console.warn(`[state-service] 用户 ${userId} 保存的状态完全为空但数据库有 ${totalExisting} 条数据，跳过保存`);
-      throw new Error('DATA_LOSS_PREVENTION: state is empty but database has data');
-    }
-  } catch (e) {
-    if (e.message && e.message.startsWith('DATA_LOSS_PREVENTION')) {
-      throw e;
-    }
-    console.warn(`[state-service] 无法检查现有数据量: ${e.message}`);
-  }
-
-  // 逐表检查：如果 state 中对应字段为空数组或未提供，标记为跳过删除
-  // 这是数据保护的核心：前端发空数组时绝不删除数据库已有数据
-  const tablesToSkipDeletion = new Set();
-  const ALL_TABLE_STATE_MAP = {
-    'exchange_rates': 'rates',
+  // 收集数据库现有数据量（用于后续检查和备份）
+  const ALL_TABLE_STATE_MAP_FOR_CHECK = {
     'accounts': 'accounts', 'asset_classes': 'assetClasses', 'records': 'records',
-    'budgets': 'budgets', 'finance_asset_transactions': 'financeAssetTransactions',
+    'budgets': 'budgets', 'finance_assets': 'financeAssets',
+    'finance_asset_transactions': 'financeAssetTransactions',
     'finance_asset_indoor_transactions': 'financeAssetIndoorTransactions',
     'finance_asset_outdoor_transactions': 'financeAssetOutdoorTransactions',
-    'finance_assets': 'financeAssets', 'finance_asset_archives': 'financeAssetArchives',
+    'finance_asset_archives': 'financeAssetArchives',
     'custom_record_categories': 'customRecordCategories',
     'finance_tertiary_categories': 'financeTertiaryCategories',
     'record_tags': 'recordTags', 'recorders': 'recorders', 'reminders': 'reminders',
@@ -379,15 +347,51 @@ async function saveUserState(conn, userId, state) {
     'survival_funds': 'survivalFunds', 'freedom_budgets': 'freedomBudgets',
   };
 
-  for (const [table, stateKey] of Object.entries(ALL_TABLE_STATE_MAP)) {
-    const stateVal = state[stateKey];
-    if (stateVal === undefined) {
-      tablesToSkipDeletion.add(table);
-      console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: state 未提供 ${stateKey}`);
-    } else if (Array.isArray(stateVal) && stateVal.length === 0) {
-      tablesToSkipDeletion.add(table);
-      console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: state 中 ${stateKey} 为空数组，保留数据库数据`);
+  const tablesToSkipDeletion = new Set();
+  let existingCounts = {};
+
+  try {
+    // 先获取所有表的数据库现有数据量
+    for (const table of Object.keys(ALL_TABLE_STATE_MAP_FOR_CHECK)) {
+      const [rows] = await conn.execute(`SELECT COUNT(*) as cnt FROM ${table} WHERE user_id = ?`, [userId]);
+      existingCounts[table] = rows[0].cnt;
     }
+
+    // 逐表检查：state 中未提供或为空数组 → 跳过删除
+    for (const [table, stateKey] of Object.entries(ALL_TABLE_STATE_MAP_FOR_CHECK)) {
+      const stateVal = state[stateKey];
+      const dbCount = existingCounts[table] || 0;
+
+      if (stateVal === undefined) {
+        tablesToSkipDeletion.add(table);
+        console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: state 未提供 ${stateKey}`);
+      } else if (Array.isArray(stateVal) && stateVal.length === 0 && dbCount > 0) {
+        // 关键保护：state 为空数组但数据库有数据 → 跳过
+        tablesToSkipDeletion.add(table);
+        console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: state 中 ${stateKey} 为空数组但数据库有 ${dbCount} 条，保留数据库数据`);
+      }
+    }
+
+    // 全局检查：如果关键表都被跳过，且 state 也没有其他数据，拒绝保存
+    const criticalTables = ['accounts', 'records', 'finance_assets', 'debts', 'asset_classes', 'survival_funds'];
+    const allCriticalSkipped = criticalTables.every(t => tablesToSkipDeletion.has(t));
+    const stateHasAnyData = (state.accounts?.length || 0) > 0 ||
+      (state.records?.length || 0) > 0 ||
+      (state.financeAssets?.length || 0) > 0 ||
+      (state.debts?.length || 0) > 0 ||
+      (state.assetClasses?.length || 0) > 0 ||
+      (state.survivalFunds?.length || 0) > 0 ||
+      (state.independentAssets && Object.values(state.independentAssets).flat().length > 0);
+
+    if (allCriticalSkipped && !stateHasAnyData) {
+      console.warn(`[state-service] 用户 ${userId} 保存的状态完全为空但数据库有数据，跳过保存`);
+      throw new Error('DATA_LOSS_PREVENTION: state is empty but database has data');
+    }
+  } catch (e) {
+    if (e.message && e.message.startsWith('DATA_LOSS_PREVENTION')) {
+      throw e;
+    }
+    console.warn(`[state-service] 数据安全检查异常: ${e.message}`);
   }
 
   const previousSettings = await sqlGet(conn, "SELECT hk_ipo_rules_json, independent_assets_json, finance_asset_draft_json, fee_config_json, overview_goals_json, account_categories_json, strategies_json FROM user_settings WHERE user_id = ?", [userId]);
@@ -533,6 +537,8 @@ async function saveUserState(conn, userId, state) {
   }
 
   for (const row of (state.accounts || [])) {
+    // 如果 accounts 表被跳过（数据库有数据但 state 为空），不执行 INSERT
+    if (tablesToSkipDeletion.has('accounts')) continue;
     const cleanedName = sanitizeAccountName(row.name);
     await sqlRun(conn, `INSERT INTO accounts (user_id, id, name, owner, owners_json, ownership_type, currency, type, balance, liability, enabled, is_default, sort_order, category, sub_category)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -545,6 +551,7 @@ async function saveUserState(conn, userId, state) {
   }
 
   for (const [index, row] of (state.assetClasses || []).entries()) {
+    if (tablesToSkipDeletion.has('asset_classes')) continue;
     await sqlRun(conn, `INSERT INTO asset_classes
       (user_id, id, name, children_json, visible, value, opening_value, target_value, income, expense, labor_income, color, expected_return, sort_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -555,6 +562,7 @@ async function saveUserState(conn, userId, state) {
   }
 
   for (const [index, row] of (state.records || []).entries()) {
+    if (tablesToSkipDeletion.has('records')) continue;
     await sqlRun(conn, `INSERT INTO records
       (user_id, id, type, category, subcategory, tag, book_id, amount, currency, account_id, record_date, recorder, note, created_at, sort_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -570,6 +578,7 @@ async function saveUserState(conn, userId, state) {
   }
 
   for (const [index, row] of (state.financeAssets || []).entries()) {
+    if (tablesToSkipDeletion.has('finance_assets')) continue;
     await sqlRun(conn, `INSERT INTO finance_assets
       (user_id, id, kind, asset_kind, account_id, category, subcategory, tertiary_category, market, currency, name, code, position_group, position_category, cost_price, shares, quantity, available_shares, current_price, pnl, pnl_percent, cumulative_return, holding_pnl, holding_pnl_rate, cumulative_return_rate, price_manual_edit, force_binding, mf_historical_base, avg_buy_price, holding_days, position_weight, total_fees, today_pnl, today_pnl_percent, prev_price, price_date, tags, status, archive_date, sort_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -669,6 +678,7 @@ async function saveUserState(conn, userId, state) {
 
   let debtOrder = 0;
   for (const row of (state.debts || [])) {
+    if (tablesToSkipDeletion.has('debts')) continue;
     const debtId = text(row.id);
     const creditor = row.creditor || row.creditorName || '';
     const debtor = row.debtor || row.debtorName || '';
@@ -698,6 +708,7 @@ async function saveUserState(conn, userId, state) {
   // survival_funds
   let sfOrder = 0;
   for (const row of (state.survivalFunds || [])) {
+    if (tablesToSkipDeletion.has('survival_funds')) continue;
     await sqlRun(conn, `INSERT INTO survival_funds
       (user_id, id, name, type, currency, amount, account_id, cost_basis, sort_order, metadata_json)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
