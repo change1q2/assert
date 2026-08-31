@@ -4,7 +4,7 @@ import { json, readBody } from "../utils/http.js";
 import { sqlRun, sqlAll, sqlGet } from "../utils/db.js";
 import { text } from "../utils/validators.js";
 import { loadUserState } from "../services/state-service.js";
-import { hashPassword } from "../utils/crypto.js";
+import { hashPassword, verifyPassword } from "../utils/crypto.js";
 import { issueAdminToken } from "../auth/token.js";
 import { fmtDt } from "../utils/date.js";
 import { TOKEN_TTL_DAYS } from "../config/index.js";

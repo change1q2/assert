@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { fetchState, saveState, peekCachedState, invalidateStateCache } from '../api';
 import { calcCooperationFunds } from './Accounts';
 import { getCache, setCache } from '../utils/cache';
-import { truncateNum } from '../utils/currency';
+import { truncateNum, convertAmount, DEFAULT_EXCHANGE_RATES } from '../utils/currency';
 import { PieChart, Pie, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import {
   Wallet,
@@ -626,7 +626,38 @@ export default function Overview() {
   const liquidity = computeLiquidity(accounts, records);
 
   // 计算理财总资产（与理财模块的总市值计算保持一致：currentValue = currentPrice × shares，货币汇率折算）
-  const exchangeRates = stateData?.exchangeRates || { CNY: 1 };
+  const exchangeRates = stateData?.exchangeRates && Object.keys(stateData.exchangeRates).length > 0
+    ? stateData.exchangeRates
+    : DEFAULT_EXCHANGE_RATES;
+
+  // 与 IndependentAssets.jsx L1574-L1628 保持一致的车辆残值算法（年龄+里程组合折旧）
+  const calcVehicleResidual = (item) => {
+    const purchasePrice = parseFloat(item.purchasePrice || 0);
+    if (purchasePrice <= 0) return 0;
+    const now = new Date();
+    const purchaseDate = item.purchaseDate ? new Date(item.purchaseDate) : null;
+    let age = 0;
+    if (purchaseDate && !isNaN(purchaseDate.getTime()) && purchaseDate <= now) {
+      age = (now - purchaseDate) / (1000 * 60 * 60 * 24 * 365);
+    }
+    let ageDepRate;
+    if (age <= 0) ageDepRate = 0;
+    else if (age <= 1) ageDepRate = 0.175;
+    else if (age <= 2) ageDepRate = 0.175 + (age - 1) * 0.1375;
+    else if (age < 10) ageDepRate = 0.3125 + (age - 2) * 0.09;
+    else ageDepRate = 0.7;
+    const mileage = parseFloat(item.mileage || 0);
+    const perMileRate = (1 - 0.15) / 30;
+    let mileageDepRate = Math.min(0.95, mileage * perMileRate);
+    const combined = (ageDepRate + mileageDepRate) / 2;
+    const residual = purchasePrice * (1 - combined);
+    const minResidual = purchasePrice * 0.05;
+    return Math.max(residual, minResidual);
+  };
+
+  // 统一的货币换算函数（与 IndependentAssets.jsx 的 toCNY 保持一致）
+  const toCNY = (value, fromCurrency) =>
+    convertAmount(parseFloat(value) || 0, (fromCurrency || 'CNY'), 'CNY', exchangeRates);
   const financeTotalValue = (financeAssets || []).reduce((sum, a) => {
     const _price = parseFloat(a.currentPrice);
     const _costPrice = parseFloat(a.costPrice);
@@ -663,68 +694,65 @@ export default function Overview() {
   const financeTotalPnl = financeTotalValue - financeTotalCost;
   const financeTotalPnlRate = financeTotalCost > 0 ? (financeTotalPnl / financeTotalCost) * 100 : 0;
 
-  // 计算独立总资产（与 IndependentAssets.jsx 保持一致）
+  // 计算独立总资产和总成本（与 IndependentAssets.jsx L1843-L1923 完全一致，
+  // 含：货币汇率转换 / 车辆残值组合折旧 / survivalfund 类型 / equity 只取 marketValue / 保险 fallback）
   let independentTotalValue = 0;
-  Object.keys(independentAssets || {}).forEach(type => {
-    const items = independentAssets[type] || [];
-    items.forEach(item => {
-      if (type === 'insurance') {
-        if (item.insuranceType === '年金险') {
-          const records = item.transactionRecords || [];
-          const sortedByYear = [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0));
-          const latestRecord = sortedByYear.length > 0 ? sortedByYear[sortedByYear.length - 1] : null;
-          const cashValue = latestRecord ? parseFloat(latestRecord.yearEndCashValue || 0) : parseFloat(item.cashValue || 0);
-          const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.annualActualDividend || 0), 0);
-          independentTotalValue += cashValue + totalDividend;
-        } else {
-          const records = item.transactionRecords || [];
-          const cashValue = parseFloat(item.cashValue || 0);
-          const totalDividend = records.reduce((sum, r) => sum + parseFloat(r.actualProfitAmount || 0), 0);
-          independentTotalValue += cashValue + totalDividend;
-        }
-      } else if (type === 'realestate') {
-        if (item.usage === '出租') {
-          independentTotalValue += parseFloat(item.purchasePrice || 0);
-        } else {
-          const marketValue = parseFloat(item.marketValue || 0);
-          const taxAmount = parseFloat(item.taxAmount || 0);
-          const agencyFee = parseFloat(item.agencyFeeAmount || 0);
-          const actualValue = marketValue > 0 ? (marketValue - taxAmount - agencyFee) : parseFloat(item.purchasePrice || 0);
-          independentTotalValue += actualValue;
-        }
-      } else if (type === 'vehicle') {
-        const purchasePrice = parseFloat(item.purchasePrice || 0);
-        const purchaseDate = item.purchaseDate ? new Date(item.purchaseDate) : null;
-        const years = purchaseDate ? (new Date() - purchaseDate) / (1000 * 60 * 60 * 24 * 365) : 0;
-        const residualRate = Math.max(0, 1 - years * 0.1);
-        independentTotalValue += purchasePrice * residualRate;
-      } else if (type === 'fixedinvestment') {
-        independentTotalValue += parseFloat(item.investmentCost || 0);
-      } else if (type === 'equity') {
-        independentTotalValue += parseFloat(item.marketValue || item.investmentCost || 0);
-      } else if (type === 'fixeddeposit') {
-        independentTotalValue += parseFloat(item.amount || 0);
-      }
-    });
-  });
-
-  // 计算独立资产总成本和总盈亏
   let independentTotalCost = 0;
   Object.keys(independentAssets || {}).forEach(type => {
     const items = independentAssets[type] || [];
     items.forEach(item => {
+      const cur = item.currency || 'CNY';
       if (type === 'insurance') {
-        independentTotalCost += parseFloat(item.paidAmount || item.premiumTotal || 0);
+        const records = item.transactionRecords || [];
+        let cost = 0;
+        let value = 0;
+        if (item.insuranceType === '年金险') {
+          const sumAnnualPremium = records.reduce((s, r) => s + (parseFloat(r.annualPremium) || 0), 0);
+          const latest = records.length > 0
+            ? [...records].sort((a, b) => (parseInt(a.year) || 0) - (parseInt(b.year) || 0)).pop()
+            : null;
+          const latestCashValue = latest ? (parseFloat(latest.yearEndCashValue) || 0) : (parseFloat(item.cashValue) || 0);
+          cost = sumAnnualPremium > 0 ? sumAnnualPremium : (parseFloat(item.paidAmount) || 0);
+          value = latestCashValue > 0 ? latestCashValue : cost;
+        } else {
+          cost = parseFloat(item.paidAmount) || 0;
+          const cash = parseFloat(item.cashValue) || 0;
+          value = cash > 0 ? cash : cost;
+        }
+        independentTotalValue += toCNY(value, cur);
+        independentTotalCost += toCNY(cost, cur);
       } else if (type === 'realestate') {
-        independentTotalCost += parseFloat(item.purchasePrice || 0);
+        let value;
+        if (item.usage === '出租') {
+          value = parseFloat(item.purchasePrice) || 0;
+        } else {
+          const marketValue = parseFloat(item.marketValue) || 0;
+          const tax = parseFloat(item.taxAmount) || 0;
+          const fee = parseFloat(item.agencyFeeAmount) || 0;
+          value = marketValue > 0 ? (marketValue - tax - fee) : (parseFloat(item.purchasePrice) || 0);
+        }
+        independentTotalValue += toCNY(value, cur);
+        independentTotalCost += toCNY(parseFloat(item.purchasePrice) || 0, cur);
       } else if (type === 'vehicle') {
-        independentTotalCost += parseFloat(item.purchasePrice || 0);
+        const residualValue = calcVehicleResidual(item);
+        independentTotalValue += toCNY(residualValue, cur);
+        independentTotalCost += toCNY(parseFloat(item.purchasePrice) || 0, cur);
       } else if (type === 'fixedinvestment') {
-        independentTotalCost += parseFloat(item.investmentCost || 0);
+        const cost = parseFloat(item.investmentCost) || 0;
+        independentTotalValue += toCNY(cost, cur);
+        independentTotalCost += toCNY(cost, cur);
       } else if (type === 'equity') {
-        independentTotalCost += parseFloat(item.investmentCost || 0);
+        // IndependentAssets 只取 marketValue（没有 investmentCost 兜底）
+        independentTotalValue += toCNY(parseFloat(item.marketValue) || 0, cur);
+        independentTotalCost += toCNY(parseFloat(item.investmentCost) || 0, cur);
       } else if (type === 'fixeddeposit') {
-        independentTotalCost += parseFloat(item.amount || 0);
+        const amount = parseFloat(item.amount) || 0;
+        independentTotalValue += toCNY(amount, cur);
+        independentTotalCost += toCNY(amount, cur);
+      } else if (type === 'survivalfund') {
+        const amount = parseFloat(item.amount) || 0;
+        independentTotalValue += toCNY(amount, cur);
+        independentTotalCost += toCNY(amount, cur);
       }
     });
   });
