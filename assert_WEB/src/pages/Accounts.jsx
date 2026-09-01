@@ -3047,9 +3047,7 @@ export default function Accounts() {
                   const plColor = pl > 0 ? 'text-green-600' : pl < 0 ? 'text-red-500' : 'text-gray-400';
                   const ownershipType = account.ownershipType || (Array.isArray(account.owners) && account.owners.length>1 ? 'multi' : 'personal');
                   const owners = Array.isArray(account.owners) && account.owners.length>0 ? account.owners : [{name:'自己', share:100}];
-                  const ownerSummaryText = owners.length===1
-                    ? (owners[0].name || '自己')
-                    : ((owners[0].name || '自己') + ' + ' + (owners.length-1) + '人');
+                  const ownerSummaryText = owners.map(o => o.name || '自己').join('、');
                   return (
                     <tr
                       key={account.id}

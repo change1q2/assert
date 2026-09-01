@@ -835,7 +835,7 @@ export default function Overview() {
   }, 0);
   const freeCashFlowExpected = totalBudget;
 
-  // 独立资产配置计算
+  // 独立资产配置计算（7 类：保险、房产、车辆、固定投资、股权、定期资产、外汇）
   const independentTypeLabels = {
     insurance: '保险',
     realestate: '房产',
@@ -843,48 +843,65 @@ export default function Overview() {
     fixedinvestment: '固定投资',
     equity: '股权',
     fixeddeposit: '定期资产',
+    forex: '外汇',
   };
-  const independentTypeColors = ['#EC4899', '#06B6D4', '#F59E0B', '#8B5CF6', '#10B981', '#3B82F6'];
+  const independentTypeColors = {
+    insurance: '#EC4899',
+    realestate: '#06B6D4',
+    vehicle: '#F59E0B',
+    fixedinvestment: '#8B5CF6',
+    equity: '#10B981',
+    fixeddeposit: '#3B82F6',
+    forex: '#14B8A6',
+  };
 
   const independentAllocation = [];
-  Object.keys(independentAssets || {}).forEach((type, idx) => {
+  Object.keys(independentAssets || {}).forEach((type) => {
     const items = independentAssets[type] || [];
     let typeValue = 0;
     items.forEach(item => {
       if (type === 'insurance') {
-        typeValue += parseFloat(item.premiumTotal || 0);
+        // 保险优先用现金价值，其次累计保费
+        const cashValue = parseFloat(item.cashValue || 0);
+        const paidAmount = parseFloat(item.paidAmount || 0);
+        typeValue += cashValue > 0 ? cashValue : paidAmount;
       } else if (type === 'realestate') {
         const marketValue = parseFloat(item.marketValue || 0);
         const taxAmount = parseFloat(item.taxAmount || 0);
-        const agencyFee = parseFloat(item.agencyFee || 0);
+        const agencyFee = parseFloat(item.agencyFee || item.agencyFeeAmount || 0);
         typeValue += marketValue > 0 ? (marketValue - taxAmount - agencyFee) : parseFloat(item.purchasePrice || 0);
       } else if (type === 'vehicle') {
         const purchasePrice = parseFloat(item.purchasePrice || 0);
-        const depreciationRate = parseFloat(item.depreciationRate || 0);
-        const years = parseFloat(item.ownershipYears || 0);
-        typeValue += purchasePrice * Math.pow(1 - depreciationRate / 100, years);
+        const purchaseDate = item.purchaseDate ? new Date(item.purchaseDate) : null;
+        const years = purchaseDate ? (new Date() - purchaseDate) / (1000 * 60 * 60 * 24 * 365) : 0;
+        const residualRate = Math.max(0, 1 - years * 0.1);
+        typeValue += purchasePrice * residualRate;
       } else if (type === 'fixedinvestment') {
         typeValue += parseFloat(item.investmentCost || 0);
       } else if (type === 'equity') {
         typeValue += parseFloat(item.marketValue || item.investmentCost || 0);
       } else if (type === 'fixeddeposit') {
         typeValue += parseFloat(item.amount || 0);
+      } else if (type === 'forex') {
+        // 外汇用买入金额
+        typeValue += parseFloat(item.buyAmount || item.amount || item.balance || 0);
       }
     });
     if (typeValue > 0) {
       independentAllocation.push({
         name: independentTypeLabels[type] || type,
         value: typeValue,
-        color: independentTypeColors[idx % independentTypeColors.length],
+        color: independentTypeColors[type] || '#9CA3AF',
       });
     }
   });
   const independentAssetAllocation = independentAllocation.sort((a, b) => b.value - a.value);
 
-  // 综合资产配置计算
+  // 综合资产配置计算：理财 + 独立资产 + 生存资金
   const comprehensiveAssetAllocation = [
     { name: '理财资产', value: financeTotalValue, color: '#3B82F6' },
     { name: '独立资产', value: independentTotalValue, color: '#EC4899' },
+    { name: '生存资金', value: survivalTotalValue, color: '#F97316' },
   ].filter(d => d.value > 0);
 
   // 资产分类排行：基于理财资产的实际品类（category）分组计算盈亏

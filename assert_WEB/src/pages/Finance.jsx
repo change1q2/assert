@@ -2900,18 +2900,13 @@ export default function Finance({ onAssetPenetration }) {
   const DEFAULT_ASSET_KIND_OPTIONS = ['流动资产', '非流动资产'];
   const assetKindOptions = DEFAULT_ASSET_KIND_OPTIONS;
 
-  // 一级分类自定义管理（从资产分类模块动态获取）
-  const DEFAULT_CATEGORY_L1_OPTIONS = ['权益类', '债权类', '现金类', '商品类', '分红类', '固收类', '另类投资'];
-  const [categoryL1Options, setCategoryL1Options] = useState(DEFAULT_CATEGORY_L1_OPTIONS);
-
-  // 当 assetClasses 数据加载后，动态更新一级分类选项（与本地存储的自定义选项合并去重）
-  useEffect(() => {
-    const saved = localStorage.getItem('finance_category_l1_options');
-    const savedOptions = saved ? JSON.parse(saved) : [];
-    const assetClassNames = stateData?.assetClasses?.map(c => c.name)?.filter(Boolean) || [];
-    // 合并：以本地存储为主，补充资产分类模块新增的项
-    const merged = [...new Set([...savedOptions, ...assetClassNames, ...DEFAULT_CATEGORY_L1_OPTIONS])].sort();
-    setCategoryL1Options(merged);
+  // 一级分类：权威数据源 = 资产分类模块（stateData.assetClasses）。
+  // 理财模块下拉、齿轮管理弹窗统一读写 assetClasses，与资产分类模块保持一致。
+  const categoryL1Options = useMemo(() => {
+    const names = (stateData?.assetClasses || []).map(c => c.name).filter(Boolean);
+    if (names.length > 0) return names;
+    // 兜底：资产分类模块还没初始化时使用默认列表
+    return ['权益类', '债权类', '现金类', '商品类', '分红类', '固收类', '另类投资'];
   }, [stateData?.assetClasses]);
   const [showCategoryL1Modal, setShowCategoryL1Modal] = useState(false);
   const [categoryL1ToEdit, setCategoryL1ToEdit] = useState(null);
@@ -4618,28 +4613,69 @@ export default function Finance({ onAssetPenetration }) {
     setDeleteConfirm(null);
   };
 
-  // ── 一级分类管理 ──
-  const handleAddCategoryL1 = () => {
-    if (!newCategoryL1Name.trim()) return;
-    if (categoryL1Options.includes(newCategoryL1Name.trim())) return;
-    const newOptions = [...categoryL1Options, newCategoryL1Name.trim()].sort();
-    setCategoryL1Options(newOptions);
-    localStorage.setItem('finance_category_l1_options', JSON.stringify(newOptions));
+  // ── 一级分类管理（统一读写 stateData.assetClasses，与资产分类模块保持一致）──
+  const handleAddCategoryL1 = async () => {
+    const name = newCategoryL1Name.trim();
+    if (!name) return;
+    const currentClasses = stateData?.assetClasses || [];
+    if (currentClasses.some(c => c.name === name)) return;
+    const PRESET_COLORS = ['#6366F1','#10B981','#06B6D4','#F59E0B','#8B5CF6','#EC4899','#EF4444','#14B8A6'];
+    const newClasses = [
+      ...currentClasses,
+      {
+        id: `custom-${name}-${Date.now()}`,
+        name,
+        children: [],
+        visible: true,
+        value: 0,
+        openingValue: 0,
+        color: PRESET_COLORS[currentClasses.length % PRESET_COLORS.length],
+      },
+    ];
+    const newState = { ...stateData, assetClasses: newClasses };
+    setStateData(newState);
+    try { await saveState(newState); } catch (e) { console.warn('saveState add catL1 failed', e); }
     setNewCategoryL1Name('');
   };
-  const handleSaveCategoryL1Edit = () => {
-    if (!categoryL1ToEdit || !newCategoryL1Name.trim()) return;
-    if (categoryL1Options.includes(newCategoryL1Name.trim()) && newCategoryL1Name.trim() !== categoryL1ToEdit) return;
-    const newOptions = categoryL1Options.map(o => o === categoryL1ToEdit ? newCategoryL1Name.trim() : o).sort();
-    setCategoryL1Options(newOptions);
-    localStorage.setItem('finance_category_l1_options', JSON.stringify(newOptions));
-    setCategoryL1ToEdit(null);
-    setNewCategoryL1Name('');
+
+  const handleSaveCategoryL1Edit = async () => {
+    if (!categoryL1ToEdit) return;
+    const newName = newCategoryL1Name.trim();
+    if (!newName || newName === categoryL1ToEdit) {
+      setCategoryL1ToEdit(null); setNewCategoryL1Name(''); return;
+    }
+    const currentClasses = stateData?.assetClasses || [];
+    if (currentClasses.some(c => c.name === newName)) {
+      alert(`分类名称「${newName}」已存在，不允许重复`); return;
+    }
+    const newClasses = currentClasses.map(c =>
+      c.name === categoryL1ToEdit ? { ...c, name: newName } : c
+    );
+    // 同步更新 financeAssets 里引用旧分类名的 categoryL1 字段
+    let updatedFinanceAssets = (stateData?.financeAssets || []).map(item => {
+      if (item.categoryL1 === categoryL1ToEdit) return { ...item, categoryL1: newName };
+      return item;
+    });
+    const newState = { ...stateData, assetClasses: newClasses, financeAssets: updatedFinanceAssets };
+    setStateData(newState);
+    try { await saveState(newState); } catch (e) { console.warn('saveState edit catL1 failed', e); }
+    setCategoryL1ToEdit(null); setNewCategoryL1Name('');
   };
-  const handleDeleteCategoryL1 = (name) => {
-    const newOptions = categoryL1Options.filter(o => o !== name);
-    setCategoryL1Options(newOptions);
-    localStorage.setItem('finance_category_l1_options', JSON.stringify(newOptions));
+
+  const handleDeleteCategoryL1 = async (name) => {
+    const currentClasses = stateData?.assetClasses || [];
+    const DEFAULT_PROTECTED = ['权益类', '债权类', '商品类', '现金类'];
+    if (DEFAULT_PROTECTED.includes(name)) {
+      alert(`默认分类「${name}」不允许删除`); setDeleteConfirm(null); return;
+    }
+    const related = (stateData?.financeAssets || []).filter(a => (a.categoryL1 || a.category) === name);
+    if (related.length > 0) {
+      alert(`该分类下有 ${related.length} 条持仓数据，请先解除关联后再删除`); setDeleteConfirm(null); return;
+    }
+    const newClasses = currentClasses.filter(c => c.name !== name);
+    const newState = { ...stateData, assetClasses: newClasses };
+    setStateData(newState);
+    try { await saveState(newState); } catch (e) { console.warn('saveState del catL1 failed', e); }
     setDeleteConfirm(null);
   };
 

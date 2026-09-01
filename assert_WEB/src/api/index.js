@@ -337,7 +337,48 @@ function getDefaultState() {
   }
 }
 
+// 关键顶层字段：对应后端 ALL_TABLE_STATE_MAP_FOR_CHECK 的 stateKey
+// 这些字段缺失意味着 state 不完整（可能 stateData 尚未加载完成），需要从后端补齐
+const CRITICAL_STATE_KEYS = new Set([
+  'accounts', 'assetClasses', 'records', 'budgets',
+  'financeAssets', 'financeAssetArchives',
+  'debts', 'debtCategories', 'strategies',
+  'survivalFunds', 'freedomBudgets',
+]);
+
+/**
+ * 确保传给后端的 state 对象包含全部关键顶层字段。
+ * 如果 stateData 为 null / 未加载完成 / 只传了部分字段，
+ * 就从后端 fetch 完整 state 做浅合并，避免后端 DATA_LOSS_PREVENTION 拒绝保存。
+ */
+async function ensureCompleteState(state) {
+  if (state == null || typeof state !== 'object') {
+    console.warn('[saveState] state 为空，从后端获取完整 state');
+    return await fetchState();
+  }
+  const stateKeys = new Set(Object.keys(state));
+  const missing = Array.from(CRITICAL_STATE_KEYS).filter(k => !stateKeys.has(k));
+  if (missing.length === 0) return state;
+
+  console.warn(
+    `[saveState] state 缺少 ${missing.length} 个关键字段 [${missing.join(', ')}]，从后端补齐`
+  );
+  try {
+    const full = await fetchState();
+    if (full && typeof full === 'object') {
+      // 浅合并：前端 state 中有的字段覆盖后端，缺失字段用后端数据补齐
+      return { ...full, ...state };
+    }
+  } catch (err) {
+    console.warn(`[saveState] fetchState 补齐失败，继续用当前 state: ${err.message}`);
+  }
+  return state;
+}
+
 export async function saveState(state) {
+  // === 完整性保护：确保 state 包含全部关键顶层字段 ===
+  state = await ensureCompleteState(state);
+
   try {
     const response = await request('/state', {
       method: 'PUT',

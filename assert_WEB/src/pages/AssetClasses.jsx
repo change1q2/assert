@@ -436,10 +436,10 @@ function computeAssetTypeBreakdown(financeAccounts, categoryName) {
     .sort((a, b) => b.value - a.value);
 }
 
-function computeCategoryL1Amounts(financeAccounts) {
+function computeCategoryL1Amounts(financeAccounts, classes) {
   const accounts = financeAccounts || [];
   const categoryMap = {};
-  
+
   accounts.forEach((account) => {
     const rawL1 = account.categoryL1 || account.category || '其他';
     const categoryL1 = sanitizeText(rawL1, '') || rawL1;
@@ -449,12 +449,34 @@ function computeCategoryL1Amounts(financeAccounts) {
     }
     categoryMap[categoryL1] += value;
   });
-  
-  return DEFAULT_CLASSES.map((cls, index) => ({
+
+  // 权威分类列表：优先使用 assetClasses（资产分类模块实际数据），回退到 DEFAULT_CLASSES
+  const authoritativeClasses = (Array.isArray(classes) && classes.length > 0)
+    ? classes
+    : DEFAULT_CLASSES;
+
+  // 从权威列表构造结果，保留被删除分类在 financeAccounts 中已不存在
+  // 的同时也不再出现在柱状图里；额外包含 financeAccounts 中尚未在
+  // 权威列表中定义的一级分类（兜底，避免持仓数据丢失）
+  const result = authoritativeClasses.map((cls, index) => ({
     name: cls.name,
     value: categoryMap[cls.name] || 0,
     color: CATEGORY_COLORS[cls.name] || cls.color || PRESET_COLORS[index % PRESET_COLORS.length],
   }));
+
+  // 兜底：加上 financeAccounts 里存在但权威列表里没有的分类（仅 >0）
+  authoritativeClasses.forEach((c) => { delete categoryMap[c.name]; });
+  Object.entries(categoryMap).forEach(([name, value]) => {
+    if (value > 0) {
+      result.push({
+        name,
+        value,
+        color: CATEGORY_COLORS[name] || PRESET_COLORS[result.length % PRESET_COLORS.length],
+      });
+    }
+  });
+
+  return result.filter((d) => d.value > 0);
 }
 
 function generateTrendData(financeAccounts, classes) {
@@ -877,8 +899,8 @@ export default function AssetClasses({ onCategorySelect }) {
   const visibleChartData = chartData.length > 0;
 
   const categoryL1AmountData = useMemo(() => {
-    return computeCategoryL1Amounts(financeAccounts);
-  }, [financeAccounts]);
+    return computeCategoryL1Amounts(financeAccounts, classes);
+  }, [financeAccounts, classes]);
 
   const hasCategoryL1Data = categoryL1AmountData.length > 0 && categoryL1AmountData.some((d) => d.value > 0);
 

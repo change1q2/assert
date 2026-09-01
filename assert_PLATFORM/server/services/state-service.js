@@ -1,4 +1,4 @@
-﻿import { pool } from "../db/index.js";
+import { pool } from "../db/index.js";
 import { sqlRun, sqlAll, sqlGet, maybeParseJson } from "../utils/db.js";
 import { text, number, numericIfPossible } from "../utils/validators.js";
 import { profileForUser } from "./user-service.js";
@@ -325,6 +325,20 @@ async function loadUserState(userId) {
 async function saveUserState(conn, userId, state) {
   const user = state.user || {};
 
+  // === DIAGNOSTIC: 仅当 state 顶层 key 数量异常少时才打印概览 ===
+  const stateKeys = Object.keys(state || {});
+  if (stateKeys.length < 10) {
+    const summary = stateKeys.map(k => {
+      const v = state[k];
+      if (Array.isArray(v)) return `${k}:arr(${v.length})`;
+      if (v && typeof v === 'object') return `${k}:obj(${Object.keys(v).length})`;
+      if (v === undefined) return `${k}:undefined`;
+      if (v === null) return `${k}:null`;
+      return `${k}:${typeof v}`;
+    }).join(', ');
+    console.warn(`[state-service] 用户 ${userId} state 只有 ${stateKeys.length} 个顶层 key（可能不完整）: ${summary}`);
+  }
+
   // ========== 数据安全检查：防止数据被意外清空 ==========
   // 1. 逐表检查：如果 state 中某表未提供或为空数组，标记为跳过删除
   // 2. 额外检查：如果数据库有数据但 state 为空，也跳过该表
@@ -370,6 +384,43 @@ async function saveUserState(conn, userId, state) {
         tablesToSkipDeletion.add(table);
         console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除: state 中 ${stateKey} 为空数组但数据库有 ${dbCount} 条，保留数据库数据`);
       }
+    }
+
+    // === 后端数据完整性补齐 ===
+    // 关键表如果前端 state 未提供（undefined）但数据库有数据，自动从数据库 fetch 现有数据
+    // 合并到 state 中。这样即使前端只传了部分 state（如 stateData 为 null 时），
+    // 后端也能自动补全，不会丢失数据。
+    // 这是前端 ensureCompleteState 的兜底防线。
+    const criticalTablesToAutoFill = [
+      ['accounts', 'accounts'],
+      ['asset_classes', 'assetClasses'],
+      ['records', 'records'],
+      ['budgets', 'budgets'],
+      ['finance_assets', 'financeAssets'],
+      ['finance_asset_archives', 'financeAssetArchives'],
+      ['debts', 'debts'],
+      ['survival_funds', 'survivalFunds'],
+      ['freedom_budgets', 'freedomBudgets'],
+    ];
+    let autoFilled = false;
+    for (const [table, stateKey] of criticalTablesToAutoFill) {
+      const stateVal = state[stateKey];
+      const dbCount = existingCounts[table] || 0;
+      if (stateVal === undefined && dbCount > 0) {
+        try {
+          const [rows] = await conn.execute(`SELECT * FROM ${table} WHERE user_id = ?`, [userId]);
+          state[stateKey] = rows;
+          autoFilled = true;
+          console.warn(`[state-service] 用户 ${userId} 自动补齐 ${stateKey}: ${rows.length} 条（从 ${table}）`);
+          // 既然 state 已补齐，不再跳过此表的删除
+          tablesToSkipDeletion.delete(table);
+        } catch (fillErr) {
+          console.warn(`[state-service] 用户 ${userId} 自动补齐 ${table} 失败: ${fillErr.message}`);
+        }
+      }
+    }
+    if (autoFilled) {
+      console.warn(`[state-service] 用户 ${userId} state 关键字段已从数据库自动补齐，继续保存`);
     }
 
     // 全局检查：如果关键表都被跳过，且 state 也没有其他数据，拒绝保存
@@ -500,13 +551,11 @@ async function saveUserState(conn, userId, state) {
   }
   // ========== 备份结束 ==========
 
-  // Force delete transaction tables and child tables that are embedded in parent records
+  // Force delete transaction tables and child tables that are embedded in parent records.
+  // 这类子表的内容嵌套在父记录内（如 debt.payments → debt_payments 表），
+  // 不会由前端独立发送顶层 key，因此必须无条件清空再重新写入，
+  // 不能被 tablesToSkipDeletion 保护逻辑拦截。
   for (const table of forceDeleteTables) {
-    const dbCount = existingCounts[table] || 0;
-    if (tablesToSkipDeletion.has(table)) {
-      console.warn(`[state-service] 用户 ${userId} 跳过表 ${table} 删除（保护数据）`);
-      continue;
-    }
     await sqlRun(conn, `DELETE FROM ${table} WHERE user_id = ?`, [userId]);
   }
 
