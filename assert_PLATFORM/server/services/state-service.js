@@ -184,7 +184,7 @@ async function loadUserState(userId) {
     try {
       payments = Object.fromEntries(
         (await sqlAll(pool, "SELECT period, status FROM debt_payments WHERE user_id = ? AND debt_id = ?", [userId, row.id]))
-          .map((payment) => [payment.period, payment.status === 1 || payment.status === true || payment.status === 'true' ? true : false])
+          .map((payment) => [payment.period, payment.status == 1 || payment.status === true || payment.status === 'true' || payment.status === '1' ? true : false])
       );
     } catch (e) {
       console.warn(`[state-service] debt_payments query failed for debt ${row.id}: ${e.message}`);

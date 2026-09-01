@@ -112,6 +112,7 @@ const INDEPENDENT_ASSET_TYPES = [
   { id: 'fixedinvestment', name: '固定投资', color: '#EC4899' },
   { id: 'equity', name: '股权', color: '#8B5CF6' },
   { id: 'fixeddeposit', name: '定期资产', color: '#06B6D4' },
+  { id: 'forex', name: '外汇', color: '#14B8A6' },
 ];
 
 function computeIndependentAssetsPie(independentAssets) {

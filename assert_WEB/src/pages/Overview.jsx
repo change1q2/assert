@@ -288,7 +288,7 @@ export default function Overview() {
   });
   const [editingYearIndex, setEditingYearIndex] = useState(-1);
 
-  const { debts = [], records = [], accounts = [], overviewGoals = {}, financeAssets = [], independentAssets = {}, budgets = [], survivalFunds = [], freedomBudgets = [] } = stateData || {};
+  const { debts = [], records = [], accounts = [], overviewGoals = [], financeAssets = [], independentAssets = {}, budgets = [], survivalFunds = [], freedomBudgets = [], assetClasses = [] } = stateData || {};
 
   useEffect(() => {
     loadData();
@@ -845,14 +845,15 @@ export default function Overview() {
     fixeddeposit: '定期资产',
     forex: '外汇',
   };
+  // 颜色来源：与 AssetClasses.jsx 的 INDEPENDENT_ASSET_TYPES 保持一致
   const independentTypeColors = {
-    insurance: '#EC4899',
-    realestate: '#06B6D4',
-    vehicle: '#F59E0B',
-    fixedinvestment: '#8B5CF6',
-    equity: '#10B981',
-    fixeddeposit: '#3B82F6',
-    forex: '#14B8A6',
+    insurance: '#6366F1',       // 保险 - 紫
+    realestate: '#10B981',     // 房产 - 绿
+    vehicle: '#F59E0B',        // 车辆 - 琥珀
+    fixedinvestment: '#EC4899',// 固定投资 - 粉
+    equity: '#8B5CF6',         // 股权 - 紫罗兰
+    fixeddeposit: '#06B6D4',   // 定期资产 - 青
+    forex: '#14B8A6',          // 外汇 - 青绿
   };
 
   const independentAllocation = [];
@@ -957,23 +958,25 @@ export default function Overview() {
 
   const topHoldings = [...assets].sort((a, b) => b.rmbValue - a.rmbValue).slice(0, 5);
 
+  // 理财资产配置：按一级分类（assetClasses）分组，只有列表中存在的分类才显示
   const assetAllocationData = () => {
-    const allocation = {};
+    // 用 assetClasses 的 name 做 key 建查找表
+    const classByName = {};
+    (assetClasses || []).forEach(cls => {
+      if (cls?.name) classByName[cls.name] = cls;
+    });
 
-    const financeKindLabels = {
-      stock: '股票',
-      fund: '基金',
-      commodity: '商品',
-      futures: '期货',
-      options: '期权',
-      crypto: '加密货币',
-      cashflow: '现金',
-      custom: '其他理财',
-    };
+    const allocation = {}; // { className: { value, color } }
 
     (financeAssets || []).forEach(asset => {
-      const category = asset.category || asset.kind || '其他理财';
-      const label = financeKindLabels[asset.kind] || category;
+      // 优先用 categoryL1，其次 category
+      const categoryName = asset.categoryL1 || asset.category || '';
+      if (!categoryName) return;
+
+      // 只统计在 assetClasses 列表中存在的分类（用户要求：只有显示在列表中才显示在饼图中）
+      const cls = classByName[categoryName];
+      if (!cls) return;
+
       const _price = parseFloat(asset.currentPrice);
       const _costPrice = parseFloat(asset.costPrice);
       const _cost = parseFloat(asset.cost);
@@ -988,16 +991,21 @@ export default function Overview() {
       const toRate = exchangeRates['CNY'] ?? 1;
       const rmbValue = currency === 'CNY' ? value : (value * fromRate) / toRate;
       if (isNaN(rmbValue)) return;
-      allocation[label] = (allocation[label] || 0) + rmbValue;
+
+      if (!allocation[categoryName]) {
+        allocation[categoryName] = { value: 0, color: cls.color || '#9CA3AF' };
+      }
+      allocation[categoryName].value += rmbValue;
     });
 
-    return Object.entries(allocation)
-      .filter(([, value]) => value > 0)
-      .map(([name, value], idx) => ({
-        name,
-        value,
-        color: ASSET_CATEGORY_COLORS[idx % ASSET_CATEGORY_COLORS.length],
-      }))
+    // 按 assetClasses 的原始顺序返回，确保颜色一致
+    return (assetClasses || [])
+      .map(cls => {
+        const entry = allocation[cls.name];
+        if (!entry || entry.value <= 0) return null;
+        return { name: cls.name, value: entry.value, color: cls.color || '#9CA3AF' };
+      })
+      .filter(Boolean)
       .sort((a, b) => b.value - a.value);
   };
 
